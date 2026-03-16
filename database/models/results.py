@@ -1,0 +1,341 @@
+from sqlalchemy import Column, Integer, String, DateTime, Float, JSON, ForeignKey, Text, Index, Boolean, text
+from sqlalchemy.orm import relationship, validates
+from sqlalchemy.sql import func
+from typing import Dict
+from ..database import Base
+
+class ExperimentalResults(Base):
+    __tablename__ = "experimental_results"
+    __table_args__ = (
+        Index(
+            "uq_primary_result_per_experiment_bucket",
+            "experiment_fk",
+            "time_post_reaction_bucket_days",
+            unique=True,
+            sqlite_where=text("is_primary_timepoint_result = 1"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_fk = Column(Integer,
+                           ForeignKey("experiments.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    time_post_reaction_days = Column(Float, nullable=True, index=True) # Time in days post-reaction start
+    time_post_reaction_bucket_days = Column(Float, nullable=True, index=True) # Normalized bucket for tolerant matching
+    cumulative_time_post_reaction_days = Column(Float, nullable=True, index=True) # Cumulative time across lineage chain (days)
+    is_primary_timepoint_result = Column(Boolean, nullable=False, default=True, server_default=text("true"), index=True)
+    description = Column(Text, nullable=False) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship
+    experiment = relationship("Experiment", back_populates="results", foreign_keys=[experiment_fk])
+    # Relationship to ResultFiles (one-to-many)
+    files = relationship("ResultFiles", back_populates="result_entry", cascade="all, delete-orphan")
+
+    # Relationships to specific data tables (one-to-one)
+    scalar_data = relationship(
+        "ScalarResults",
+        back_populates="result_entry",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+    
+    icp_data = relationship(
+        "ICPResults",
+        back_populates="result_entry",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    # No unique constraints - allow multiple results per experiment/time combination
+
+class ScalarResults(Base):
+    __tablename__ = "scalar_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    result_id = Column(Integer, ForeignKey("experimental_results.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Scalar fields
+    ferrous_iron_yield = Column(Float, nullable=True)  # in percentage
+    gross_ammonium_concentration_mM = Column(Float, nullable=True)  # in mM
+    background_ammonium_concentration_mM = Column(Float, nullable=True)  # in mM
+    ammonium_quant_method = Column(String, nullable=True) # e.g., 'NMR', 'Colorimetric Assay'
+    grams_per_ton_yield = Column(Float, nullable=True)  # yield in g/ton
+    final_ph = Column(Float, nullable=True)
+    final_nitrate_concentration_mM = Column(Float, nullable=True)  # in mM
+    final_dissolved_oxygen_mg_L = Column(Float, nullable=True) # in ppm
+    co2_partial_pressure_MPa = Column(Float, nullable=True) # in psi
+    final_conductivity_mS_cm = Column(Float, nullable=True) # in uS/cm
+    final_alkalinity_mg_L = Column(Float, nullable=True) # in mg/L CaCO3
+    sampling_volume_mL = Column(Float, nullable=True) # in mL
+    measurement_date = Column(DateTime(timezone=True), nullable=True)
+
+    # Hydrogen tracking inputs
+    h2_concentration = Column(Float, nullable=True)  # ppm (vol/vol)
+    h2_concentration_unit = Column(String, nullable=True)  # always 'ppm'
+    gas_sampling_volume_ml = Column(Float, nullable=True)  # mL at sampling conditions
+    gas_sampling_pressure_MPa = Column(Float, nullable=True)  # MPa at sampling conditions
+
+    # Hydrogen derived outputs (stored as microunits per requirements)
+    h2_micromoles = Column(Float, nullable=True)  # micromoles (μmol)
+    h2_mass_ug = Column(Float, nullable=True)  # micrograms (μg)
+    # Hydrogen yield normalized by rock mass (g/ton rock)
+    h2_grams_per_ton_yield = Column(Float, nullable=True)
+
+    background_experiment_id = Column(String, nullable=True)
+    background_experiment_fk = Column(Integer, ForeignKey("experiments.id", ondelete="SET NULL"), nullable=True)
+    background_experiment = relationship("Experiment", back_populates="scalar_data", foreign_keys=[background_experiment_fk])
+    # Relationship back to the main entry using result_id
+    result_entry = relationship(
+        "ExperimentalResults",
+        back_populates="scalar_data",
+    )
+
+    def calculate_yields(self):
+        """Calculate and update the yield values based on solution concentration and experimental conditions."""
+        # Ensure necessary parent relationships exist
+        if not self.result_entry or not self.result_entry.experiment or not self.result_entry.experiment.conditions:
+            self.grams_per_ton_yield = None
+            # Still try hydrogen calc which uses only scalar inputs and user-provided pressure
+            self.calculate_hydrogen()
+            # Without conditions, cannot compute normalized H2 yield
+            self.h2_grams_per_ton_yield = None
+            return
+
+        rock_mass = self.result_entry.experiment.conditions.rock_mass_g
+        # Prefer sampling volume if provided; otherwise use total water volume from conditions
+        liquid_volume_ml = None
+        if self.sampling_volume_mL is not None and self.sampling_volume_mL > 0:
+            liquid_volume_ml = self.sampling_volume_mL
+        else:
+            liquid_volume_ml = self.result_entry.experiment.conditions.water_volume_mL
+        
+        ammonia_mass_g = None
+        if self.gross_ammonium_concentration_mM is not None and liquid_volume_ml is not None and liquid_volume_ml > 0:
+            # Use background_ammonium_concentration_mM or default 0.3 mM
+            bg_conc = self.background_ammonium_concentration_mM if self.background_ammonium_concentration_mM is not None else 0.3
+            
+            # Calculate net concentration, clamped to 0
+            net_conc = max(0.0, self.gross_ammonium_concentration_mM - bg_conc)
+
+            # Molar mass of NH4+ is ~18.04 g/mol
+            ammonia_mass_g = (
+                (net_conc / 1000) *  # Convert mM to M (mol/L)
+                (liquid_volume_ml / 1000) *  # Convert mL to L
+                18.04  # Molar mass of NH4+ (g/mol)
+            )
+
+        # Calculate grams_per_ton_yield
+        if (ammonia_mass_g is not None and
+            rock_mass is not None and
+            rock_mass > 0):
+
+            # Convert to g/ton using rock mass in grams
+            # 1 ton = 1,000,000 grams
+            self.grams_per_ton_yield = 1_000_000 * (ammonia_mass_g / rock_mass)
+        else:
+            # Set to None if required data is missing or invalid
+            self.grams_per_ton_yield = None
+
+        # Hydrogen calculations (PV = nRT at 25°C, pressure required)
+        self.calculate_hydrogen()
+
+        # Normalize hydrogen to g/ton yield if rock mass available and hydrogen mass calculated
+        try:
+            if rock_mass is not None and rock_mass > 0 and self.h2_mass_ug is not None:
+                # h2_mass_ug is stored as micrograms (μg); convert to grams
+                h2_mass_grams = self.h2_mass_ug / 1_000_000.0
+                self.h2_grams_per_ton_yield = 1_000_000.0 * (h2_mass_grams / rock_mass)
+            else:
+                self.h2_grams_per_ton_yield = None
+        except Exception:
+            # Defensive: if any unexpected error, null out the derived value
+            self.h2_grams_per_ton_yield = None
+
+        # TODO: Calculate ferrous_iron_yield when the calculation method is determined
+        # Example: Check if specific inputs for Fe yield are present
+        # if required_input_for_fe_yield is not None:
+        #    self.ferrous_iron_yield = ... calculation ...
+        # else:
+        #    self.ferrous_iron_yield = None # Or leave as is if manually entered
+
+    @validates('h2_concentration', 'gas_sampling_volume_ml', 'gas_sampling_pressure_MPa')
+    def validate_non_negative(self, key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"{key} must be non-negative.")
+        return value
+
+    @validates('h2_concentration_unit')
+    def validate_h2_unit(self, key, value):
+        if value is None:
+            return value
+        if value != 'ppm':
+            raise ValueError("h2_concentration_unit must be 'ppm'")
+        return value
+
+    def calculate_hydrogen(self):
+        """
+        Calculate hydrogen amount from gas-phase ppm concentration using PV = nRT.
+
+        Assumptions:
+        - Temperature fixed at 20 °C (293.15 K)
+        - Concentration always in ppm (vol/vol)
+        - Pressure provided in MPa; converted to atm internally
+        - Volume provided in mL; converted to L internally
+
+        Stores:
+        - h2_micromoles  (μmol)
+        - h2_mass_ug     (μg)
+        """
+        if (
+            self.h2_concentration is None
+            or self.gas_sampling_volume_ml is None or self.gas_sampling_volume_ml <= 0
+            or self.gas_sampling_pressure_MPa is None or self.gas_sampling_pressure_MPa <= 0
+        ):
+            self.h2_micromoles = None
+            self.h2_mass_ug = None
+            return
+
+        R = 0.082057          # L·atm/(mol·K)
+        T_K = 293.15          # 20 °C
+        H2_MOLAR_MASS = 2.01588  # g/mol
+
+        P_atm = self.gas_sampling_pressure_MPa * 9.86923  # MPa → atm
+        V_L = self.gas_sampling_volume_ml / 1000.0         # mL → L
+
+        total_moles = (P_atm * V_L) / (R * T_K)
+        fraction = self.h2_concentration / 1_000_000.0     # ppm → mole fraction
+
+        if fraction < 0:
+            self.h2_micromoles = None
+            self.h2_mass_ug = None
+            return
+
+        h2_moles = total_moles * fraction
+
+        self.h2_micromoles = h2_moles * 1_000_000.0
+        self.h2_mass_ug = h2_moles * H2_MOLAR_MASS * 1_000_000.0
+
+class ICPResults(Base):
+    __tablename__ = "icp_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    result_id = Column(Integer, ForeignKey("experimental_results.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Fixed columns for common elements (all concentrations in ppm)
+    fe = Column(Float, nullable=True)   # Iron
+    si = Column(Float, nullable=True)   # Silicon
+    ni = Column(Float, nullable=True)   # Nickel
+    cu = Column(Float, nullable=True)   # Copper
+    mo = Column(Float, nullable=True)   # Molybdenum
+    ca = Column(Float, nullable=True)   # Calcium
+    zn = Column(Float, nullable=True)   # Zinc
+    mn = Column(Float, nullable=True)   # Manganese
+    cr = Column(Float, nullable=True)   # Chromium
+    co = Column(Float, nullable=True)   # Cobalt
+    mg = Column(Float, nullable=True)   # Magnesium
+    al = Column(Float, nullable=True)   # Aluminum
+    sr = Column(Float, nullable=True)   # Strontium
+    y = Column(Float, nullable=True)   # Yttrium
+    nb = Column(Float, nullable=True)   # Niobium
+    sb = Column(Float, nullable=True)   # Antimony
+    cs = Column(Float, nullable=True)   # Cesium
+    ba = Column(Float, nullable=True)   # Barium
+    nd = Column(Float, nullable=True)   # Neodymium
+    gd = Column(Float, nullable=True)   # Gadolinium
+    pt = Column(Float, nullable=True)   # Platinum
+    rh = Column(Float, nullable=True)   # Rhodium
+    ir = Column(Float, nullable=True)   # Iridium
+    pd = Column(Float, nullable=True)   # Palladium
+    ru = Column(Float, nullable=True)   # Ruthenium
+    os = Column(Float, nullable=True)   # Osmium
+    tl = Column(Float, nullable=True)   # Thallium
+
+    # JSON storage for all elements (including the fixed ones above for completeness)
+    all_elements = Column(JSON, nullable=True)  # e.g., {"fe": 125.0, "mg": 45.8, "ca": 12.3, "k": 8.9}
+    
+    # ICP-specific metadata
+    dilution_factor = Column(Float, nullable=True)
+    measurement_date = Column(DateTime(timezone=True), nullable=True)
+    sample_date = Column(DateTime(timezone=True), nullable=True)
+    instrument_used = Column(String, nullable=True)
+    detection_limits = Column(JSON, nullable=True)  # Store per-element detection limits
+    raw_label = Column(String, nullable=True)  # Original sample label from ICP file
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship back to the main entry using result_id
+    result_entry = relationship(
+        "ExperimentalResults",
+        back_populates="icp_data",
+    )
+
+    @validates('all_elements', 'detection_limits')
+    def validate_json(self, key, value):
+        if value is not None and not isinstance(value, dict):
+            raise ValueError(f"{key} must be a valid JSON object.")
+        return value
+
+    def get_element_concentration(self, element_symbol: str) -> float:
+        """
+        Get concentration for any element, checking fixed columns first, then JSON.
+        
+        Args:
+            element_symbol: Element symbol (e.g., 'Fe', 'Mg', 'Ca')
+            
+        Returns:
+            Concentration in ppm, or 0 if not found
+        """
+        element_lower = element_symbol.lower()
+        
+        # Check fixed columns first (faster)
+        if hasattr(self, element_lower):
+            value = getattr(self, element_lower)
+            if value is not None:
+                return value
+        
+        # Check JSON storage
+        if self.all_elements and isinstance(self.all_elements, dict):
+            return self.all_elements.get(element_lower, 0)
+        
+        return 0
+
+    def get_all_detected_elements(self) -> Dict[str, float]:
+        """
+        Get all detected elements with their concentrations.
+        
+        Returns:
+            Dictionary of {element: concentration_ppm}
+        """
+        # Import at runtime to avoid circular dependency
+        from frontend.config.variable_config import ICP_FIXED_ELEMENT_FIELDS
+        
+        elements = {}
+        
+        # Add fixed columns
+        for element in ICP_FIXED_ELEMENT_FIELDS:
+            value = getattr(self, element)
+            if value is not None:
+                elements[element] = value
+        
+        # Add JSON elements (may override fixed columns with same values)
+        if self.all_elements and isinstance(self.all_elements, dict):
+            elements.update(self.all_elements)
+        
+        return elements
+
+class ResultFiles(Base):
+    __tablename__ = "result_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    result_id = Column(Integer, ForeignKey("experimental_results.id", ondelete="CASCADE"), nullable=False)
+    file_path = Column(String, nullable=False)
+    file_name = Column(String)
+    file_type = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship back to the specific result entry
+    result_entry = relationship("ExperimentalResults", back_populates="files")

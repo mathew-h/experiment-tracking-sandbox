@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 << 'EOF'\nimport sqlite3\nimport json\n\nconn = sqlite3.connect\\('docs/sample_data/experiments.db'\\)\ncursor = conn.cursor\\(\\)\n\n# Get all tables\ncursor.execute\\(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;\"\\)\ntables = cursor.fetchall\\(\\)\n\nprint\\(\"=== TABLES IN DATABASE ===\\\\n\"\\)\nfor table in tables:\n    table_name = table[0]\n    cursor.execute\\(f\"PRAGMA table_info\\({table_name}\\);\"\\)\n    columns = cursor.fetchall\\(\\)\n    print\\(f\"\\\\n{table_name}:\"\\)\n    for col in columns:\n        print\\(f\"  {col[1]}: {col[2]}\"\\)\n\n# Get row counts\nprint\\(\"\\\\n\\\\n=== ROW COUNTS ===\\\\n\"\\)\nfor table in tables:\n    table_name = table[0]\n    cursor.execute\\(f\"SELECT COUNT\\(*\\) FROM {table_name};\"\\)\n    count = cursor.fetchone\\(\\)[0]\n    print\\(f\"{table_name}: {count} rows\"\\)\n\nconn.close\\(\\)\nEOF)",
+      "Bash(git init:*)",
+      "Bash(cd experiment_tracking_sandbox && chmod +x scripts/dev-entrypoint.sh scripts/migrate-sqlite-to-postgres.py setup.sh && ls -la scripts/)",
+      "Bash(chmod +x \"/c/Users/MathewHearl/Documents/0x_Software/database_sandbox/experiment_tracking_sandbox/scripts\"/* \"/c/Users/MathewHearl/Documents/0x_Software/database_sandbox/experiment_tracking_sandbox/setup.sh\" 2>/dev/null; ls -la \"/c/Users/MathewHearl/Documents/0x_Software/database_sandbox/experiment_tracking_sandbox/scripts/\")",
+      "Bash(which docker:*)",
+      "Bash(docker --version && docker-compose --version)",
+      "Bash(cd /c/Users/MathewHearl/Documents/0x_Software/database_sandbox/experiment_tracking_sandbox && \\\\\necho \"=== Verifying Setup ===\" && \\\\\nls -la | grep -E \"Dockerfile|docker-compose|requirements\" && \\\\\necho \"\" && \\\\\necho \"=== Checking experiments.db ===\" && \\\\\nls -lh docs/sample_data/experiments.db && \\\\\necho \"\" && \\\\\necho \"=== Docker Info ===\" && \\\\\ndocker system df | head -5)",
+      "Bash(cd /c/Users/MathewHearl/Documents/0x_Software/database_sandbox/experiment_tracking_sandbox && \\\\\nmkdir -p docs/sample_data && \\\\\ncp ../docs/sample_data/experiments.db docs/sample_data/ && \\\\\nls -lh docs/sample_data/ && \\\\\necho \"Database copied successfully\")",
+      "Bash(\\\\ timeout:*)",
+      "Bash(docker ps:*)",
+      "Bash(\\\\\n\\\\\necho \"Starting docker-compose \\(this may take 2-3 minutes on first run\\)...\" && \\\\\ntimeout 180 docker-compose up --build 2>&1 | tail -100)",
+      "Bash(\\\\ echo:*)",
+      "Bash(\\\\ docker-compose:*)",
+      "Bash(ls -la backend/api/*.py 2>/dev/null | head -10)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(cd C:\\\\\\\\Users\\\\\\\\MathewHearl\\\\\\\\Documents\\\\\\\\0x_Software\\\\\\\\database_sandbox\\\\\\\\experiment_tracking_sandbox && docker-compose down && docker-compose up --build -d)",
+      "Bash(pwd && docker-compose down && docker-compose up --build -d 2>&1 | head -50)",
+      "Bash(curl -s http://localhost:8000/health | jq .)",
+      "Bash(curl -i http://localhost:8000/health 2>&1 | head -20)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(.venv/Scripts/python -m alembic upgrade head 2>&1)",
+      "Bash(.venv/Scripts/python -c \"\nfrom database.database import engine, Base\nfrom database.models import experiments, conditions, results, samples, chemicals, analysis, xrd, characterization\nBase.metadata.create_all\\(bind=engine\\)\nprint\\('All tables created successfully'\\)\n\" 2>&1)",
+      "Bash(.venv/Scripts/python -m alembic stamp head 2>&1)"
+    ]
+  }
+}

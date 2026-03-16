@@ -1,0 +1,112 @@
+# CLAUDE.md — Lab Experiment Tracking System
+> Read this file first. Then follow the instructions here to load additional context.
+> Do not modify this file unless explicitly directed by the user.
+
+---
+
+## 1. Start Every Session With This
+
+1. Run `/start-task` — this reads working memory, orients to the active milestone, and confirms scope
+2. Never begin coding without completing the `/start-task` checklist
+
+---
+
+## 2. Project Overview
+
+A laboratory experiment tracking system for a small geochemistry team (2-5 users).
+Researchers log experiments, upload bulk analytical data, track samples and chemicals,
+and visualize reactor status. Data exports to Power BI.
+
+**Current state:** Streamlit + SQLAlchemy + SQLite
+**Target state:** React 18 + FastAPI + PostgreSQL (see `docs/STACK.md` for full table)
+
+**Deployment:** Single always-on lab PC, LAN only, no cloud, no Docker in production.
+
+---
+
+## 3. Agent System
+
+You operate as the **Conductor Agent**. Load `.claude/skills/conductor.md` now.
+
+Sub-agent skills (load when relevant):
+- `.claude/skills/db-architect.md` — schema, migrations, calculation registry
+- `.claude/skills/api-developer.md` — FastAPI, Pydantic, calculation formulas
+- `.claude/skills/frontend-builder.md` — React, Tailwind, design system
+- `.claude/skills/test-writer.md` — pytest, vitest, coverage
+
+---
+
+## 4. Active Milestone
+
+Read `docs/milestones/MILESTONE_INDEX.md` to find the current active milestone.
+Read the corresponding milestone file before starting any work.
+Do not begin a milestone until the previous one has received explicit user sign-off.
+
+---
+
+## 5. What Is Locked
+
+Full details in `docs/LOCKED_COMPONENTS.md`. Summary:
+
+- `database/models/` — field names, types, relationships: do not change without explicit instruction
+- `backend/services/bulk_uploads/` — parser logic: do not modify without explicit instruction
+- `alembic/versions/` — never delete or squash migration files
+- Firebase auth — do not modify without explicit instruction
+- All enums in `enums.py` — changing these breaks existing data
+
+---
+
+## 6. Working Memory
+
+`docs/working/plan.md` is the project's working memory.
+Read it at the start of every session.
+Update it after every completed task.
+It tracks what has been done, what decisions were made, and what comes next.
+
+---
+
+## 7. Key Reference Files
+
+| Need | Read |
+|------|------|
+| Schema details | `MODELS.md` and `docs/SCHEMA.md` |
+| Derived field formulas | `docs/CALCULATIONS.md` |
+| Milestone details | `docs/milestones/[milestone file]` |
+| Locked components | `docs/LOCKED_COMPONENTS.md` |
+| Code standards | `docs/CODE_STANDARDS.md` |
+| Git workflow | `docs/GIT_WORKFLOW.md` |
+| Environment variables | `docs/ENVIRONMENT.md` |
+| Design system | `docs/DESIGN.md` |
+| Agent system full reference | `docs/AGENT_SYSTEM.md` |
+| Directory structure | `docs/DIRECTORY_STRUCTURE.md` |
+
+---
+
+## 8. Stop and Ask the User When
+
+- A schema change affects more than one model
+- A new third-party package is needed
+- Any bulk upload parser needs modification
+- A migration cannot be written as purely additive
+- Brand assets have not been provided and Milestone 4 is starting
+- A derived field formula is ambiguous or undocumented
+- Any test is failing and the fix is not obvious within 2 attempts
+- Estimated scope expands significantly beyond what was agreed
+
+When escalating: state the ambiguity, the options, your recommendation. Then wait.
+
+---
+
+## 9. Commit Format
+
+```
+[M<number>] <imperative description> (<50 chars)
+
+- Detail if needed
+- Tests added: yes/no
+- Docs updated: yes/no
+```
+
+## 10. MCP Servers
+Notion MCP (`notion`, `author`) is disabled for this project via `.mcp.json` -- not needed and consumes significant context tokens.
+Claude.ai plugin should also remain disabled for this project (disable via Cursor Settings > Features > MCP if re-enabled).

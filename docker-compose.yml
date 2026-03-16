@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:16-alpine
+    container_name: experiment_tracking_postgres
+    environment:
+      POSTGRES_USER: experiments_user
+      POSTGRES_PASSWORD: experiments_dev_password
+      POSTGRES_DB: experiments
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U experiments_user -d experiments"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  # FastAPI backend + React dev server
+  app:
+    build: .
+    container_name: experiment_tracking_app
+    environment:
+      DATABASE_URL: postgresql://experiments_user:experiments_dev_password@postgres:5432/experiments
+      APP_ENV: development
+      API_PORT: 8000
+      CORS_ORIGINS: http://localhost:5173,http://localhost:8000
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
+    ports:
+      - "8000:8000"
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/frontend/node_modules
+      - app_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  app_logs:
+
+networks:
+  app_network:
+    driver: bridge
