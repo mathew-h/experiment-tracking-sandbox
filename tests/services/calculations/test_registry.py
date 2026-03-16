@@ -11,7 +11,14 @@ class OtherModel:
     pass
 
 
-def test_register_and_dispatch():
+@pytest.fixture
+def clean_fake_model():
+    """Ensure FakeModel is removed from registry after each test that uses it."""
+    yield
+    registry._REGISTRY.pop(FakeModel, None)
+
+
+def test_register_and_dispatch(clean_fake_model):
     """Registered function is called with instance and session."""
     called_with = {}
 
@@ -27,9 +34,6 @@ def test_register_and_dispatch():
     assert called_with['instance'] is instance
     assert called_with['session'] is session
 
-    # Cleanup: remove registration so other tests are not affected
-    registry._REGISTRY.pop(FakeModel, None)
-
 
 def test_unregistered_model_is_noop():
     """recalculate silently does nothing for unregistered model types."""
@@ -39,7 +43,7 @@ def test_unregistered_model_is_noop():
     registry.recalculate(instance, session)
 
 
-def test_register_overwrites_previous():
+def test_register_overwrites_previous(clean_fake_model):
     """Re-registering a model class replaces the previous function."""
     results = []
 
@@ -53,5 +57,3 @@ def test_register_overwrites_previous():
 
     registry.recalculate(FakeModel(), types.SimpleNamespace())
     assert results == ['second']
-
-    registry._REGISTRY.pop(FakeModel, None)
