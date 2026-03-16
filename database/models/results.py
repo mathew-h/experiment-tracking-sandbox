@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, JSON, ForeignKey, Text, Index, Boolean, text
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text, Index, Boolean, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from typing import Dict
@@ -12,7 +13,7 @@ class ExperimentalResults(Base):
             "experiment_fk",
             "time_post_reaction_bucket_days",
             unique=True,
-            sqlite_where=text("is_primary_timepoint_result = 1"),
+            postgresql_where=text("is_primary_timepoint_result = true"),
         ),
     )
 
@@ -253,14 +254,14 @@ class ICPResults(Base):
     tl = Column(Float, nullable=True)   # Thallium
 
     # JSON storage for all elements (including the fixed ones above for completeness)
-    all_elements = Column(JSON, nullable=True)  # e.g., {"fe": 125.0, "mg": 45.8, "ca": 12.3, "k": 8.9}
+    all_elements = Column(JSONB, nullable=True)  # e.g., {"fe": 125.0, "mg": 45.8, "ca": 12.3, "k": 8.9}
     
     # ICP-specific metadata
     dilution_factor = Column(Float, nullable=True)
     measurement_date = Column(DateTime(timezone=True), nullable=True)
     sample_date = Column(DateTime(timezone=True), nullable=True)
     instrument_used = Column(String, nullable=True)
-    detection_limits = Column(JSON, nullable=True)  # Store per-element detection limits
+    detection_limits = Column(JSONB, nullable=True)  # Store per-element detection limits
     raw_label = Column(String, nullable=True)  # Original sample label from ICP file
     
     # Timestamps

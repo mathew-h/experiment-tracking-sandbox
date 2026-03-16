@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text, JSON
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
@@ -97,8 +98,8 @@ class ModificationsLog(Base):
     modified_by = Column(String)  # Username or identifier of who made the change
     modification_type = Column(String)  # e.g., 'create', 'update', 'delete'
     modified_table = Column(String)  # Which table was modified
-    old_values = Column(JSON)  # Previous values
-    new_values = Column(JSON)  # New values
+    old_values = Column(JSONB)  # Previous values
+    new_values = Column(JSONB)  # New values
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     experiment = relationship("Experiment", back_populates="modifications", foreign_keys=[experiment_fk])
