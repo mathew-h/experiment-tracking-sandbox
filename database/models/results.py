@@ -93,74 +93,6 @@ class ScalarResults(Base):
         back_populates="scalar_data",
     )
 
-    def calculate_yields(self):
-        """Calculate and update the yield values based on solution concentration and experimental conditions."""
-        # Ensure necessary parent relationships exist
-        if not self.result_entry or not self.result_entry.experiment or not self.result_entry.experiment.conditions:
-            self.grams_per_ton_yield = None
-            # Still try hydrogen calc which uses only scalar inputs and user-provided pressure
-            self.calculate_hydrogen()
-            # Without conditions, cannot compute normalized H2 yield
-            self.h2_grams_per_ton_yield = None
-            return
-
-        rock_mass = self.result_entry.experiment.conditions.rock_mass_g
-        # Prefer sampling volume if provided; otherwise use total water volume from conditions
-        liquid_volume_ml = None
-        if self.sampling_volume_mL is not None and self.sampling_volume_mL > 0:
-            liquid_volume_ml = self.sampling_volume_mL
-        else:
-            liquid_volume_ml = self.result_entry.experiment.conditions.water_volume_mL
-        
-        ammonia_mass_g = None
-        if self.gross_ammonium_concentration_mM is not None and liquid_volume_ml is not None and liquid_volume_ml > 0:
-            # Use background_ammonium_concentration_mM or default 0.3 mM
-            bg_conc = self.background_ammonium_concentration_mM if self.background_ammonium_concentration_mM is not None else 0.3
-            
-            # Calculate net concentration, clamped to 0
-            net_conc = max(0.0, self.gross_ammonium_concentration_mM - bg_conc)
-
-            # Molar mass of NH4+ is ~18.04 g/mol
-            ammonia_mass_g = (
-                (net_conc / 1000) *  # Convert mM to M (mol/L)
-                (liquid_volume_ml / 1000) *  # Convert mL to L
-                18.04  # Molar mass of NH4+ (g/mol)
-            )
-
-        # Calculate grams_per_ton_yield
-        if (ammonia_mass_g is not None and
-            rock_mass is not None and
-            rock_mass > 0):
-
-            # Convert to g/ton using rock mass in grams
-            # 1 ton = 1,000,000 grams
-            self.grams_per_ton_yield = 1_000_000 * (ammonia_mass_g / rock_mass)
-        else:
-            # Set to None if required data is missing or invalid
-            self.grams_per_ton_yield = None
-
-        # Hydrogen calculations (PV = nRT at 25°C, pressure required)
-        self.calculate_hydrogen()
-
-        # Normalize hydrogen to g/ton yield if rock mass available and hydrogen mass calculated
-        try:
-            if rock_mass is not None and rock_mass > 0 and self.h2_mass_ug is not None:
-                # h2_mass_ug is stored as micrograms (μg); convert to grams
-                h2_mass_grams = self.h2_mass_ug / 1_000_000.0
-                self.h2_grams_per_ton_yield = 1_000_000.0 * (h2_mass_grams / rock_mass)
-            else:
-                self.h2_grams_per_ton_yield = None
-        except Exception:
-            # Defensive: if any unexpected error, null out the derived value
-            self.h2_grams_per_ton_yield = None
-
-        # TODO: Calculate ferrous_iron_yield when the calculation method is determined
-        # Example: Check if specific inputs for Fe yield are present
-        # if required_input_for_fe_yield is not None:
-        #    self.ferrous_iron_yield = ... calculation ...
-        # else:
-        #    self.ferrous_iron_yield = None # Or leave as is if manually entered
-
     @validates('h2_concentration', 'gas_sampling_volume_ml', 'gas_sampling_pressure_MPa')
     def validate_non_negative(self, key, value):
         if value is not None and value < 0:
@@ -174,49 +106,6 @@ class ScalarResults(Base):
         if value != 'ppm':
             raise ValueError("h2_concentration_unit must be 'ppm'")
         return value
-
-    def calculate_hydrogen(self):
-        """
-        Calculate hydrogen amount from gas-phase ppm concentration using PV = nRT.
-
-        Assumptions:
-        - Temperature fixed at 20 °C (293.15 K)
-        - Concentration always in ppm (vol/vol)
-        - Pressure provided in MPa; converted to atm internally
-        - Volume provided in mL; converted to L internally
-
-        Stores:
-        - h2_micromoles  (μmol)
-        - h2_mass_ug     (μg)
-        """
-        if (
-            self.h2_concentration is None
-            or self.gas_sampling_volume_ml is None or self.gas_sampling_volume_ml <= 0
-            or self.gas_sampling_pressure_MPa is None or self.gas_sampling_pressure_MPa <= 0
-        ):
-            self.h2_micromoles = None
-            self.h2_mass_ug = None
-            return
-
-        R = 0.082057          # L·atm/(mol·K)
-        T_K = 293.15          # 20 °C
-        H2_MOLAR_MASS = 2.01588  # g/mol
-
-        P_atm = self.gas_sampling_pressure_MPa * 9.86923  # MPa → atm
-        V_L = self.gas_sampling_volume_ml / 1000.0         # mL → L
-
-        total_moles = (P_atm * V_L) / (R * T_K)
-        fraction = self.h2_concentration / 1_000_000.0     # ppm → mole fraction
-
-        if fraction < 0:
-            self.h2_micromoles = None
-            self.h2_mass_ug = None
-            return
-
-        h2_moles = total_moles * fraction
-
-        self.h2_micromoles = h2_moles * 1_000_000.0
-        self.h2_mass_ug = h2_moles * H2_MOLAR_MASS * 1_000_000.0
 
 class ICPResults(Base):
     __tablename__ = "icp_results"
