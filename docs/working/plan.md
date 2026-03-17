@@ -78,7 +78,7 @@ Extract all derived-field calculation logic from SQLAlchemy model methods into `
 
 ---
 
-## M3 — FastAPI Backend: IN PROGRESS
+## M3 — FastAPI Backend: COMPLETE
 
 ### Objective
 Build the complete API layer. All business logic lives here. The React app never touches the database directly.
@@ -114,14 +114,28 @@ Build the complete API layer. All business logic lives here. The React app never
   - analysis.py: GET /api/analysis/xrd/{experiment_id}, GET /api/analysis/pxrf, GET /api/analysis/external/{experiment_id}
   - 15 tests passing
 
-### Pending
+### Completed (all chunks)
 - [x] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13) — 2026-03-16
   - experiments.py: POST/PATCH/DELETE /api/experiments, POST /api/experiments/{id}/notes
   - conditions.py: GET /api/conditions/{id}, GET /api/conditions/by-experiment/{id}, POST/PATCH /api/conditions
   - results.py: GET /api/results/{experiment_id}, POST /api/results, GET/POST /api/results/scalar, PATCH /api/results/scalar/{id}, GET/POST /api/results/icp
   - 32 total API tests passing
-- [ ] Chunk 5: Dashboard, admin, bulk uploads, wire main.py (Tasks 14–17)
-- [ ] Chunk 6: `docs/api/API_REFERENCE.md` + final verification (Task 18)
+- [x] Chunk 5: Dashboard, admin, bulk uploads, wire main.py (Tasks 14–17) — 2026-03-16
+  - dashboard.py: GET /api/dashboard/reactor-status, GET /api/dashboard/timeline/{id}
+  - admin.py: POST /api/admin/recalculate/{model_type}/{id}
+  - bulk_uploads.py: POST /api/bulk-uploads/scalar-results, /new-experiments, /pxrf, /aeris-xrd
+    - Uses lazy imports to avoid frontend.config import at startup (frontend not yet built)
+  - main.py: full rewrite with openapi_tags for all 9 routers + static file serving
+  - 41 total API tests passing
+- [x] Chunk 6: docs/api/API_REFERENCE.md + final verification (Task 18) — 2026-03-16
+  - docs/api/API_REFERENCE.md created
+
+### Sign-off
+- [ ] Awaiting user sign-off to proceed to M4
+
+### Known Patterns / Decisions Made in M3
+- **Bulk upload lazy imports:** `backend/services/bulk_uploads/scalar_results.py` and `pxrf_data.py` import `frontend.config.variable_config` which doesn't exist until M4. Bulk uploads router uses lazy imports inside endpoint functions to avoid startup failure. Tests use `sys.modules` patching.
+- **41 API tests passing** across all routers.
 
 ---
 

@@ -40,3 +40,13 @@ Read `docs/CALCULATIONS.md` before touching any derived field logic.
 ## M3 Firebase Rule
 `backend/auth/firebase_auth.py` initializes Firebase Admin SDK directly.
 Never import `auth.firebase_config` from backend code — it imports `streamlit` at load time and crashes the API.
+
+## M3 Bulk Upload Constraint (Learned)
+`backend/services/bulk_uploads/scalar_results.py` and `pxrf_data.py` import `frontend.config.variable_config`
+at module load time. This module does not exist until M4 (React frontend build).
+**Always use lazy imports** (inside endpoint functions) when wrapping these parsers in the API.
+Tests that exercise these endpoints must use `sys.modules` patching to stub `frontend.config.variable_config`.
+
+## API Reference
+Full endpoint reference: `docs/api/API_REFERENCE.md`
+Interactive docs when server is running: `http://localhost:8000/docs`
