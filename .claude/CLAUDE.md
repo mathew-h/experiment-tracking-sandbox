@@ -38,6 +38,8 @@ Sub-agent skills (load when relevant):
 
 ## 4. Active Milestone
 
+**Current: M3 — FastAPI Backend** (`feature/m3-fastapi-backend`)
+
 Read `docs/milestones/MILESTONE_INDEX.md` to find the current active milestone.
 Read the corresponding milestone file before starting any work.
 Do not begin a milestone until the previous one has received explicit user sign-off.
@@ -109,4 +111,4 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 
 ## 10. MCP Servers
 Notion MCP (`notion`, `author`) is disabled for this project via `.mcp.json` -- not needed and consumes significant context tokens.
-Claude.ai plugin should also remain disabled for this project (disable via Cursor Settings > Features > MCP if re-enabled).
+Claude.ai Slack and Microsoft 365 plugins are disabled for this project via `disabledMcpServers` in `.mcp.json` -- not needed and consume significant context tokens. If they reappear, disable via Cursor Settings > Features > MCP.

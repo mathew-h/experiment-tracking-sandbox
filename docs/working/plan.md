@@ -1,8 +1,8 @@
 # Project Working Memory
 
 ## Current Status
-**Active Milestone:** M1 — PostgreSQL Migration
-**Branch:** `infra/lab-pc-server-setup` (M0 complete; M1 branch to be cut from develop)
+**Active Milestone:** M3 — FastAPI Backend
+**Branch:** `feature/m3-fastapi-backend`
 **Last Updated:** 2026-03-16
 
 ---
@@ -39,17 +39,61 @@
 
 ---
 
-## M1 — PostgreSQL Migration: NOT STARTED
+## M1 — PostgreSQL Migration: COMPLETE
 
 ### Objective
 Migrate existing SQLite data (`docs/sample_data/experiments.db`) to PostgreSQL with full integrity verification.
 
-### Pre-reading Required
-- `docs/milestones/M1_postgres_migration.md`
-- `scripts/migrate-sqlite-to-postgres.py` (existing migration script)
+### What Was Done
+- Integrated Alembic with PostgreSQL
+- Migrated all schema and data to PostgreSQL
+- Created M1 milestone documentation
+
+---
+
+## M2 — Calculation Engine: COMPLETE
+
+### Objective
+Extract all derived-field calculation logic from SQLAlchemy model methods into `backend/services/calculations/`.
 
 ### Branch
-`feature/m1-postgres-migration` — cut from `develop`
+`feature/m2-calculation-engine` — cut from `feature/m1-postgres-migration`
+
+### What Was Done
+- Registry pattern: `backend/services/calculations/registry.py` — dispatch dict + `recalculate(instance, session)`
+- `conditions_calcs.py` — water_to_rock_ratio
+- `additive_calcs.py` — unit conversions, moles, concentration, catalyst fields, format_additives()
+- `scalar_calcs.py` — H2 PV=nRT at 20°C, ammonium yield, h2_grams_per_ton_yield
+- Deleted calculation methods from `chemicals.py`, `conditions.py`, `results.py` (models now pure storage)
+- 29 unit tests passing, no DB required
+- `docs/CALCULATIONS.md` created
+
+### Decisions Made
+- **Clean break:** Model calculation methods deleted (not wrapped). No dead code.
+- **Simple registry:** dispatch dict keyed on `type(instance)` — exact type match, no subclass matching.
+- **Background default:** 0.3 mM default for background_ammonium_concentration_mM when not set.
+
+### Sign-off
+- [x] User sign-off received 2026-03-16 — proceed to M3
+
+---
+
+## M3 — FastAPI Backend: IN PROGRESS
+
+### Objective
+Build the complete API layer. All business logic lives here. The React app never touches the database directly.
+
+### Branch
+`feature/m3-fastapi-backend` — cut from `feature/m2-calculation-engine` (via `infra/lab-pc-server-setup`)
+
+### Pending
+- [ ] Write M3 implementation plan
+- [ ] Build dependencies (`get_db`, `verify_firebase_token`)
+- [ ] Build Pydantic schemas for all entities
+- [ ] Implement 9 routers: experiments, conditions, results, samples, chemicals, analysis, dashboard, bulk_uploads, admin
+- [ ] Wire calculation engine on all write endpoints
+- [ ] Tests per endpoint
+- [ ] `docs/api/API_REFERENCE.md`
 
 ---
 

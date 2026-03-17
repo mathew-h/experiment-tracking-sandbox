@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, JSON, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from typing import Dict
@@ -33,7 +34,7 @@ class ExternalAnalysis(Base):
     # No FK constraint to allow multiple readings per sample
     pxrf_reading_no = Column(String, nullable=True, index=True)
     description = Column(Text)
-    analysis_metadata = Column(JSON)  # For storing additional analysis-specific data
+    analysis_metadata = Column(JSONB)  # For storing additional analysis-specific data
     # Add magnetic susceptibility field
     magnetic_susceptibility = Column(String, nullable=True)  # Store as string to maintain flexibility
     created_at = Column(DateTime(timezone=True), server_default=func.now())

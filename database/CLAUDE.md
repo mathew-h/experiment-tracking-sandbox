@@ -5,6 +5,23 @@
 - `docs/SCHEMA.md` — PostgreSQL-specific notes and migration history
 - `docs/LOCKED_COMPONENTS.md` — complete locked models table
 
+## Quick Commands
+
+```bash
+# Create a new migration
+alembic revision --autogenerate -m "descriptive message"
+
+# Apply migrations
+alembic upgrade head
+
+# Test downgrade (always verify before merging)
+alembic downgrade -1 && alembic upgrade head
+
+# Fresh DB bootstrap (use instead of migration chain on a new PostgreSQL DB)
+python -c "from database.base import Base, engine; Base.metadata.create_all(engine)"
+alembic stamp head
+```
+
 ## Key Rules (Non-Negotiable)
 - Never delete, rewrite, or squash existing Alembic migration files
 - All migrations must be additive

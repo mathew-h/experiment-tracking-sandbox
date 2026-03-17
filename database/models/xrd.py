@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 
@@ -19,11 +20,11 @@ class XRDAnalysis(Base):
 
     # Store primary mineralogy as JSON for engines that support JSON operators.
     # In SQLite this will be stored as TEXT via SQLAlchemy and treated as opaque JSON.
-    mineral_phases = Column(JSON)       # e.g., {"quartz": 45.2, "feldspar": 23.8}
-    peak_positions = Column(JSON)       # e.g., {"2-theta": [20.8, 26.6, ...]}
-    intensities = Column(JSON)          # e.g., {"counts": [1500, 8000, ...]}
-    d_spacings = Column(JSON)           # e.g., {"angstrom": [4.26, 3.34, ...]}
-    analysis_parameters = Column(JSON)  # e.g., {"xray_source": "CuKa", "scan_range": "5-90"}
+    mineral_phases = Column(JSONB)       # e.g., {"quartz": 45.2, "feldspar": 23.8}
+    peak_positions = Column(JSONB)       # e.g., {"2-theta": [20.8, 26.6, ...]}
+    intensities = Column(JSONB)          # e.g., {"counts": [1500, 8000, ...]}
+    d_spacings = Column(JSONB)           # e.g., {"angstrom": [4.26, 3.34, ...]}
+    analysis_parameters = Column(JSONB)  # e.g., {"xray_source": "CuKa", "scan_range": "5-90"}
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
