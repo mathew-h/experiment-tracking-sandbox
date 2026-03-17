@@ -96,8 +96,16 @@ Build the complete API layer. All business logic lives here. The React app never
 - **Route order matters:** In `results.py`, static routes (`/scalar/`, `/icp/`) must be registered before `/{experiment_id}` to avoid path shadowing.
 - **Test DB:** Use `experiments_test` PostgreSQL DB. Create once: `psql -U postgres -c "CREATE DATABASE experiments_test OWNER experiments_user;"`. Tests use rollback fixtures, not mocks.
 
+### Completed
+- [x] Chunk 1: Settings, `get_db`, Firebase auth, test conftest (Tasks 1–4) — 2026-03-16
+  - `backend/config/settings.py` — pydantic-settings, CORS list, Firebase cred dict
+  - `backend/api/dependencies/db.py` — module-level engine + `get_db` generator
+  - `backend/auth/firebase_auth.py` — `FirebaseUser`, `_decode_token`, `verify_firebase_token`
+  - `tests/api/conftest.py` — test DB session, client fixture, auth override
+  - `httpx==0.28.1` added to `requirements.txt` (required by FastAPI TestClient)
+  - `experiments_test` DB created (postgres superuser password: "password")
+
 ### Pending
-- [ ] Chunk 1: Settings, `get_db`, Firebase auth, test conftest (Tasks 1–4)
 - [ ] Chunk 2: All Pydantic schemas (Tasks 5–7)
 - [ ] Chunk 3: Read routers — experiments, samples, chemicals, analysis (Tasks 8–11)
 - [ ] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13)
