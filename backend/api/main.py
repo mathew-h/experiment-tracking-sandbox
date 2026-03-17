@@ -13,6 +13,7 @@ from backend.api.routers import conditions as conditions_router
 from backend.api.routers import results as results_router
 from backend.api.routers import dashboard as dashboard_router
 from backend.api.routers import admin as admin_router
+from backend.api.routers import bulk_uploads as bulk_uploads_router
 
 # Load environment variables
 load_dotenv()
@@ -46,6 +47,7 @@ app.include_router(conditions_router.router)
 app.include_router(results_router.router)
 app.include_router(dashboard_router.router)
 app.include_router(admin_router.router)
+app.include_router(bulk_uploads_router.router)
 
 # Health check endpoint
 @app.get("/health")
