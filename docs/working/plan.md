@@ -1,8 +1,8 @@
 # Project Working Memory
 
 ## Current Status
-**Active Milestone:** M2 — Calculation Engine
-**Branch:** `feature/m2-calculation-engine`
+**Active Milestone:** M3 — FastAPI Backend
+**Branch:** `feature/m3-fastapi-backend`
 **Last Updated:** 2026-03-16
 
 ---
@@ -51,7 +51,7 @@ Migrate existing SQLite data (`docs/sample_data/experiments.db`) to PostgreSQL w
 
 ---
 
-## M2 — Calculation Engine: IN PROGRESS
+## M2 — Calculation Engine: COMPLETE
 
 ### Objective
 Extract all derived-field calculation logic from SQLAlchemy model methods into `backend/services/calculations/`.
@@ -73,8 +73,27 @@ Extract all derived-field calculation logic from SQLAlchemy model methods into `
 - **Simple registry:** dispatch dict keyed on `type(instance)` — exact type match, no subclass matching.
 - **Background default:** 0.3 mM default for background_ammonium_concentration_mM when not set.
 
+### Sign-off
+- [x] User sign-off received 2026-03-16 — proceed to M3
+
+---
+
+## M3 — FastAPI Backend: IN PROGRESS
+
+### Objective
+Build the complete API layer. All business logic lives here. The React app never touches the database directly.
+
+### Branch
+`feature/m3-fastapi-backend` — cut from `feature/m2-calculation-engine` (via `infra/lab-pc-server-setup`)
+
 ### Pending
-- [ ] User sign-off to proceed to M3
+- [ ] Write M3 implementation plan
+- [ ] Build dependencies (`get_db`, `verify_firebase_token`)
+- [ ] Build Pydantic schemas for all entities
+- [ ] Implement 9 routers: experiments, conditions, results, samples, chemicals, analysis, dashboard, bulk_uploads, admin
+- [ ] Wire calculation engine on all write endpoints
+- [ ] Tests per endpoint
+- [ ] `docs/api/API_REFERENCE.md`
 
 ---
 
