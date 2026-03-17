@@ -9,6 +9,7 @@ from backend.api.routers import experiments as experiments_router
 from backend.api.routers import samples as samples_router
 from backend.api.routers import chemicals as chemicals_router
 from backend.api.routers import analysis as analysis_router
+from backend.api.routers import conditions as conditions_router
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +39,7 @@ app.include_router(experiments_router.router)
 app.include_router(samples_router.router)
 app.include_router(chemicals_router.router)
 app.include_router(analysis_router.router)
+app.include_router(conditions_router.router)
 
 # Health check endpoint
 @app.get("/health")
