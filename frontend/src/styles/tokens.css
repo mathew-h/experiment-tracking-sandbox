@@ -1,0 +1,41 @@
+/* Design tokens as CSS custom properties */
+/* These mirror brand.ts — keep in sync */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Colors */
+  --color-navy-base:    #05172B;
+  --color-navy-raised:  #0a2440;
+  --color-navy-overlay: #0e3158;
+  --color-navy-border:  #1a3a5c;
+  --color-navy-muted:   #133355;
+
+  --color-red:       #FD4437;
+  --color-red-dark:  #d93020;
+  --color-red-light: #ff6b5e;
+
+  --color-ink-primary:   #F0F4F8;
+  --color-ink-secondary: #8BACC8;
+  --color-ink-muted:     #4d6e8a;
+
+  --color-status-ongoing:   #22c55e;
+  --color-status-completed: #38bdf8;
+  --color-status-cancelled: #6b7280;
+  --color-status-warning:   #f59e0b;
+  --color-status-error:     #FD4437;
+
+  /* Typography */
+  --font-sans:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Layout */
+  --sidebar-width:    240px;
+  --header-height:    56px;
+  --content-max:      1400px;
+
+  /* Transitions */
+  --transition-fast:  100ms ease-out;
+  --transition-base:  200ms ease-out;
+  --transition-slow:  300ms cubic-bezier(0.16, 1, 0.3, 1);
+}

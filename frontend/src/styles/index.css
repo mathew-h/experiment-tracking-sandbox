@@ -1,34 +1,99 @@
+@import './tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+/* ─── Base resets ─────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  background-color: var(--color-navy-base);
+  color: var(--color-ink-primary);
+  font-family: var(--font-sans);
+  line-height: 1.5;
   min-height: 100vh;
 }
 
 #root {
+  min-height: 100vh;
   width: 100%;
-  margin: 0 auto;
-  text-align: center;
+}
+
+/* ─── Scrollbar styling ───────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-navy-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-navy-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-muted);
+}
+
+/* ─── Selection ───────────────────────────────────────────────── */
+::selection {
+  background: rgba(253, 68, 55, 0.3);
+  color: var(--color-ink-primary);
+}
+
+/* ─── Focus ring ──────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-red);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ─── Utility layers ─────────────────────────────────────────── */
+@layer utilities {
+  .font-mono-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  .grid-bg {
+    background-image: var(--tw-gradient-stops,
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px));
+    background-size: 24px 24px;
+  }
+
+  .border-subtle {
+    border-color: var(--color-navy-border);
+  }
+
+  .text-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.875rem;
+    letter-spacing: -0.01em;
+  }
+
+  .panel {
+    background-color: var(--color-navy-raised);
+    border: 1px solid var(--color-navy-border);
+    border-radius: 6px;
+  }
+
+  .panel-overlay {
+    background-color: var(--color-navy-overlay);
+    border: 1px solid var(--color-navy-border);
+    border-radius: 6px;
+  }
 }
