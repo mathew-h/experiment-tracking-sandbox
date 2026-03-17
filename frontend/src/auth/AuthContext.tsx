@@ -5,13 +5,14 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from 'firebase/auth'
-import { auth } from './firebaseConfig'
+import { auth, firebaseConfigured } from './firebaseConfig'
 import { apiClient } from '@/api/client'
 
 interface AuthContextValue {
   user: User | null
   token: string | null
   loading: boolean
+  configured: boolean
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
 }
@@ -21,15 +22,15 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(firebaseConfigured) // false immediately if unconfigured
 
   useEffect(() => {
+    if (!firebaseConfigured) return
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const idToken = await firebaseUser.getIdToken()
         setUser(firebaseUser)
         setToken(idToken)
-        // Inject auth header into axios
         apiClient.defaults.headers.common['Authorization'] = `Bearer ${idToken}`
       } else {
         setUser(null)
@@ -61,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, token, loading, configured: firebaseConfigured, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )

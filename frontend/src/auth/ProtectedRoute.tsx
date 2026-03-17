@@ -7,8 +7,11 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, loading } = useAuth()
+  const { user, loading, configured } = useAuth()
   const location = useLocation()
+
+  // Firebase not configured — let the app render anyway (dev mode)
+  if (!configured) return <>{children}</>
 
   if (loading) {
     return (

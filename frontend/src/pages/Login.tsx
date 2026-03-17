@@ -3,8 +3,21 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { Button, Input } from '@/components/ui'
 
+function FirebaseConfigWarning() {
+  return (
+    <div className="bg-surface-overlay border border-status-warning/30 rounded-xl p-5 text-center space-y-2">
+      <p className="text-sm font-semibold text-status-warning">Firebase not configured</p>
+      <p className="text-xs text-ink-muted">
+        Create <code className="font-mono-data bg-surface-raised px-1 py-0.5 rounded text-ink-secondary">frontend/.env.local</code> from{' '}
+        <code className="font-mono-data bg-surface-raised px-1 py-0.5 rounded text-ink-secondary">.env.example</code> and add your Firebase credentials.
+      </p>
+      <p className="text-xs text-ink-muted">Restart the dev server after saving.</p>
+    </div>
+  )
+}
+
 export function LoginPage() {
-  const { signIn } = useAuth()
+  const { signIn, configured } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/'
@@ -13,6 +26,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  if (!configured) return <FirebaseConfigWarning />
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

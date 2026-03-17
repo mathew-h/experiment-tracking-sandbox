@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { experimentsApi } from '@/api/experiments'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
@@ -8,6 +8,7 @@ import {
 } from '@/components/ui'
 
 export function ExperimentListPage() {
+  const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
 
@@ -30,12 +31,12 @@ export function ExperimentListPage() {
             {experiments ? `${filtered.length} of ${experiments.length}` : '…'} experiments
           </p>
         </div>
-        <Button variant="primary" size="sm" leftIcon={
+        <Button variant="primary" size="sm" onClick={() => navigate('/experiments/new')} leftIcon={
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
         }>
-          <Link to="/experiments/new" className="text-inherit">New Experiment</Link>
+          New Experiment
         </Button>
       </div>
 
