@@ -22,6 +22,12 @@ python -c "from database import Base, engine; Base.metadata.create_all(engine)"
 alembic stamp head
 ```
 
+## Connection Strings
+Dev DB: `postgresql://experiments_user:password@localhost:5432/experiments`
+Test DB: `postgresql://experiments_user:password@localhost:5432/experiments_test`
+
+Create test DB once: `psql -U postgres -c "CREATE DATABASE experiments_test OWNER experiments_user;"`
+
 ## Key Rules (Non-Negotiable)
 - Never delete, rewrite, or squash existing Alembic migration files
 - All migrations must be additive

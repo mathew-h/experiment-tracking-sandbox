@@ -153,10 +153,13 @@ Build the complete API layer. All business logic lives here. The React app never
 - [x] 4f: All 8 page stubs with real structure: Dashboard (reactor grid + metrics), ExperimentList (table + filters), ExperimentDetail (conditions panel + results), NewExperiment (form + sample select), BulkUploads (drag-drop cards for all 4 upload types), Samples, Chemicals, Analysis (pXRF table)
 - TypeScript strict: 0 errors; ESLint: 0 warnings; production build: clean (474kB)
 
+### Completed (continued, 2026-03-17)
+- [x] Firebase `.env.local` configured; full auth flow verified via Chrome DevTools
+- [x] Chrome DevTools verification: login, all 7 protected routes, sign out, unauthenticated redirect
+- [x] CLAUDE.md files updated for accuracy (active milestone, frontend Firebase setup, DB connection strings)
+
 ### Pending
-- [ ] Firebase `.env.local` needs to be populated (template at `frontend/.env.example`)
-- [ ] Chrome DevTools visual verification (Chrome needs to be installed for MCP)
-- [ ] M4 acceptance criteria sign-off
+- [ ] M4 acceptance criteria sign-off from user
 
 ### Key Decisions / Patterns
 - **Font pairing:** Inter (UI) + JetBrains Mono (data values) — instrument panel aesthetic
@@ -164,6 +167,17 @@ Build the complete API layer. All business logic lives here. The React app never
 - **Auth token refresh:** Proactive 55-minute interval via `setInterval` in `AuthContext`
 - **API errors:** Interceptor extracts FastAPI `detail` array messages into flat `error.message`
 - **No `console.log`:** ESLint `no-console: error` enforced
+- **Firebase graceful degradation:** `firebaseConfig.ts` exports `firebaseConfigured = Boolean(VITE_FIREBASE_API_KEY)`. When false, `auth` is exported as `null`, `AuthProvider` skips `onAuthStateChanged`, and `ProtectedRoute` returns children directly. App starts without Firebase for UI-only dev work. Template: `frontend/.env.example`.
+- **Hooks-before-early-return rule:** ESLint `react-hooks/rules-of-hooks` is enforced — all `useState`/`useNavigate`/`useLocation` calls must appear before any conditional `return` in a component.
+- **Form element IDs:** Use `useId()` from React, not `Math.random()` — stable across renders, ESLint-safe.
+- **React Router future flags:** `v7_startTransition` and `v7_relativeSplatPath` set on `<BrowserRouter>` to silence upgrade warnings.
+- **Navigation from non-link contexts:** Use `useNavigate()` + `onClick`, not `<Link>` wrapped inside `<Button>` — avoids nested interactive element violation.
+
+### Bugs Fixed in M4 (do not reintroduce)
+- Firebase crash on startup when `.env.local` missing — fixed via conditional init + `firebaseConfigured` flag
+- `Link`-inside-`Button` in ExperimentList → replaced with `useNavigate`
+- `useId()` replaces `Math.random()` in Input/Select for stable IDs
+- ESLint `react-refresh` plugin removed (ESM conflict with `.eslintrc.cjs` format)
 
 ---
 

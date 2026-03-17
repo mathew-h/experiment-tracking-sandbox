@@ -11,7 +11,7 @@
 # Install dependencies
 npm install
 
-# Start dev server (Vite, port 5173)
+# Start dev server (Vite, default port 5173; may use 5174 if occupied)
 npm run dev
 
 # Build for production (output to frontend/dist/ — served by FastAPI)
@@ -33,10 +33,13 @@ npx eslint src --ext .ts,.tsx
 - No `console.log` in committed code
 - ESLint + Prettier zero warnings
 
-## Chrome DevTools Loop
-The conductor must explicitly enable this per task. It does not run autonomously.
-Instructions are in `.claude/skills/frontend-builder.md`.
+## Firebase Setup (Required for Auth)
+Copy `frontend/.env.example` to `frontend/.env.local` and fill in Firebase credentials.
+Without this, the app starts but shows a "Firebase not configured" warning and auth is bypassed
+(useful for UI-only dev work without Firebase credentials).
 
-## Milestone 4 Prerequisite Check
-Before starting any Milestone 4 work, verify `frontend/public/logo.png` exists
-and `docs/DESIGN.md` has brand hex codes. If either is missing, stop and ask the user.
+Test account: `labpc@addisenergy.com` (password matches email — dev only).
+
+## Design System
+All color/font tokens in `frontend/src/assets/brand.ts` — never hardcode hex values in components.
+Tailwind config mirrors these tokens. CSS custom properties in `frontend/src/styles/tokens.css`.

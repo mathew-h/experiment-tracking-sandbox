@@ -38,7 +38,7 @@ Sub-agent skills (load when relevant):
 
 ## 4. Active Milestone
 
-**Current: M3 — FastAPI Backend** (`feature/m3-fastapi-backend`)
+**Current: M4 — React Shell** (`feature/m4-react-shell`)
 
 Read `docs/milestones/MILESTONE_INDEX.md` to find the current active milestone.
 Read the corresponding milestone file before starting any work.
