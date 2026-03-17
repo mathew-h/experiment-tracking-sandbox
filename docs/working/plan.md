@@ -1,7 +1,7 @@
 # Project Working Memory
 
 ## Current Status
-**Active Milestone:** M4 — React Shell
+**Active Milestone:** M5 — Experiment Pages
 **Branch:** `feature/m4-react-shell`
 **Last Updated:** 2026-03-17
 
@@ -139,7 +139,7 @@ Build the complete API layer. All business logic lives here. The React app never
 
 ---
 
-## M4 — React Shell: IN PROGRESS
+## M4 — React Shell: COMPLETE
 
 ### Branch
 `feature/m4-react-shell`
@@ -158,8 +158,11 @@ Build the complete API layer. All business logic lives here. The React app never
 - [x] Chrome DevTools verification: login, all 7 protected routes, sign out, unauthenticated redirect
 - [x] CLAUDE.md files updated for accuracy (active milestone, frontend Firebase setup, DB connection strings)
 
-### Pending
-- [ ] M4 acceptance criteria sign-off from user
+### Completed (continued, 2026-03-17)
+- [x] Documentation Agent: `docs/frontend/ARCHITECTURE.md`, `docs/frontend/ADDING_A_PAGE.md`, `docs/frontend/DESIGN_SYSTEM.md`
+
+### Sign-off
+- [x] User sign-off received 2026-03-17 — proceed to M5
 
 ### Key Decisions / Patterns
 - **Font pairing:** Inter (UI) + JetBrains Mono (data values) — instrument panel aesthetic
@@ -178,6 +181,37 @@ Build the complete API layer. All business logic lives here. The React app never
 - `Link`-inside-`Button` in ExperimentList → replaced with `useNavigate`
 - `useId()` replaces `Math.random()` in Input/Select for stable IDs
 - ESLint `react-refresh` plugin removed (ESM conflict with `.eslintrc.cjs` format)
+
+---
+
+## M5 — Experiment Pages: NOT STARTED
+
+### Objective
+Build the three fully-functional experiment management pages, wired to the live FastAPI backend.
+
+### Branch
+`feature/m5-experiment-pages` — cut from `feature/m4-react-shell` (after M4 merge)
+
+### Pages
+- **Experiment List (`/experiments`):** Filterable table (status, type, sample ID, date range, reactor number). Server-side pagination. Row click → detail.
+- **New Experiment (`/experiments/new`):** Multi-step form (basic info → conditions → chemical additives → review/submit). Live `water_to_rock_ratio` preview. Real-time experiment ID uniqueness check.
+- **Experiment Detail (`/experiments/:id`):** Tabs — Conditions (read-only + edit modal), Results (timepoints with scalar + ICP expandable rows), Notes (chronological feed + add), Analysis (linked XRD/pXRF/elemental), Files.
+
+### Acceptance Criteria
+- Creation round-trips with derived fields populated
+- All filters work
+- Derived fields display from stored DB values
+- Lineage visible
+- Chrome DevTools loop: no console errors
+
+### Pending
+- [ ] Brainstorm + plan before implementation
+- [ ] Experiment List page
+- [ ] New Experiment multi-step form
+- [ ] Experiment Detail tabs
+- [ ] Form validation, API integration, filter logic tests (Test Writer Agent)
+- [ ] User-facing guide: creating and managing experiments (Documentation Agent)
+- [ ] M5 acceptance criteria sign-off from user
 
 ---
 
