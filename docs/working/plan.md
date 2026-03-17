@@ -106,7 +106,8 @@ Build the complete API layer. All business logic lives here. The React app never
   - `experiments_test` DB created (postgres superuser password: "password")
 
 ### Pending
-- [ ] Chunk 2: All Pydantic schemas (Tasks 5–7)
+- [x] Chunk 2: All Pydantic schemas (Tasks 5–7) — 2026-03-16
+  - experiments.py, conditions.py, results.py, chemicals.py, samples.py, analysis.py, dashboard.py, bulk_upload.py + __init__.py
 - [ ] Chunk 3: Read routers — experiments, samples, chemicals, analysis (Tasks 8–11)
 - [ ] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13)
 - [ ] Chunk 5: Dashboard, admin, bulk uploads, wire main.py (Tasks 14–17)
