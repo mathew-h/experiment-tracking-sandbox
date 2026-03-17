@@ -84,16 +84,25 @@ Extract all derived-field calculation logic from SQLAlchemy model methods into `
 Build the complete API layer. All business logic lives here. The React app never touches the database directly.
 
 ### Branch
-`feature/m3-fastapi-backend` — cut from `feature/m2-calculation-engine` (via `infra/lab-pc-server-setup`)
+`feature/m3-fastapi-backend` — cut from `infra/lab-pc-server-setup` (after M2 merge)
+
+### Implementation Plan
+`docs/superpowers/plans/2026-03-16-m3-fastapi-backend.md` — 18 tasks, 6 chunks. **Read this before starting any M3 work.**
+
+### Key Decisions Made
+- **Firebase auth:** `auth/firebase_config.py` imports `streamlit` at module load — cannot be imported from FastAPI. `backend/auth/firebase_auth.py` initializes Firebase Admin SDK directly via `pydantic-settings`. Never import `auth.firebase_config` from the backend.
+- **Calc engine API:** `docs/CODE_STANDARDS.md` example snippet uses `get_affected_fields()`/`calculation_service.run()` — these do **not exist**. Actual API is `registry.recalculate(instance, session)` from `backend/services/calculations/registry.py`.
+- **Bulk upload parsers are locked:** `backend/services/bulk_uploads/` must not be modified. M3 wraps them only.
+- **Route order matters:** In `results.py`, static routes (`/scalar/`, `/icp/`) must be registered before `/{experiment_id}` to avoid path shadowing.
+- **Test DB:** Use `experiments_test` PostgreSQL DB. Create once: `psql -U postgres -c "CREATE DATABASE experiments_test OWNER experiments_user;"`. Tests use rollback fixtures, not mocks.
 
 ### Pending
-- [ ] Write M3 implementation plan
-- [ ] Build dependencies (`get_db`, `verify_firebase_token`)
-- [ ] Build Pydantic schemas for all entities
-- [ ] Implement 9 routers: experiments, conditions, results, samples, chemicals, analysis, dashboard, bulk_uploads, admin
-- [ ] Wire calculation engine on all write endpoints
-- [ ] Tests per endpoint
-- [ ] `docs/api/API_REFERENCE.md`
+- [ ] Chunk 1: Settings, `get_db`, Firebase auth, test conftest (Tasks 1–4)
+- [ ] Chunk 2: All Pydantic schemas (Tasks 5–7)
+- [ ] Chunk 3: Read routers — experiments, samples, chemicals, analysis (Tasks 8–11)
+- [ ] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13)
+- [ ] Chunk 5: Dashboard, admin, bulk uploads, wire main.py (Tasks 14–17)
+- [ ] Chunk 6: `docs/api/API_REFERENCE.md` + final verification (Task 18)
 
 ---
 
