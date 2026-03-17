@@ -115,7 +115,11 @@ Build the complete API layer. All business logic lives here. The React app never
   - 15 tests passing
 
 ### Pending
-- [ ] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13)
+- [x] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13) — 2026-03-16
+  - experiments.py: POST/PATCH/DELETE /api/experiments, POST /api/experiments/{id}/notes
+  - conditions.py: GET /api/conditions/{id}, GET /api/conditions/by-experiment/{id}, POST/PATCH /api/conditions
+  - results.py: GET /api/results/{experiment_id}, POST /api/results, GET/POST /api/results/scalar, PATCH /api/results/scalar/{id}, GET/POST /api/results/icp
+  - 32 total API tests passing
 - [ ] Chunk 5: Dashboard, admin, bulk uploads, wire main.py (Tasks 14–17)
 - [ ] Chunk 6: `docs/api/API_REFERENCE.md` + final verification (Task 18)
 
