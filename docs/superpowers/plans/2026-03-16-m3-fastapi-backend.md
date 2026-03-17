@@ -10,6 +10,8 @@
 
 **Critical constraint:** `auth/firebase_config.py` is locked and imports `streamlit` — never import it from the FastAPI backend. Firebase is initialized independently in `backend/auth/firebase_auth.py`.
 
+**Calc engine API:** `docs/CODE_STANDARDS.md` shows `registry.get_affected_fields()` and `calculation_service.run()` in its example snippet — these functions do **not exist**. The actual M2 registry exposes only `recalculate(instance, session)`. Always follow this plan's pattern, not the CODE_STANDARDS snippet.
+
 ---
 
 ## File Map
@@ -1798,6 +1800,8 @@ def test_create_conditions_triggers_calculation(client, db_session):
     resp = client.post("/api/conditions", json=payload)
     assert resp.status_code == 201
     data = resp.json()
+    # water_to_rock_ratio is a persisted Float column (confirmed: conditions.py line 33)
+    # The calc engine writes it directly; it is NOT a @hybrid_property.
     assert data["water_to_rock_ratio"] == 5.0  # 50/10
 
 
@@ -1995,6 +1999,37 @@ from backend.api.schemas.results import (
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/results", tags=["results"])
 
+# IMPORTANT: Register static-segment routes (/scalar/*, /icp/*) BEFORE the
+# dynamic /{experiment_id} route, otherwise FastAPI matches "scalar" as an
+# experiment_id value and the scalar/icp routes are never reached.
+
+@router.get("/scalar/{result_id}", response_model=ScalarResponse)
+def get_scalar(
+    result_id: int,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ScalarResponse:
+    scalar = db.execute(
+        select(ScalarResults).where(ScalarResults.result_id == result_id)
+    ).scalar_one_or_none()
+    if scalar is None:
+        raise HTTPException(status_code=404, detail="Scalar result not found")
+    return ScalarResponse.model_validate(scalar)
+
+
+@router.get("/icp/{result_id}", response_model=ICPResponse)
+def get_icp(
+    result_id: int,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ICPResponse:
+    icp = db.execute(
+        select(ICPResults).where(ICPResults.result_id == result_id)
+    ).scalar_one_or_none()
+    if icp is None:
+        raise HTTPException(status_code=404, detail="ICP result not found")
+    return ICPResponse.model_validate(icp)
+
 
 @router.get("/{experiment_id}", response_model=list[ResultResponse])
 def list_results(
@@ -2067,20 +2102,6 @@ def update_scalar(
     return ScalarResponse.model_validate(scalar)
 
 
-@router.get("/scalar/{result_id}", response_model=ScalarResponse)
-def get_scalar(
-    result_id: int,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> ScalarResponse:
-    scalar = db.execute(
-        select(ScalarResults).where(ScalarResults.result_id == result_id)
-    ).scalar_one_or_none()
-    if scalar is None:
-        raise HTTPException(status_code=404, detail="Scalar result not found")
-    return ScalarResponse.model_validate(scalar)
-
-
 @router.post("/icp", response_model=ICPResponse, status_code=201)
 def create_icp(
     payload: ICPCreate,
@@ -2097,18 +2118,6 @@ def create_icp(
     return ICPResponse.model_validate(icp)
 
 
-@router.get("/icp/{result_id}", response_model=ICPResponse)
-def get_icp(
-    result_id: int,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> ICPResponse:
-    icp = db.execute(
-        select(ICPResults).where(ICPResults.result_id == result_id)
-    ).scalar_one_or_none()
-    if icp is None:
-        raise HTTPException(status_code=404, detail="ICP result not found")
-    return ICPResponse.model_validate(icp)
 ```
 
 - [ ] **Add router to main.py**, run tests, commit
@@ -2448,8 +2457,8 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.bulk_upload import UploadResponse
 from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService
 from backend.services.bulk_uploads.new_experiments import NewExperimentsUploadService
-from backend.services.bulk_uploads.pxrf_data import PXRFDataService
-from backend.services.bulk_uploads.aeris_xrd import AerisXRDUploadService
+from backend.services.bulk_uploads.pxrf_data import PXRFUploadService  # class is PXRFUploadService, method is ingest_from_bytes
+from backend.services.bulk_uploads.aeris_xrd import AerisXRDUploadService  # method is bulk_upsert_from_excel, returns 4-tuple
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/bulk-uploads", tags=["bulk-uploads"])
@@ -2482,15 +2491,16 @@ async def upload_new_experiments(
     """Upload a New Experiments Excel file."""
     file_bytes = await file.read()
     try:
-        result = NewExperimentsUploadService.bulk_upload_from_excel(db, file_bytes)
-        created = getattr(result, "created", 0) if not isinstance(result, tuple) else result[0]
-        errors: list[str] = getattr(result, "errors", []) if not isinstance(result, tuple) else (result[3] if len(result) > 3 else [])
+        # Returns 6-tuple: (created, updated, skipped, errors, warnings, info_messages)
+        created, updated, skipped, errors, _warnings, _info = (
+            NewExperimentsUploadService.bulk_upsert_from_excel(db, file_bytes)
+        )
     except Exception as exc:
         log.error("new_experiments_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
-    return UploadResponse(created=created, updated=0, skipped=0, errors=errors,
-                          message=f"{created} experiments created")
+    return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
+                          message=f"{created} created, {updated} updated, {skipped} skipped")
 
 
 @router.post("/pxrf", response_model=UploadResponse)
@@ -2502,7 +2512,8 @@ async def upload_pxrf(
     """Upload a pXRF CSV/Excel file."""
     file_bytes = await file.read()
     try:
-        created, updated, skipped, errors = PXRFDataService.bulk_upsert_from_file(db, file_bytes)
+        # PXRFUploadService.ingest_from_bytes returns (created, updated, skipped, errors: List[str])
+        created, updated, skipped, errors = PXRFUploadService.ingest_from_bytes(db, file_bytes)
     except Exception as exc:
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
@@ -2519,7 +2530,8 @@ async def upload_aeris_xrd(
     """Upload an Aeris XRD file (time-series mineral phases)."""
     file_bytes = await file.read()
     try:
-        created, updated, skipped, errors = AerisXRDUploadService.bulk_upsert_from_file(db, file_bytes)
+        # AerisXRDUploadService.bulk_upsert_from_excel returns (created, updated, skipped, errors: List[str])
+        created, updated, skipped, errors = AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
     except Exception as exc:
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
