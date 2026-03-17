@@ -17,7 +17,7 @@ A laboratory experiment tracking system for a small geochemistry team (2-5 users
 Researchers log experiments, upload bulk analytical data, track samples and chemicals,
 and visualize reactor status. Data exports to Power BI.
 
-**Current state:** Streamlit + SQLAlchemy + SQLite
+**Current state:** Streamlit + SQLAlchemy + PostgreSQL (migrated M1)
 **Target state:** React 18 + FastAPI + PostgreSQL (see `docs/STACK.md` for full table)
 
 **Deployment:** Single always-on lab PC, LAN only, no cloud, no Docker in production.

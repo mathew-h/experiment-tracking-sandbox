@@ -20,16 +20,23 @@ pytest tests/services/ -v
 
 # Run calculation engine tests only
 pytest tests/services/calculations/ -v
+
+# Run API tests (M3+)
+pytest tests/api/ -v
 ```
 
 ## Key Rules (Non-Negotiable)
 - No business logic inside `database/models/` files — models are storage only
 - All derived fields are written at create/update time by the calculation engine
 - Never modify bulk upload parsers in `backend/services/bulk_uploads/` without explicit user instruction
-- All endpoints call `registry.get_affected_fields()` after every write
+- All write endpoints call `registry.recalculate(instance, session)` after every write (never `get_affected_fields` — does not exist)
 - Use `structlog` — never `print()` or `logging.basicConfig()`
 - Use `pydantic-settings` for all config — never `os.environ.get()` with hardcoded fallbacks
 
 ## Calculation Engine
 All formula modules live in `backend/services/calculations/`.
 Read `docs/CALCULATIONS.md` before touching any derived field logic.
+
+## M3 Firebase Rule
+`backend/auth/firebase_auth.py` initializes Firebase Admin SDK directly.
+Never import `auth.firebase_config` from backend code — it imports `streamlit` at load time and crashes the API.

@@ -18,7 +18,7 @@ alembic upgrade head
 alembic downgrade -1 && alembic upgrade head
 
 # Fresh DB bootstrap (use instead of migration chain on a new PostgreSQL DB)
-python -c "from database.base import Base, engine; Base.metadata.create_all(engine)"
+python -c "from database import Base, engine; Base.metadata.create_all(engine)"
 alembic stamp head
 ```
 
