@@ -104,16 +104,17 @@ Build the complete API layer. All business logic lives here. The React app never
   - `tests/api/conftest.py` — test DB session, client fixture, auth override
   - `httpx==0.28.1` added to `requirements.txt` (required by FastAPI TestClient)
   - `experiments_test` DB created (postgres superuser password: "password")
-
-### Pending
 - [x] Chunk 2: All Pydantic schemas (Tasks 5–7) — 2026-03-16
   - experiments.py, conditions.py, results.py, chemicals.py, samples.py, analysis.py, dashboard.py, bulk_upload.py + __init__.py
+  - 5 schema tests passing
 - [x] Chunk 3: Read routers — experiments, samples, chemicals, analysis (Tasks 8–11) — 2026-03-16
   - experiments.py: GET /api/experiments (list + filters), GET /api/experiments/{id}
   - samples.py: GET/POST /api/samples, GET/PATCH /api/samples/{id}
   - chemicals.py: GET/POST /api/chemicals/compounds, GET /api/chemicals/compounds/{id}, GET/POST /api/chemicals/additives/{conditions_id}
   - analysis.py: GET /api/analysis/xrd/{experiment_id}, GET /api/analysis/pxrf, GET /api/analysis/external/{experiment_id}
   - 15 tests passing
+
+### Pending
 - [ ] Chunk 4: Write routers — experiments write, conditions, results (Tasks 12–13)
 - [ ] Chunk 5: Dashboard, admin, bulk uploads, wire main.py (Tasks 14–17)
 - [ ] Chunk 6: `docs/api/API_REFERENCE.md` + final verification (Task 18)
