@@ -1,8 +1,8 @@
 # Project Working Memory
 
 ## Current Status
-**Active Milestone:** M3 — FastAPI Backend
-**Branch:** `feature/m3-fastapi-backend`
+**Active Milestone:** M4 — React Shell
+**Branch:** `feature/m4-react-shell`
 **Last Updated:** 2026-03-16
 
 ---
@@ -131,7 +131,7 @@ Build the complete API layer. All business logic lives here. The React app never
   - docs/api/API_REFERENCE.md created
 
 ### Sign-off
-- [ ] Awaiting user sign-off to proceed to M4
+- [x] User sign-off received 2026-03-16 — proceed to M4
 
 ### Known Patterns / Decisions Made in M3
 - **Bulk upload lazy imports:** `backend/services/bulk_uploads/scalar_results.py` and `pxrf_data.py` import `frontend.config.variable_config` which doesn't exist until M4. Bulk uploads router uses lazy imports inside endpoint functions to avoid startup failure. Tests use `sys.modules` patching.
