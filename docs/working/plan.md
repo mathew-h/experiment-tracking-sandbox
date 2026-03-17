@@ -3,7 +3,7 @@
 ## Current Status
 **Active Milestone:** M4 — React Shell
 **Branch:** `feature/m4-react-shell`
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 
 ---
 
@@ -136,6 +136,34 @@ Build the complete API layer. All business logic lives here. The React app never
 ### Known Patterns / Decisions Made in M3
 - **Bulk upload lazy imports:** `backend/services/bulk_uploads/scalar_results.py` and `pxrf_data.py` import `frontend.config.variable_config` which doesn't exist until M4. Bulk uploads router uses lazy imports inside endpoint functions to avoid startup failure. Tests use `sys.modules` patching.
 - **41 API tests passing** across all routers.
+
+---
+
+## M4 — React Shell: IN PROGRESS
+
+### Branch
+`feature/m4-react-shell`
+
+### Completed (2026-03-17)
+- [x] 4a: Tailwind config, PostCSS, ESLint (zero warnings), Prettier; logo.png renamed; vite proxy pre-configured
+- [x] 4b: Design system — `brand.ts`, `tokens.css`, `index.css`; 10 UI components (Button, Input, Select, Badge, Card, Table, Spinner, Toast, Modal, FileUpload); inter + JetBrains Mono fonts; navy/red precision-instrument aesthetic
+- [x] 4c: `AppLayout.tsx` (sidebar + header), `AuthLayout.tsx` (centered with decorative grid background)
+- [x] 4d: `firebaseConfig.ts`, `AuthContext.tsx` (55-min token refresh), `ProtectedRoute.tsx`, `Login.tsx`
+- [x] 4e: `api/client.ts` (Axios + auth interceptor + FastAPI error extraction) + domain files: experiments, samples, chemicals, analysis, dashboard, bulkUploads, results
+- [x] 4f: All 8 page stubs with real structure: Dashboard (reactor grid + metrics), ExperimentList (table + filters), ExperimentDetail (conditions panel + results), NewExperiment (form + sample select), BulkUploads (drag-drop cards for all 4 upload types), Samples, Chemicals, Analysis (pXRF table)
+- TypeScript strict: 0 errors; ESLint: 0 warnings; production build: clean (474kB)
+
+### Pending
+- [ ] Firebase `.env.local` needs to be populated (template at `frontend/.env.example`)
+- [ ] Chrome DevTools visual verification (Chrome needs to be installed for MCP)
+- [ ] M4 acceptance criteria sign-off
+
+### Key Decisions / Patterns
+- **Font pairing:** Inter (UI) + JetBrains Mono (data values) — instrument panel aesthetic
+- **Token file:** `frontend/src/assets/brand.ts` is single source of truth for all color/spacing values
+- **Auth token refresh:** Proactive 55-minute interval via `setInterval` in `AuthContext`
+- **API errors:** Interceptor extracts FastAPI `detail` array messages into flat `error.message`
+- **No `console.log`:** ESLint `no-console: error` enforced
 
 ---
 
