@@ -5,6 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
+from backend.api.routers import experiments as experiments_router
+from backend.api.routers import samples as samples_router
+from backend.api.routers import chemicals as chemicals_router
+from backend.api.routers import analysis as analysis_router
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +34,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(experiments_router.router)
+app.include_router(samples_router.router)
+app.include_router(chemicals_router.router)
+app.include_router(analysis_router.router)
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -54,11 +63,7 @@ async def root():
     }
 
 # TODO: Add routers for:
-# - /api/experiments
 # - /api/results
-# - /api/samples
-# - /api/chemicals
-# - /api/analysis
 # - /api/bulk_uploads
 # - /api/dashboard
 
