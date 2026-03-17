@@ -1,87 +1,77 @@
-"""
-FastAPI application entry point
-"""
+"""FastAPI application entry point."""
+from __future__ import annotations
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
-from backend.api.routers import experiments as experiments_router
-from backend.api.routers import samples as samples_router
-from backend.api.routers import chemicals as chemicals_router
-from backend.api.routers import analysis as analysis_router
-from backend.api.routers import conditions as conditions_router
-from backend.api.routers import results as results_router
-from backend.api.routers import dashboard as dashboard_router
-from backend.api.routers import admin as admin_router
-from backend.api.routers import bulk_uploads as bulk_uploads_router
 
-# Load environment variables
 load_dotenv()
 
-# Create FastAPI app
+from backend.config.settings import get_settings
+from backend.api.routers import (
+    experiments, conditions, results, samples,
+    chemicals, analysis, dashboard, admin, bulk_uploads,
+)
+
+settings = get_settings()
+
 app = FastAPI(
     title="Experiment Tracking System API",
     description="Backend API for laboratory experiment tracking",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_tags=[
+        {"name": "experiments", "description": "Experiment CRUD and notes"},
+        {"name": "conditions", "description": "Experimental conditions and calculation engine"},
+        {"name": "results", "description": "Scalar, ICP, and file results"},
+        {"name": "samples", "description": "Sample inventory"},
+        {"name": "chemicals", "description": "Compound library and chemical additives"},
+        {"name": "analysis", "description": "XRD, pXRF, and external analyses"},
+        {"name": "dashboard", "description": "Reactor status and experiment timelines"},
+        {"name": "admin", "description": "Recalculation and maintenance endpoints"},
+        {"name": "bulk-uploads", "description": "Bulk data upload via Excel/CSV"},
+    ],
 )
-
-# CORS configuration
-CORS_ORIGINS = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:8000"
-).split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(experiments_router.router)
-app.include_router(samples_router.router)
-app.include_router(chemicals_router.router)
-app.include_router(analysis_router.router)
-app.include_router(conditions_router.router)
-app.include_router(results_router.router)
-app.include_router(dashboard_router.router)
-app.include_router(admin_router.router)
-app.include_router(bulk_uploads_router.router)
+# Register all API routers
+app.include_router(experiments.router)
+app.include_router(conditions.router)
+app.include_router(results.router)
+app.include_router(samples.router)
+app.include_router(chemicals.router)
+app.include_router(analysis.router)
+app.include_router(dashboard.router)
+app.include_router(admin.router)
+app.include_router(bulk_uploads.router)
 
-# Health check endpoint
+
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+async def health_check() -> dict:
+    """Health check endpoint."""
     return {"status": "ok", "service": "experiment_tracking_api"}
 
-# API docs
-@app.get("/api/docs", include_in_schema=False)
-async def redirect_docs():
-    """Redirect to Swagger UI"""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/docs")
 
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "Experiment Tracking System API",
-        "docs": "http://localhost:8000/docs",
-        "redoc": "http://localhost:8000/redoc"
-    }
+# Serve React app from frontend/dist/ if built
+_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
 
-# TODO: Add routers for:
-# - /api/results
-# - /api/bulk_uploads
-# - /api/dashboard
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str) -> FileResponse:
+        """Serve React SPA — all non-API routes return index.html."""
+        index = _DIST / "index.html"
+        return FileResponse(index)
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    uvicorn.run("backend.api.main:app", host="0.0.0.0", port=8000, reload=True)
