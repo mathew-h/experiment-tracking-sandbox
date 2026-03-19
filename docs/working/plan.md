@@ -211,8 +211,8 @@ Build the three fully-functional experiment management pages, wired to the live 
 ### Pending
 - [x] Chunk C: ExperimentList page (frontend API client + full rewrite) — 2026-03-19
 - [x] Chunk D: New Experiment multi-step form (D1–D3) — 2026-03-19
-- [ ] Chunk E: Experiment Detail tabs (E1–E3)
-- [ ] Chunk F: Documentation update
+- [x] Chunk E: Experiment Detail tabs (E1–E3) — 2026-03-19
+- [x] Chunk F: Documentation update — 2026-03-19
 - [ ] M5 acceptance criteria sign-off from user
 
 ---

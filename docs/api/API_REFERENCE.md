@@ -7,10 +7,13 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `researcher`, `sample_id` |
-| GET | `/api/experiments/{experiment_id}` | Get single experiment by string ID |
-| POST | `/api/experiments` | Create experiment |
+| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `reactor_number`, `date_from`, `date_to` |
+| GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
+| GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
+| GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags |
+| POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
 | PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id |
+| PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a note |
 

@@ -216,8 +216,8 @@ This object is the single source of truth for what renders in the form. Adding a
 | B | Backend schema + endpoint extensions | ✅ Complete (2026-03-19) |
 | C | ExperimentList page rewrite | ✅ Complete (2026-03-19) |
 | D | New Experiment 4-step form | ✅ Complete (2026-03-19) |
-| E | Experiment Detail tabs | 🔄 Pending |
-| F | Documentation update | 🔄 Pending |
+| E | Experiment Detail tabs | ✅ Complete (2026-03-19) |
+| F | Documentation update | ✅ Complete (2026-03-19) |
 
 ---
 
