@@ -17,14 +17,14 @@ def _make_experiment(db, experiment_id="TEST_001", number=9001):
 def test_list_experiments_empty(client):
     resp = client.get("/api/experiments")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["items"] == []
 
 
 def test_list_experiments_returns_items(client, db_session):
     _make_experiment(db_session)
     resp = client.get("/api/experiments")
     assert resp.status_code == 200
-    assert len(resp.json()) >= 1
+    assert len(resp.json()["items"]) >= 1
 
 
 def test_get_experiment_not_found(client):
@@ -103,3 +103,38 @@ def test_create_experiment_auto_number(client, db_session):
     resp = client.post("/api/experiments", json={"experiment_id": "AUTONUMBER_001", "status": "ONGOING"})
     assert resp.status_code == 201
     assert resp.json()["experiment_number"] >= 1
+
+
+# --- B3: status-patch and list pagination ---
+
+def test_patch_status(client, db_session):
+    _make_experiment(db_session, "STATUS_TEST_001", 9020)
+    resp = client.patch("/api/experiments/STATUS_TEST_001/status", json={"status": "COMPLETED"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "COMPLETED"
+
+
+def test_patch_status_invalid(client, db_session):
+    _make_experiment(db_session, "STATUS_TEST_002", 9021)
+    resp = client.patch("/api/experiments/STATUS_TEST_002/status", json={"status": "INVALID"})
+    assert resp.status_code == 422
+
+
+def test_list_experiments_pagination(client, db_session):
+    for i in range(5):
+        db_session.add(Experiment(experiment_id=f"PAGE_{i:03d}", experiment_number=9100 + i, status=ExperimentStatus.ONGOING))
+    db_session.commit()
+    resp = client.get("/api/experiments?skip=0&limit=3")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert len(data["items"]) <= 3
+
+
+def test_list_experiments_filter_by_status(client, db_session):
+    db_session.add(Experiment(experiment_id="COMP_001", experiment_number=9200, status=ExperimentStatus.COMPLETED))
+    db_session.commit()
+    resp = client.get("/api/experiments?status=COMPLETED")
+    data = resp.json()
+    assert all(e["status"] == "COMPLETED" for e in data["items"])
