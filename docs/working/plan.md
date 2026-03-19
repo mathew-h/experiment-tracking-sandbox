@@ -209,8 +209,8 @@ Build the three fully-functional experiment management pages, wired to the live 
 - **Auto-numbering:** experiment_number is now Optional in ExperimentCreate; if omitted, assigned as max(existing) + 1.
 
 ### Pending
-- [ ] Chunk C: ExperimentList page (frontend API client + full rewrite)
-- [ ] Chunk D: New Experiment multi-step form (D1–D3)
+- [x] Chunk C: ExperimentList page (frontend API client + full rewrite) — 2026-03-19
+- [x] Chunk D: New Experiment multi-step form (D1–D3) — 2026-03-19
 - [ ] Chunk E: Experiment Detail tabs (E1–E3)
 - [ ] Chunk F: Documentation update
 - [ ] M5 acceptance criteria sign-off from user

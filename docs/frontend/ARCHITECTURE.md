@@ -27,7 +27,8 @@ frontend/src/
 │   └── firebaseConfig.ts     # Firebase SDK initialization + firebaseConfigured flag
 ├── api/
 │   ├── client.ts             # Axios instance with error interceptor
-│   ├── experiments.ts        # Experiment CRUD + notes
+│   ├── experiments.ts        # Experiment CRUD + notes + patchStatus + nextId + getResults
+│   ├── conditions.ts         # Conditions create / get / patch
 │   ├── samples.ts
 │   ├── chemicals.ts
 │   ├── analysis.ts
@@ -54,7 +55,13 @@ frontend/src/
 │   ├── Dashboard.tsx
 │   ├── ExperimentList.tsx
 │   ├── ExperimentDetail.tsx
-│   ├── NewExperiment.tsx
+│   ├── NewExperiment/
+│   │   ├── index.tsx           # Orchestrator — step state, submit mutation
+│   │   ├── fieldVisibility.ts  # Per-type field visibility matrix
+│   │   ├── Step1BasicInfo.tsx
+│   │   ├── Step2Conditions.tsx
+│   │   ├── Step3Additives.tsx
+│   │   └── Step4Review.tsx
 │   ├── BulkUploads.tsx
 │   ├── Samples.tsx
 │   ├── Chemicals.tsx
