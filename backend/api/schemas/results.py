@@ -92,6 +92,25 @@ ICP_ELEMENTS = ["fe","si","mg","ca","ni","cu","mo","zn","mn","cr","co","al",
                 "sr","y","nb","sb","cs","ba","nd","gd","pt","rh","ir","pd","ru","os","tl"]
 
 
+class ResultWithFlagsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    experiment_fk: int
+    time_post_reaction_days: Optional[float] = None
+    time_post_reaction_bucket_days: Optional[float] = None
+    cumulative_time_post_reaction_days: Optional[float] = None
+    is_primary_timepoint_result: bool
+    description: str
+    created_at: datetime
+    has_scalar: bool = False
+    has_icp: bool = False
+    # Key scalar values for the list (None if no scalar)
+    grams_per_ton_yield: Optional[float] = None
+    h2_grams_per_ton_yield: Optional[float] = None
+    final_ph: Optional[float] = None
+
+
 class ICPCreate(BaseModel):
     result_id: int
     dilution_factor: Optional[float] = None
