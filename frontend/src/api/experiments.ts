@@ -1,6 +1,28 @@
 import { apiClient } from './client'
 
-export interface Experiment {
+export interface ExperimentListItem {
+  id: number
+  experiment_id: string
+  experiment_number: number
+  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED'
+  researcher: string | null
+  date: string | null
+  sample_id: string | null
+  created_at: string
+  experiment_type: string | null
+  reactor_number: number | null
+  additives_summary: string | null
+  condition_note: string | null
+}
+
+export interface ExperimentListResponse {
+  items: ExperimentListItem[]
+  total: number
+  skip: number
+  limit: number
+}
+
+export interface ExperimentDetail {
   id: number
   experiment_id: string
   experiment_number: number
@@ -11,19 +33,44 @@ export interface Experiment {
   base_experiment_id: string | null
   parent_experiment_fk: number | null
   created_at: string
-  updated_at: string
+  updated_at: string | null
+  conditions: Record<string, unknown> | null
+  notes: Array<{ id: number; note_text: string; created_at: string }>
+  modifications: Array<{
+    id: number
+    modified_by: string | null
+    modification_type: string | null
+    modified_table: string | null
+    old_values: Record<string, unknown> | null
+    new_values: Record<string, unknown> | null
+    created_at: string
+  }>
 }
 
-export interface ExperimentDetail extends Experiment {
-  conditions: Record<string, unknown> | null
-  results: unknown[]
-  notes: unknown[]
+export interface ResultWithFlags {
+  id: number
+  experiment_fk: number
+  time_post_reaction_days: number | null
+  time_post_reaction_bucket_days: number | null
+  cumulative_time_post_reaction_days: number | null
+  is_primary_timepoint_result: boolean
+  description: string
+  created_at: string
+  has_scalar: boolean
+  has_icp: boolean
+  grams_per_ton_yield: number | null
+  h2_grams_per_ton_yield: number | null
+  final_ph: number | null
 }
 
 export interface ExperimentListParams {
   status?: string
   researcher?: string
   sample_id?: string
+  experiment_type?: string
+  reactor_number?: number
+  date_from?: string
+  date_to?: string
   skip?: number
   limit?: number
 }
@@ -34,32 +81,35 @@ export interface CreateExperimentPayload {
   researcher?: string
   date?: string
   sample_id?: string
-  base_experiment_id?: string
-  parent_experiment_fk?: number
-}
-
-export interface PatchExperimentPayload {
-  status?: string
-  researcher?: string
-  date?: string
+  experiment_type?: string
+  note?: string
 }
 
 export const experimentsApi = {
   list: (params?: ExperimentListParams) =>
-    apiClient.get<Experiment[]>('/experiments', { params }).then((r) => r.data),
+    apiClient.get<ExperimentListResponse>('/experiments', { params }).then((r) => r.data),
 
-  get: (id: string | number) =>
-    apiClient.get<ExperimentDetail>(`/experiments/${id}`).then((r) => r.data),
+  get: (experimentId: string) =>
+    apiClient.get<ExperimentDetail>(`/experiments/${experimentId}`).then((r) => r.data),
 
   create: (payload: CreateExperimentPayload) =>
     apiClient.post<ExperimentDetail>('/experiments', payload).then((r) => r.data),
 
-  patch: (id: string | number, payload: PatchExperimentPayload) =>
-    apiClient.patch<ExperimentDetail>(`/experiments/${id}`, payload).then((r) => r.data),
+  patch: (experimentId: string, payload: { status?: string; researcher?: string; date?: string }) =>
+    apiClient.patch<ExperimentDetail>(`/experiments/${experimentId}`, payload).then((r) => r.data),
 
-  delete: (id: string | number) =>
-    apiClient.delete(`/experiments/${id}`).then((r) => r.data),
+  patchStatus: (experimentId: string, status: string) =>
+    apiClient.patch<ExperimentDetail>(`/experiments/${experimentId}/status`, { status }).then((r) => r.data),
 
-  addNote: (id: string | number, text: string) =>
-    apiClient.post(`/experiments/${id}/notes`, { note_text: text }).then((r) => r.data),
+  nextId: (type: string) =>
+    apiClient.get<{ next_id: string }>('/experiments/next-id', { params: { type } }).then((r) => r.data),
+
+  getResults: (experimentId: string) =>
+    apiClient.get<ResultWithFlags[]>(`/experiments/${experimentId}/results`).then((r) => r.data),
+
+  addNote: (experimentId: string, text: string) =>
+    apiClient.post(`/experiments/${experimentId}/notes`, { note_text: text }).then((r) => r.data),
+
+  delete: (experimentId: string) =>
+    apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),
 }
