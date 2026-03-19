@@ -16,6 +16,7 @@ export interface ScalarResult {
   result_id: number
   final_ph: number | null
   final_conductivity_mS_cm: number | null
+  final_dissolved_oxygen_mg_L: number | null
   gross_ammonium_concentration_mM: number | null
   background_ammonium_concentration_mM: number | null
   grams_per_ton_yield: number | null
@@ -24,6 +25,25 @@ export interface ScalarResult {
   h2_micromoles: number | null
   h2_grams_per_ton_yield: number | null
   measurement_date: string | null
+}
+
+export interface ICPResult {
+  id: number
+  result_id: number
+  dilution_factor: number | null
+  instrument_used: string | null
+  fe: number | null
+  si: number | null
+  mg: number | null
+  ca: number | null
+  ni: number | null
+  cu: number | null
+  mo: number | null
+  zn: number | null
+  mn: number | null
+  cr: number | null
+  co: number | null
+  al: number | null
 }
 
 export const resultsApi = {
@@ -38,4 +58,7 @@ export const resultsApi = {
 
   patchScalar: (id: number, payload: Partial<ScalarResult>) =>
     apiClient.patch<ScalarResult>(`/results/scalar/${id}`, payload).then((r) => r.data),
+
+  getIcp: (resultId: number) =>
+    apiClient.get<ICPResult>(`/results/icp/${resultId}`).then((r) => r.data),
 }

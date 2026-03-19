@@ -5,6 +5,7 @@ export interface XRDAnalysis {
   experiment_id: string
   mineral_phases: Record<string, number> | null
   analysis_date: string | null
+  laboratory: string | null
 }
 
 export interface PXRFReading {
