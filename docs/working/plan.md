@@ -213,7 +213,10 @@ Build the three fully-functional experiment management pages, wired to the live 
 - [x] Chunk D: New Experiment multi-step form (D1–D3) — 2026-03-19
 - [x] Chunk E: Experiment Detail tabs (E1–E3) — 2026-03-19
 - [x] Chunk F: Documentation update — 2026-03-19
-- [ ] M5 acceptance criteria sign-off from user
+- [x] M5 acceptance criteria sign-off from user — 2026-03-19
+
+### Sign-off
+- [x] User sign-off received 2026-03-19 — merged to infra/lab-pc-server-setup, proceed to M6
 
 ---
 

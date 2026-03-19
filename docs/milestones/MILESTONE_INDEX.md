@@ -2,7 +2,7 @@
 
 ## Current Active Milestone
 <!-- This line is updated by the agent at the start of each milestone -->
-**Active:** M5 — Experiment Pages
+**Active:** M6 — Bulk Uploads
 
 ## Milestone Status
 | ID | Name | Branch | Status |
@@ -12,7 +12,7 @@
 | M2 | Calculation Engine | feature/m2-calculation-engine | Complete |
 | M3 | FastAPI Backend | feature/m3-fastapi-backend | Complete |
 | M4 | React Shell | feature/m4-react-shell | Complete |
-| M5 | Experiment Pages | feature/m5-experiment-pages | In Progress |
+| M5 | Experiment Pages | feature/m5-experiment-pages | Complete |
 | M6 | Bulk Uploads | feature/m6-bulk-uploads | Not Started |
 | M7 | Reactor Dashboard | feature/m7-reactor-dashboard | Not Started |
 | M8 | Testing and Docs | feature/m8-testing-docs | Not Started |
