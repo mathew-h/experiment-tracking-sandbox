@@ -54,7 +54,7 @@ export function ExperimentDetailPage() {
         <p className="text-xs text-ink-muted mt-0.5">
           #{experiment.experiment_number}
           {experiment.researcher && ` · ${experiment.researcher}`}
-          {experiment.date && ` · ${experiment.date}`}
+          {experiment.date && ` · ${experiment.date.slice(0, 10)}`}
           {experiment.sample_id && ` · Sample: ${experiment.sample_id}`}
           {conditions?.reactor_number != null && ` · Reactor ${conditions.reactor_number}`}
         </p>

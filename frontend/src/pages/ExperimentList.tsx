@@ -205,7 +205,7 @@ export function ExperimentListPage() {
                         ))}
                       </select>
                     </Td>
-                    <Td className="font-mono-data text-xs text-ink-muted">{exp.date ?? '—'}</Td>
+                    <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? exp.date.slice(0, 10) : '—'}</Td>
                     <Td className="text-xs text-ink-secondary max-w-48 truncate">
                       {exp.additives_summary ?? <span className="text-ink-muted">—</span>}
                     </Td>
