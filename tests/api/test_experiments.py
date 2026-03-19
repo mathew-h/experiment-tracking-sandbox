@@ -69,3 +69,37 @@ def test_delete_experiment(client, db_session):
     resp = client.delete("/api/experiments/DELETE_ME_001")
     assert resp.status_code == 204
     assert client.get("/api/experiments/DELETE_ME_001").status_code == 404
+
+
+# --- B2: next-id and auto-numbering ---
+
+def test_next_id_first_ever(client):
+    """No existing experiments of type → returns PREFIX_001."""
+    resp = client.get("/api/experiments/next-id?type=HPHT")
+    assert resp.status_code == 200
+    assert resp.json()["next_id"] == "HPHT_001"
+
+
+def test_next_id_increments(client, db_session):
+    """Existing HPHT_002 → next is HPHT_003."""
+    db_session.add(Experiment(experiment_id="HPHT_002", experiment_number=9010, status=ExperimentStatus.ONGOING))
+    db_session.commit()
+    resp = client.get("/api/experiments/next-id?type=HPHT")
+    assert resp.json()["next_id"] == "HPHT_003"
+
+
+def test_next_id_serum_prefix(client):
+    resp = client.get("/api/experiments/next-id?type=Serum")
+    assert resp.json()["next_id"] == "SERUM_001"
+
+
+def test_next_id_core_flood_prefix(client):
+    resp = client.get("/api/experiments/next-id?type=Core Flood")
+    assert resp.json()["next_id"] == "CF_001"
+
+
+def test_create_experiment_auto_number(client, db_session):
+    """experiment_number omitted → auto-assigned."""
+    resp = client.post("/api/experiments", json={"experiment_id": "AUTONUMBER_001", "status": "ONGOING"})
+    assert resp.status_code == 201
+    assert resp.json()["experiment_number"] >= 1

@@ -10,11 +10,20 @@ from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentResponse,
+    ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse,
 )
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
+
+# Prefix mapping for next-id endpoint
+_TYPE_PREFIX: dict[str, str] = {
+    "HPHT": "HPHT",
+    "Serum": "SERUM",
+    "Autoclave": "AUTOCLAVE",
+    "Core Flood": "CF",
+}
 
 
 @router.get("", response_model=list[ExperimentListItem])
@@ -40,6 +49,27 @@ def list_experiments(
     return [ExperimentListItem.model_validate(r) for r in rows]
 
 
+@router.get("/next-id", response_model=NextIdResponse)
+def get_next_experiment_id(
+    type: str = Query(..., description="Experiment type"),
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> NextIdResponse:
+    """Return the next auto-incremented experiment ID for the given type."""
+    prefix = _TYPE_PREFIX.get(type, type.upper().replace(" ", "_"))
+    pattern = f"{prefix}_%"
+    rows = db.execute(
+        select(Experiment.experiment_id).where(Experiment.experiment_id.like(pattern))
+    ).scalars().all()
+    max_num = 0
+    for eid in rows:
+        suffix = eid[len(prefix) + 1:]
+        if suffix.isdigit():
+            max_num = max(max_num, int(suffix))
+    next_num = str(max_num + 1).zfill(3)
+    return NextIdResponse(next_id=f"{prefix}_{next_num}")
+
+
 @router.get("/{experiment_id}", response_model=ExperimentResponse)
 def get_experiment(
     experiment_id: str,
@@ -62,7 +92,12 @@ def create_experiment(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentResponse:
     """Create a new experiment."""
-    exp = Experiment(**payload.model_dump())
+    from sqlalchemy import func
+    data = payload.model_dump()
+    if data.get("experiment_number") is None:
+        max_num = db.execute(select(func.max(Experiment.experiment_number))).scalar() or 0
+        data["experiment_number"] = max_num + 1
+    exp = Experiment(**data)
     db.add(exp)
     try:
         db.commit()
