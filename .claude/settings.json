@@ -1,5 +1,22 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git commit*)",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before committing, you must evaluate the project documentation. Please use the /complete-task skill to update docs/working/plan.md and any other relevant documentation if needed.",
+            "statusMessage": "Automatically calling skills for updating documentation..."
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/sync_docs_to_project_context.py\" --all",
+            "statusMessage": "Copying updated documentation to project_context..."
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",

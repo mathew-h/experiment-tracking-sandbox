@@ -144,3 +144,16 @@
 ## Before Schema Changes: Checklist
 
 See `.claude/rules/schema-checklist.md` before modifying models.
+
+---
+
+## Frontend Contract: Results UI (from Bulk Upload)
+
+See `memory/project_bulk_upload_frontend_contract.md` for the full field mapping.
+
+**Summary:** Results UI field labels and grouping must mirror the master bulk upload spreadsheet:
+- **Headline metrics:** NH4 (mM), H2 (ppm)
+- **Chemistry:** Sample pH, Sample Conductivity (mS/cm)
+- **H2 inputs:** Gas Volume (mL), Gas Pressure (psi) — secondary/collapsed
+- **Dates:** Sample Date, NMR Run Date, ICP Run Date, GC Run Date — "Provenance" section
+- **Derived (display-only):** h2_micromoles, h2_grams_per_ton_yield, grams_per_ton_yield
