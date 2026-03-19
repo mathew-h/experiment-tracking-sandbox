@@ -2,8 +2,8 @@
 
 ## Current Status
 **Active Milestone:** M5 — Experiment Pages
-**Branch:** `feature/m4-react-shell`
-**Last Updated:** 2026-03-17
+**Branch:** `feature/m5-experiment-pages`
+**Last Updated:** 2026-03-19
 
 ---
 
@@ -184,33 +184,35 @@ Build the complete API layer. All business logic lives here. The React app never
 
 ---
 
-## M5 — Experiment Pages: NOT STARTED
+## M5 — Experiment Pages: IN PROGRESS
 
 ### Objective
 Build the three fully-functional experiment management pages, wired to the live FastAPI backend.
 
 ### Branch
-`feature/m5-experiment-pages` — cut from `feature/m4-react-shell` (after M4 merge)
+`feature/m5-experiment-pages`
 
-### Pages
-- **Experiment List (`/experiments`):** Filterable table (status, type, sample ID, date range, reactor number). Server-side pagination. Row click → detail.
-- **New Experiment (`/experiments/new`):** Multi-step form (basic info → conditions → chemical additives → review/submit). Live `water_to_rock_ratio` preview. Real-time experiment ID uniqueness check.
-- **Experiment Detail (`/experiments/:id`):** Tabs — Conditions (read-only + edit modal), Results (timepoints with scalar + ICP expandable rows), Notes (chronological feed + add), Analysis (linked XRD/pXRF/elemental), Files.
+### Implementation Plan
+`docs/superpowers/plans/2026-03-18-m5-experiment-pages.md` — Read before starting any M5 work.
 
-### Acceptance Criteria
-- Creation round-trips with derived fields populated
-- All filters work
-- Derived fields display from stored DB values
-- Lineage visible
-- Chrome DevTools loop: no console errors
+### Completed (2026-03-19)
+- [x] Chunk A: Committed run-date fields migration (nmr_run_date, icp_run_date, gc_run_date to ScalarResults)
+- [x] Chunk B: Backend schema + endpoint extensions
+  - [x] B1: Extended Pydantic schemas — ExperimentListItem (additives_summary, condition_note, experiment_type, reactor_number), ExperimentListResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse, ResultWithFlagsResponse; ConditionsUpdate/Response with all condition fields. 11 schema tests passing.
+  - [x] B2: GET /experiments/next-id (prefix mapping, zero-padded); auto-assign experiment_number on create. 5 tests passing.
+  - [x] B3: PATCH /experiments/{id}/status; list_experiments rewritten with pagination, server-side filters, conditions join, inline additives string_agg (replaces broken SQLite GROUP_CONCAT view). 4 new tests + 2 fixed. 17 tests passing.
+  - [x] B4: GET /experiments/{id}/results with scalar+ICP flags; get_experiment enriched to return conditions+notes+modifications as ExperimentDetailResponse. 2 tests. 19 tests passing. Full suite: 54 passing.
+
+### Key Decisions / Patterns (M5)
+- **Additives summary:** `v_experiment_additives_summary` view uses SQLite `GROUP_CONCAT` and silently fails on PostgreSQL. Replaced with inline `string_agg` query in the list endpoint — no view dependency.
+- **Route ordering:** GET /next-id → GET /{id}/results → PATCH /{id}/status → GET /{id} → POST → PATCH /{id} → DELETE → POST /{id}/notes. Static segments before dynamic at same depth.
+- **Auto-numbering:** experiment_number is now Optional in ExperimentCreate; if omitted, assigned as max(existing) + 1.
 
 ### Pending
-- [ ] Brainstorm + plan before implementation
-- [ ] Experiment List page
-- [ ] New Experiment multi-step form
-- [ ] Experiment Detail tabs
-- [ ] Form validation, API integration, filter logic tests (Test Writer Agent)
-- [ ] User-facing guide: creating and managing experiments (Documentation Agent)
+- [ ] Chunk C: ExperimentList page (frontend API client + full rewrite)
+- [ ] Chunk D: New Experiment multi-step form (D1–D3)
+- [ ] Chunk E: Experiment Detail tabs (E1–E3)
+- [ ] Chunk F: Documentation update
 - [ ] M5 acceptance criteria sign-off from user
 
 ---
