@@ -219,13 +219,12 @@ def get_experiment(
         .order_by(ModificationsLog.created_at.desc())
     ).scalars().all()
 
-    detail = ExperimentDetailResponse.model_validate(exp)
-    detail.conditions = ConditionsResponse.model_validate(cond).model_dump() if cond else None
-    detail.notes = [
+    cond_dict = ConditionsResponse.model_validate(cond).model_dump() if cond else None
+    notes_list = [
         {"id": n.id, "note_text": n.note_text, "created_at": n.created_at.isoformat()}
         for n in notes
     ]
-    detail.modifications = [
+    mods_list = [
         {
             "id": m.id,
             "modified_by": m.modified_by,
@@ -237,7 +236,8 @@ def get_experiment(
         }
         for m in mods
     ]
-    return detail
+    base = ExperimentResponse.model_validate(exp)
+    return ExperimentDetailResponse(**base.model_dump(), conditions=cond_dict, notes=notes_list, modifications=mods_list)
 
 
 @router.post("", response_model=ExperimentResponse, status_code=201)
