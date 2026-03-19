@@ -71,6 +71,9 @@ class ScalarResults(Base):
     final_alkalinity_mg_L = Column(Float, nullable=True) # in mg/L CaCO3
     sampling_volume_mL = Column(Float, nullable=True) # in mL
     measurement_date = Column(DateTime(timezone=True), nullable=True)
+    nmr_run_date = Column(DateTime(timezone=True), nullable=True)
+    icp_run_date = Column(DateTime(timezone=True), nullable=True)
+    gc_run_date = Column(DateTime(timezone=True), nullable=True)
 
     # Hydrogen tracking inputs
     h2_concentration = Column(Float, nullable=True)  # ppm (vol/vol)
