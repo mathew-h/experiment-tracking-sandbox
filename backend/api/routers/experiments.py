@@ -10,9 +10,10 @@ from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
-    ExperimentResponse, ExperimentStatusUpdate, NextIdResponse,
+    ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse,
 )
+from backend.api.schemas.results import ResultWithFlagsResponse
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -121,14 +122,51 @@ def get_next_experiment_id(
     return NextIdResponse(next_id=f"{prefix}_{next_num}")
 
 
-@router.get("/{experiment_id}/results")
+@router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
 def get_experiment_results(
     experiment_id: str,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
-):
-    """Placeholder — implemented in B4."""
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+) -> list[ResultWithFlagsResponse]:
+    """Return all result timepoints for an experiment, with scalar and ICP existence flags."""
+    from database.models.results import ExperimentalResults, ScalarResults, ICPResults
+
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    results = db.execute(
+        select(ExperimentalResults)
+        .where(ExperimentalResults.experiment_fk == exp.id)
+        .order_by(ExperimentalResults.time_post_reaction_days)
+    ).scalars().all()
+
+    out = []
+    for r in results:
+        scalar = db.execute(
+            select(ScalarResults).where(ScalarResults.result_id == r.id)
+        ).scalar_one_or_none()
+        icp = db.execute(
+            select(ICPResults).where(ICPResults.result_id == r.id)
+        ).scalar_one_or_none()
+        out.append(ResultWithFlagsResponse(
+            id=r.id,
+            experiment_fk=r.experiment_fk,
+            time_post_reaction_days=r.time_post_reaction_days,
+            time_post_reaction_bucket_days=r.time_post_reaction_bucket_days,
+            cumulative_time_post_reaction_days=r.cumulative_time_post_reaction_days,
+            is_primary_timepoint_result=r.is_primary_timepoint_result,
+            description=r.description,
+            created_at=r.created_at,
+            has_scalar=scalar is not None,
+            has_icp=icp is not None,
+            grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
+            h2_grams_per_ton_yield=scalar.h2_grams_per_ton_yield if scalar else None,
+            final_ph=scalar.final_ph if scalar else None,
+        ))
+    return out
 
 
 @router.patch("/{experiment_id}/status", response_model=ExperimentResponse)
@@ -150,19 +188,56 @@ def update_experiment_status(
     return ExperimentResponse.model_validate(exp)
 
 
-@router.get("/{experiment_id}", response_model=ExperimentResponse)
+@router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
 def get_experiment(
     experiment_id: str,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> ExperimentResponse:
-    """Get a single experiment by its string identifier."""
+) -> ExperimentDetailResponse:
+    """Get a single experiment with nested conditions, notes, and modifications."""
+    from database.models.conditions import ExperimentalConditions
+    from database.models.experiments import ModificationsLog
+    from backend.api.schemas.conditions import ConditionsResponse
+
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    return ExperimentResponse.model_validate(exp)
+
+    cond = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+    ).scalar_one_or_none()
+    notes = db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.experiment_fk == exp.id)
+        .order_by(ExperimentNotes.id.asc())
+    ).scalars().all()
+    mods = db.execute(
+        select(ModificationsLog)
+        .where(ModificationsLog.experiment_fk == exp.id)
+        .order_by(ModificationsLog.created_at.desc())
+    ).scalars().all()
+
+    detail = ExperimentDetailResponse.model_validate(exp)
+    detail.conditions = ConditionsResponse.model_validate(cond).model_dump() if cond else None
+    detail.notes = [
+        {"id": n.id, "note_text": n.note_text, "created_at": n.created_at.isoformat()}
+        for n in notes
+    ]
+    detail.modifications = [
+        {
+            "id": m.id,
+            "modified_by": m.modified_by,
+            "modification_type": m.modification_type,
+            "modified_table": m.modified_table,
+            "old_values": m.old_values,
+            "new_values": m.new_values,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in mods
+    ]
+    return detail
 
 
 @router.post("", response_model=ExperimentResponse, status_code=201)

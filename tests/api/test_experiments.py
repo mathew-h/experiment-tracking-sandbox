@@ -138,3 +138,39 @@ def test_list_experiments_filter_by_status(client, db_session):
     resp = client.get("/api/experiments?status=COMPLETED")
     data = resp.json()
     assert all(e["status"] == "COMPLETED" for e in data["items"])
+
+
+# --- B4: results-with-flags ---
+
+def test_get_experiment_results_empty(client, db_session):
+    _make_experiment(db_session, "RESULTS_EXP_001", 9300)
+    resp = client.get("/api/experiments/RESULTS_EXP_001/results")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_get_experiment_results_with_flags(client, db_session):
+    from database.models.results import ExperimentalResults, ScalarResults
+    exp = _make_experiment(db_session, "RESULTS_EXP_002", 9301)
+    result = ExperimentalResults(
+        experiment_fk=exp.id,
+        time_post_reaction_days=7.0,
+        time_post_reaction_bucket_days=7.0,
+        cumulative_time_post_reaction_days=7.0,
+        is_primary_timepoint_result=True,
+        description="T7",
+    )
+    db_session.add(result)
+    db_session.flush()
+    scalar = ScalarResults(result_id=result.id, final_ph=7.2, grams_per_ton_yield=55.0)
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get("/api/experiments/RESULTS_EXP_002/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["has_scalar"] is True
+    assert data[0]["has_icp"] is False
+    assert data[0]["final_ph"] == 7.2
+    assert data[0]["grams_per_ton_yield"] == 55.0
