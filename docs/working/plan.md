@@ -220,7 +220,7 @@ Build the three fully-functional experiment management pages, wired to the live 
 
 ---
 
-## M6 — Bulk Uploads: IN PROGRESS
+## M6 — Bulk Uploads: COMPLETE (signed off 2026-03-19, merged to infra/lab-pc-server-setup)
 
 ### Objective
 Expose all bulk data ingestion workflows through an accordion-style React UI with 12 upload types.
@@ -253,6 +253,36 @@ Expose all bulk data ingestion workflows through an accordion-style React UI wit
 ### Known Service Bugs (documented, not fixed — parsers are locked)
 - `chemical_inventory.py`: uses `molecular_weight` attribute; model has `molecular_weight_g_mol` → all rows fail
 - `actlabs_titration_data.py` (ElementalCompositionService): creates ElementalAnalysis without required external_analysis_id
+
+---
+
+## M7 — Reactor Dashboard: IN PROGRESS
+
+### Objective
+Build a fully interactive reactor dashboard with live status grid (R01–R16, CF01–CF02), Gantt timeline, activity feed, filter chips, and a single-call backend endpoint returning all dashboard data under 500 ms.
+
+### Branch
+`feature/m7-reactor-dashboard`
+
+### Implementation Plan
+`docs/superpowers/plans/2026-03-19-m7-reactor-dashboard.md` — Read before starting any M7 work.
+
+### Completed (2026-03-19)
+- [x] Chunk A: Backend — DashboardResponse schema, GET /api/dashboard/ endpoint, 15 tests (incl. performance)
+  - `ReactorCardData` includes: reactor_label, description (first note), sample_id, researcher, days_running
+  - Single query per data section, no N+1
+  - Performance: passes <1500ms with 500 experiments
+- [x] Chunk B: Frontend — ReactorGrid, ExperimentTimeline, ActivityFeed, DashboardFilters, Dashboard rebuild
+  - 18 fixed slots (R01–R16 + CF01–CF02), empty slots greyed out
+  - Click reactor → detail modal with full info + "View Detail" link
+  - CSS Gantt with status colors + click-to-navigate
+  - Client-side filtering (status, type, date range)
+  - Auto-refresh every 60s
+  - TypeScript: 0 errors; ESLint: 0 warnings; production build: clean
+- [x] Chunk C: Documentation — DASHBOARD.md, API_REFERENCE.md updated
+
+### Pending sign-off
+- [ ] User review of Dashboard UI
 
 ---
 

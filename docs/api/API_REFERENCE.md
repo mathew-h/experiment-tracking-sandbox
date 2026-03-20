@@ -69,8 +69,70 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/dashboard/reactor-status` | All reactors with current ONGOING experiment |
+| GET | `/api/dashboard/` | **M7** Full dashboard payload: summary stats, reactor cards, Gantt timeline, recent activity. Single call. |
+| GET | `/api/dashboard/reactor-status` | Legacy — reactors with current ONGOING experiment |
 | GET | `/api/dashboard/timeline/{experiment_id}` | All timepoints with scalar/ICP presence flags |
+
+### GET /api/dashboard/
+
+Returns all dashboard data in a single call. Response shape:
+
+```json
+{
+  "summary": {
+    "active_experiments": 5,
+    "reactors_in_use": 4,
+    "completed_this_month": 2,
+    "pending_results": 1
+  },
+  "reactors": [
+    {
+      "reactor_number": 5,
+      "reactor_label": "R05",
+      "experiment_id": "HPHT_MH_072",
+      "experiment_db_id": 142,
+      "status": "ONGOING",
+      "experiment_type": "HPHT",
+      "sample_id": "SMP-042",
+      "description": "Baseline run with magnetite catalyst",
+      "researcher": "MH",
+      "started_at": "2026-03-01T09:00:00Z",
+      "days_running": 18,
+      "temperature_c": 200.0
+    }
+  ],
+  "timeline": [
+    {
+      "experiment_id": "HPHT_MH_072",
+      "experiment_db_id": 142,
+      "status": "ONGOING",
+      "experiment_type": "HPHT",
+      "sample_id": "SMP-042",
+      "researcher": "MH",
+      "started_at": "2026-03-01T09:00:00Z",
+      "ended_at": null,
+      "days_running": 18
+    }
+  ],
+  "recent_activity": [
+    {
+      "id": 501,
+      "experiment_id": "HPHT_MH_072",
+      "modified_by": "MH",
+      "modification_type": "update",
+      "modified_table": "scalar_results",
+      "created_at": "2026-03-19T14:30:00Z"
+    }
+  ]
+}
+```
+
+**Notes:**
+- Only occupied reactor slots are returned; the frontend renders all 18 fixed slots
+- `description` is the text of the oldest note for the experiment
+- Timeline limited to 100 most recent experiments
+- Activity limited to last 20 modification log entries
+- Core Flood experiments use `CF01`/`CF02` labels; all others use `R01`–`R16`
 
 ## Admin
 
