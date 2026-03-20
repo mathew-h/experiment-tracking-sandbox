@@ -13,6 +13,10 @@
             "type": "command",
             "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/sync_docs_to_project_context.py\" --all",
             "statusMessage": "Copying updated documentation to project_context..."
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/block_server_commands.py"
           }
         ]
       }

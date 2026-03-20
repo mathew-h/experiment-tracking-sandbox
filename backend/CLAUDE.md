@@ -47,15 +47,10 @@ at module load time. This module does not exist until M4 (React frontend build).
 **Always use lazy imports** (inside endpoint functions) when wrapping these parsers in the API.
 Tests that exercise these endpoints must use `sys.modules` patching to stub `frontend.config.variable_config`.
 
-## Stale Backend Processes (Windows Gotcha)
-Old uvicorn instances from prior sessions persist as Windows-native processes. Neither WSL `kill`,
-`taskkill`, nor PowerShell `Stop-Process` can reliably terminate them. Symptoms: API returns
-responses missing recently added fields. Fix: start on a new port and update the Vite proxy:
-```bash
-.venv/Scripts/uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8001
-# then set target: 'http://localhost:8001' in frontend/vite.config.ts
-```
-The `--reload` flag will eventually pick up file changes, but a fresh port is faster and reliable.
+## Server Management (Non-Negotiable)
+Never start, stop, or restart the uvicorn server. Assume it is already running
+on port 8000. If an endpoint is unreachable, report the error to the user --
+do not attempt to restart the process.
 
 ## API Reference
 Full endpoint reference: `docs/api/API_REFERENCE.md`

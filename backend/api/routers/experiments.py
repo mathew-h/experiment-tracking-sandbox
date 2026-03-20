@@ -131,26 +131,24 @@ def get_next_experiment_ids(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> dict:
     """
-    Return the next auto-incremented experiment number for each type.
+    Return the next sequence number for each experiment type, derived by
+    parsing the numeric suffix from experiment_id (same logic as /next-id).
 
-    Response: ``{"HPHT": 72, "Serum": 43, "CF": 8}``
-    (Each value is MAX(experiment_number) + 1 for that type, or 1 if none exist.)
+    Response: ``{"HPHT": 107, "Serum": 165, "CF": 15}``
     """
-    from database.models.conditions import ExperimentalConditions  # noqa: PLC0415
-
-    # Only report on the three main types shown in the UI
-    type_labels = {"HPHT": "HPHT", "Serum": "Serum", "CF": "Core Flood"}
+    label_prefix = {"HPHT": "HPHT", "Serum": "SERUM", "CF": "CF"}
     result: dict[str, int] = {}
-    for label, db_type in type_labels.items():
-        max_num = (
-            db.execute(
-                select(func.max(Experiment.experiment_number))
-                .join(ExperimentalConditions,
-                      Experiment.id == ExperimentalConditions.experiment_fk)
-                .where(ExperimentalConditions.experiment_type == db_type)
-            ).scalar()
-        )
-        result[label] = (max_num or 0) + 1
+    for label, prefix in label_prefix.items():
+        rows = db.execute(
+            select(Experiment.experiment_id)
+            .where(Experiment.experiment_id.like(f"{prefix}_%"))
+        ).scalars().all()
+        max_num = 0
+        for eid in rows:
+            suffix = eid[len(prefix) + 1:]
+            if suffix.isdigit():
+                max_num = max(max_num, int(suffix))
+        result[label] = max_num + 1
     return result
 
 

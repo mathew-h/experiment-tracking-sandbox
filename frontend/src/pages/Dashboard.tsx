@@ -1,116 +1,113 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { dashboardApi, ReactorStatus } from '@/api/dashboard'
+import { dashboardApi } from '@/api/dashboard'
+import type { GanttEntry } from '@/api/dashboard'
 import { MetricCard, Card, CardHeader, CardBody, PageSpinner } from '@/components/ui'
+import { ReactorGrid } from './ReactorGrid'
+import { ExperimentTimeline } from './ExperimentTimeline'
+import { ActivityFeed } from './ActivityFeed'
+import { DashboardFilters, type DashboardFilterState } from './DashboardFilters'
 
-function ReactorCard({ reactor }: { reactor: ReactorStatus }) {
-  const occupied = Boolean(reactor.experiment_id)
-  return (
-    <Card className="hover:border-ink-muted transition-colors duration-150">
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <p className="text-2xs text-ink-muted uppercase tracking-wider font-medium mb-0.5">Reactor</p>
-          <p className="text-xl font-bold text-ink-primary font-mono-data leading-none">
-            {String(reactor.reactor_number).padStart(2, '0')}
-          </p>
-        </div>
-        <span className={[
-          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider border',
-          occupied
-            ? 'text-status-ongoing bg-status-ongoing/10 border-status-ongoing/20'
-            : 'text-ink-muted bg-surface-overlay border-surface-border',
-        ].join(' ')}>
-          <span className={['w-1.5 h-1.5 rounded-full', occupied ? 'bg-status-ongoing animate-pulse-slow' : 'bg-surface-border'].join(' ')} />
-          {occupied ? 'Active' : 'Empty'}
-        </span>
-      </div>
-
-      {occupied ? (
-        <div className="space-y-1.5">
-          <p className="text-sm font-medium text-ink-primary font-mono-data">{reactor.experiment_id}</p>
-          {reactor.researcher && <p className="text-xs text-ink-secondary">{reactor.researcher}</p>}
-          {reactor.experiment_type && (
-            <p className="text-xs text-ink-muted">{reactor.experiment_type}</p>
-          )}
-          <div className="flex items-center gap-3 pt-1">
-            {reactor.temperature_c != null && (
-              <span className="text-xs text-ink-muted">
-                <span className="font-mono-data text-ink-secondary">{reactor.temperature_c}</span> °C
-              </span>
-            )}
-            {reactor.days_running != null && (
-              <span className="text-xs text-ink-muted">
-                Day <span className="font-mono-data text-ink-secondary">{reactor.days_running}</span>
-              </span>
-            )}
-          </div>
-        </div>
-      ) : (
-        <p className="text-xs text-ink-muted">No active experiment</p>
-      )}
-    </Card>
-  )
+function applyFilters(entries: GanttEntry[], f: DashboardFilterState): GanttEntry[] {
+  return entries.filter((e) => {
+    if (f.statuses.length > 0 && !f.statuses.includes(e.status)) return false
+    if (f.types.length > 0 && (!e.experiment_type || !f.types.includes(e.experiment_type))) return false
+    if (f.dateFrom && e.started_at && e.started_at.slice(0, 10) < f.dateFrom) return false
+    if (f.dateTo && e.started_at && e.started_at.slice(0, 10) > f.dateTo) return false
+    return true
+  })
 }
 
 export function DashboardPage() {
-  const { data: reactors, isLoading, error } = useQuery({
-    queryKey: ['reactor-status'],
-    queryFn: dashboardApi.reactorStatus,
+  const [filters, setFilters] = useState<DashboardFilterState>({
+    statuses: [],
+    types: [],
+    dateFrom: '',
+    dateTo: '',
+  })
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: dashboardApi.full,
     refetchInterval: 60_000,
   })
 
-  const activeCount = reactors?.filter((r) => r.experiment_id).length ?? 0
-  const totalCount  = reactors?.length ?? 0
+  const filteredTimeline = data ? applyFilters(data.timeline, filters) : []
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-ink-primary">Dashboard</h1>
-        <p className="text-xs text-ink-muted mt-0.5">Reactor status and lab overview</p>
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-ink-primary">Dashboard</h1>
+          <p className="text-xs text-ink-muted mt-0.5">
+            Reactor status and lab overview · Auto-refreshes every 60s
+          </p>
+        </div>
       </div>
 
-      {/* Metrics row */}
+      {/* Summary metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricCard label="Active Reactors" value={activeCount} unit={`/ ${totalCount}`} />
-        <MetricCard label="Capacity" value={totalCount > 0 ? Math.round((activeCount / totalCount) * 100) : 0} unit="%" />
-        <MetricCard label="Total Reactors" value={totalCount} />
-        <MetricCard label="Available" value={totalCount - activeCount} />
+        <MetricCard
+          label="Active Experiments"
+          value={data?.summary.active_experiments ?? '—'}
+        />
+        <MetricCard
+          label="Reactors In Use"
+          value={data?.summary.reactors_in_use ?? '—'}
+          unit="/ 18"
+        />
+        <MetricCard
+          label="Completed This Month"
+          value={data?.summary.completed_this_month ?? '—'}
+        />
+        <MetricCard
+          label="Pending Results"
+          value={data?.summary.pending_results ?? '—'}
+        />
       </div>
+
+      {/* Filters (apply to timeline) */}
+      <DashboardFilters filters={filters} onChange={setFilters} />
 
       {/* Reactor grid */}
       <Card padding="none">
-        <CardHeader label="Reactor Status">
-          <span className="text-2xs text-ink-muted">Auto-refreshes every 60s</span>
-        </CardHeader>
+        <CardHeader label="Reactor Status" />
         <CardBody>
           {isLoading && <PageSpinner />}
           {error && (
-            <div className="text-sm text-red-400 py-4 text-center">
-              Failed to load reactor status
-            </div>
+            <p className="text-sm text-red-400 py-4 text-center">Failed to load dashboard</p>
           )}
-          {reactors && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-              {reactors.map((r) => (
-                <ReactorCard key={r.reactor_number} reactor={r} />
-              ))}
-            </div>
-          )}
-          {reactors?.length === 0 && (
-            <p className="text-sm text-ink-muted text-center py-8">No reactors found</p>
-          )}
+          {data && <ReactorGrid cards={data.reactors} />}
         </CardBody>
       </Card>
 
-      {/* Recent experiments placeholder */}
+      {/* Gantt timeline */}
       <Card padding="none">
-        <CardHeader label="Recent Experiments" />
+        <CardHeader label="Experiment Timeline">
+          <span className="text-2xs text-ink-muted">
+            {filteredTimeline.length} experiment{filteredTimeline.length !== 1 ? 's' : ''}
+            {(filters.statuses.length > 0 || filters.types.length > 0 || filters.dateFrom || filters.dateTo) && (
+              <span className="ml-1 text-brand-red">(filtered)</span>
+            )}
+          </span>
+        </CardHeader>
         <CardBody>
-          <p className="text-sm text-ink-muted text-center py-8">
-            Full experiment list available in <a href="/experiments" className="text-red-400 hover:text-red-300">Experiments</a>
-          </p>
+          {isLoading && <PageSpinner />}
+          {data && <ExperimentTimeline entries={filteredTimeline} />}
+        </CardBody>
+      </Card>
+
+      {/* Recent activity */}
+      <Card padding="none">
+        <CardHeader label="Recent Activity">
+          <span className="text-2xs text-ink-muted">Last 20 changes</span>
+        </CardHeader>
+        <CardBody>
+          {isLoading && <PageSpinner />}
+          {data && <ActivityFeed entries={data.recent_activity} />}
         </CardBody>
       </Card>
     </div>
   )
 }
-

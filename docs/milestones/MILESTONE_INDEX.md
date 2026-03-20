@@ -2,7 +2,7 @@
 
 ## Current Active Milestone
 <!-- This line is updated by the agent at the start of each milestone -->
-**Active:** M7 — Reactor Dashboard
+**Active:** M8 — Testing and Docs
 
 ## Milestone Status
 | ID | Name | Branch | Status |
@@ -14,7 +14,7 @@
 | M4 | React Shell | feature/m4-react-shell | Complete |
 | M5 | Experiment Pages | feature/m5-experiment-pages | Complete |
 | M6 | Bulk Uploads | feature/m6-bulk-uploads | Complete |
-| M7 | Reactor Dashboard | feature/m7-reactor-dashboard | In Progress |
+| M7 | Reactor Dashboard | feature/m7-reactor-dashboard | Complete |
 | M8 | Testing and Docs | feature/m8-testing-docs | Not Started |
 
 ## How to Use
