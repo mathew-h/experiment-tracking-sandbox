@@ -9,16 +9,6 @@ from backend.services.bulk_uploads.chemical_inventory import ChemicalInventorySe
 
 from .excel_helpers import make_excel
 
-# NOTE: chemical_inventory.py uses `compound.molecular_weight` and `Compound(molecular_weight=...)`
-# but the model column is `molecular_weight_g_mol`.  This bug causes every row that reaches the
-# create/update path to raise an AttributeError/TypeError (caught and appended to errors[]).
-# The three tests below that exercise create/update are marked xfail until the service is fixed.
-
-
-@pytest.mark.xfail(
-    reason="Service uses wrong attr 'molecular_weight' (model has 'molecular_weight_g_mol'); "
-    "causes TypeError on Compound() constructor for every new row",
-)
 def test_creates_new_compound(db_session: Session):
     """Valid row creates a Compound record."""
     xlsx = make_excel(
@@ -42,10 +32,6 @@ def test_creates_new_compound(db_session: Session):
     assert compound.formula == "Mg(OH)2"
 
 
-@pytest.mark.xfail(
-    reason="Service uses wrong attr 'molecular_weight' (model has 'molecular_weight_g_mol'); "
-    "causes AttributeError on existing compound update",
-)
 def test_updates_existing_compound(db_session: Session):
     """Second upload with the same name updates the existing compound."""
     existing = Compound(name="Iron sulfate", formula="FeSO4")
@@ -64,6 +50,7 @@ def test_updates_existing_compound(db_session: Session):
     assert created == 0
     assert updated == 1
 
+    db_session.flush()
     db_session.refresh(existing)
     assert existing.formula == "FeSO4·7H2O"
 
@@ -97,10 +84,6 @@ def test_blank_name_rows_skipped(db_session: Session):
     assert errors == []
 
 
-@pytest.mark.xfail(
-    reason="Service uses wrong attr 'molecular_weight' (model has 'molecular_weight_g_mol'); "
-    "causes AttributeError/TypeError on every create or update row",
-)
 def test_multiple_rows_mixed_create_and_update(db_session: Session):
     """Mix of new and existing compounds processes correctly."""
     existing = Compound(name="Sodium chloride", formula="NaCl")

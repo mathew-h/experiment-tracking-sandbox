@@ -8,6 +8,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from database import Analyte, ElementalAnalysis, SampleInfo
+from database.models.analysis import ExternalAnalysis
 
 
 class AnalyteService:
@@ -104,6 +105,31 @@ class ElementalCompositionService:
                     db.flush()  # assign id before loop uses it
                     symbol_to_analyte[sym_lower] = new_analyte
 
+        # Cache ExternalAnalysis stubs per sample_id to avoid repeated queries
+        ext_analysis_cache: Dict[str, int] = {}
+
+        def _get_or_create_ext_analysis(sample_id: str) -> int:
+            """Return the id of a 'Bulk Elemental Composition' ExternalAnalysis stub for this sample."""
+            if sample_id in ext_analysis_cache:
+                return ext_analysis_cache[sample_id]
+            stub = (
+                db.query(ExternalAnalysis)
+                .filter(
+                    ExternalAnalysis.sample_id == sample_id,
+                    ExternalAnalysis.analysis_type == "Bulk Elemental Composition",
+                )
+                .first()
+            )
+            if not stub:
+                stub = ExternalAnalysis(
+                    sample_id=sample_id,
+                    analysis_type="Bulk Elemental Composition",
+                )
+                db.add(stub)
+                db.flush()
+            ext_analysis_cache[sample_id] = stub.id
+            return stub.id
+
         for idx, row in df.iterrows():
             try:
                 sample_id = str(row.get(sample_col) or '').strip()
@@ -116,6 +142,8 @@ class ElementalCompositionService:
                 if not sample:
                     errors.append(f"Row {idx+2}: sample_id '{sample_id}' not found")
                     continue
+
+                ext_analysis_id = _get_or_create_ext_analysis(sample_id)
 
                 for symbol in analyte_headers:
                     analyte = symbol_to_analyte.get(str(symbol).lower())
@@ -132,14 +160,22 @@ class ElementalCompositionService:
 
                     existing = (
                         db.query(ElementalAnalysis)
-                        .filter(ElementalAnalysis.sample_id == sample_id, ElementalAnalysis.analyte_id == analyte.id)
+                        .filter(
+                            ElementalAnalysis.external_analysis_id == ext_analysis_id,
+                            ElementalAnalysis.analyte_id == analyte.id,
+                        )
                         .first()
                     )
                     if existing:
                         existing.analyte_composition = fval
                         updated += 1
                     else:
-                        db.add(ElementalAnalysis(sample_id=sample_id, analyte_id=analyte.id, analyte_composition=fval))
+                        db.add(ElementalAnalysis(
+                            external_analysis_id=ext_analysis_id,
+                            sample_id=sample_id,
+                            analyte_id=analyte.id,
+                            analyte_composition=fval,
+                        ))
                         created += 1
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")

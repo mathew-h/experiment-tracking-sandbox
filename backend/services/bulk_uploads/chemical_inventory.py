@@ -72,10 +72,10 @@ class ChemicalInventoryService:
                 if existing:
                     existing.formula = formula or existing.formula
                     existing.cas_number = cas_number or existing.cas_number
-                    existing.molecular_weight = molecular_weight if molecular_weight is not None else existing.molecular_weight
-                    existing.density = density if density is not None else existing.density
-                    existing.melting_point = melting_point if melting_point is not None else existing.melting_point
-                    existing.boiling_point = boiling_point if boiling_point is not None else existing.boiling_point
+                    existing.molecular_weight_g_mol = molecular_weight if molecular_weight is not None else existing.molecular_weight_g_mol
+                    existing.density_g_cm3 = density if density is not None else existing.density_g_cm3
+                    existing.melting_point_c = melting_point if melting_point is not None else existing.melting_point_c
+                    existing.boiling_point_c = boiling_point if boiling_point is not None else existing.boiling_point_c
                     existing.solubility = solubility or existing.solubility
                     existing.hazard_class = hazard_class or existing.hazard_class
                     existing.supplier = supplier or existing.supplier
@@ -87,10 +87,10 @@ class ChemicalInventoryService:
                         name=name,
                         formula=formula,
                         cas_number=cas_number,
-                        molecular_weight=molecular_weight,
-                        density=density,
-                        melting_point=melting_point,
-                        boiling_point=boiling_point,
+                        molecular_weight_g_mol=molecular_weight,
+                        density_g_cm3=density,
+                        melting_point_c=melting_point,
+                        boiling_point_c=boiling_point,
                         solubility=solubility,
                         hazard_class=hazard_class,
                         supplier=supplier,
