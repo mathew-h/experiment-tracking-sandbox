@@ -145,6 +145,18 @@ async def upload_icp_oes(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload an ICP-OES CSV file and ingest elemental data."""
+    import sys  # noqa: PLC0415
+    if "frontend.config.variable_config" not in sys.modules:
+        from types import ModuleType
+        _stub = ModuleType("frontend.config.variable_config")
+        _stub.ICP_FIXED_ELEMENT_FIELDS = [
+            "fe", "si", "mg", "ca", "ni", "cu", "mo", "zn", "mn", "cr",
+            "co", "al", "sr", "y", "nb", "sb", "cs", "ba", "nd", "gd",
+            "pt", "rh", "ir", "pd", "ru", "os", "tl",
+        ]
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules["frontend.config.variable_config"] = _stub
     from backend.services.icp_service import ICPService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
