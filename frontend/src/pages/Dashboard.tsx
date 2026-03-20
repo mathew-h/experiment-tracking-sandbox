@@ -11,7 +11,7 @@ import { DashboardFilters, type DashboardFilterState } from './DashboardFilters'
 function applyFilters(entries: GanttEntry[], f: DashboardFilterState): GanttEntry[] {
   return entries.filter((e) => {
     if (f.statuses.length > 0 && !f.statuses.includes(e.status)) return false
-    if (f.types.length > 0 && e.experiment_type && !f.types.includes(e.experiment_type)) return false
+    if (f.types.length > 0 && (!e.experiment_type || !f.types.includes(e.experiment_type))) return false
     if (f.dateFrom && e.started_at && e.started_at.slice(0, 10) < f.dateFrom) return false
     if (f.dateTo && e.started_at && e.started_at.slice(0, 10) > f.dateTo) return false
     return true

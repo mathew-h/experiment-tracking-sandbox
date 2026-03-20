@@ -1,9 +1,9 @@
 # Project Working Memory
 
 ## Current Status
-**Active Milestone:** M6 — Bulk Uploads
-**Branch:** `feature/m6-bulk-uploads`
-**Last Updated:** 2026-03-19
+**Active Milestone:** M8 — Testing and Docs
+**Branch:** `feature/m8-testing-docs`
+**Last Updated:** 2026-03-20
 
 ---
 
@@ -256,7 +256,7 @@ Expose all bulk data ingestion workflows through an accordion-style React UI wit
 
 ---
 
-## M7 — Reactor Dashboard: IN PROGRESS
+## M7 — Reactor Dashboard: COMPLETE (signed off 2026-03-20, merge to infra/lab-pc-server-setup pending)
 
 ### Objective
 Build a fully interactive reactor dashboard with live status grid (R01–R16, CF01–CF02), Gantt timeline, activity feed, filter chips, and a single-call backend endpoint returning all dashboard data under 500 ms.
@@ -264,25 +264,20 @@ Build a fully interactive reactor dashboard with live status grid (R01–R16, CF
 ### Branch
 `feature/m7-reactor-dashboard`
 
-### Implementation Plan
-`docs/superpowers/plans/2026-03-19-m7-reactor-dashboard.md` — Read before starting any M7 work.
-
-### Completed (2026-03-19)
+### Completed
 - [x] Chunk A: Backend — DashboardResponse schema, GET /api/dashboard/ endpoint, 15 tests (incl. performance)
-  - `ReactorCardData` includes: reactor_label, description (first note), sample_id, researcher, days_running
-  - Single query per data section, no N+1
-  - Performance: passes <1500ms with 500 experiments
 - [x] Chunk B: Frontend — ReactorGrid, ExperimentTimeline, ActivityFeed, DashboardFilters, Dashboard rebuild
-  - 18 fixed slots (R01–R16 + CF01–CF02), empty slots greyed out
-  - Click reactor → detail modal with full info + "View Detail" link
-  - CSS Gantt with status colors + click-to-navigate
-  - Client-side filtering (status, type, date range)
-  - Auto-refresh every 60s
-  - TypeScript: 0 errors; ESLint: 0 warnings; production build: clean
 - [x] Chunk C: Documentation — DASHBOARD.md, API_REFERENCE.md updated
+- [x] Post-implementation bugfixes: reactors_in_use distinct fix, vite proxy port, filter logic, modal theme
 
-### Pending sign-off
-- [ ] User review of Dashboard UI
+### Sign-off
+- [x] User sign-off received 2026-03-20 — proceed to M8
+
+### Key Decisions / Patterns (M7)
+- **Single API call:** `GET /api/dashboard/` returns all four sections; frontend uses React Query `refetchInterval: 60_000`
+- **18 fixed slots:** Frontend renders all slots from a static list; backend returns only occupied ones
+- **Client-side filtering:** All Gantt filtering applied in-memory; no extra API calls
+- **Reactor label:** Derived at backend from `experiment_type + reactor_number`; `CF01`/`CF02` for Core Flood, `R01`–`R16` for all others
 
 ---
 

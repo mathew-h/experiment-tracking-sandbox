@@ -117,7 +117,7 @@ function ReactorDetailModal({
       onClick={onClose}
     >
       <div
-        className="bg-surface-card border border-surface-border rounded-lg p-6 w-full max-w-md shadow-xl"
+        className="bg-surface-overlay border border-surface-border rounded-lg p-6 w-full max-w-md shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4">

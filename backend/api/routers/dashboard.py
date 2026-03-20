@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, distinct
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.conditions import ExperimentalConditions
@@ -37,11 +37,11 @@ def get_dashboard(
         select(
             func.count(case((Experiment.status == ExperimentStatus.ONGOING, 1))).label("active"),
             func.count(
-                case((
+                distinct(case((
                     (Experiment.status == ExperimentStatus.ONGOING) &
                     ExperimentalConditions.reactor_number.isnot(None),
-                    1,
-                ))
+                    ExperimentalConditions.reactor_number,
+                )))
             ).label("reactors_in_use"),
             func.count(
                 case((
