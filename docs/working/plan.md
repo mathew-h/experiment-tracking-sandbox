@@ -1,8 +1,8 @@
 # Project Working Memory
 
 ## Current Status
-**Active Milestone:** M5 — Experiment Pages
-**Branch:** `feature/m5-experiment-pages`
+**Active Milestone:** M6 — Bulk Uploads
+**Branch:** `feature/m6-bulk-uploads`
 **Last Updated:** 2026-03-19
 
 ---
@@ -217,6 +217,29 @@ Build the three fully-functional experiment management pages, wired to the live 
 
 ### Sign-off
 - [x] User sign-off received 2026-03-19 — merged to infra/lab-pc-server-setup, proceed to M6
+
+---
+
+## M6 — Bulk Uploads: IN PROGRESS
+
+### Objective
+Expose all bulk data ingestion workflows through an accordion-style React UI with 12 upload types.
+
+### Branch
+`feature/m6-bulk-uploads`
+
+### Implementation Plan
+`docs/superpowers/plans/2026-03-19-m6-bulk-uploads.md` — Read before starting any M6 work.
+
+### Completed
+- [x] Chunk A: Schema alignment — UploadResponse + warnings/feedbacks; frontend BulkUploadResult field fix (2026-03-19)
+- [x] Chunk B: New parsers — timepoint_modifications, master_bulk_upload, xrd_upload; modified ElementalCompositionService auto-create analytes; MASTER_RESULTS_PATH in settings (2026-03-19)
+- [x] Chunk C: All 9 new POST endpoints + GET templates/{type} + GET experiments/next-ids (2026-03-19)
+- [x] Chunk D: Frontend rebuild — accordion BulkUploads page, UploadRow component, full API client, DefaultUnitField, NextIdChips (2026-03-19)
+
+### Pending
+- [ ] Chunk E: Tests
+- [ ] Chunk F: Documentation
 
 ---
 

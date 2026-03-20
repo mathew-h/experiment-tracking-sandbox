@@ -53,12 +53,21 @@ class AnalyteService:
 
 class ElementalCompositionService:
     @staticmethod
-    def bulk_upsert_wide_from_excel(db: Session, file_bytes: bytes) -> Tuple[int, int, int, List[str]]:
+    def bulk_upsert_wide_from_excel(
+        db: Session,
+        file_bytes: bytes,
+        default_unit: Optional[str] = None,
+    ) -> Tuple[int, int, int, List[str]]:
         """
         Upsert ElementalAnalysis from a wide Excel file:
           - First column: sample_id
           - Remaining columns: analyte symbols
           - Cells: numeric composition
+
+        If ``default_unit`` is provided, any analyte header not already in the
+        Analyte table is auto-created with that unit.  When ``default_unit`` is
+        None (the default), unknown analyte headers are silently skipped.
+
         Returns (created, updated, skipped_rows, errors).
         """
         errors: List[str] = []
@@ -85,6 +94,16 @@ class ElementalCompositionService:
         all_analytes = db.query(Analyte).all()
         symbol_to_analyte = {a.analyte_symbol.lower(): a for a in all_analytes}
 
+        # Auto-create analytes for unknown headers when default_unit is supplied
+        if default_unit:
+            for symbol in analyte_headers:
+                sym_lower = str(symbol).lower()
+                if sym_lower not in symbol_to_analyte:
+                    new_analyte = Analyte(analyte_symbol=symbol, unit=default_unit)
+                    db.add(new_analyte)
+                    db.flush()  # assign id before loop uses it
+                    symbol_to_analyte[sym_lower] = new_analyte
+
         for idx, row in df.iterrows():
             try:
                 sample_id = str(row.get(sample_col) or '').strip()
@@ -101,7 +120,7 @@ class ElementalCompositionService:
                 for symbol in analyte_headers:
                     analyte = symbol_to_analyte.get(str(symbol).lower())
                     if not analyte:
-                        # Unknown analyte header; user should upload Analytes first
+                        # Unknown analyte and no default_unit — skip silently
                         continue
                     val = row.get(symbol)
                     if val is None or (isinstance(val, float) and pd.isna(val)):

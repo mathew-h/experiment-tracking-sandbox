@@ -125,6 +125,35 @@ def get_next_experiment_id(
     return NextIdResponse(next_id=f"{prefix}_{next_num}")
 
 
+@router.get("/next-ids")
+def get_next_experiment_ids(
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> dict:
+    """
+    Return the next auto-incremented experiment number for each type.
+
+    Response: ``{"HPHT": 72, "Serum": 43, "CF": 8}``
+    (Each value is MAX(experiment_number) + 1 for that type, or 1 if none exist.)
+    """
+    from database.models.conditions import ExperimentalConditions  # noqa: PLC0415
+
+    # Only report on the three main types shown in the UI
+    type_labels = {"HPHT": "HPHT", "Serum": "Serum", "CF": "Core Flood"}
+    result: dict[str, int] = {}
+    for label, db_type in type_labels.items():
+        max_num = (
+            db.execute(
+                select(func.max(Experiment.experiment_number))
+                .join(ExperimentalConditions,
+                      Experiment.id == ExperimentalConditions.experiment_fk)
+                .where(ExperimentalConditions.experiment_type == db_type)
+            ).scalar()
+        )
+        result[label] = (max_num or 0) + 1
+    return result
+
+
 @router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
 def get_experiment_results(
     experiment_id: str,

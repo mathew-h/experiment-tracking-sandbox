@@ -1,118 +1,242 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { bulkUploadsApi, BulkUploadResult } from '@/api/bulkUploads'
-import { Card, CardHeader, CardBody, FileUpload, Badge, useToast } from '@/components/ui'
+import { useQuery } from '@tanstack/react-query'
+import { Select } from '@/components/ui'
+import { bulkUploadsApi, NextIds } from '@/api/bulkUploads'
+import { UploadRow } from './BulkUploadRow'
 
-type UploadType = 'scalar-results' | 'new-experiments' | 'pxrf' | 'aeris-xrd'
-
-interface UploadCardProps {
-  title: string
-  description: string
-  accept: string
-  type: UploadType
-}
-
-const uploadFns: Record<UploadType, (file: File) => Promise<BulkUploadResult>> = {
-  'scalar-results':  (f) => bulkUploadsApi.uploadScalarResults(f),
-  'new-experiments': (f) => bulkUploadsApi.uploadNewExperiments(f),
-  'pxrf':            (f) => bulkUploadsApi.uploadPXRF(f),
-  'aeris-xrd':       (f) => bulkUploadsApi.uploadAerisXRD(f),
-}
-
-function UploadCard({ title, description, accept, type }: UploadCardProps) {
-  const [result, setResult] = useState<BulkUploadResult | null>(null)
-  const { success, error: toastError } = useToast()
-
-  const mutation = useMutation({
-    mutationFn: (file: File) => uploadFns[type](file),
-    onSuccess: (data) => {
-      setResult(data)
-      success(`Upload complete — ${data.rows_inserted} rows inserted`)
-    },
-    onError: (err: Error) => {
-      toastError('Upload failed', err.message)
-    },
-  })
-
+// ─── Next-ID chips (New Experiments card) ────────────────────────────────────
+function NextIdChips({ data }: { data: NextIds | undefined }) {
+  if (!data) return null
+  const fmt = (n: number) => String(n).padStart(3, '0')
   return (
-    <Card padding="none">
-      <CardHeader label={title} />
-      <CardBody className="space-y-4">
-        <p className="text-xs text-ink-muted">{description}</p>
-        <FileUpload
-          accept={accept}
-          onFiles={([file]) => { setResult(null); mutation.mutate(file) }}
-          disabled={mutation.isPending}
-          hint={`Accepted: ${accept}`}
-        />
-
-        {mutation.isPending && (
-          <div className="flex items-center gap-2 text-xs text-ink-secondary">
-            <span className="animate-spin w-3.5 h-3.5 border-2 border-surface-border border-t-red-500 rounded-full" />
-            Processing…
-          </div>
-        )}
-
-        {result && (
-          <div className="space-y-2">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">Processed: {result.rows_processed}</Badge>
-              <Badge variant="success">Inserted: {result.rows_inserted}</Badge>
-              <Badge variant="warning">Skipped: {result.rows_skipped}</Badge>
-              {result.errors.length > 0 && <Badge variant="error">Errors: {result.errors.length}</Badge>}
-            </div>
-            {result.errors.length > 0 && (
-              <div className="p-3 rounded bg-red-500/5 border border-red-500/20 space-y-1">
-                {result.errors.slice(0, 5).map((e, i) => (
-                  <p key={i} className="text-2xs text-red-400 font-mono-data">{e}</p>
-                ))}
-                {result.errors.length > 5 && (
-                  <p className="text-2xs text-ink-muted">…and {result.errors.length - 5} more</p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-export function BulkUploadsPage() {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold text-ink-primary">Bulk Uploads</h1>
-        <p className="text-xs text-ink-muted mt-0.5">Upload analytical data from instrument exports</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <UploadCard
-          type="scalar-results"
-          title="Scalar Results"
-          description="Upload solution chemistry measurements (pH, conductivity, ammonium, H₂, ICP) from Excel exports."
-          accept=".xlsx,.xls,.csv"
-        />
-        <UploadCard
-          type="new-experiments"
-          title="New Experiments"
-          description="Bulk-create experiments from a structured Excel template."
-          accept=".xlsx,.xls,.csv"
-        />
-        <UploadCard
-          type="pxrf"
-          title="pXRF Readings"
-          description="Upload portable XRF scan data from the instrument CSV export."
-          accept=".csv,.xlsx"
-        />
-        <UploadCard
-          type="aeris-xrd"
-          title="Aeris XRD"
-          description="Upload Aeris XRD mineral phase data (time-series format)."
-          accept=".csv,.xlsx,.xls"
-        />
-      </div>
+    <div className="flex flex-wrap gap-2 py-1">
+      <span className="text-xs text-ink-muted">Next IDs:</span>
+      {(['HPHT', 'Serum', 'CF'] as const).map((type) => (
+        <span
+          key={type}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-raised border border-surface-border text-xs"
+        >
+          <span className="text-ink-muted">{type}:</span>
+          <span className="font-mono-data text-ink-primary">{fmt(data[type])}</span>
+        </span>
+      ))}
     </div>
   )
 }
 
+// ─── Default-unit selector (Elemental Composition card) ──────────────────────
+const UNIT_OPTIONS = [
+  { value: 'ppm', label: 'ppm' },
+  { value: '%', label: '%' },
+  { value: 'wt%', label: 'wt%' },
+  { value: 'mM', label: 'mM' },
+  { value: 'ppb', label: 'ppb' },
+]
+
+function DefaultUnitField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-ink-muted shrink-0">Default unit for new analytes:</span>
+      <Select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        options={UNIT_OPTIONS}
+        className="w-28"
+      />
+    </div>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+export function BulkUploadsPage() {
+  const [openRow, setOpenRow] = useState<string | null>(null)
+  const [elemDefaultUnit, setElemDefaultUnit] = useState('ppm')
+
+  const toggle = (id: string) => setOpenRow((prev) => (prev === id ? null : id))
+  const isOpen = (id: string) => openRow === id
+
+  // Next-IDs query — staleTime 60s, only used in "new-experiments" row
+  const { data: nextIds } = useQuery({
+    queryKey: ['nextIds'],
+    queryFn: bulkUploadsApi.getNextIds,
+    staleTime: 60_000,
+  })
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-lg font-semibold text-ink-primary">Bulk Uploads</h1>
+        <p className="text-xs text-ink-muted mt-0.5">
+          Upload analytical data from instrument exports and spreadsheets
+        </p>
+      </div>
+
+      <div className="space-y-2">
+
+        {/* 1 — Master Results Sync */}
+        <UploadRow
+          id="master-results"
+          title="Master Results Sync"
+          description="Sync from SharePoint or upload the master tracking spreadsheet"
+          helpText="Reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). Sync reads from the configured SharePoint path; upload allows a manual override."
+          accept=".xlsx,.xls"
+          uploadFn={(file) => bulkUploadsApi.uploadMasterResults(file)}
+          syncFn={() => bulkUploadsApi.triggerMasterSync()}
+          isOpen={isOpen('master-results')}
+          onToggle={() => toggle('master-results')}
+        />
+
+        {/* 2 — ICP-OES Data */}
+        <UploadRow
+          id="icp-oes"
+          title="ICP-OES Data"
+          description="Upload ICP-OES elemental analysis CSV"
+          helpText="Instrument CSV export from the ICP-OES. Multi-element, multi-timepoint files supported. Blank rows are filtered. Duplicate spectral lines resolved by best intensity."
+          accept=".csv"
+          uploadFn={(file) => bulkUploadsApi.uploadIcpOes(file)}
+          isOpen={isOpen('icp-oes')}
+          onToggle={() => toggle('icp-oes')}
+        />
+
+        {/* 3 — XRD Mineralogy */}
+        <UploadRow
+          id="xrd-mineralogy"
+          title="XRD Mineralogy"
+          description="Upload XRD mineral phase data — auto-detects Aeris or ActLabs format"
+          helpText="Aeris files (sample IDs like '20260218_HPHT070-d19_02') are detected automatically. ActLabs files have a plain sample_id column. Use the template for ActLabs format."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadXrdMineralogy(file)}
+          templateType="xrd-mineralogy"
+          isOpen={isOpen('xrd-mineralogy')}
+          onToggle={() => toggle('xrd-mineralogy')}
+        />
+
+        {/* 4 — Solution Chemistry */}
+        <UploadRow
+          id="scalar-results"
+          title="Solution Chemistry"
+          description="Upload solution chemistry measurements (pH, NH₄, H₂, conductivity)"
+          helpText="Required columns: Experiment ID, Time (days). All other fields are optional. Set Overwrite=TRUE to replace existing values."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadScalarResults(file)}
+          templateType="scalar-results"
+          isOpen={isOpen('scalar-results')}
+          onToggle={() => toggle('scalar-results')}
+        />
+
+        {/* 5 — New Experiments */}
+        <UploadRow
+          id="new-experiments"
+          title="New Experiments"
+          description="Bulk-create experiments from a structured Excel template"
+          helpText="Use the template for correct column formatting. The file must have an 'experiments' sheet; a 'conditions' sheet is optional."
+          accept=".xlsx,.xls"
+          uploadFn={(file) => bulkUploadsApi.uploadNewExperiments(file)}
+          templateType="new-experiments"
+          topContent={<NextIdChips data={nextIds} />}
+          isOpen={isOpen('new-experiments')}
+          onToggle={() => toggle('new-experiments')}
+        />
+
+        {/* 6 — Timepoint Modifications */}
+        <UploadRow
+          id="timepoint-modifications"
+          title="Timepoint Modifications"
+          description="Bulk-set modification descriptions on existing result rows"
+          helpText="Required columns: experiment_id, time_point, modification_description. Set overwrite_existing=TRUE to replace existing descriptions. Time is matched with ±0.0001 day tolerance."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadTimepointModifications(file)}
+          templateType="timepoint-modifications"
+          isOpen={isOpen('timepoint-modifications')}
+          onToggle={() => toggle('timepoint-modifications')}
+        />
+
+        {/* 7 — Rock Inventory */}
+        <UploadRow
+          id="rock-inventory"
+          title="Rock Inventory"
+          description="Upload or update rock sample metadata"
+          helpText="Required column: sample_id. Optional: rock_classification, state, country, locality, latitude, longitude, description, characterized."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadRockInventory(file)}
+          templateType="rock-inventory"
+          isOpen={isOpen('rock-inventory')}
+          onToggle={() => toggle('rock-inventory')}
+        />
+
+        {/* 8 — Chemical Inventory */}
+        <UploadRow
+          id="chemical-inventory"
+          title="Chemical Inventory"
+          description="Upload or update chemical reagent records"
+          helpText="Required column: name. Optional: formula, cas_number, molecular_weight, density, hazard_class, supplier, catalog_number, notes."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadChemicalInventory(file)}
+          templateType="chemical-inventory"
+          isOpen={isOpen('chemical-inventory')}
+          onToggle={() => toggle('chemical-inventory')}
+        />
+
+        {/* 9 — Sample Chemical Composition */}
+        <UploadRow
+          id="elemental-composition"
+          title="Sample Chemical Composition"
+          description="Wide-format Excel with sample_id + analyte columns"
+          helpText="First column must be sample_id. Remaining columns are analyte symbols (e.g. SiO2, Al2O3). Cells contain numeric values. Unknown analytes are auto-created with the selected default unit."
+          accept=".xlsx,.xls"
+          uploadFn={(file) => bulkUploadsApi.uploadElementalComposition(file, elemDefaultUnit)}
+          templateType="elemental-composition"
+          topContent={
+            <DefaultUnitField value={elemDefaultUnit} onChange={setElemDefaultUnit} />
+          }
+          isOpen={isOpen('elemental-composition')}
+          onToggle={() => toggle('elemental-composition')}
+        />
+
+        {/* 10 — ActLabs Rock Analysis */}
+        <UploadRow
+          id="actlabs-rock"
+          title="ActLabs Rock Analysis"
+          description="Import ActLabs titration report (Excel or CSV)"
+          helpText="Accepts ActLabs standard report format. Row 3 = analyte symbols, Row 4 = units. Values like '<0.01', 'nd', 'na' are handled. Analytes are auto-created from file headers."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadActlabsRock(file)}
+          isOpen={isOpen('actlabs-rock')}
+          onToggle={() => toggle('actlabs-rock')}
+        />
+
+        {/* 11 — Experiment Status Update */}
+        <UploadRow
+          id="experiment-status"
+          title="Experiment Status Update"
+          description="Bulk-set ONGOING / COMPLETED statuses"
+          helpText="Required column: experiment_id. Listed experiments are set to ONGOING; other HPHT experiments currently ONGOING are set to COMPLETED. Optional: reactor_number column."
+          accept=".xlsx,.xls,.csv"
+          uploadFn={(file) => bulkUploadsApi.uploadExperimentStatus(file)}
+          templateType="experiment-status"
+          isOpen={isOpen('experiment-status')}
+          onToggle={() => toggle('experiment-status')}
+        />
+
+        {/* 12 — pXRF Readings */}
+        <UploadRow
+          id="pxrf"
+          title="pXRF Readings"
+          description="Upload portable XRF scan data"
+          helpText="Instrument CSV or Excel export from the portable XRF. Each row is one scan. Instrument format — no template needed."
+          accept=".csv,.xlsx,.xls"
+          uploadFn={(file) => bulkUploadsApi.uploadPXRF(file)}
+          isOpen={isOpen('pxrf')}
+          onToggle={() => toggle('pxrf')}
+        />
+
+      </div>
+    </div>
+  )
+}

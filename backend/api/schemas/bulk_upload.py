@@ -8,3 +8,5 @@ class UploadResponse(BaseModel):
     skipped: int
     errors: list[str]
     message: str
+    warnings: list[str] = []
+    feedbacks: list[dict] = []

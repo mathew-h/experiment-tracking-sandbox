@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     firebase_client_id: str = ""
     firebase_client_cert_url: str = ""
 
+    # Master Results SharePoint path
+    master_results_path: str = (
+        r"C:\Users\MathewHearl\Addis Energy\All Company - Addis Energy"
+        r"\01_R&D\02_Results\Master Reactor Sampling Tracker.xlsx"
+    )
+
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
 
