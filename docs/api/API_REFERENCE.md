@@ -80,6 +80,33 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 ## Bulk Uploads
 
+All endpoints return `UploadResponse`:
+```json
+{
+  "created": 0, "updated": 0, "skipped": 0,
+  "errors": [], "warnings": [], "feedbacks": [], "message": ""
+}
+```
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/bulk-uploads/master-results` | Master Results sync. `file` optional — if omitted, reads from configured SharePoint path. Runs calc engine on affected `ScalarResults`. |
+| POST | `/api/bulk-uploads/scalar-results` | Bulk-create/update `ScalarResults` rows from Excel template. Runs calc engine. |
+| POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. |
+| POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. |
+| POST | `/api/bulk-uploads/xrd-mineralogy` | Unified XRD upload — auto-detects Aeris or ActLabs format. |
+| POST | `/api/bulk-uploads/timepoint-modifications` | Bulk-set `brine_modification_description` on result rows. Writes audit log. |
+| POST | `/api/bulk-uploads/rock-inventory` | Create/update `SampleInfo` records. Normalises sample IDs to uppercase, no underscores. |
+| POST | `/api/bulk-uploads/chemical-inventory` | Create/update `Compound` (reagent) records. |
+| POST | `/api/bulk-uploads/elemental-composition` | Import wide-format elemental composition into `ElementalAnalysis`. Query param: `default_unit` (auto-creates unknown analytes). |
+| POST | `/api/bulk-uploads/actlabs-rock` | Import ActLabs geochemical analysis reports (Excel or CSV). Heuristic header detection. |
+| POST | `/api/bulk-uploads/experiment-status` | Preview + apply bulk ONGOING/COMPLETED transitions. |
+| POST | `/api/bulk-uploads/pxrf` | Import pXRF readings from instrument export. |
+| GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`. Returns 404 for types with no template. |
+| GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
+
+## Bulk Uploads
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/bulk-uploads/scalar-results` | Solution Chemistry Excel upload |

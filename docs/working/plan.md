@@ -237,9 +237,22 @@ Expose all bulk data ingestion workflows through an accordion-style React UI wit
 - [x] Chunk C: All 9 new POST endpoints + GET templates/{type} + GET experiments/next-ids (2026-03-19)
 - [x] Chunk D: Frontend rebuild — accordion BulkUploads page, UploadRow component, full API client, DefaultUnitField, NextIdChips (2026-03-19)
 
-### Pending
-- [ ] Chunk E: Tests
-- [ ] Chunk F: Documentation
+### Completed (continued, 2026-03-19)
+- [x] Chunk E: Tests — 103 tests total (97 passing, 6 xfailed for known service bugs)
+  - `tests/services/bulk_uploads/` — 50 service-level tests across 6 parsers
+  - `tests/api/test_bulk_uploads.py` — 53 API-level tests (all endpoints, auth, templates)
+  - Fixed 3 router bugs: class name mismatches (RockInventoryUploadService, ChemicalInventoryUploadService), missing image_files parameter
+  - Fixed pre-M2 relic: scalar_results_service.py called deleted calculate_yields() → replaced with registry.recalculate()
+  - xfailed tests document known service bugs: chemical_inventory (molecular_weight attr mismatch), elemental_composition (missing external_analysis_id)
+- [x] Chunk F: Documentation — 2026-03-19
+  - `docs/user_guide/BULK_UPLOADS.md` — all 12 upload types documented
+  - `docs/developer/ADDING_UPLOAD_TYPE.md` — step-by-step guide
+  - `docs/api/API_REFERENCE.md` — all new endpoints added
+  - `docs/milestones/M6_bulk_uploads.md` — completion status updated
+
+### Known Service Bugs (documented, not fixed — parsers are locked)
+- `chemical_inventory.py`: uses `molecular_weight` attribute; model has `molecular_weight_g_mol` → all rows fail
+- `actlabs_titration_data.py` (ElementalCompositionService): creates ElementalAnalysis without required external_analysis_id
 
 ---
 

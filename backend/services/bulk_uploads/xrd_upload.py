@@ -1,41 +1,57 @@
-"""Unified XRD upload: auto-detects Aeris vs ActLabs format and routes accordingly."""
+"""Unified XRD upload: auto-detects Aeris, ActLabs, or Experiment+Timepoint format."""
 from __future__ import annotations
 
 import io
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy.orm import Session
+
+from database.models import XRDPhase
 
 # Aeris Sample ID pattern: DATE_ExperimentID-dDAYS_SCAN
 # e.g. 20260218_HPHT070-d19_02
 _AERIS_SAMPLE_RE = re.compile(r"^\d{8}_.+?-d\d+_\d+$")
 
+_EXP_COL_VARIANTS = {"experiment_id", "experiment id"}
+_TIME_COL_VARIANTS = {"time (days)", "time_days", "duration (days)", "time(days)"}
+_SAMPLE_COL_VARIANTS = {"sample_id", "sample id"}
+
 
 def _detect_format(file_bytes: bytes) -> str | None:
     """
-    Inspect the first sheet of the file to detect XRD format.
-    Returns 'aeris', 'actlabs', or None (unrecognised).
+    Inspect the first sheet to detect XRD format.
+
+    Detection order:
+    1. 'experiment-timepoint' — file has an Experiment ID column AND a Time (days) column
+    2. 'aeris'               — sample_id column with Aeris-regex values
+    3. 'actlabs'             — sample_id column with plain sample identifiers
+    Returns None if no format can be identified.
     """
     try:
         df = pd.read_excel(io.BytesIO(file_bytes), nrows=6)
     except Exception:
         return None
 
-    columns = [str(c).strip() for c in df.columns]
+    cols_lower = [str(c).strip().lower() for c in df.columns]
 
-    # Find column whose header is 'sample_id' or 'sample id'
-    sample_col = None
-    for c in columns:
-        if c.lower() in ("sample_id", "sample id"):
-            sample_col = c
-            break
+    # Priority 1: explicit Experiment ID + time columns
+    has_exp = any(c in _EXP_COL_VARIANTS for c in cols_lower)
+    has_time = any(c in _TIME_COL_VARIANTS for c in cols_lower)
+    if has_exp and has_time:
+        return "experiment-timepoint"
 
-    if sample_col is None:
+    # Priority 2/3: sample_id column present
+    sample_col_idx = next(
+        (i for i, c in enumerate(cols_lower) if c in _SAMPLE_COL_VARIANTS), None
+    )
+    if sample_col_idx is None:
         return None
 
-    # Check first few non-empty values against Aeris regex
+    orig_cols = [str(c).strip() for c in df.columns]
+    sample_col = orig_cols[sample_col_idx]
+
     for val in df[sample_col].dropna().head(5):
         if _AERIS_SAMPLE_RE.match(str(val).strip()):
             return "aeris"
@@ -43,16 +59,164 @@ def _detect_format(file_bytes: bytes) -> str | None:
     return "actlabs"
 
 
+def _find_experiment(db: Session, exp_id_raw: str):
+    """Delimiter-insensitive experiment lookup (reused from aeris_xrd logic)."""
+    from sqlalchemy import func  # noqa: PLC0415
+    from database import Experiment  # noqa: PLC0415
+
+    norm = "".join(ch for ch in exp_id_raw.lower() if ch not in ("-", "_", " "))
+    return (
+        db.query(Experiment)
+        .filter(
+            func.lower(
+                func.replace(
+                    func.replace(
+                        func.replace(Experiment.experiment_id, "-", ""),
+                        "_", "",
+                    ),
+                    " ", "",
+                )
+            )
+            == norm
+        )
+        .first()
+    )
+
+
+def _clean_mineral_name(col: str) -> str:
+    """Strip trailing [%] or (%) and whitespace from a column header."""
+    col = re.sub(r"\s*[\[\(]%[\]\)]\s*$", "", col)
+    return col.strip()
+
+
+def _parse_experiment_timepoint(
+    db: Session, file_bytes: bytes
+) -> Tuple[int, int, int, List[str]]:
+    """
+    Parse a wide-format XRD file with explicit Experiment ID + Time (days) columns.
+
+    Each row is one experiment at one timepoint; all remaining columns are mineral phases.
+    Upserts XRDPhase rows keyed on (experiment_id, time_post_reaction_days, mineral_name).
+
+    Returns (created, updated, skipped, errors).
+    """
+    created = updated = skipped = 0
+    errors: List[str] = []
+
+    try:
+        df = pd.read_excel(io.BytesIO(file_bytes))
+    except Exception:
+        try:
+            df = pd.read_csv(io.BytesIO(file_bytes))
+        except Exception as e:
+            return 0, 0, 0, [f"Failed to read file: {e}"]
+
+    cols_normalized = [str(c).strip() for c in df.columns]
+    df.columns = cols_normalized
+    cols_lower = [c.lower() for c in cols_normalized]
+
+    exp_col = next(
+        (cols_normalized[i] for i, c in enumerate(cols_lower) if c in _EXP_COL_VARIANTS),
+        None,
+    )
+    if not exp_col:
+        return 0, 0, 0, ["No 'Experiment ID' column found."]
+
+    time_col = next(
+        (cols_normalized[i] for i, c in enumerate(cols_lower) if c in _TIME_COL_VARIANTS),
+        None,
+    )
+    if not time_col:
+        return 0, 0, 0, ["No 'Time (days)' column found."]
+
+    identity_cols = {exp_col.lower(), time_col.lower()}
+    mineral_cols = [c for c in cols_normalized if c.lower() not in identity_cols]
+    if not mineral_cols:
+        return 0, 0, 0, ["No mineral phase columns detected."]
+
+    exp_cache: dict[str, Optional[object]] = {}
+
+    for idx, row in df.iterrows():
+        row_num = idx + 2
+        exp_id_raw = str(row.get(exp_col) or "").strip()
+        if not exp_id_raw:
+            skipped += 1
+            continue
+
+        time_raw = row.get(time_col)
+        if time_raw is None or (isinstance(time_raw, float) and pd.isna(time_raw)):
+            skipped += 1
+            continue
+
+        try:
+            time_days = float(time_raw)
+        except (ValueError, TypeError):
+            errors.append(f"Row {row_num}: invalid Time (days) '{time_raw}'")
+            continue
+
+        if exp_id_raw not in exp_cache:
+            exp_cache[exp_id_raw] = _find_experiment(db, exp_id_raw)
+        experiment = exp_cache[exp_id_raw]
+
+        if experiment is None:
+            errors.append(f"Row {row_num}: experiment '{exp_id_raw}' not found.")
+            continue
+
+        for mcol in mineral_cols:
+            raw_val = row.get(mcol)
+            if raw_val is None or (isinstance(raw_val, float) and pd.isna(raw_val)):
+                continue
+            try:
+                amount_val = float(raw_val)
+            except (ValueError, TypeError):
+                continue
+
+            mineral_name = _clean_mineral_name(mcol)
+
+            phase = (
+                db.query(XRDPhase)
+                .filter(
+                    XRDPhase.experiment_id == experiment.experiment_id,
+                    XRDPhase.time_post_reaction_days == time_days,
+                    XRDPhase.mineral_name == mineral_name,
+                )
+                .first()
+            )
+
+            if phase:
+                phase.amount = amount_val
+                phase.experiment_fk = experiment.id
+                updated += 1
+            else:
+                db.add(XRDPhase(
+                    experiment_fk=experiment.id,
+                    experiment_id=experiment.experiment_id,
+                    time_post_reaction_days=time_days,
+                    mineral_name=mineral_name,
+                    amount=amount_val,
+                ))
+                created += 1
+
+    return created, updated, skipped, errors
+
+
 class XRDAutoDetectService:
     @staticmethod
     def upload(db: Session, file_bytes: bytes) -> Tuple[int, int, int, List[str]]:
         """
-        Auto-detect XRD format (Aeris or ActLabs) and delegate to the
-        appropriate parser.
+        Auto-detect XRD file format and delegate to the appropriate parser.
+
+        Formats supported:
+        - experiment-timepoint: 'Experiment ID' + 'Time (days)' columns (user-created)
+        - aeris:   Aeris instrument export (Sample ID values like 20260218_HPHT070-d19_02)
+        - actlabs: ActLabs report (plain sample_id column)
 
         Returns (created, updated, skipped, errors).
         """
         fmt = _detect_format(file_bytes)
+
+        if fmt == "experiment-timepoint":
+            return _parse_experiment_timepoint(db, file_bytes)
 
         if fmt == "aeris":
             from backend.services.bulk_uploads.aeris_xrd import AerisXRDUploadService  # noqa: PLC0415
@@ -60,84 +224,102 @@ class XRDAutoDetectService:
 
         if fmt == "actlabs":
             from backend.services.bulk_uploads.actlabs_xrd_report import XRDUploadService  # noqa: PLC0415
-            # XRDUploadService returns 8-tuple; normalise to 4-tuple
             (
                 created_ext, updated_ext,
                 created_json, updated_json,
                 created_phase, updated_phase,
                 skipped, errors,
             ) = XRDUploadService.bulk_upsert_from_excel(db, file_bytes)
-            # Expose phase counts (mineral phases) as the primary user-visible metric;
-            # external analysis + JSON sub-records are implementation details.
             created = created_phase + created_ext
             updated = updated_phase + updated_ext
             return created, updated, skipped, errors
 
         return 0, 0, 0, [
-            "Unable to detect XRD file format. "
-            "Expected Aeris format (Sample ID values like '20260218_HPHT070-d19_02') "
-            "or ActLabs format (first column 'sample_id' with plain sample identifiers)."
+            "Unable to detect XRD file format. Expected one of:\n"
+            "  (1) Experiment+Timepoint: columns 'Experiment ID' and 'Time (days)'\n"
+            "  (2) Aeris instrument export: 'Sample ID' values like '20260218_HPHT070-d19_02'\n"
+            "  (3) ActLabs format: 'sample_id' column with plain sample identifiers"
         ]
 
     @staticmethod
-    def generate_template_bytes() -> bytes:
+    def generate_template_bytes(mode: str = "sample") -> bytes:
         """
-        Return a downloadable ActLabs-format XRD template as Excel bytes.
-        (Aeris files are instrument exports — no template needed for that format.)
+        Return a downloadable XRD template as Excel bytes.
+
+        mode='sample'      — ActLabs-style: sample_id + mineral columns
+        mode='experiment'  — Experiment+Timepoint: Experiment ID + Time (days) + mineral columns
         """
         import openpyxl  # noqa: PLC0415
         from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = "XRD Template"
 
-        headers = ["sample_id", "Quartz", "Calcite", "Dolomite", "Feldspar", "Pyrite", "Other"]
         req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
         opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+        if mode == "experiment":
+            ws.title = "XRD Experiment-Timepoint"
+            headers = ["Experiment ID", "Time (days)", "Quartz", "Calcite", "Dolomite", "Olivine", "Serpentine"]
+            required = {"Experiment ID", "Time (days)"}
+            example = ["HPHT_001", 7.0, 45.2, 20.1, 15.0, 10.5, 9.2]
+        else:
+            ws.title = "XRD Sample-Based"
+            headers = ["sample_id", "Quartz", "Calcite", "Dolomite", "Feldspar", "Pyrite", "Other"]
+            required = {"sample_id"}
+            example = ["S001", 45.2, 20.1, 15.0, 10.5, 5.2, 4.0]
 
         for col, h in enumerate(headers, start=1):
             cell = ws.cell(row=1, column=col, value=h)
             cell.font = Font(bold=True)
-            cell.fill = req_fill if h == "sample_id" else opt_fill
+            cell.fill = req_fill if h in required else opt_fill
             cell.alignment = Alignment(horizontal="center")
-            ws.column_dimensions[cell.column_letter].width = 18
+            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
 
-        # Example row
-        ws.cell(row=2, column=1, value="S001")
-        ws.cell(row=2, column=2, value=45.2)
-        ws.cell(row=2, column=3, value=20.1)
-        ws.cell(row=2, column=4, value=15.0)
-        ws.cell(row=2, column=5, value=10.5)
-        ws.cell(row=2, column=6, value=5.2)
-        ws.cell(row=2, column=7, value=4.0)
+        for col, val in enumerate(example, start=1):
+            ws.cell(row=2, column=col, value=val)
 
-        # Instructions
         instr = wb.create_sheet("INSTRUCTIONS")
-        rows = [
-            ["XRD Mineralogy Upload — Instructions"],
-            [""],
-            ["This template is for ActLabs-format XRD reports."],
-            ["For Aeris instrument exports, upload the file directly — no template needed."],
-            [""],
-            ["Column", "Description"],
-            ["sample_id (required)", "Must match an existing sample in the database."],
-            ["[mineral name]",
-             "Mineral weight percent (0–100). Add or remove columns as needed."],
-            [""],
-            ["Format auto-detection:"],
-            ["  Aeris  — Sample ID column values match pattern YYYYMMDD_ExpID-dDAYS_SCAN"],
-            ["  ActLabs — sample_id column with plain sample identifiers (e.g. S001)"],
-            [""],
-            ["Notes:"],
-            ["- Leave cells blank for minerals not detected"],
-            ["- Column headers become mineral phase names in the database"],
-            ["- Replace example mineral columns with your actual phases"],
-        ]
+        if mode == "experiment":
+            rows = [
+                ["XRD Mineralogy — Experiment + Timepoint Format"],
+                [""],
+                ["Use this format when uploading post-reaction XRD data for specific experiments."],
+                [""],
+                ["Column", "Description"],
+                ["Experiment ID (required)", "Must match an existing experiment (delimiter-insensitive, e.g. HPHT_001 or HPHT001)."],
+                ["Time (days) (required)", "Days post-reaction as a number (e.g. 7, 14.5). Use 0 for pre-reaction baseline."],
+                ["[mineral name]", "Mineral weight percent (0–100). Add/remove columns as needed. Blank cells are skipped."],
+                [""],
+                ["Notes:"],
+                ["- Column headers become mineral phase names in the database."],
+                ["- Uploading again with the same Experiment ID + Time (days) + mineral name updates the existing value."],
+                ["- Column headers may include trailing % indicators like 'Quartz (%)' — these are stripped automatically."],
+            ]
+        else:
+            rows = [
+                ["XRD Mineralogy — Sample-Based Format"],
+                [""],
+                ["Use this format for sample characterization data (not tied to a specific timepoint)."],
+                [""],
+                ["Column", "Description"],
+                ["sample_id (required)", "Must match an existing sample in the database."],
+                ["[mineral name]", "Mineral weight percent (0–100). Add/remove columns as needed. Blank cells are skipped."],
+                [""],
+                ["Format auto-detection:"],
+                ["  Experiment+Timepoint — columns named 'Experiment ID' and 'Time (days)'"],
+                ["  Aeris instrument export — 'Sample ID' values like '20260218_HPHT070-d19_02'"],
+                ["  Sample-based (this template) — 'sample_id' column with plain identifiers"],
+                [""],
+                ["Notes:"],
+                ["- Column headers become mineral phase names in the database."],
+                ["- Column headers may include trailing % indicators — these are stripped automatically."],
+            ]
+
         for r in rows:
             instr.append(r)
         instr.column_dimensions["A"].width = 35
-        instr.column_dimensions["B"].width = 60
+        instr.column_dimensions["B"].width = 75
 
         buf = io.BytesIO()
         wb.save(buf)

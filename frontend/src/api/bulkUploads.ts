@@ -99,14 +99,16 @@ export const bulkUploadsApi = {
     apiClient.get<NextIds>('/experiments/next-ids').then((r) => r.data),
 
   // Template downloads
-  downloadTemplate: async (type: TemplateType): Promise<void> => {
-    const response = await apiClient.get(`/bulk-uploads/templates/${type}`, {
+  downloadTemplate: async (type: TemplateType, mode?: string): Promise<void> => {
+    const params = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+    const response = await apiClient.get(`/bulk-uploads/templates/${type}${params}`, {
       responseType: 'blob',
     })
     const url = URL.createObjectURL(response.data as Blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${type}-template.xlsx`
+    const suffix = mode ? `-${mode}` : ''
+    a.download = `${type}${suffix}-template.xlsx`
     a.click()
     URL.revokeObjectURL(url)
   },

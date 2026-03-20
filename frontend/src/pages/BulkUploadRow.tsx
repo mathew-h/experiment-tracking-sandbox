@@ -51,6 +51,8 @@ export interface UploadRowProps {
   accept: string
   uploadFn: (file: File) => Promise<BulkUploadResult>
   templateType?: TemplateType
+  /** Optional mode passed to the template download endpoint (e.g. 'experiment' for XRD) */
+  templateMode?: string
   /** If provided, shows a "Sync from SharePoint" button above the file zone */
   syncFn?: () => Promise<BulkUploadResult>
   /** Optional content rendered inside the expanded panel (chips, extra fields, etc.) */
@@ -66,6 +68,7 @@ export function UploadRow({
   accept,
   uploadFn,
   templateType,
+  templateMode,
   syncFn,
   topContent,
   isOpen,
@@ -99,7 +102,7 @@ export function UploadRow({
   })
 
   const templateMutation = useMutation({
-    mutationFn: () => bulkUploadsApi.downloadTemplate(templateType!),
+    mutationFn: () => bulkUploadsApi.downloadTemplate(templateType!, templateMode),
     onError: (err: Error) => {
       toastError('Download failed', err.message)
     },

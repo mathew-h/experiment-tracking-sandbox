@@ -53,10 +53,44 @@ function DefaultUnitField({
   )
 }
 
+// ─── XRD mode toggle ─────────────────────────────────────────────────────────
+type XrdMode = 'sample' | 'experiment'
+
+function XrdModeToggle({ mode, onChange }: { mode: XrdMode; onChange: (m: XrdMode) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-ink-muted shrink-0">Template format:</span>
+      <div className="flex rounded border border-surface-border overflow-hidden text-xs">
+        <button
+          className={`px-2.5 py-1 transition-colors ${
+            mode === 'sample'
+              ? 'bg-surface-raised text-ink-primary font-medium'
+              : 'text-ink-muted hover:text-ink-secondary hover:bg-surface-secondary'
+          }`}
+          onClick={() => onChange('sample')}
+        >
+          Sample-based
+        </button>
+        <button
+          className={`px-2.5 py-1 border-l border-surface-border transition-colors ${
+            mode === 'experiment'
+              ? 'bg-surface-raised text-ink-primary font-medium'
+              : 'text-ink-muted hover:text-ink-secondary hover:bg-surface-secondary'
+          }`}
+          onClick={() => onChange('experiment')}
+        >
+          Experiment + Timepoint
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export function BulkUploadsPage() {
   const [openRow, setOpenRow] = useState<string | null>(null)
   const [elemDefaultUnit, setElemDefaultUnit] = useState('ppm')
+  const [xrdMode, setXrdMode] = useState<XrdMode>('sample')
 
   const toggle = (id: string) => setOpenRow((prev) => (prev === id ? null : id))
   const isOpen = (id: string) => openRow === id
@@ -108,11 +142,17 @@ export function BulkUploadsPage() {
         <UploadRow
           id="xrd-mineralogy"
           title="XRD Mineralogy"
-          description="Upload XRD mineral phase data — auto-detects Aeris or ActLabs format"
-          helpText="Aeris files (sample IDs like '20260218_HPHT070-d19_02') are detected automatically. ActLabs files have a plain sample_id column. Use the template for ActLabs format."
+          description="Upload XRD mineral phase data — auto-detects format from column names"
+          helpText={
+            xrdMode === 'experiment'
+              ? "Experiment+Timepoint format: include 'Experiment ID' and 'Time (days)' columns plus one column per mineral phase. The format is auto-detected on upload."
+              : "Sample-based format: include a 'sample_id' column plus one column per mineral phase. Aeris instrument exports (sample IDs like '20260218_HPHT070-d19_02') are also accepted."
+          }
           accept=".xlsx,.xls,.csv"
           uploadFn={(file) => bulkUploadsApi.uploadXrdMineralogy(file)}
           templateType="xrd-mineralogy"
+          templateMode={xrdMode}
+          topContent={<XrdModeToggle mode={xrdMode} onChange={setXrdMode} />}
           isOpen={isOpen('xrd-mineralogy')}
           onToggle={() => toggle('xrd-mineralogy')}
         />

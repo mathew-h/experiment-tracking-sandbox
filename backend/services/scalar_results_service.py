@@ -171,7 +171,8 @@ class ScalarResultsService:
             }
 
         # Calculate derived values (yields, conversions, etc.)
-        scalar_data.calculate_yields()
+        from backend.services.calculations.registry import recalculate  # noqa: PLC0415
+        recalculate(scalar_data, db)
 
         # Audit trail: log changes via ModificationsLog
         if upsert.fields_updated:
@@ -453,7 +454,8 @@ class ScalarResultsService:
                 setattr(scalar_result, field, value)
         
         # Recalculate derived values
-        scalar_result.calculate_yields()
+        from backend.services.calculations.registry import recalculate  # noqa: PLC0415
+        recalculate(scalar_result, db)
         
         db.flush()
         return scalar_result

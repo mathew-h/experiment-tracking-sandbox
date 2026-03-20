@@ -4,7 +4,7 @@ import io
 from typing import Optional
 
 import structlog
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -243,11 +243,11 @@ async def upload_rock_inventory(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a Rock Inventory Excel file."""
-    from backend.services.bulk_uploads.rock_inventory import RockInventoryUploadService  # noqa: PLC0415
+    from backend.services.bulk_uploads.rock_inventory import RockInventoryService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
         created, updated, _images, skipped, errors, warnings = (
-            RockInventoryUploadService.bulk_upsert_samples(db, file_bytes)
+            RockInventoryService.bulk_upsert_samples(db, file_bytes, [])
         )
         if not errors:
             db.commit()
@@ -272,10 +272,10 @@ async def upload_chemical_inventory(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a Chemical Inventory Excel file."""
-    from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryUploadService  # noqa: PLC0415
+    from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
-        created, updated, skipped, errors = ChemicalInventoryUploadService.bulk_upsert_from_excel(
+        created, updated, skipped, errors = ChemicalInventoryService.bulk_upsert_from_excel(
             db, file_bytes
         )
         if not errors:
@@ -445,10 +445,10 @@ def _simple_template(
     return buf.getvalue()
 
 
-def _get_template_bytes(upload_type: str) -> bytes:
+def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
     if upload_type == "xrd-mineralogy":
         from backend.services.bulk_uploads.xrd_upload import XRDAutoDetectService  # noqa: PLC0415
-        return XRDAutoDetectService.generate_template_bytes()
+        return XRDAutoDetectService.generate_template_bytes(mode=mode or "sample")
 
     if upload_type == "timepoint-modifications":
         from backend.services.bulk_uploads.timepoint_modifications import TimepointModificationsService  # noqa: PLC0415
@@ -514,6 +514,7 @@ def _get_template_bytes(upload_type: str) -> bytes:
 @router.get("/templates/{upload_type}")
 async def download_template(
     upload_type: str,
+    mode: Optional[str] = Query(None, description="Template mode (e.g. 'experiment' for XRD experiment+timepoint format)"),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> StreamingResponse:
     """Download an Excel upload template for the specified upload type."""
@@ -524,7 +525,7 @@ async def download_template(
                    "This upload type uses instrument exports or fixed-format files.",
         )
     try:
-        template_bytes = _get_template_bytes(upload_type)
+        template_bytes = _get_template_bytes(upload_type, mode=mode)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
