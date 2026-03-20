@@ -16,6 +16,7 @@ _AERIS_SAMPLE_RE = re.compile(r"^\d{8}_.+?-d\d+_\d+$")
 
 _EXP_COL_VARIANTS = {"experiment_id", "experiment id"}
 _TIME_COL_VARIANTS = {"time (days)", "time_days", "duration (days)", "time(days)"}
+_DATE_COL_VARIANTS = {"date", "measurement_date", "measurement date"}
 _SAMPLE_COL_VARIANTS = {"sample_id", "sample id"}
 
 
@@ -129,7 +130,14 @@ def _parse_experiment_timepoint(
     if not time_col:
         return 0, 0, 0, ["No 'Time (days)' column found."]
 
+    date_col = next(
+        (cols_normalized[i] for i, c in enumerate(cols_lower) if c in _DATE_COL_VARIANTS),
+        None,
+    )
+
     identity_cols = {exp_col.lower(), time_col.lower()}
+    if date_col:
+        identity_cols.add(date_col.lower())
     mineral_cols = [c for c in cols_normalized if c.lower() not in identity_cols]
     if not mineral_cols:
         return 0, 0, 0, ["No mineral phase columns detected."]
@@ -162,6 +170,19 @@ def _parse_experiment_timepoint(
             errors.append(f"Row {row_num}: experiment '{exp_id_raw}' not found.")
             continue
 
+        measurement_date = None
+        if date_col:
+            date_raw = row.get(date_col)
+            if date_raw is not None and not (isinstance(date_raw, float) and pd.isna(date_raw)):
+                import datetime  # noqa: PLC0415
+                if isinstance(date_raw, (datetime.date, datetime.datetime)):
+                    measurement_date = date_raw
+                else:
+                    try:
+                        measurement_date = datetime.datetime.strptime(str(date_raw).strip(), "%Y-%m-%d")
+                    except ValueError:
+                        pass  # Unrecognised format — leave as None
+
         for mcol in mineral_cols:
             raw_val = row.get(mcol)
             if raw_val is None or (isinstance(raw_val, float) and pd.isna(raw_val)):
@@ -186,6 +207,8 @@ def _parse_experiment_timepoint(
             if phase:
                 phase.amount = amount_val
                 phase.experiment_fk = experiment.id
+                if measurement_date is not None:
+                    phase.measurement_date = measurement_date
                 updated += 1
             else:
                 db.add(XRDPhase(
@@ -194,6 +217,7 @@ def _parse_experiment_timepoint(
                     time_post_reaction_days=time_days,
                     mineral_name=mineral_name,
                     amount=amount_val,
+                    measurement_date=measurement_date,
                 ))
                 created += 1
 
@@ -260,9 +284,9 @@ class XRDAutoDetectService:
 
         if mode == "experiment":
             ws.title = "XRD Experiment-Timepoint"
-            headers = ["Experiment ID", "Time (days)", "Quartz", "Calcite", "Dolomite", "Olivine", "Serpentine"]
+            headers = ["Experiment ID", "Time (days)", "Date", "Quartz", "Calcite", "Dolomite", "Olivine", "Serpentine"]
             required = {"Experiment ID", "Time (days)"}
-            example = ["HPHT_001", 7.0, 45.2, 20.1, 15.0, 10.5, 9.2]
+            example = ["HPHT_001", 7.0, "2026-03-19", 45.2, 20.1, 15.0, 10.5, 9.2]
         else:
             ws.title = "XRD Sample-Based"
             headers = ["sample_id", "Quartz", "Calcite", "Dolomite", "Feldspar", "Pyrite", "Other"]
@@ -289,6 +313,7 @@ class XRDAutoDetectService:
                 ["Column", "Description"],
                 ["Experiment ID (required)", "Must match an existing experiment (delimiter-insensitive, e.g. HPHT_001 or HPHT001)."],
                 ["Time (days) (required)", "Days post-reaction as a number (e.g. 7, 14.5). Use 0 for pre-reaction baseline."],
+                ["Date (optional)", "Measurement date in YYYY-MM-DD format. Stored as measurement_date on the XRDPhase record."],
                 ["[mineral name]", "Mineral weight percent (0–100). Add/remove columns as needed. Blank cells are skipped."],
                 [""],
                 ["Notes:"],
