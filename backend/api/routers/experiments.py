@@ -33,6 +33,7 @@ def list_experiments(
     limit: int = Query(50, ge=1, le=500),
     status: ExperimentStatus | None = None,
     researcher: str | None = None,
+    search: str | None = None,
     sample_id: str | None = None,
     experiment_type: str | None = None,
     reactor_number: int | None = None,
@@ -49,6 +50,8 @@ def list_experiments(
         stmt = stmt.where(Experiment.status == status)
     if researcher:
         stmt = stmt.where(Experiment.researcher == researcher)
+    if search:
+        stmt = stmt.where(Experiment.experiment_id.ilike(f"%{search}%"))
     if sample_id:
         stmt = stmt.where(Experiment.sample_id.ilike(f"%{sample_id}%"))
     if date_from:
@@ -162,8 +165,13 @@ def get_experiment_results(
             created_at=r.created_at,
             has_scalar=scalar is not None,
             has_icp=icp is not None,
+            has_brine_modification=r.has_brine_modification,
+            brine_modification_description=r.brine_modification_description,
             grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
             h2_grams_per_ton_yield=scalar.h2_grams_per_ton_yield if scalar else None,
+            h2_micromoles=scalar.h2_micromoles if scalar else None,
+            gross_ammonium_concentration_mM=scalar.gross_ammonium_concentration_mM if scalar else None,
+            final_conductivity_mS_cm=scalar.final_conductivity_mS_cm if scalar else None,
             final_ph=scalar.final_ph if scalar else None,
         ))
     return out

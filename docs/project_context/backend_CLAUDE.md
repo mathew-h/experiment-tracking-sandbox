@@ -12,8 +12,8 @@
 ## Quick Commands
 
 ```bash
-# Start the API server (from project root)
-uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8000
+# Start the API server (from project root — use venv prefix)
+.venv/Scripts/uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8000
 
 # Run backend tests
 pytest tests/services/ -v
@@ -46,6 +46,16 @@ Never import `auth.firebase_config` from backend code — it imports `streamlit`
 at module load time. This module does not exist until M4 (React frontend build).
 **Always use lazy imports** (inside endpoint functions) when wrapping these parsers in the API.
 Tests that exercise these endpoints must use `sys.modules` patching to stub `frontend.config.variable_config`.
+
+## Stale Backend Processes (Windows Gotcha)
+Old uvicorn instances from prior sessions persist as Windows-native processes. Neither WSL `kill`,
+`taskkill`, nor PowerShell `Stop-Process` can reliably terminate them. Symptoms: API returns
+responses missing recently added fields. Fix: start on a new port and update the Vite proxy:
+```bash
+.venv/Scripts/uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8001
+# then set target: 'http://localhost:8001' in frontend/vite.config.ts
+```
+The `--reload` flag will eventually pick up file changes, but a fresh port is faster and reliable.
 
 ## API Reference
 Full endpoint reference: `docs/api/API_REFERENCE.md`

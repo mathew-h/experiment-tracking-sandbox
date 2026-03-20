@@ -105,9 +105,14 @@ class ResultWithFlagsResponse(BaseModel):
     created_at: datetime
     has_scalar: bool = False
     has_icp: bool = False
+    has_brine_modification: bool = False
+    brine_modification_description: Optional[str] = None
     # Key scalar values for the list (None if no scalar)
     grams_per_ton_yield: Optional[float] = None
     h2_grams_per_ton_yield: Optional[float] = None
+    h2_micromoles: Optional[float] = None
+    gross_ammonium_concentration_mM: Optional[float] = None
+    final_conductivity_mS_cm: Optional[float] = None
     final_ph: Optional[float] = None
 
 

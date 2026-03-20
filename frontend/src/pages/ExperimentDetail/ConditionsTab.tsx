@@ -17,8 +17,8 @@ interface Props {
 function Row({ label, value, unit }: { label: string; value: unknown; unit?: string }) {
   if (value == null || value === '') return null
   return (
-    <div className="flex items-baseline justify-between py-1 border-b border-surface-border/50">
-      <span className="text-xs text-ink-muted">{label}</span>
+    <div className="flex items-baseline gap-4 py-1 border-b border-surface-border/50">
+      <span className="text-xs text-ink-secondary w-44 shrink-0">{label}</span>
       <span className="text-xs font-mono-data text-ink-primary">
         {String(value)}{unit ? ` ${unit}` : ''}
       </span>
@@ -81,8 +81,8 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
         <Row label="Rock Mass" value={conditions.rock_mass_g} unit="g" />
         <Row label="Water Volume" value={conditions.water_volume_mL} unit="mL" />
         {conditions.water_to_rock_ratio != null && (
-          <div className="flex items-baseline justify-between py-1 border-b border-surface-border/50">
-            <span className="text-xs text-ink-muted font-semibold">Water : Rock Ratio</span>
+          <div className="flex items-baseline gap-4 py-1 border-b border-surface-border/50">
+            <span className="text-xs text-ink-secondary font-semibold w-44 shrink-0">Water : Rock Ratio</span>
             <span className="text-xs font-mono-data text-brand-red font-semibold">{conditions.water_to_rock_ratio.toFixed(2)}</span>
           </div>
         )}

@@ -8,18 +8,21 @@
 ## Quick Commands
 
 ```bash
-# Create a new migration
-alembic revision --autogenerate -m "descriptive message"
+# Create a new migration (use venv prefix — bare 'alembic' not on PATH)
+.venv/Scripts/alembic revision --autogenerate -m "descriptive message"
 
 # Apply migrations
-alembic upgrade head
+.venv/Scripts/alembic upgrade head
 
 # Test downgrade (always verify before merging)
-alembic downgrade -1 && alembic upgrade head
+.venv/Scripts/alembic downgrade -1 && .venv/Scripts/alembic upgrade head
 
 # Fresh DB bootstrap (use instead of migration chain on a new PostgreSQL DB)
-python -c "from database import Base, engine; Base.metadata.create_all(engine)"
-alembic stamp head
+.venv/Scripts/python -c "from database import Base, engine; Base.metadata.create_all(engine)"
+.venv/Scripts/alembic stamp head
+
+# After loading a new experiments.db via migrate-sqlite-to-postgres.py, always follow with:
+.venv/Scripts/alembic upgrade head   # applies additive columns added since last migration
 ```
 
 ## Connection Strings

@@ -12,6 +12,12 @@ const STATUS_OPTIONS = [
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
 ]
+
+const STATUS_TEXT_CLASS: Record<string, string> = {
+  ONGOING:   'text-status-ongoing',
+  COMPLETED: 'text-status-completed',
+  CANCELLED: 'text-status-cancelled',
+}
 const TYPE_OPTIONS = [
   { value: 'Serum', label: 'Serum' },
   { value: 'HPHT', label: 'HPHT' },
@@ -26,6 +32,7 @@ export function ExperimentListPage() {
 
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [experimentIdFilter, setExperimentIdFilter] = useState('')
   const [sampleFilter, setSampleFilter] = useState('')
   const [reactorFilter, setReactorFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -33,12 +40,13 @@ export function ExperimentListPage() {
   const [skip, setSkip] = useState(0)
   const [limit, setLimit] = useState(25)
 
-  const queryKey = ['experiments', statusFilter, typeFilter, sampleFilter, reactorFilter, dateFrom, dateTo, skip, limit]
+  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, dateFrom, dateTo, skip, limit]
   const { data, isLoading, error } = useQuery({
     queryKey,
     queryFn: () => experimentsApi.list({
       status: statusFilter || undefined,
       experiment_type: typeFilter || undefined,
+      search: experimentIdFilter || undefined,
       sample_id: sampleFilter || undefined,
       reactor_number: reactorFilter ? parseInt(reactorFilter) : undefined,
       date_from: dateFrom || undefined,
@@ -57,7 +65,7 @@ export function ExperimentListPage() {
   const resetPage = () => setSkip(0)
   const totalPages = data ? Math.ceil(data.total / limit) : 0
   const currentPage = Math.floor(skip / limit) + 1
-  const hasActiveFilters = !!(statusFilter || typeFilter || sampleFilter || reactorFilter || dateFrom || dateTo)
+  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || dateFrom || dateTo)
 
   return (
     <div className="space-y-4">
@@ -103,6 +111,13 @@ export function ExperimentListPage() {
             onChange={(e) => { setTypeFilter(e.target.value); resetPage() }}
           />
         </div>
+        <div className="w-44">
+          <Input
+            placeholder="Experiment ID…"
+            value={experimentIdFilter}
+            onChange={(e) => { setExperimentIdFilter(e.target.value); resetPage() }}
+          />
+        </div>
         <div className="w-36">
           <Input
             placeholder="Sample ID…"
@@ -138,8 +153,8 @@ export function ExperimentListPage() {
             variant="ghost"
             size="sm"
             onClick={() => {
-              setStatusFilter(''); setTypeFilter(''); setSampleFilter('')
-              setReactorFilter(''); setDateFrom(''); setDateTo(''); resetPage()
+              setStatusFilter(''); setTypeFilter(''); setExperimentIdFilter('')
+              setSampleFilter(''); setReactorFilter(''); setDateFrom(''); setDateTo(''); resetPage()
             }}
           >
             Clear
@@ -193,17 +208,24 @@ export function ExperimentListPage() {
                       {exp.reactor_number ?? <span className="text-ink-muted">—</span>}
                     </Td>
                     <Td onClick={(e) => e.stopPropagation()}>
-                      <select
-                        className="bg-surface-card border border-surface-border rounded px-1.5 py-0.5 text-xs text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
-                        value={exp.status ?? ''}
-                        onChange={(e) =>
-                          statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value })
-                        }
-                      >
-                        {STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
+                      <div className="relative inline-block">
+                        <select
+                          className={[
+                            'appearance-none bg-surface-overlay border border-surface-border rounded',
+                            'pl-2 pr-6 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-red/50',
+                            STATUS_TEXT_CLASS[exp.status ?? ''] ?? 'text-ink-secondary',
+                          ].join(' ')}
+                          value={exp.status ?? ''}
+                          onChange={(e) =>
+                            statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value })
+                          }
+                        >
+                          {STATUS_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                        <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-ink-muted text-2xs">▾</span>
+                      </div>
                     </Td>
                     <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? exp.date.slice(0, 10) : '—'}</Td>
                     <Td className="text-xs text-ink-secondary max-w-48 truncate">

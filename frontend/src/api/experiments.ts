@@ -58,14 +58,20 @@ export interface ResultWithFlags {
   created_at: string
   has_scalar: boolean
   has_icp: boolean
+  has_brine_modification: boolean
+  brine_modification_description: string | null
   grams_per_ton_yield: number | null
   h2_grams_per_ton_yield: number | null
+  h2_micromoles: number | null
+  gross_ammonium_concentration_mM: number | null
+  final_conductivity_mS_cm: number | null
   final_ph: number | null
 }
 
 export interface ExperimentListParams {
   status?: string
   researcher?: string
+  search?: string
   sample_id?: string
   experiment_type?: string
   reactor_number?: number
