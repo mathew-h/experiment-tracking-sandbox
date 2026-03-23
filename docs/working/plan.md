@@ -45,14 +45,16 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
   - `frontend/e2e/journeys/03-upload-icp.spec.ts` — 1 test passing
   - `frontend/e2e/journeys/08-solution-chemistry.spec.ts` — 1 test passing
 
-### Pending
-- [ ] Chunk D: Master Results Sync config store
-  - New `AppConfig` DB table (key-value store for runtime-mutable settings)
+### Completed (continued)
+- [x] Chunk D: Master Results Sync config store
+  - `database/models/app_config.py` — AppConfig key-value table (key PK, value text, updated_at)
+  - `alembic/versions/0e95bf7dffaf_add_app_config_table.py` — migration (additive, downgrade clean)
   - `GET /api/bulk-uploads/master-results/config` + `PATCH /api/bulk-uploads/master-results/config`
-  - Update `master_bulk_upload.py` `sync_from_path()` to read from `AppConfig` (not hardcoded settings)
-  - No frontend changes needed (spec confirmed `UploadRow.syncFn` pattern already works)
-  - One-time setup: configure path via Swagger UI before running E2E test
-  - `frontend/e2e/journeys/07-master-results-sync.spec.ts`
+  - `sync_from_path()` reads from AppConfig table first, falls back to settings
+  - 6 new API tests (129 total passing)
+  - `frontend/e2e/journeys/07-master-results-sync.spec.ts` — spec written; requires one-time path config setup via Swagger UI
+
+### Pending
 - [ ] Chunk E: XRD Mineralogy (Aeris format)
   - Upload `docs/sample_data/XRD_result_070d19.xlsx` via UI, fix parser if needed
   - `frontend/e2e/journeys/05-upload-xrd.spec.ts`
@@ -75,7 +77,7 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
 - `bulk_uploads.py` `upload_scalar_results()`: added `variable_config` sys.modules stub (same pattern as ICP endpoint)
 
 ### Next Action
-Start **Chunk D**: Create `AppConfig` table, write migration, add `GET/PATCH /bulk-uploads/master-results/config` endpoints, update `sync_from_path()` to read from `AppConfig`. See plan `docs/superpowers/plans/2026-03-23-m8-testing-docs.md` Tasks D1–D3.
+Start **Chunk E**: Upload `docs/sample_data/XRD_result_070d19.xlsx` via UI, fix parser if needed, write `05-upload-xrd.spec.ts`. See plan Tasks E1.
 
 ---
 
