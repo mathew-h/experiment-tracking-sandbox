@@ -13,7 +13,7 @@ M8 covers three workstreams:
 
 1. **Playwright E2E infrastructure** — browser automation against the live dev stack
 2. **Upload testing and parser fixes** — test each upload type with real lab files; fix parsing bugs found
-3. **New feature implementation** — specs in `docs/specs/` that are designed but not yet built (Master Results Sync server-side UI, `next-ids` endpoint, elemental composition parser)
+3. **New feature implementation** — specs in `docs/specs/` that are designed but not yet fully built (Master Results Sync server-side UI + mutable config store, `next-ids` endpoint fix, new `elemental_composition.py` parser)
 
 After all uploads are verified, the final chunk completes the 6 original E2E journeys, the calculation regression test, and the documentation pass.
 
@@ -31,6 +31,7 @@ After all uploads are verified, the final chunk completes the 6 original E2E jou
 Key settings:
 - `baseURL: 'http://localhost:5173'` — connects to the already-running Vite dev server
 - `testDir: './e2e/journeys'`
+- `globalSetup: './e2e/fixtures/auth.ts'` — runs once before all tests; logs in and saves `storageState`
 - `use.storageState: 'e2e/.auth/state.json'` — persisted Firebase session reused across tests
 - `workers: 1` — sequential (live dev DB, no isolation)
 - `projects: [{ name: 'chromium' }]` — Chromium only (Windows lab PC)
@@ -94,10 +95,13 @@ Deliverables:
 ---
 
 ### Chunk B — New Experiments Upload
-**Goal:** Test `new_experiments_template.xlsx` end-to-end; implement `next-ids` endpoint and NextIdChips UI.
+**Goal:** Test `new_experiments_template.xlsx` end-to-end; fix `next-ids` endpoint; add NextIdChips UI.
 
-**New backend work:**
-- `GET /api/experiments/next-ids` — returns `{ HPHT: N, Serum: N, CF: N, Autoclave: N }` (per spec `docs/specs/new_experiments_upload.md`)
+**Existing backend — requires fixes:**
+- `GET /api/experiments/next-ids` already exists at `backend/api/routers/experiments.py`
+- Two divergences from spec (`docs/specs/new_experiments_upload.md`) to fix:
+  1. Remove Firebase auth requirement (spec says no auth — read-only, non-sensitive)
+  2. Add `Autoclave` type to the response (current impl only returns HPHT, Serum, CF)
 
 **New frontend work:**
 - NextIdChips component on the New Experiments upload card (shows next available IDs per type)
@@ -129,14 +133,17 @@ Deliverables:
 ### Chunk D — Master Results Sync
 **Goal:** Implement the server-side sync model from `docs/specs/master_results_sync.md`; test with `Master Reactor Sampling Tracker.xlsx`.
 
-This chunk is the largest — it implements a new UI pattern and new endpoints not yet built.
+**What already exists:**
+- `MasterBulkUploadService.sync_from_path()` in `master_bulk_upload.py` reads the file from `settings.master_results_path` (a pydantic-settings `.env` field)
+- `POST /api/bulk-uploads/master-results` already calls `sync_from_path()` when no file body is provided
+- `Standard` column — must verify the existing parser silently ignores it (spec requirement)
 
-**New backend work:**
-- `AppConfig` key-value table (or settings mechanism) for storing the file path
-- `GET /api/bulk-uploads/master-results/config` — read configured path
-- `PATCH /api/bulk-uploads/master-results/config` — validate and save path
-- Update `POST /api/bulk-uploads/master-results` — reads from configured path (no file upload body)
-- `PermissionError` handling (file open in Excel → clear user message)
+**What is genuinely new (backend):**
+- Mutable config store for the file path — the current `.env` field is read-only at runtime; need a small `AppConfig` DB table (key-value) or equivalent writable store
+- `GET /api/bulk-uploads/master-results/config` — read the configured path from the writable store
+- `PATCH /api/bulk-uploads/master-results/config` — validate the path resolves to a readable `.xlsx`, then save
+- Update `POST /api/bulk-uploads/master-results` to read from the writable store (not `.env`)
+- `PermissionError` handling (file open in Excel → clear user message, not 500)
 
 **New frontend work:**
 - Redesign the Master Results card:
@@ -158,7 +165,8 @@ This chunk is the largest — it implements a new UI pattern and new endpoints n
 
 **File:** `docs/sample_data/XRD_result_070d19.xlsx`
 **Format:** Aeris — `Sample ID` column with values like `20260218_HPHT070-d19_02`
-**Parser:** `XRDAutoDetectService` → `AerisXRDUploadService`
+**UI endpoint:** The XRD Mineralogy card in `BulkUploads.tsx` calls `POST /api/bulk-uploads/xrd-mineralogy`, which routes through `XRDAutoDetectService`. Auto-detection will classify this file as `"aeris"` format and delegate to `AerisXRDUploadService`.
+**Parser chain:** `XRDAutoDetectService.upload()` → `AerisXRDUploadService.bulk_upsert_from_excel()`
 
 Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 ```
@@ -177,20 +185,30 @@ Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 ---
 
 ### Chunk F — Elemental Composition (ActLabs)
-**Goal:** Test `sample_actlabs_rock_composition.xlsx`; fix known `external_analysis_id` bug in `elemental_composition.py`.
+**Goal:** Create new `elemental_composition.py` parser per spec; fix known `external_analysis_id` bug; test with `sample_actlabs_rock_composition.xlsx`.
 
 **File:** `docs/sample_data/sample_actlabs_rock_composition.xlsx`
-**Parser:** `backend/services/bulk_uploads/elemental_composition.py`
 
-**Known bug (from M6):**
-- `ElementalCompositionService` creates `ElementalAnalysis` without required `external_analysis_id`
-- Fix: create `ExternalAnalysis` record first (type=`Elemental`), then link `ElementalAnalysis` to it
+**What exists:**
+- `backend/services/bulk_uploads/actlabs_titration_data.py` — the current `ElementalCompositionService` (heuristic multi-header ActLabs format)
+- Known bug: creates `ElementalAnalysis` without required `external_analysis_id`
+
+**What is new:**
+- `backend/services/bulk_uploads/elemental_composition.py` — new flexible parser per `docs/specs/elemental_composition_upload.md`
+  - Wide-format: `Sample ID` + analyte columns with unit in header (`Symbol (unit)`)
+  - Auto-creates `Analyte` records; upserts `ElementalAnalysis` linked to an `ExternalAnalysis` record (fixes the missing `external_analysis_id` pattern)
+  - This is a distinct parser from `actlabs_titration_data.py`, which stays for structured ActLabs report files
+- New `POST /api/bulk-uploads/elemental-composition` endpoint wiring the new parser
+- New upload card on the Bulk Uploads page for this parser
+
+**Known bug fix (in existing `actlabs_titration_data.py`):**
+- Fix `ElementalCompositionService` to create `ExternalAnalysis` record first (type=`Elemental`), then link `ElementalAnalysis` to it via `external_analysis_id`
 
 **Spec reference:** `docs/specs/elemental_composition_upload.md`
 
 **Test:**
-- Upload file via UI
-- Verify `ElementalAnalysis` rows created for the sample
+- Upload file via UI using the new elemental composition card
+- Verify `ElementalAnalysis` rows created for the sample with correct analyte values
 - E2E test: `09-elemental-composition.spec.ts`
 
 ---
@@ -200,12 +218,11 @@ Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 
 **Remaining journeys:**
 1. `01-create-experiment.spec.ts` — Login → create experiment → conditions → additives → verify derived fields on detail page
-2. `04-update-status-dashboard.spec.ts` — Update experiment status → verify dashboard reflects change
+2. `04-update-status-dashboard.spec.ts` — Update experiment status via the inline `StatusBadge` on the ReactorGrid → reload the dashboard page → verify the card's status badge reflects the new status
 3. `06-recalculate-derived-fields.spec.ts` — Edit `rock_mass_g` → verify `water_to_rock_ratio` recalculated
 
 **Additional tests:**
 - Calculation regression test (pytest): all derived fields for a known dataset match expected values
-- Load test: 5 concurrent users hitting the API simultaneously (using pytest-asyncio or locust)
 
 **Documentation:**
 - `README.md` — full rewrite; must work on a clean machine
@@ -233,12 +250,13 @@ Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 
 ## 5. Acceptance Criteria
 
-- [ ] All 9 E2E journey specs pass (`npx playwright test`)
+- [ ] Smoke test (`00-smoke.spec.ts`) passes — Playwright reaches app, auth works, dashboard loads
+- [ ] All 9 journey specs (`01`–`09`) pass (`npx playwright test`)
 - [ ] Calculation regression test passes
 - [ ] All 6 upload types process real sample files with 0 unexpected errors
-- [ ] Master Results Sync server-side config implemented and tested
-- [ ] `external_analysis_id` bug in `elemental_composition.py` fixed
-- [ ] `GET /api/experiments/next-ids` implemented
+- [ ] Master Results Sync: mutable config store + `GET`/`PATCH /config` endpoints + redesigned UI card working
+- [ ] `elemental_composition.py` new parser created; `external_analysis_id` bug fixed in `actlabs_titration_data.py`
+- [ ] `GET /api/experiments/next-ids` returns all 4 types (HPHT, Serum, CF, Autoclave), no auth required
 - [ ] `README.md` works end-to-end on a clean machine
 - [ ] All documentation accurate and up to date
 
@@ -246,7 +264,7 @@ Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 
 ## 6. Out of Scope
 
-- Load test deferred unless time permits in Chunk G
+- Load test (5 concurrent users)
 - Firefox/WebKit Playwright projects — Chromium only
 - Docker or CI pipeline integration
 - Firebase emulator — real Firebase credentials used throughout
