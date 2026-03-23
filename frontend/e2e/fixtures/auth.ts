@@ -1,32 +1,60 @@
-import { chromium, FullConfig } from '@playwright/test'
-import * as fs from 'fs'
-import * as path from 'path'
+/**
+ * Playwright auth fixtures.
+ *
+ * Firebase Web SDK v9 stores auth state in IndexedDB, which Playwright's
+ * storageState does not capture. The solution: a worker-scoped BrowserContext
+ * that logs in once and is reused across all tests in the worker.
+ *
+ * Each test receives its own Page (for isolation), but shares the authenticated
+ * BrowserContext so Firebase auth in IndexedDB persists throughout the run.
+ */
+import { test as base, BrowserContext, Page } from '@playwright/test'
 import * as dotenv from 'dotenv'
+import * as path from 'path'
+import * as url from 'url'
 
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 dotenv.config({ path: path.join(__dirname, '../.env.e2e') })
 
-const AUTH_FILE = path.join(__dirname, '../.auth/state.json')
-
-export default async function globalSetup(_config: FullConfig) {
-  // Ensure .auth directory exists
-  fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true })
-
-  const browser = await chromium.launch()
-  const page = await browser.newPage()
-
-  await page.goto('http://localhost:5173')
-
-  // Fill login form (selectors from frontend/src/pages/Login.tsx)
-  await page.getByPlaceholder('you@addisenergy.com').fill(process.env.E2E_EMAIL!)
-  await page.getByPlaceholder('••••••••').fill(process.env.E2E_PASSWORD!)
-  await page.getByRole('button', { name: /sign in/i }).click()
-
-  // Wait for redirect to dashboard
-  await page.waitForURL('**/dashboard', { timeout: 15_000 })
-
-  // Save auth state
-  await page.context().storageState({ path: AUTH_FILE })
-  await browser.close()
-
-  console.log('✓ Auth state saved to', AUTH_FILE)
+type AuthWorkerFixtures = {
+  authedContext: BrowserContext
 }
+
+type AuthTestFixtures = {
+  page: Page
+}
+
+export const test = base.extend<AuthTestFixtures, AuthWorkerFixtures>({
+  // One authenticated browser context per worker (= once for the whole run with workers:1)
+  authedContext: [
+    async ({ browser }, use) => {
+      const context = await browser.newContext()
+      const loginPage = await context.newPage()
+
+      await loginPage.goto('http://localhost:5173/login')
+      await loginPage.getByPlaceholder('you@addisenergy.com').fill(process.env.E2E_EMAIL!)
+      await loginPage.getByPlaceholder('••••••••').fill(process.env.E2E_PASSWORD!)
+      await loginPage.getByRole('button', { name: /sign in/i }).click()
+
+      // Wait for redirect away from login page (dashboard is at /)
+      await loginPage.waitForFunction(
+        () => !window.location.pathname.includes('/login'),
+        { timeout: 15_000 }
+      )
+      await loginPage.close()
+
+      await use(context)
+      await context.close()
+    },
+    { scope: 'worker' },
+  ],
+
+  // Each test gets its own page within the shared authenticated context
+  page: async ({ authedContext }, use) => {
+    const page = await authedContext.newPage()
+    await use(page)
+    await page.close()
+  },
+})
+
+export { expect } from '@playwright/test'

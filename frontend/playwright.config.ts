@@ -2,7 +2,6 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e/journeys',
-  globalSetup: './e2e/fixtures/auth.ts',
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
@@ -11,7 +10,6 @@ export default defineConfig({
 
   use: {
     baseURL: 'http://localhost:5173',
-    storageState: 'e2e/.auth/state.json',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
