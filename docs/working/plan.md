@@ -60,12 +60,17 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
   - HPHT_070 already existed in dev DB
   - `frontend/e2e/journeys/05-upload-xrd.spec.ts` — 1 test passing
 
+### Completed (continued)
+- [x] Chunk F: Elemental Composition (ActLabs) — scoped to F1 bug fix + two E2E tests
+  - Bug fix: `ActlabsRockTitrationService.import_excel()` — ElementalAnalysis rows now linked via auto-created ExternalAnalysis stub; duplicate-check query also updated to key on (external_analysis_id, analyte_id)
+  - 9 unit tests passing (`test_elemental_composition.py`)
+  - `docs/sample_data/elemental_composition_wide.xlsx` — small wide-format fixture (SC-B-01)
+  - `frontend/e2e/journeys/09-elemental-composition.spec.ts` — Sample Chemical Composition card, wide fixture — passing
+  - `frontend/e2e/journeys/10-actlabs-rock.spec.ts` — ActLabs Rock Analysis card, real actlabs file — passing
+  - Design decision: `/actlabs-rock` and `/elemental-composition` kept as separate contracts; flexible-parser upgrade deferred (see docs/specs/elemental_composition_upload.md)
+  - Seeded TAMARACK, MONAZITE SAND, PNNL CORE reference standards into dev SampleInfo
+
 ### Pending
-- [ ] Chunk F: Elemental Composition (ActLabs)
-  - Bug fix: `actlabs_titration_data.py` `ActlabsRockTitrationService.import_excel()` — creates `ElementalAnalysis` without `external_analysis_id` (see plan Task F1 for exact fix)
-  - New `backend/services/bulk_uploads/elemental_composition.py` parser (flexible wide-format)
-  - New `POST /api/bulk-uploads/elemental-composition` endpoint
-  - `frontend/e2e/journeys/09-elemental-composition.spec.ts`
 - [ ] Chunk G: Core E2E journeys + documentation
   - `01-create-experiment.spec.ts` — Login → create experiment → conditions → additives → verify derived fields
   - `04-update-status-dashboard.spec.ts` — Status change via StatusBadge → reload → verify dashboard badge
@@ -80,7 +85,7 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
 - `bulk_uploads.py` `upload_scalar_results()`: added `variable_config` sys.modules stub (same pattern as ICP endpoint)
 
 ### Next Action
-Start **Chunk F**: Fix `ActlabsRockTitrationService.import_excel()` bug (missing `external_analysis_id`), write new elemental composition parser, add E2E spec `09-elemental-composition.spec.ts`. See plan Tasks F1–F3.
+Start **Chunk G**: Core E2E journeys (`01-create-experiment`, `04-update-status-dashboard`, `06-recalculate-derived-fields`) + calculation regression test + documentation pass (README, USER_MANUAL, CONTRIBUTING, PRODUCTION_DEPLOYMENT).
 
 ---
 
