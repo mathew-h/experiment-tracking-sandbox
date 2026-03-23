@@ -327,7 +327,6 @@ class ICPService:
                     
                     # Skip rows that don't match expected pattern (Standards, Blanks, etc.)
                     if sample_info is None:
-                        errors.append(f"Sample '{label}': Skipped - Label format not recognized (likely Standard/Blank/QC sample)")
                         continue
                     
                     # Get all data for this sample
@@ -605,55 +604,52 @@ class ICPService:
         return experimental_result, was_update
     
     @staticmethod
-    def bulk_create_icp_results(db: Session, processed_data: List[Dict[str, Any]]) -> Tuple[List[ExperimentalResults], List[str]]:
+    def bulk_create_icp_results(db: Session, processed_data: List[Dict[str, Any]]) -> Tuple[List[ExperimentalResults], int, List[str]]:
         """
         Bulk create ICP results with validation and error collection.
-        
+
         Args:
             db: Database session
             processed_data: List of processed ICP data dictionaries
-            
+
         Returns:
-            Tuple of (successful_results, error_messages)
+            Tuple of (successful_results, updated_count, error_messages)
         """
         results_to_add = []
+        updated_count = 0
         errors = []
-        
+
         for idx, data in enumerate(processed_data):
             try:
                 experiment_id = data.get('experiment_id')
                 time_post_reaction = data.get('time_post_reaction')
-                
+
                 if not experiment_id:
                     errors.append(f"Sample {idx + 1}: Missing experiment_id.")
                     continue
-                
+
                 if time_post_reaction is None:
                     errors.append(f"Sample {idx + 1}: Missing time_post_reaction.")
                     continue
-                
+
                 # Create or update the ICP result
                 result, was_update = ICPService.create_icp_result(
                     db=db,
                     experiment_id=experiment_id,
                     result_data=data
                 )
-                
+
                 if result:
                     results_to_add.append(result)
-                    
-                    # Add informational message for overwrites
                     if was_update:
-                        errors.append(
-                            f"Sample {idx + 1}: Updated existing ICP-OES data for experiment '{experiment_id}' at time {time_post_reaction} days"
-                        )
-                    
+                        updated_count += 1
+
             except ValueError as e:
                 errors.append(f"Sample {idx + 1}: {str(e)}")
             except Exception as e:
                 errors.append(f"Sample {idx + 1}: Unexpected error - {str(e)}")
-        
-        return results_to_add, errors
+
+        return results_to_add, updated_count, errors
     
     @staticmethod
     def get_icp_results_for_experiment(db: Session, experiment_id: str) -> List[ICPResults]:

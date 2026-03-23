@@ -27,6 +27,31 @@ async def upload_scalar_results(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a Solution Chemistry Excel file and upsert scalar results."""
+    import sys  # noqa: PLC0415
+    if "frontend.config.variable_config" not in sys.modules:
+        from types import ModuleType
+        _stub = ModuleType("frontend.config.variable_config")
+        _stub.SCALAR_RESULTS_TEMPLATE_HEADERS = {
+            "measurement_date": "Date",
+            "experiment_id": "Experiment ID",
+            "time_post_reaction": "Time (days)",
+            "description": "Description",
+            "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
+            "sampling_volume_mL": "Sampling Vol (mL)",
+            "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
+            "background_experiment_id": "Bkg Exp ID",
+            "h2_concentration": "H2 Conc (ppm)",
+            "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
+            "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
+            "final_ph": "Final pH",
+            "ferrous_iron_yield": "Fe2+ Yield (%)",
+            "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
+            "final_conductivity_mS_cm": "Conductivity (mS/cm)",
+            "overwrite": "Overwrite",
+        }
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules["frontend.config.variable_config"] = _stub
     from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     created, updated, skipped, errors, feedbacks = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
@@ -164,7 +189,7 @@ async def upload_icp_oes(
         if parse_errors and not processed_data:
             return UploadResponse(created=0, updated=0, skipped=0, errors=parse_errors,
                                   message="ICP parse failed")
-        created_rows, ingest_errors = ICPService.bulk_create_icp_results(db, processed_data)
+        created_rows, updated_count, ingest_errors = ICPService.bulk_create_icp_results(db, processed_data)
         all_errors = parse_errors + ingest_errors
         db.commit()
     except Exception as exc:
@@ -172,11 +197,11 @@ async def upload_icp_oes(
         log.error("icp_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
-    created = len(created_rows)
-    log.info("icp_upload", created=created, user=current_user.email)
+    new_count = len(created_rows) - updated_count
+    log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email)
     return UploadResponse(
-        created=created, updated=0, skipped=0, errors=all_errors,
-        message=f"ICP-OES: {created} result rows created",
+        created=new_count, updated=updated_count, skipped=0, errors=all_errors,
+        message=f"ICP-OES: {new_count} created, {updated_count} updated",
     )
 
 
