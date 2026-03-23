@@ -185,30 +185,29 @@ Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 ---
 
 ### Chunk F — Elemental Composition (ActLabs)
-**Goal:** Create new `elemental_composition.py` parser per spec; fix known `external_analysis_id` bug; test with `sample_actlabs_rock_composition.xlsx`.
+**Goal:** Fix `external_analysis_id` bug in `ActlabsRockTitrationService`; test with `sample_actlabs_rock_composition.xlsx`; create new flexible `elemental_composition.py` parser.
 
 **File:** `docs/sample_data/sample_actlabs_rock_composition.xlsx`
+**Frontend card:** "ActLabs Rock Titration" — calls `POST /api/bulk-uploads/actlabs-rock`
+**Parser:** `ActlabsRockTitrationService.import_excel()` in `backend/services/bulk_uploads/actlabs_titration_data.py`
 
-**What exists:**
-- `backend/services/bulk_uploads/actlabs_titration_data.py` — the current `ElementalCompositionService` (heuristic multi-header ActLabs format)
-- Known bug: creates `ElementalAnalysis` without required `external_analysis_id`
+**Bug (in `ActlabsRockTitrationService.import_excel()`):**
+- Line 467 creates `ElementalAnalysis(sample_id=..., analyte_id=..., analyte_composition=...)` with no `external_analysis_id`
+- Fix: create a `ExternalAnalysis` stub per sample (type=`Bulk Elemental Composition`) before inserting `ElementalAnalysis` rows, then pass `external_analysis_id=stub.id` — exactly the pattern already used by `ElementalCompositionService._get_or_create_ext_analysis()` in the same file
 
-**What is new:**
-- `backend/services/bulk_uploads/elemental_composition.py` — new flexible parser per `docs/specs/elemental_composition_upload.md`
-  - Wide-format: `Sample ID` + analyte columns with unit in header (`Symbol (unit)`)
-  - Auto-creates `Analyte` records; upserts `ElementalAnalysis` linked to an `ExternalAnalysis` record (fixes the missing `external_analysis_id` pattern)
-  - This is a distinct parser from `actlabs_titration_data.py`, which stays for structured ActLabs report files
-- New `POST /api/bulk-uploads/elemental-composition` endpoint wiring the new parser
-- New upload card on the Bulk Uploads page for this parser
+**Note:** `ElementalCompositionService.bulk_upsert_wide_from_excel()` already handles this correctly and does not need fixing.
 
-**Known bug fix (in existing `actlabs_titration_data.py`):**
-- Fix `ElementalCompositionService` to create `ExternalAnalysis` record first (type=`Elemental`), then link `ElementalAnalysis` to it via `external_analysis_id`
-
-**Spec reference:** `docs/specs/elemental_composition_upload.md`
+**New parser (separate from the bug fix):**
+- `backend/services/bulk_uploads/elemental_composition.py` — new flexible wide-format parser per `docs/specs/elemental_composition_upload.md`
+  - Parses unit from column header (`Symbol (unit)`, `Symbol [unit]`, `Symbol_unit`)
+  - Auto-creates `Analyte` records for unknown symbols
+  - Links `ElementalAnalysis` to `ExternalAnalysis` correctly from the start
+- New `POST /api/bulk-uploads/elemental-composition` endpoint
+- New upload card on the Bulk Uploads page
 
 **Test:**
-- Upload file via UI using the new elemental composition card
-- Verify `ElementalAnalysis` rows created for the sample with correct analyte values
+- Upload `sample_actlabs_rock_composition.xlsx` via the ActLabs Rock Titration card
+- Verify `ElementalAnalysis` rows are created with `external_analysis_id` populated (bug fix confirmed)
 - E2E test: `09-elemental-composition.spec.ts`
 
 ---
@@ -255,7 +254,8 @@ Aeris Sample ID parsing (`_parse_aeris_sample_id`):
 - [ ] Calculation regression test passes
 - [ ] All 6 upload types process real sample files with 0 unexpected errors
 - [ ] Master Results Sync: mutable config store + `GET`/`PATCH /config` endpoints + redesigned UI card working
-- [ ] `elemental_composition.py` new parser created; `external_analysis_id` bug fixed in `actlabs_titration_data.py`
+- [ ] `external_analysis_id` bug fixed in `ActlabsRockTitrationService.import_excel()` (`actlabs_titration_data.py` line 467)
+- [ ] New `elemental_composition.py` parser created per spec
 - [ ] `GET /api/experiments/next-ids` returns all 4 types (HPHT, Serum, CF, Autoclave), no auth required
 - [ ] `README.md` works end-to-end on a clean machine
 - [ ] All documentation accurate and up to date
