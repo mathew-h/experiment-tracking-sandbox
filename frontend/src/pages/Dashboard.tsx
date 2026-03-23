@@ -67,9 +67,6 @@ export function DashboardPage() {
         />
       </div>
 
-      {/* Filters (apply to timeline) */}
-      <DashboardFilters filters={filters} onChange={setFilters} />
-
       {/* Reactor grid */}
       <Card padding="none">
         <CardHeader label="Reactor Status" />
@@ -81,6 +78,9 @@ export function DashboardPage() {
           {data && <ReactorGrid cards={data.reactors} />}
         </CardBody>
       </Card>
+
+      {/* Filters (apply to timeline) */}
+      <DashboardFilters filters={filters} onChange={setFilters} />
 
       {/* Gantt timeline */}
       <Card padding="none">

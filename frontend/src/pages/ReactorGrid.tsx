@@ -1,11 +1,16 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
+import { experimentsApi } from '@/api/experiments'
 
 // Fixed reactor layout: R01-R16 and CF01-CF02
 const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(2, '0')}`)
 const CF_SLOTS = ['CF01', 'CF02']
+
+const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED'] as const
+type ExperimentStatus = typeof STATUS_OPTIONS[number]
 
 function statusColors(status: string | null) {
   switch (status) {
@@ -18,6 +23,80 @@ function statusColors(status: string | null) {
     default:
       return 'text-ink-muted bg-surface-overlay border-surface-border'
   }
+}
+
+function StatusBadge({
+  card,
+}: {
+  card: ReactorCardData
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: (newStatus: string) =>
+      experimentsApi.patchStatus(card.experiment_id, newStatus),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={isPending}
+        className={[
+          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider border transition-opacity',
+          statusColors(card.status),
+          isPending ? 'opacity-50' : 'hover:opacity-80 cursor-pointer',
+        ].join(' ')}
+        title="Change status"
+      >
+        <span
+          className={[
+            'w-1.5 h-1.5 rounded-full',
+            card.status === 'ONGOING' ? 'bg-status-ongoing animate-pulse-slow' : 'bg-surface-border',
+          ].join(' ')}
+        />
+        {card.status ?? 'Active'}
+        <span className="ml-0.5 opacity-60">▾</span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 bg-surface-overlay border border-surface-border rounded shadow-lg min-w-[110px]">
+          {STATUS_OPTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => {
+                setOpen(false)
+                if (s !== card.status) mutate(s)
+              }}
+              className={[
+                'w-full text-left px-3 py-1.5 text-2xs font-semibold uppercase tracking-wider transition-colors',
+                s === card.status
+                  ? 'text-ink-muted cursor-default'
+                  : 'text-ink-secondary hover:bg-surface-border/30 cursor-pointer',
+              ].join(' ')}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ReactorCard({
@@ -46,20 +125,14 @@ function ReactorCard({
           </p>
           <p className="text-xl font-bold text-ink-primary font-mono-data leading-none">{label}</p>
         </div>
-        <span
-          className={[
-            'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider border',
-            occupied ? statusColors(card!.status) : 'text-ink-muted bg-surface-overlay border-surface-border',
-          ].join(' ')}
-        >
-          <span
-            className={[
-              'w-1.5 h-1.5 rounded-full',
-              occupied && card!.status === 'ONGOING' ? 'bg-status-ongoing animate-pulse-slow' : 'bg-surface-border',
-            ].join(' ')}
-          />
-          {occupied ? (card!.status ?? 'Active') : 'Empty'}
-        </span>
+        {occupied ? (
+          <StatusBadge card={card!} />
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider border text-ink-muted bg-surface-overlay border-surface-border">
+            <span className="w-1.5 h-1.5 rounded-full bg-surface-border" />
+            Empty
+          </span>
+        )}
       </div>
 
       {occupied ? (
