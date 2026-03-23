@@ -443,3 +443,83 @@ def test_xrd_template_experiment_mode(client):
     resp = client.get("/api/bulk-uploads/templates/xrd-mineralogy?mode=experiment")
     assert resp.status_code == 200
     assert "spreadsheetml" in resp.headers.get("content-type", "")
+
+
+# ---------------------------------------------------------------------------
+# D1: AppConfig model upsert
+# ---------------------------------------------------------------------------
+
+def test_app_config_upsert(db_session):
+    """AppConfig stores and retrieves key-value pairs."""
+    from database.models.app_config import AppConfig
+
+    cfg = AppConfig(key="test_key", value="test_value")
+    db_session.add(cfg)
+    db_session.flush()
+    fetched = db_session.query(AppConfig).filter_by(key="test_key").first()
+    assert fetched is not None
+    assert fetched.value == "test_value"
+
+
+def test_app_config_primary_key_is_key(db_session):
+    """AppConfig uses key as PK — duplicate key raises integrity error."""
+    from database.models.app_config import AppConfig
+    import pytest
+
+    db_session.add(AppConfig(key="dup_key", value="first"))
+    db_session.flush()
+    db_session.add(AppConfig(key="dup_key", value="second"))
+    with pytest.raises(Exception):
+        db_session.flush()
+
+
+# ---------------------------------------------------------------------------
+# D2: Master Results config endpoints
+# ---------------------------------------------------------------------------
+
+def test_get_master_results_config_returns_path(client):
+    """GET /master-results/config returns JSON with a 'path' field."""
+    r = client.get("/api/bulk-uploads/master-results/config")
+    assert r.status_code == 200
+    data = r.json()
+    assert "path" in data
+
+
+def test_patch_master_results_config_invalid_path(client):
+    """PATCH /master-results/config rejects a nonexistent file path with 422."""
+    r = client.patch(
+        "/api/bulk-uploads/master-results/config",
+        json={"path": "/nonexistent/path/to/file.xlsx"},
+    )
+    assert r.status_code == 422
+
+
+def test_patch_master_results_config_valid_path(client, tmp_path):
+    """PATCH /master-results/config accepts a real .xlsx file path and persists it."""
+    import openpyxl
+
+    p = tmp_path / "test.xlsx"
+    wb = openpyxl.Workbook()
+    wb.save(str(p))
+
+    r = client.patch(
+        "/api/bulk-uploads/master-results/config",
+        json={"path": str(p)},
+    )
+    assert r.status_code == 200
+    assert r.json()["path"] == str(p)
+
+
+def test_patch_master_results_config_persists_to_get(client, tmp_path):
+    """After PATCH, GET returns the newly configured path."""
+    import openpyxl
+
+    p = tmp_path / "persist.xlsx"
+    wb = openpyxl.Workbook()
+    wb.save(str(p))
+
+    client.patch("/api/bulk-uploads/master-results/config", json={"path": str(p)})
+
+    r = client.get("/api/bulk-uploads/master-results/config")
+    assert r.status_code == 200
+    assert r.json()["path"] == str(p)

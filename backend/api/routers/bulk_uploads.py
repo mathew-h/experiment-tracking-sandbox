@@ -428,6 +428,63 @@ async def upload_experiment_status(
 
 
 # ---------------------------------------------------------------------------
+# Master Results config (Chunk D)
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel as _PydanticBase  # noqa: E402
+
+
+class MasterResultsConfigResponse(_PydanticBase):
+    path: str | None
+
+
+class MasterResultsConfigUpdate(_PydanticBase):
+    path: str
+
+
+_MASTER_RESULTS_CONFIG_KEY = "master_results_path"
+
+
+@router.get("/master-results/config", response_model=MasterResultsConfigResponse)
+def get_master_results_config(
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> MasterResultsConfigResponse:
+    """Return the currently configured Master Results file path."""
+    from database.models.app_config import AppConfig  # noqa: PLC0415
+    cfg = db.query(AppConfig).filter_by(key=_MASTER_RESULTS_CONFIG_KEY).first()
+    if cfg:
+        return MasterResultsConfigResponse(path=cfg.value)
+    from backend.config.settings import get_settings  # noqa: PLC0415
+    return MasterResultsConfigResponse(path=get_settings().master_results_path)
+
+
+@router.patch("/master-results/config", response_model=MasterResultsConfigResponse)
+def update_master_results_config(
+    body: MasterResultsConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> MasterResultsConfigResponse:
+    """Set the Master Results file path after validating it resolves to a readable .xlsx file."""
+    import os  # noqa: PLC0415
+    from database.models.app_config import AppConfig  # noqa: PLC0415
+
+    path = body.path
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=422, detail=f"File not found: {path}")
+    if not path.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=422, detail="Path must point to an .xlsx or .xls file")
+
+    cfg = db.query(AppConfig).filter_by(key=_MASTER_RESULTS_CONFIG_KEY).first()
+    if cfg:
+        cfg.value = path
+    else:
+        db.add(AppConfig(key=_MASTER_RESULTS_CONFIG_KEY, value=path))
+    db.commit()
+    return MasterResultsConfigResponse(path=path)
+
+
+# ---------------------------------------------------------------------------
 # Template downloads
 # ---------------------------------------------------------------------------
 

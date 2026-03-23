@@ -181,25 +181,28 @@ class MasterBulkUploadService:
     @staticmethod
     def sync_from_path(db: Session) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
         """
-        Read the Master Results file from the configured SharePoint path.
+        Read the Master Results file from the configured path.
+        Priority: AppConfig table > MASTER_RESULTS_PATH env/settings.
         Returns (created, updated, skipped, errors, feedbacks).
         """
         from backend.config.settings import get_settings  # noqa: PLC0415
-        settings = get_settings()
-        path = settings.master_results_path
+        from database.models.app_config import AppConfig  # noqa: PLC0415
+
+        cfg = db.query(AppConfig).filter_by(key="master_results_path").first()
+        path = cfg.value if cfg else get_settings().master_results_path
 
         try:
             with open(path, "rb") as fh:
                 file_bytes = fh.read()
         except FileNotFoundError:
             return 0, 0, 0, [
-                f"Master Results file not found at configured path: {path}. "
-                "Check MASTER_RESULTS_PATH in your .env file."
+                f"Master Results file not found at: {path}. "
+                "Configure the path via Bulk Uploads → Master Results Sync → Settings."
             ], []
         except PermissionError:
             return 0, 0, 0, [
                 f"Permission denied reading: {path}. "
-                "Ensure the file is not locked by another process (e.g. Excel)."
+                "Ensure the file is not open in Excel."
             ], []
         except Exception as exc:
             return 0, 0, 0, [f"Failed to read Master Results file: {exc}"], []
