@@ -7,6 +7,7 @@ from .analysis import AnalysisFiles, ExternalAnalysis, PXRFReading
 from .xrd import XRDAnalysis, XRDPhase
 from .chemicals import Compound, ChemicalAdditive
 from .characterization import *  # Future characterization models
+from .app_config import AppConfig
 from .enums import (
     ExperimentStatus, ExperimentType, FeedstockType, ComponentType,
     AnalysisType, AmmoniumQuantMethod, TitrationType, CharacterizationStatus,
@@ -28,6 +29,8 @@ __all__ = [
     'Analyte', 'ElementalAnalysis',
     # Chemicals
     'Compound', 'ChemicalAdditive',
+    # App config
+    'AppConfig',
     # Enums
     'ExperimentStatus', 'ExperimentType', 'FeedstockType', 'ComponentType',
     'AnalysisType', 'AmmoniumQuantMethod', 'TitrationType', 'CharacterizationStatus',
