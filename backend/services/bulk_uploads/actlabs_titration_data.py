@@ -430,6 +430,24 @@ class ActlabsRockTitrationService:
         all_analytes = db.query(Analyte).all()
         symbol_to_analyte = {a.analyte_symbol.lower(): a for a in all_analytes}
 
+        # Cache ExternalAnalysis stubs per sample_id (same pattern as ElementalCompositionService)
+        ext_analysis_cache: dict[str, int] = {}
+
+        def _get_ext_analysis_id(sid: str) -> int:
+            if sid in ext_analysis_cache:
+                return ext_analysis_cache[sid]
+            stub = (
+                db.query(ExternalAnalysis)
+                .filter_by(sample_id=sid, analysis_type="Elemental")
+                .first()
+            )
+            if not stub:
+                stub = ExternalAnalysis(sample_id=sid, analysis_type="Elemental")
+                db.add(stub)
+                db.flush()
+            ext_analysis_cache[sid] = stub.id
+            return stub.id
+
         # Iterate rows
         for i in range(len(data)):
             sid_raw = data.iat[i, sample_id_col]
@@ -455,16 +473,25 @@ class ActlabsRockTitrationService:
                 if not analyte:
                     # If misaligned, skip
                     continue
+                ext_id = _get_ext_analysis_id(sample_id)
                 existing = (
                     db.query(ElementalAnalysis)
-                    .filter(ElementalAnalysis.sample_id == sample_id, ElementalAnalysis.analyte_id == analyte.id)
+                    .filter(
+                        ElementalAnalysis.external_analysis_id == ext_id,
+                        ElementalAnalysis.analyte_id == analyte.id,
+                    )
                     .first()
                 )
                 if existing:
                     existing.analyte_composition = vnum
                     results_updated += 1
                 else:
-                    db.add(ElementalAnalysis(sample_id=sample_id, analyte_id=analyte.id, analyte_composition=vnum))
+                    db.add(ElementalAnalysis(
+                        external_analysis_id=ext_id,
+                        sample_id=sample_id,
+                        analyte_id=analyte.id,
+                        analyte_composition=vnum,
+                    ))
                     results_created += 1
 
         return results_created, results_updated, skipped, errors

@@ -192,3 +192,48 @@ def test_blank_sample_id_rows_skipped(db_session: Session):
 
     assert created == 0
     assert skipped == 1
+
+
+def test_actlabs_import_sets_external_analysis_id(db_session: Session):
+    """ActlabsRockTitrationService.import_excel must link every ElementalAnalysis row
+    to an ExternalAnalysis record via external_analysis_id."""
+    import io
+    import openpyxl
+    from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
+
+    sample = SampleInfo(sample_id="TEST_ACTLABS_F1", rock_classification="Dunite")
+    db_session.add(sample)
+    db_session.flush()
+
+    # Minimal ActLabs-format workbook:
+    # row 0 — Report Number header
+    # row 1 — Report Date header
+    # row 2 — Analyte Symbol row (sample_id, Fe, SiO2)
+    # row 3 — Unit Symbol row
+    # row 4 — Detection Limit row
+    # row 5 — Analysis Method row  ← data starts at row 6
+    # row 6 — first data row
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Report Number", "12345"])
+    ws.append(["Report Date", "2026-03-23"])
+    ws.append(["sample_id", "Fe", "SiO2"])
+    ws.append([None, "ppm", "%"])
+    ws.append([None, "0.01", "0.01"])
+    ws.append(["Analysis Method", "FUS-ICP", "FUS-ICP"])
+    ws.append(["TEST_ACTLABS_F1", 45000.0, 38.5])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
+        db_session, buf.getvalue()
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created > 0
+
+    rows = db_session.query(ElementalAnalysis).filter_by(sample_id="TEST_ACTLABS_F1").all()
+    assert len(rows) > 0
+    for row in rows:
+        assert row.external_analysis_id is not None, (
+            "external_analysis_id must be set on every ElementalAnalysis row"
+        )
