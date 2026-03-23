@@ -128,15 +128,15 @@ def get_next_experiment_id(
 @router.get("/next-ids")
 def get_next_experiment_ids(
     db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> dict:
     """
     Return the next sequence number for each experiment type, derived by
     parsing the numeric suffix from experiment_id (same logic as /next-id).
+    No auth required — read-only, non-sensitive.
 
-    Response: ``{"HPHT": 107, "Serum": 165, "CF": 15}``
+    Response: ``{"HPHT": 107, "Serum": 165, "CF": 15, "Autoclave": 8}``
     """
-    label_prefix = {"HPHT": "HPHT", "Serum": "SERUM", "CF": "CF"}
+    label_prefix = {"HPHT": "HPHT", "Serum": "SERUM", "CF": "CF", "Autoclave": "Autoclave"}
     result: dict[str, int] = {}
     for label, prefix in label_prefix.items():
         rows = db.execute(

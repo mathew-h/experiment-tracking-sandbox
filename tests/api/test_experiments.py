@@ -174,3 +174,31 @@ def test_get_experiment_results_with_flags(client, db_session):
     assert data[0]["has_icp"] is False
     assert data[0]["final_ph"] == 7.2
     assert data[0]["grams_per_ton_yield"] == 55.0
+
+
+def test_next_ids_no_auth_required(client):
+    """next-ids must be accessible without authentication."""
+    from fastapi.testclient import TestClient
+    from backend.api.main import app
+    from backend.auth.firebase_auth import verify_firebase_token
+
+    original = app.dependency_overrides.copy()
+    if verify_firebase_token in app.dependency_overrides:
+        del app.dependency_overrides[verify_firebase_token]
+
+    try:
+        with TestClient(app) as c:
+            r = c.get('/api/experiments/next-ids')
+            assert r.status_code == 200
+    finally:
+        app.dependency_overrides.update(original)
+
+
+def test_next_ids_includes_autoclave(client):
+    """next-ids response includes Autoclave type."""
+    r = client.get('/api/experiments/next-ids')
+    assert r.status_code == 200
+    data = r.json()
+    assert 'Autoclave' in data
+    assert isinstance(data['Autoclave'], int)
+    assert data['Autoclave'] >= 1

@@ -14,6 +14,7 @@ export interface NextIds {
   HPHT: number
   Serum: number
   CF: number
+  Autoclave: number
 }
 
 // Template types that have a downloadable template

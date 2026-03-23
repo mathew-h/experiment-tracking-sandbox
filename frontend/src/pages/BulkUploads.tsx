@@ -11,7 +11,7 @@ function NextIdChips({ data }: { data: NextIds | undefined }) {
   return (
     <div className="flex flex-wrap gap-2 py-1">
       <span className="text-xs text-ink-muted">Next IDs:</span>
-      {(['HPHT', 'Serum', 'CF'] as const).map((type) => (
+      {(['HPHT', 'Serum', 'CF', 'Autoclave'] as const).map((type) => (
         <span
           key={type}
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-raised border border-surface-border text-xs"
