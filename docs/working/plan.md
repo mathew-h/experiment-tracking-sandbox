@@ -3,7 +3,79 @@
 ## Current Status
 **Active Milestone:** M8 — Testing and Docs
 **Branch:** `feature/m8-testing-docs`
-**Last Updated:** 2026-03-20
+**Last Updated:** 2026-03-23
+
+---
+
+## M8 — Testing and Docs: IN PROGRESS
+
+### Objective
+Playwright E2E infrastructure, test all upload types with real lab files, fix parser bugs found, complete documentation pass.
+
+### Branch
+`feature/m8-testing-docs` — cut from `infra/lab-pc-server-setup`
+
+### Implementation Plan
+`docs/superpowers/plans/2026-03-23-m8-testing-docs.md` — Read before starting any M8 work.
+Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
+
+### Key Decisions / Patterns (M8)
+- **Firebase auth in Playwright:** Firebase Web SDK v9 stores auth in IndexedDB; Playwright's `storageState` only captures localStorage. Solution: worker-scoped `BrowserContext` fixture that logs in once via UI and shares the authenticated context (with IndexedDB intact) across all tests. One login per worker = one login per run with `workers: 1`. All spec files import `test, expect` from `../fixtures/auth` (not `@playwright/test`).
+- **E2E file input selector:** The `UploadRow` component renders `id` prop but doesn't apply it to the DOM. To scope file inputs, use: `page.locator('.rounded-lg').filter({ has: page.getByRole('button', { name: /CardTitle/ }) }).locator('input[type="file"]')`.
+- **ICP update/skip error reporting:** `icp_service.py` was putting standards-skip messages and update confirmations into `errors`. Fixed: standards silently skipped, updates counted in `updated` field (not errors). Return signature of `bulk_create_icp_results` changed to `(results, updated_count, errors)`.
+- **scalar_results variable_config stub:** `bulk_uploads/scalar_results.py` imports `frontend.config.variable_config` at module load time; the endpoint was missing the sys.modules stub that ICP had. Fixed: added stub with `SCALAR_RESULTS_TEMPLATE_HEADERS` in `upload_scalar_results` endpoint.
+
+### Completed
+- [x] Chunk A: Playwright infrastructure
+  - `feature/m8-testing-docs` branch cut from `infra/lab-pc-server-setup`
+  - `frontend/playwright.config.ts` — baseURL, workers:1, no globalSetup/storageState
+  - `frontend/e2e/fixtures/auth.ts` — worker-scoped BrowserContext fixture with Firebase UI login
+  - `frontend/e2e/journeys/00-smoke.spec.ts` — 2 tests passing
+  - `.gitignore` updated with `frontend/e2e/.auth/` and `frontend/e2e/.env.e2e`
+  - `dotenv` devDependency added
+- [x] Chunk B: Next-IDs fix + New Experiments upload
+  - `GET /api/experiments/next-ids`: removed Firebase auth requirement, added `Autoclave` type
+  - `frontend/src/api/bulkUploads.ts`: `Autoclave` added to `NextIds` interface
+  - `frontend/src/pages/BulkUploads.tsx`: `NextIdChips` now renders Autoclave chip
+  - `tests/api/test_experiments.py`: 2 new tests (no-auth, Autoclave) — all 21 pass
+  - `frontend/e2e/journeys/02-bulk-upload-experiments.spec.ts` — 1 test passing
+- [x] Chunk C: ICP + Solution Chemistry uploads
+  - Bug fix: `icp_service.py` — standards silently skipped, updates counted separately (not in errors)
+  - Bug fix: `bulk_uploads.py` `/scalar-results` endpoint — added missing `variable_config` sys.modules stub
+  - `frontend/e2e/journeys/03-upload-icp.spec.ts` — 1 test passing
+  - `frontend/e2e/journeys/08-solution-chemistry.spec.ts` — 1 test passing
+
+### Pending
+- [ ] Chunk D: Master Results Sync config store
+  - New `AppConfig` DB table (key-value store for runtime-mutable settings)
+  - `GET /api/bulk-uploads/master-results/config` + `PATCH /api/bulk-uploads/master-results/config`
+  - Update `master_bulk_upload.py` `sync_from_path()` to read from `AppConfig` (not hardcoded settings)
+  - No frontend changes needed (spec confirmed `UploadRow.syncFn` pattern already works)
+  - One-time setup: configure path via Swagger UI before running E2E test
+  - `frontend/e2e/journeys/07-master-results-sync.spec.ts`
+- [ ] Chunk E: XRD Mineralogy (Aeris format)
+  - Upload `docs/sample_data/XRD_result_070d19.xlsx` via UI, fix parser if needed
+  - `frontend/e2e/journeys/05-upload-xrd.spec.ts`
+- [ ] Chunk F: Elemental Composition (ActLabs)
+  - Bug fix: `actlabs_titration_data.py` `ActlabsRockTitrationService.import_excel()` — creates `ElementalAnalysis` without `external_analysis_id` (see plan Task F1 for exact fix)
+  - New `backend/services/bulk_uploads/elemental_composition.py` parser (flexible wide-format)
+  - New `POST /api/bulk-uploads/elemental-composition` endpoint
+  - `frontend/e2e/journeys/09-elemental-composition.spec.ts`
+- [ ] Chunk G: Core E2E journeys + documentation
+  - `01-create-experiment.spec.ts` — Login → create experiment → conditions → additives → verify derived fields
+  - `04-update-status-dashboard.spec.ts` — Status change via StatusBadge → reload → verify dashboard badge
+  - `06-recalculate-derived-fields.spec.ts` — Edit rock_mass_g → verify water_to_rock_ratio recalculated
+  - Calculation regression test: `tests/regression/test_calc_regression.py`
+  - Documentation: README.md rewrite, USER_MANUAL.md, CONTRIBUTING.md, PRODUCTION_DEPLOYMENT.md
+  - FastAPI docstring audit, React JSDoc audit
+
+### Parser Bugs Fixed in M8 (do not reintroduce)
+- `icp_service.py` `process_icp_dataframe()`: standards with unrecognized label format now silently skipped (no error message)
+- `icp_service.py` `bulk_create_icp_results()`: return signature changed to `(List, int, List)` — updated_count is tracked separately; update messages removed from errors
+- `bulk_uploads.py` `upload_scalar_results()`: added `variable_config` sys.modules stub (same pattern as ICP endpoint)
+
+### Next Action
+Start **Chunk D**: Create `AppConfig` table, write migration, add `GET/PATCH /bulk-uploads/master-results/config` endpoints, update `sync_from_path()` to read from `AppConfig`. See plan `docs/superpowers/plans/2026-03-23-m8-testing-docs.md` Tasks D1–D3.
 
 ---
 
