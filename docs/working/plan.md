@@ -54,10 +54,13 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
   - 6 new API tests (129 total passing)
   - `frontend/e2e/journeys/07-master-results-sync.spec.ts` — spec written; requires one-time path config setup via Swagger UI
 
+### Completed (continued)
+- [x] Chunk E: XRD Mineralogy (Aeris format)
+  - `XRD_result_070d19.xlsx` — 1 row, Aeris format (`20260218_HPHT070-d19_02`), 6 mineral columns; parser matched without changes
+  - HPHT_070 already existed in dev DB
+  - `frontend/e2e/journeys/05-upload-xrd.spec.ts` — 1 test passing
+
 ### Pending
-- [ ] Chunk E: XRD Mineralogy (Aeris format)
-  - Upload `docs/sample_data/XRD_result_070d19.xlsx` via UI, fix parser if needed
-  - `frontend/e2e/journeys/05-upload-xrd.spec.ts`
 - [ ] Chunk F: Elemental Composition (ActLabs)
   - Bug fix: `actlabs_titration_data.py` `ActlabsRockTitrationService.import_excel()` — creates `ElementalAnalysis` without `external_analysis_id` (see plan Task F1 for exact fix)
   - New `backend/services/bulk_uploads/elemental_composition.py` parser (flexible wide-format)
@@ -77,7 +80,7 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
 - `bulk_uploads.py` `upload_scalar_results()`: added `variable_config` sys.modules stub (same pattern as ICP endpoint)
 
 ### Next Action
-Start **Chunk E**: Upload `docs/sample_data/XRD_result_070d19.xlsx` via UI, fix parser if needed, write `05-upload-xrd.spec.ts`. See plan Tasks E1.
+Start **Chunk F**: Fix `ActlabsRockTitrationService.import_excel()` bug (missing `external_analysis_id`), write new elemental composition parser, add E2E spec `09-elemental-composition.spec.ts`. See plan Tasks F1–F3.
 
 ---
 
