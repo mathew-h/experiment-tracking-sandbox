@@ -37,3 +37,44 @@ def test_zero_feo_returns_zero():
     """0.0 wt% FeO → 0.0 g (not None)."""
     result = calculate_total_ferrous_iron_g(feo_wt_pct=0.0, rock_mass_g=5.0)
     assert result == pytest.approx(0.0)
+
+
+from unittest.mock import MagicMock
+from backend.services.elemental_composition_service import get_analyte_wt_pct
+
+
+def _mock_session(scalar_result):
+    """Return a session mock whose execute().scalar_one_or_none() returns scalar_result."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = scalar_result
+    return session
+
+
+def test_get_analyte_wt_pct_happy_path():
+    """Returns analyte_composition when a matching row exists."""
+    session = _mock_session(12.5)
+    result = get_analyte_wt_pct(sample_id="SAMPLE-001", db=session)
+    assert result == 12.5
+
+
+def test_get_analyte_wt_pct_missing_analyte_returns_none():
+    """Returns None when no matching ElementalAnalysis row exists."""
+    session = _mock_session(None)
+    result = get_analyte_wt_pct(sample_id="SAMPLE-NO-FEO", db=session)
+    assert result is None
+
+
+def test_get_analyte_wt_pct_none_sample_id_returns_none():
+    """Skips the DB query entirely when sample_id is None."""
+    session = MagicMock()
+    result = get_analyte_wt_pct(sample_id=None, db=session)
+    assert result is None
+    session.execute.assert_not_called()
+
+
+def test_get_analyte_wt_pct_custom_analyte_symbol():
+    """analyte_symbol parameter is forwarded to the query."""
+    session = _mock_session(45.0)
+    result = get_analyte_wt_pct(sample_id="SAMPLE-001", db=session, analyte_symbol="SiO2")
+    assert result == 45.0
+    session.execute.assert_called_once()
