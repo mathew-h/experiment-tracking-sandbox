@@ -84,3 +84,6 @@ poetry.lock
 # Playwright
 frontend/e2e/.auth/
 frontend/e2e/.env.e2e
+
+# Git worktrees
+.worktrees/
