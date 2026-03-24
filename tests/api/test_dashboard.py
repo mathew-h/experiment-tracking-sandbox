@@ -279,6 +279,90 @@ def test_get_dashboard_completed_this_month(client, db_session):
 
 
 # ---------------------------------------------------------------------------
+# Reactor spec-merge tests (issue #2)
+# ---------------------------------------------------------------------------
+
+def test_reactor_specs_constant_coverage():
+    """REACTOR_SPECS covers all 16 standard reactors with required keys."""
+    from backend.api.routers.dashboard import REACTOR_SPECS
+    assert len(REACTOR_SPECS) == 16
+    for rn in range(1, 17):
+        spec = REACTOR_SPECS[rn]
+        assert "volume_mL" in spec
+        assert "material" in spec
+        assert "vendor" in spec
+
+
+def test_reactor_specs_values():
+    """Spot-check key spec values against the hardware inventory."""
+    from backend.api.routers.dashboard import REACTOR_SPECS
+    # R01–R03: Hastelloy, 100 mL, Yushen
+    for rn in (1, 2, 3):
+        assert REACTOR_SPECS[rn]["material"] == "Hastelloy"
+        assert REACTOR_SPECS[rn]["volume_mL"] == 100
+        assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+    # R04: 300 mL Titanium, Tan
+    assert REACTOR_SPECS[4]["volume_mL"] == 300
+    assert REACTOR_SPECS[4]["material"] == "Titanium"
+    assert REACTOR_SPECS[4]["vendor"] == "Tan"
+    # R05–R07: 500 mL Titanium, Yushen
+    for rn in (5, 6, 7):
+        assert REACTOR_SPECS[rn]["volume_mL"] == 500
+        assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+    # R08–R09: 100 mL Titanium, Tan
+    for rn in (8, 9):
+        assert REACTOR_SPECS[rn]["vendor"] == "Tan"
+    # R10–R16: 100 mL Titanium, Yushen
+    for rn in range(10, 17):
+        assert REACTOR_SPECS[rn]["volume_mL"] == 100
+        assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+
+
+def test_reactor_card_includes_specs(client, db_session):
+    """Reactor cards returned by GET /api/dashboard/ include volume_mL, material, vendor."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="SPECS_TEST_001",
+        experiment_number=8900,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="SPECS_TEST_001",
+        reactor_number=5,  # R05: 500 mL, Titanium, Yushen
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_number"]: c for c in resp.json()["reactors"]}
+    assert 5 in cards
+    card = cards[5]
+    assert card["volume_mL"] == 500
+    assert card["material"] == "Titanium"
+    assert card["vendor"] == "Yushen"
+
+
+def test_reactor_card_data_schema_includes_specs():
+    """ReactorCardData schema accepts and returns hardware spec fields."""
+    from backend.api.schemas.dashboard import ReactorCardData
+    card = ReactorCardData(
+        reactor_number=4, reactor_label="R04",
+        volume_mL=300, material="Titanium", vendor="Tan",
+    )
+    assert card.volume_mL == 300
+    assert card.material == "Titanium"
+    assert card.vendor == "Tan"
+
+
+# ---------------------------------------------------------------------------
 # Performance test
 # ---------------------------------------------------------------------------
 

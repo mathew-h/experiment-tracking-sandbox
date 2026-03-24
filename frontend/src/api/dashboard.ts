@@ -33,6 +33,9 @@ export interface ReactorCardData {
   started_at: string | null
   days_running: number | null
   temperature_c: number | null
+  volume_mL: number | null
+  material: string | null
+  vendor: string | null
 }
 
 export interface GanttEntry {

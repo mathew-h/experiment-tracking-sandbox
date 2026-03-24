@@ -18,6 +18,27 @@ from backend.api.schemas.dashboard import (
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
+# Static reactor hardware specs — keyed by reactor_number (int).
+# Source: lab hardware inventory (issue #2).
+REACTOR_SPECS: dict[int, dict[str, object]] = {
+    1:  {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
+    2:  {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
+    3:  {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
+    4:  {"volume_mL": 300, "material": "Titanium",  "vendor": "Tan"},
+    5:  {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
+    6:  {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
+    7:  {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
+    8:  {"volume_mL": 100, "material": "Titanium",  "vendor": "Tan"},
+    9:  {"volume_mL": 100, "material": "Titanium",  "vendor": "Tan"},
+    10: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    11: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    12: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    13: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    14: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    15: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    16: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+}
+
 
 @router.get("/", response_model=DashboardResponse)
 def get_dashboard(
@@ -127,6 +148,7 @@ def get_dashboard(
         is_cf = exp_type == "Core Flood" if exp_type else False
         label = f"CF{rn:02d}" if is_cf else f"R{rn:02d}"
         days = (now - row.created_at).days if row.created_at else None
+        specs = REACTOR_SPECS.get(rn, {})
         reactor_cards.append(ReactorCardData(
             reactor_number=rn,
             reactor_label=label,
@@ -140,6 +162,9 @@ def get_dashboard(
             started_at=row.created_at,
             days_running=days,
             temperature_c=row.temperature_c,
+            volume_mL=specs.get("volume_mL"),
+            material=specs.get("material"),
+            vendor=specs.get("vendor"),
         ))
 
     # ── 3. Gantt timeline (all experiments, newest first, limit 100) ──────

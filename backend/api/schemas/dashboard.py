@@ -53,6 +53,9 @@ class ReactorCardData(BaseModel):
     started_at: Optional[datetime] = None
     days_running: Optional[int] = None
     temperature_c: Optional[float] = None
+    volume_mL: Optional[int] = None     # reactor hardware spec
+    material: Optional[str] = None      # reactor hardware spec
+    vendor: Optional[str] = None        # reactor hardware spec
 
 
 class GanttEntry(BaseModel):
