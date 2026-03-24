@@ -1,7 +1,10 @@
 # backend/api/routers/samples.py
 from __future__ import annotations
+import os
+import uuid
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, File, Form, UploadFile
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, selectinload
 from database.models.samples import SampleInfo, SamplePhotos
@@ -16,6 +19,10 @@ from backend.api.schemas.samples import (
     ExternalAnalysisResponse, AnalysisFileResponse, ElementalAnalysisItem,
 )
 from backend.services.samples import evaluate_characterized, log_sample_modification
+from backend.config.settings import get_settings
+
+PHOTO_ALLOWED_TYPES = {"image/jpeg", "image/png"}
+MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/samples", tags=["samples"])
@@ -308,3 +315,78 @@ def delete_sample(
     db.commit()
     log.info("sample_deleted", sample_id=sample_id, user=current_user.email)
     return Response(status_code=204)
+
+
+# ── POST /api/samples/{sample_id}/photos ──────────────────────────────────
+@router.post("/{sample_id}/photos", response_model=SamplePhotoResponse, status_code=201)
+async def upload_photo(
+    sample_id: str,
+    file: UploadFile = File(...),
+    description: str | None = Form(None),
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> SamplePhotoResponse:
+    if db.get(SampleInfo, sample_id) is None:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    if file.content_type not in PHOTO_ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Photo must be image/jpeg or image/png; got {file.content_type}",
+        )
+    content = await file.read()
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=422, detail="File exceeds 20 MB limit")
+
+    settings = get_settings()
+    dest_dir = Path(settings.sample_photos_dir) / sample_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(file.filename or "photo").stem
+    ext = Path(file.filename or "photo").suffix or ".jpg"
+    filename = f"{stem}_{uuid.uuid4().hex[:8]}{ext}"
+    dest = dest_dir / filename
+    dest.write_bytes(content)
+
+    photo = SamplePhotos(
+        sample_id=sample_id,
+        file_path=str(dest),
+        file_name=file.filename,
+        file_type=file.content_type,
+        description=description,
+    )
+    db.add(photo)
+    log_sample_modification(
+        db, sample_id=sample_id, modified_by=current_user.email,
+        modification_type="create", modified_table="sample_photos",
+        new_values={"file_name": file.filename},
+    )
+    db.commit()
+    db.refresh(photo)
+    return SamplePhotoResponse.model_validate(photo)
+
+
+# ── DELETE /api/samples/{sample_id}/photos/{photo_id} ─────────────────────
+@router.delete("/{sample_id}/photos/{photo_id}", status_code=204)
+def delete_photo(
+    sample_id: str,
+    photo_id: int,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+):
+    photo = db.execute(
+        select(SamplePhotos)
+        .where(SamplePhotos.id == photo_id, SamplePhotos.sample_id == sample_id)
+    ).scalar_one_or_none()
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    file_path = Path(photo.file_path)
+    if file_path.exists():
+        file_path.unlink()
+
+    log_sample_modification(
+        db, sample_id=sample_id, modified_by=current_user.email,
+        modification_type="delete", modified_table="sample_photos",
+        old_values={"file_name": photo.file_name},
+    )
+    db.delete(photo)
+    db.commit()

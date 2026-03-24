@@ -1,3 +1,5 @@
+import io
+
 from database.models.samples import SampleInfo
 from database.models.analysis import ExternalAnalysis, PXRFReading
 from database.models.experiments import Experiment, ModificationsLog
@@ -133,3 +135,46 @@ def test_get_sample_detail_structure(client, db_session):
     assert "photos" in data
     assert "analyses" in data
     assert "experiments" in data
+
+
+def test_upload_photo_returns_201(client, db_session, tmp_path, monkeypatch):
+    _make_sample(db_session, "PHOTO_S01")
+    monkeypatch.setattr(
+        "backend.api.routers.samples.get_settings",
+        lambda: type("S", (), {"sample_photos_dir": str(tmp_path)})(),
+    )
+    content = b"fake image bytes"
+    resp = client.post(
+        "/api/samples/PHOTO_S01/photos",
+        files={"file": ("shot.jpg", io.BytesIO(content), "image/jpeg")},
+        data={"description": "Rock face"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["file_name"] == "shot.jpg"
+
+
+def test_upload_photo_rejects_bad_mime(client, db_session, tmp_path, monkeypatch):
+    _make_sample(db_session, "PHOTO_S02")
+    monkeypatch.setattr(
+        "backend.api.routers.samples.get_settings",
+        lambda: type("S", (), {"sample_photos_dir": str(tmp_path)})(),
+    )
+    resp = client.post(
+        "/api/samples/PHOTO_S02/photos",
+        files={"file": ("doc.pdf", io.BytesIO(b"pdf"), "application/pdf")},
+    )
+    assert resp.status_code == 415
+
+
+def test_delete_photo(client, db_session, tmp_path, monkeypatch):
+    from database.models.samples import SamplePhotos
+    _make_sample(db_session, "PHOTO_S03")
+    photo = SamplePhotos(
+        sample_id="PHOTO_S03", file_path=str(tmp_path / "x.jpg"),
+        file_name="x.jpg", file_type="image/jpeg",
+    )
+    db_session.add(photo)
+    db_session.commit()
+    db_session.refresh(photo)
+    resp = client.delete(f"/api/samples/PHOTO_S03/photos/{photo.id}")
+    assert resp.status_code == 204
