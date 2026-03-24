@@ -48,6 +48,8 @@ class SampleResponse(BaseModel):
 
 class SampleListItem(BaseModel):
     """Flat projection for the inventory table — no nested objects."""
+    model_config = ConfigDict(from_attributes=True)
+
     sample_id: str
     rock_classification: Optional[str] = None
     locality: Optional[str] = None
@@ -71,6 +73,8 @@ class SampleListResponse(BaseModel):
 # ── Geo view (map markers) ────────────────────────────────────────────────
 
 class SampleGeoItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     sample_id: str
     latitude: float
     longitude: float
@@ -141,6 +145,8 @@ class ExternalAnalysisWithWarnings(BaseModel):
 # ── Detail view (full nested) ─────────────────────────────────────────────
 
 class LinkedExperiment(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     experiment_id: str
     experiment_type: Optional[str] = None  # from ExperimentalConditions.experiment_type
     status: Optional[str] = None
@@ -149,12 +155,16 @@ class LinkedExperiment(BaseModel):
 
 class ElementalAnalysisItem(BaseModel):
     """One analyte row from ElementalAnalysis, for the Analyses tab elemental group."""
+    model_config = ConfigDict(from_attributes=True)
+
     analyte_symbol: str
     unit: str
     analyte_composition: Optional[float] = None
 
 
 class SampleDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     sample_id: str
     rock_classification: Optional[str] = None
     state: Optional[str] = None
