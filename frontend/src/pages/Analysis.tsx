@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { analysisApi } from '@/api/analysis'
 import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Card, CardHeader, CardBody, PageSpinner } from '@/components/ui'
 
+/** Analysis page: pXRF readings table and XRD phase viewer. */
 export function AnalysisPage() {
   const { data: pxrfReadings, isLoading, error } = useQuery({
     queryKey: ['pxrf'],

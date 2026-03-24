@@ -7,6 +7,7 @@ const STATUS_BAR: Record<string, string> = {
   CANCELLED: 'bg-surface-border opacity-60',
 }
 
+/** Gantt-style timeline bar chart showing experiment active periods. */
 export function ExperimentTimeline({ entries }: { entries: GanttEntry[] }) {
   const navigate = useNavigate()
 

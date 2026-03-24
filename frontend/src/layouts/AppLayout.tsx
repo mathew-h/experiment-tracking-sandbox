@@ -85,6 +85,7 @@ const navItems: NavItem[] = [
   },
 ]
 
+/** Root app shell: sidebar navigation, top bar, and main content outlet. */
 export function AppLayout() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()

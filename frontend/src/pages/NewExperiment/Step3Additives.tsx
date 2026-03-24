@@ -20,6 +20,7 @@ interface Props {
   onNext: () => void
 }
 
+/** Step 3 of new experiment wizard: chemical additives table with compound picker. */
 export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
   const [compoundSearch, setCompoundSearch] = useState('')
 

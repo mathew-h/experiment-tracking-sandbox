@@ -19,6 +19,7 @@ def get_xrd_phases(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[XRDPhaseResponse]:
+    """Return XRD mineral phases for an experiment, ordered by timepoint and mineral name."""
     rows = db.execute(
         select(XRDPhase)
         .where(XRDPhase.experiment_id == experiment_id)
@@ -34,6 +35,7 @@ def list_pxrf(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[PXRFResponse]:
+    """List pXRF readings ordered by reading number."""
     rows = db.execute(
         select(PXRFReading).order_by(PXRFReading.reading_no).offset(skip).limit(limit)
     ).scalars().all()
@@ -46,6 +48,7 @@ def get_external_analyses(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ExternalAnalysisResponse]:
+    """Return external analyses linked to an experiment, ordered by analysis date."""
     rows = db.execute(
         select(ExternalAnalysis)
         .where(ExternalAnalysis.experiment_id == experiment_id)

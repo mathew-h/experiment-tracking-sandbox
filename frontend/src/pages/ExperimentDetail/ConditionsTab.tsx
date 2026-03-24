@@ -26,6 +26,7 @@ function Row({ label, value, unit }: { label: string; value: unknown; unit?: str
   )
 }
 
+/** Conditions tab: editable experimental setup parameters and chemical additives. */
 export function ConditionsTab({ conditions, experimentId }: Props) {
   const [editOpen, setEditOpen] = useState(false)
   const [form, setForm] = useState<Partial<ConditionsPayload>>({})

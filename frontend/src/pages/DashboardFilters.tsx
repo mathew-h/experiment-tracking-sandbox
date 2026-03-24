@@ -35,6 +35,7 @@ function Chip({
   )
 }
 
+/** Filter bar for the dashboard — researcher, status, and date-range selectors. */
 export function DashboardFilters({
   filters,
   onChange,

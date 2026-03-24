@@ -6,6 +6,7 @@ import { Button, useToast } from '@/components/ui'
 interface Note { id: number; note_text: string; created_at: string }
 interface Props { experimentId: string; notes: Note[] }
 
+/** Notes tab: chronological lab notes with inline add-note form. */
 export function NotesTab({ experimentId, notes }: Props) {
   const [text, setText] = useState('')
   const queryClient = useQueryClient()

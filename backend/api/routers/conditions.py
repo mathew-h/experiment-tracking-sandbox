@@ -20,6 +20,7 @@ def get_conditions(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ConditionsResponse:
+    """Return experimental conditions by primary key. 404 if not found."""
     cond = db.get(ExperimentalConditions, conditions_id)
     if cond is None:
         raise HTTPException(status_code=404, detail="Conditions not found")
@@ -32,6 +33,7 @@ def get_conditions_by_experiment(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ConditionsResponse:
+    """Return conditions for a given experiment_id string. 404 if no conditions record exists."""
     cond = db.execute(
         select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
     ).scalar_one_or_none()

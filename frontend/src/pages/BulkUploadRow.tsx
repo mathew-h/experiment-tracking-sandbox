@@ -61,6 +61,7 @@ export interface UploadRowProps {
   onToggle: () => void
 }
 
+/** Single row in the bulk upload table — file picker, upload trigger, and status display. */
 export function UploadRow({
   title,
   description,

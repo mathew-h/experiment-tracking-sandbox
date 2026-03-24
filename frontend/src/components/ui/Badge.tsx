@@ -29,6 +29,7 @@ const dotClasses: Record<BadgeVariant, string> = {
   cancelled: 'bg-status-cancelled',
 }
 
+/** Pill-shaped label with semantic color variants and optional status dot. */
 export function Badge({ children, variant = 'default', dot = false, className = '' }: BadgeProps) {
   return (
     <span className={[
@@ -42,7 +43,7 @@ export function Badge({ children, variant = 'default', dot = false, className = 
   )
 }
 
-// Convenience: experiment status badge
+/** Convenience badge that maps an experiment status string to the correct variant. */
 export function StatusBadge({ status }: { status: string }) {
   const variant = (status.toLowerCase() as BadgeVariant)
   const validVariants: BadgeVariant[] = ['ongoing', 'completed', 'cancelled']

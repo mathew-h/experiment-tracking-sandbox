@@ -26,6 +26,7 @@ const typeConfig: Record<ToastType, { icon: string; classes: string }> = {
   info:    { icon: 'ℹ', classes: 'border-status-info/40 bg-status-info/10 text-status-info' },
 }
 
+/** Context provider that renders the toast stack and exposes useToast. */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
@@ -82,6 +83,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/** Hook returning show/dismiss helpers for the toast notification system. */
 export function useToast() {
   const ctx = useContext(ToastContext)
   if (!ctx) throw new Error('useToast must be used within ToastProvider')

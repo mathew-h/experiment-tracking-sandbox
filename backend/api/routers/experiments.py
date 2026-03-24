@@ -343,6 +343,7 @@ def add_note(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> NoteResponse:
+    """Append a timestamped note to an experiment. 404 if the experiment does not exist."""
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()

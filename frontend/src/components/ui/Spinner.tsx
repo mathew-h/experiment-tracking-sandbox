@@ -11,6 +11,7 @@ const sizeClasses = {
   lg: 'w-8 h-8 border-2',
 }
 
+/** Animated loading spinner with sm/md/lg size variants and an optional screen-reader label. */
 export function Spinner({ size = 'md', className = '', label }: SpinnerProps) {
   return (
     <span
@@ -27,6 +28,7 @@ export function Spinner({ size = 'md', className = '', label }: SpinnerProps) {
   )
 }
 
+/** Full-page centered spinner for route-level loading states. */
 export function PageSpinner() {
   return (
     <div className="flex items-center justify-center w-full h-64">

@@ -23,6 +23,7 @@ function kv(label: string, value: string | undefined) {
   )
 }
 
+/** Step 4 of new experiment wizard: read-only summary and final submission. */
 export function Step4Review({ step1, step2, additives, onBack, onSubmit, isSubmitting }: Props) {
   const visibleFields = step1.experimentType ? FIELD_VISIBILITY[step1.experimentType] : new Set<string>()
 

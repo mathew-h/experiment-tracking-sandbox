@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { chemicalsApi } from '@/api/chemicals'
 import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Input, PageSpinner } from '@/components/ui'
 
+/** Chemical inventory page: searchable compound table and additive management. */
 export function ChemicalsPage() {
   const [search, setSearch] = useState('')
 

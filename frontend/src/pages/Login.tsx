@@ -16,6 +16,7 @@ function FirebaseConfigWarning() {
   )
 }
 
+/** Firebase email/password login page with domain restriction to @addisenergy.com. */
 export function LoginPage() {
   const { signIn, configured } = useAuth()
   const navigate = useNavigate()

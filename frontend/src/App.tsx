@@ -12,6 +12,7 @@ import { SamplesPage } from '@/pages/Samples'
 import { ChemicalsPage } from '@/pages/Chemicals'
 import { AnalysisPage } from '@/pages/Analysis'
 
+/** Root component: sets up React Query, React Router, and the auth/toast providers. */
 export default function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

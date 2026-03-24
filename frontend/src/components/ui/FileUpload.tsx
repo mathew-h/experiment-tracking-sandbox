@@ -11,6 +11,7 @@ interface FileUploadProps {
   className?: string
 }
 
+/** Drag-and-drop / click-to-browse file input with accept filter and validation hint. */
 export function FileUpload({ accept, multiple, onFiles, label, hint, error, disabled, className = '' }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)

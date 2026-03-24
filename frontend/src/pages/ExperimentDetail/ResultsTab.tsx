@@ -79,6 +79,7 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
 
 interface Props { experimentId: string }
 
+/** Results tab: timepoint result cards with scalar chemistry and ICP data. */
 export function ResultsTab({ experimentId }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 

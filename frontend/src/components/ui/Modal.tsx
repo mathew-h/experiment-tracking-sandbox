@@ -18,6 +18,7 @@ const sizeClasses = {
   xl: 'max-w-4xl',
 }
 
+/** Accessible overlay dialog with title, description, footer slot, and size variants. */
 export function Modal({ open, onClose, title, description, children, footer, size = 'md' }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
 
@@ -86,6 +87,7 @@ interface ConfirmModalProps {
   danger?: boolean
 }
 
+/** Pre-built confirmation dialog with configurable confirm/cancel labels and danger styling. */
 export function ConfirmModal({ open, onClose, onConfirm, title, description, confirmLabel = 'Confirm', loading, danger }: ConfirmModalProps) {
   return (
     <Modal

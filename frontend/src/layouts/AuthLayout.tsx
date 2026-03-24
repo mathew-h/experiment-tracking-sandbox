@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom'
 
+/** Centered card layout used for login and other unauthenticated pages. */
 export function AuthLayout() {
   return (
     <div className="min-h-screen bg-surface-base flex items-center justify-center p-4 relative overflow-hidden">

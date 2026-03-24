@@ -32,6 +32,7 @@ const STATUS_OPTIONS = [
   { value: 'CANCELLED', label: 'Cancelled' },
 ]
 
+/** Step 1 of new experiment wizard: experiment ID, type, researcher, sample, and notes. */
 export function Step1BasicInfo({ data, onChange, onNext }: Props) {
   const sampleInputId = useId()
   const [sampleQuery, setSampleQuery] = useState(data.sampleId)

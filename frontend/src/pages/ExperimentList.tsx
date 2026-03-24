@@ -26,6 +26,7 @@ const TYPE_OPTIONS = [
 ]
 const PAGE_SIZES = [25, 50, 100]
 
+/** Paginated, filterable experiment list with status badges and quick-nav links. */
 export function ExperimentListPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()

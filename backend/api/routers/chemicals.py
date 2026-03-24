@@ -24,6 +24,7 @@ def list_compounds(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[CompoundResponse]:
+    """List all compounds in the chemical inventory, ordered by name."""
     rows = db.execute(select(Compound).order_by(Compound.name).offset(skip).limit(limit)).scalars().all()
     return [CompoundResponse.model_validate(r) for r in rows]
 
@@ -34,6 +35,7 @@ def get_compound(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> CompoundResponse:
+    """Return a single compound by primary key. 404 if not found."""
     c = db.get(Compound, compound_id)
     if c is None:
         raise HTTPException(status_code=404, detail="Compound not found")
@@ -46,6 +48,7 @@ def create_compound(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> CompoundResponse:
+    """Create a new compound in the chemical inventory."""
     compound = Compound(**payload.model_dump())
     db.add(compound)
     db.commit()
@@ -59,6 +62,7 @@ def list_additives(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[AdditiveResponse]:
+    """List chemical additives for a conditions record, ordered by addition_order."""
     rows = db.execute(
         select(ChemicalAdditive)
         .where(ChemicalAdditive.experiment_id == conditions_id)
@@ -74,6 +78,7 @@ def create_additive(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> AdditiveResponse:
+    """Add a chemical additive to a conditions record and trigger derived field recalculation."""
     conditions = db.get(ExperimentalConditions, conditions_id)
     if conditions is None:
         raise HTTPException(status_code=404, detail="Conditions record not found")

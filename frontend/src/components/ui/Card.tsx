@@ -22,6 +22,7 @@ const variantClasses = {
   flat:    'bg-transparent border border-surface-border',
 }
 
+/** Surface container with configurable variant (default/raised/flat) and padding. */
 export function Card({ variant = 'default', padding = 'md', className = '', children, ...props }: CardProps) {
   return (
     <div className={[variantClasses[variant], paddingClasses[padding], 'rounded-lg', className].join(' ')} {...props}>
@@ -30,6 +31,7 @@ export function Card({ variant = 'default', padding = 'md', className = '', chil
   )
 }
 
+/** Card header row with an optional uppercase label and right-aligned action slot. */
 export function CardHeader({ label, className = '', children, ...props }: CardSectionProps) {
   return (
     <div className={['flex items-center justify-between px-4 py-3 border-b border-surface-border', className].join(' ')} {...props}>
@@ -39,6 +41,7 @@ export function CardHeader({ label, className = '', children, ...props }: CardSe
   )
 }
 
+/** Padded content area for use inside a Card. */
 export function CardBody({ className = '', children, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div className={['p-4', className].join(' ')} {...props}>
@@ -57,6 +60,7 @@ interface MetricCardProps {
   className?: string
 }
 
+/** Dashboard stat tile with a label, numeric value, optional unit, and subtitle. */
 export function MetricCard({ label, value, unit, sub, className = '' }: MetricCardProps) {
   return (
     <Card className={className}>

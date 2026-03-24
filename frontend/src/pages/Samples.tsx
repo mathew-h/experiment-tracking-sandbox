@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { samplesApi } from '@/api/samples'
 import { Table, TableHead, TableBody, TableRow, Th, Td, Badge, PageSpinner } from '@/components/ui'
 
+/** Sample inventory page — stub for M9 implementation. */
 export function SamplesPage() {
   const { data: samples, isLoading, error } = useQuery({
     queryKey: ['samples'],

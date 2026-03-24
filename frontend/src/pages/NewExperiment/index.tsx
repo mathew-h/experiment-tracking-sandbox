@@ -35,6 +35,7 @@ function toFloat(s: string): number | undefined {
   return isNaN(n) ? undefined : n
 }
 
+/** Four-step wizard for creating a new experiment (Basic Info → Conditions → Additives → Review). */
 export function NewExperimentPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()

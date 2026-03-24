@@ -19,6 +19,7 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+/** Firebase auth context provider — manages ID token, user state, and login/logout. */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
@@ -68,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/** Hook returning the current Firebase auth state and login/logout helpers. */
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')

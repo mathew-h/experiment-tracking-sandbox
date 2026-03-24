@@ -7,7 +7,7 @@
 
 ---
 
-## M8 — Testing and Docs: IN PROGRESS
+## M8 — Testing and Docs: COMPLETE
 
 ### Objective
 Playwright E2E infrastructure, test all upload types with real lab files, fix parser bugs found, complete documentation pass.
@@ -103,8 +103,23 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
 - `bulk_uploads.py` `upload_scalar_results()`: added `variable_config` sys.modules stub using `hasattr` guard
 - `bulk_uploads.py` stub ordering bug: each endpoint's stub now uses `hasattr` to add ONLY ITS OWN attribute; never overwrites another endpoint's stub. Pattern: get-or-create the module, then add the attribute if missing.
 
+### Completed (continued) — M8 Sign-Off Items
+- [x] Load test: `tests/api/test_load.py` — 5 concurrent reads × 3 requests + 5 concurrent writes; module-scoped fixture sets dependency overrides once with session factory (thread-safe). Passing.
+- [x] Backup/restore test: `tests/test_pg_backup_restore.py` — pg_dump experiments_test → custom format → pg_restore to scratch DB → verifies tables, row counts, FK integrity. Passing.
+- [x] Fresh-install migration test: `tests/test_fresh_install_migration.py` — documents and tests the correct fresh-install procedure: `Base.metadata.create_all()` + `alembic stamp head` (NOT `alembic upgrade head` — initial migration b1fc58c4119d is empty, written against existing SQLite DB). Passing.
+- [x] FastAPI docstring audit — all 21 router endpoints that were missing docstrings now have one-line docstrings
+- [x] React JSDoc audit — all 50 exported page and UI component functions now have JSDoc comments
+- **Final test count: 225 passing** (tests/api/ + tests/integration/ + tests/models/ + tests/regression/ + tests/services/ + backup/restore + fresh-install)
+
+### Key Learnings (M8 Sign-Off)
+- `str(engine.url)` in SQLAlchemy masks the password — reconstruct the URL from constants when passing to subprocess
+- SQLAlchemy quotes mixed-case column names in PostgreSQL DDL (e.g. `co2_partial_pressure_MPa` stored as mixed-case, not lowercased)
+- Fresh-install procedure for this project: `Base.metadata.create_all()` then `alembic stamp head` (initial migration is empty)
+- Load test: set `app.dependency_overrides` once in module-scoped fixture with a session factory function, not per-worker
+
 ### Next Action
-**M8 complete** — run `/complete-task` for final commit and PR.
+**M8 SIGNED OFF** — next milestone is M9 Sample Management on `feature/m9-sample-management`.
+Plan: `docs/superpowers/plans/2026-03-23-m9-sample-management.md`
 
 ---
 

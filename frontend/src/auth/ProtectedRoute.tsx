@@ -6,6 +6,7 @@ interface ProtectedRouteProps {
   children: React.ReactNode
 }
 
+/** Route guard that redirects unauthenticated users to /login. */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading, configured } = useAuth()
   const location = useLocation()

@@ -25,6 +25,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toISOString().slice(0, 10)
 }
 
+/** Scrollable feed of recent experiment modifications with timestamp and actor. */
 export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
   const navigate = useNavigate()
 

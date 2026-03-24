@@ -27,6 +27,7 @@ def get_scalar(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ScalarResponse:
+    """Return scalar chemistry results for a result entry. 404 if not found."""
     scalar = db.execute(
         select(ScalarResults).where(ScalarResults.result_id == result_id)
     ).scalar_one_or_none()
@@ -41,6 +42,7 @@ def get_icp(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ICPResponse:
+    """Return ICP-OES elemental results for a result entry. 404 if not found."""
     icp = db.execute(
         select(ICPResults).where(ICPResults.result_id == result_id)
     ).scalar_one_or_none()
@@ -55,6 +57,7 @@ def list_results(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ResultResponse]:
+    """List all result timepoints for an experiment, ordered by time_post_reaction_days. 404 if experiment not found."""
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
@@ -74,6 +77,7 @@ def create_result(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ResultResponse:
+    """Create a new result timepoint for an experiment."""
     result = ExperimentalResults(**payload.model_dump())
     db.add(result)
     db.commit()
@@ -108,6 +112,7 @@ def update_scalar(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ScalarResponse:
+    """Update scalar results and recompute derived H2 and yield fields."""
     scalar = db.get(ScalarResults, scalar_id)
     if scalar is None:
         raise HTTPException(status_code=404, detail="Scalar result not found")
@@ -126,6 +131,7 @@ def create_icp(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ICPResponse:
+    """Create ICP-OES elemental results for a result entry. 404 if result entry not found."""
     result_entry = db.get(ExperimentalResults, payload.result_id)
     if result_entry is None:
         raise HTTPException(status_code=404, detail="Result entry not found")

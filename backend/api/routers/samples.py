@@ -21,6 +21,7 @@ def list_samples(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[SampleResponse]:
+    """List geological samples. Filterable by country and rock_classification."""
     stmt = select(SampleInfo).order_by(SampleInfo.sample_id)
     if country:
         stmt = stmt.where(SampleInfo.country == country)
@@ -37,6 +38,7 @@ def get_sample(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> SampleResponse:
+    """Return a single sample by its string sample_id. 404 if not found."""
     sample = db.execute(
         select(SampleInfo).where(SampleInfo.sample_id == sample_id)
     ).scalar_one_or_none()
@@ -51,6 +53,7 @@ def create_sample(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> SampleResponse:
+    """Create a new geological sample record."""
     sample = SampleInfo(**payload.model_dump())
     db.add(sample)
     db.commit()
@@ -66,6 +69,7 @@ def update_sample(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> SampleResponse:
+    """Update mutable fields on a sample. 404 if the sample does not exist."""
     sample = db.execute(
         select(SampleInfo).where(SampleInfo.sample_id == sample_id)
     ).scalar_one_or_none()

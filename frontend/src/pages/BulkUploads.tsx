@@ -87,6 +87,7 @@ function XrdModeToggle({ mode, onChange }: { mode: XrdMode; onChange: (m: XrdMod
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
+/** Bulk data upload page: one row per upload type with template download and status feedback. */
 export function BulkUploadsPage() {
   const [openRow, setOpenRow] = useState<string | null>(null)
   const [elemDefaultUnit, setElemDefaultUnit] = useState('ppm')

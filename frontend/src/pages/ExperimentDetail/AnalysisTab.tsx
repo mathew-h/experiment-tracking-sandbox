@@ -3,6 +3,7 @@ import { analysisApi } from '@/api/analysis'
 
 interface Props { experimentId: string }
 
+/** Analysis tab: external analyses, XRD phases, and pXRF readings for an experiment. */
 export function AnalysisTab({ experimentId }: Props) {
   const { data: xrd } = useQuery({
     queryKey: ['xrd', experimentId],

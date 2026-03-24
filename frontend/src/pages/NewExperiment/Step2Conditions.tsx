@@ -56,6 +56,7 @@ function field(
   )
 }
 
+/** Step 2 of new experiment wizard: reactor conditions, pressure, and fluid parameters. */
 export function Step2Conditions({ data, experimentType, onChange, onBack, onNext }: Props) {
   const rockMass = parseFloat(data.rock_mass_g)
   const waterVol = parseFloat(data.water_volume_mL)

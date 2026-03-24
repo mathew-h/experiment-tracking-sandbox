@@ -18,6 +18,7 @@ function applyFilters(entries: GanttEntry[], f: DashboardFilterState): GanttEntr
   })
 }
 
+/** Main dashboard: KPI metrics, reactor grid, activity feed, and experiment timeline. */
 export function DashboardPage() {
   const [filters, setFilters] = useState<DashboardFilterState>({
     statuses: [],

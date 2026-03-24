@@ -279,6 +279,7 @@ function ReactorDetailModal({
   )
 }
 
+/** Grid of reactor status cards showing current occupant, temperature, and elapsed time. */
 export function ReactorGrid({ cards }: { cards: ReactorCardData[] }) {
   const [selected, setSelected] = useState<ReactorCardData | null>(null)
 

@@ -9,6 +9,7 @@ interface Mod {
 }
 interface Props { modifications: Mod[] }
 
+/** Modifications tab: audit log of all recorded changes to this experiment. */
 export function ModificationsTab({ modifications }: Props) {
   if (!modifications.length) return <p className="text-sm text-ink-muted p-4">No modifications recorded</p>
   return (

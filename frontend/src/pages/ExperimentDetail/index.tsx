@@ -14,6 +14,7 @@ import { FilesTab } from './FilesTab'
 const TABS = ['Conditions', 'Results', 'Notes', 'Modifications', 'Analysis', 'Files'] as const
 type Tab = typeof TABS[number]
 
+/** Full experiment detail page with tabbed navigation (Results, Conditions, Analysis, Notes, Files, Modifications). */
 export function ExperimentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()

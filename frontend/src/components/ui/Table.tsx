@@ -4,6 +4,7 @@ interface TableProps extends HTMLAttributes<HTMLTableElement> {
   striped?: boolean
 }
 
+/** Styled HTML table wrapper for data-dense lab tables. */
 export function Table({ striped: _striped = false, className = '', children, ...props }: TableProps) {
   return (
     <div className="w-full overflow-x-auto rounded-lg border border-surface-border">
@@ -17,6 +18,7 @@ export function Table({ striped: _striped = false, className = '', children, ...
   )
 }
 
+/** thead wrapper applying sticky header styles. */
 export function TableHead({ className = '', children, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead className={['bg-surface-overlay border-b border-surface-border', className].join(' ')} {...props}>
@@ -25,6 +27,7 @@ export function TableHead({ className = '', children, ...props }: HTMLAttributes
   )
 }
 
+/** tbody wrapper for Table. */
 export function TableBody({ className = '', children, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <tbody className={['divide-y divide-surface-border', className].join(' ')} {...props}>
@@ -33,6 +36,7 @@ export function TableBody({ className = '', children, ...props }: HTMLAttributes
   )
 }
 
+/** Table row with hover highlight and optional border. */
 export function TableRow({ className = '', children, ...props }: HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
@@ -44,6 +48,7 @@ export function TableRow({ className = '', children, ...props }: HTMLAttributes<
   )
 }
 
+/** Sortable-friendly column header cell with uppercase label styling. */
 export function Th({ className = '', children, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
@@ -59,6 +64,7 @@ export function Th({ className = '', children, ...props }: ThHTMLAttributes<HTML
   )
 }
 
+/** Standard data cell with consistent padding and text color. */
 export function Td({ className = '', children, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
@@ -71,6 +77,7 @@ export function Td({ className = '', children, ...props }: TdHTMLAttributes<HTML
 }
 
 // Mono data cell — for numeric values
+/** Data cell styled for numeric/monospace values (right-aligned, font-mono-data). */
 export function TdValue({ className = '', children, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
