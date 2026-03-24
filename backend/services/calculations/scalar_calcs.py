@@ -5,6 +5,62 @@ from backend.services.calculations.registry import register
 from database.models.results import ScalarResults
 
 
+FE_MOLAR_MASS = 55.845  # g/mol
+
+
+def calculate_ferrous_iron_yield_h2(
+    h2_micromoles: float | None,
+    total_ferrous_iron_g: float | None,
+) -> float | None:
+    """H2-derived ferrous iron yield (%).
+
+    Stoichiometry: 3 mol Fe2+ per 1 mol H2
+
+        Fe2+_consumed_g = (h2_micromoles * 3 / 1e6) * FE_MOLAR_MASS
+        yield_h2_pct    = (Fe2+_consumed_g / total_ferrous_iron_g) * 100
+
+    Returns None if h2_micromoles is None or total_ferrous_iron_g is None or <= 0.
+    """
+    if h2_micromoles is None or total_ferrous_iron_g is None or total_ferrous_iron_g <= 0:
+        return None
+    fe2_consumed_g = (h2_micromoles * 3 / 1_000_000) * FE_MOLAR_MASS
+    return (fe2_consumed_g / total_ferrous_iron_g) * 100
+
+
+def calculate_ferrous_iron_yield_nh3(
+    gross_ammonium_mM: float | None,
+    background_ammonium_mM: float | None,
+    solution_volume_mL: float | None,
+    total_ferrous_iron_g: float | None,
+) -> float | None:
+    """NH3-derived ferrous iron yield (%).
+
+    Stoichiometry: 9 mol Fe2+ per 2 mol NH3 (ratio = 4.5)
+
+        net_ammonium_mM  = max(0, gross_ammonium_mM - background_ammonium_mM)
+                           [background defaults to 0.3 mM if None]
+        total_NH3_mol    = (net_ammonium_mM / 1000) * (solution_volume_mL / 1000)
+        Fe2+_consumed_g  = total_NH3_mol * 4.5 * FE_MOLAR_MASS
+        yield_nh3_pct    = (Fe2+_consumed_g / total_ferrous_iron_g) * 100
+
+    Returns None if gross_ammonium_mM, solution_volume_mL, or total_ferrous_iron_g
+    is None or <= 0.
+    """
+    if (
+        gross_ammonium_mM is None
+        or solution_volume_mL is None
+        or solution_volume_mL <= 0
+        or total_ferrous_iron_g is None
+        or total_ferrous_iron_g <= 0
+    ):
+        return None
+    bg = background_ammonium_mM if background_ammonium_mM is not None else 0.3
+    net_mM = max(0.0, gross_ammonium_mM - bg)
+    total_nh3_mol = (net_mM / 1000.0) * (solution_volume_mL / 1000.0)
+    fe2_consumed_g = total_nh3_mol * 4.5 * FE_MOLAR_MASS
+    return (fe2_consumed_g / total_ferrous_iron_g) * 100
+
+
 @register(ScalarResults)
 def recalculate_scalar(instance: object, session: Session) -> None:
     """Recalculate all derived fields on a ScalarResults instance.
