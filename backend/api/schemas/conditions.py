@@ -66,6 +66,7 @@ class ConditionsResponse(BaseModel):
     rock_mass_g: Optional[float] = None
     water_volume_mL: Optional[float] = None
     water_to_rock_ratio: Optional[float] = None
+    total_ferrous_iron_g: Optional[float] = None
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
     feedstock: Optional[str] = None
