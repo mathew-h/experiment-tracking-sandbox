@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import re
 
+import structlog
+from sqlalchemy.orm import Session
+
+log = structlog.get_logger(__name__)
+
 
 def normalize_pxrf_reading_no(raw: str) -> str:
     """Normalize a pXRF reading number for consistent storage and lookup.
@@ -29,3 +34,77 @@ def normalize_pxrf_reading_no(raw: str) -> str:
     if re.fullmatch(r"\d+\.0+", v):
         v = str(int(float(v)))
     return v
+
+
+def evaluate_characterized(db: Session, sample_id: str) -> bool:
+    """Return True if the sample meets at least one characterization criterion."""
+    from sqlalchemy import select
+    from database.models.analysis import ExternalAnalysis, PXRFReading
+    from database.models.characterization import ElementalAnalysis
+    from database.models.xrd import XRDAnalysis
+
+    # 1. XRD type with a linked XRDAnalysis record
+    has_xrd = db.execute(
+        select(ExternalAnalysis.id)
+        .join(XRDAnalysis, XRDAnalysis.external_analysis_id == ExternalAnalysis.id)
+        .where(
+            ExternalAnalysis.sample_id == sample_id,
+            ExternalAnalysis.analysis_type == "XRD",
+        )
+        .limit(1)
+    ).first() is not None
+    if has_xrd:
+        return True
+
+    # 2. Elemental or Titration with at least one ElementalAnalysis row
+    has_elemental = db.execute(
+        select(ExternalAnalysis.id)
+        .join(ElementalAnalysis, ElementalAnalysis.external_analysis_id == ExternalAnalysis.id)
+        .where(
+            ExternalAnalysis.sample_id == sample_id,
+            ExternalAnalysis.analysis_type.in_(["Elemental", "Titration"]),
+        )
+        .limit(1)
+    ).first() is not None
+    if has_elemental:
+        return True
+
+    # 3. pXRF linked to an existing PXRFReading row
+    pxrf_readings = db.execute(
+        select(ExternalAnalysis.pxrf_reading_no)
+        .where(
+            ExternalAnalysis.sample_id == sample_id,
+            ExternalAnalysis.analysis_type == "pXRF",
+            ExternalAnalysis.pxrf_reading_no.isnot(None),
+        )
+    ).scalars().all()
+    for readings_str in pxrf_readings:
+        for raw in readings_str.split(","):
+            normalized = normalize_pxrf_reading_no(raw)
+            if normalized and db.get(PXRFReading, normalized) is not None:
+                return True
+
+    return False
+
+
+def log_sample_modification(
+    db: Session,
+    *,
+    sample_id: str,
+    modified_by: str,
+    modification_type: str,
+    modified_table: str,
+    old_values: dict | None = None,
+    new_values: dict | None = None,
+) -> None:
+    """Write a ModificationsLog entry for a sample-related change."""
+    from database.models.experiments import ModificationsLog
+
+    db.add(ModificationsLog(
+        sample_id=sample_id,  # sample_id column added in Task 3 migration
+        modified_by=modified_by,
+        modification_type=modification_type,
+        modified_table=modified_table,
+        old_values=old_values or {},
+        new_values=new_values or {},
+    ))
