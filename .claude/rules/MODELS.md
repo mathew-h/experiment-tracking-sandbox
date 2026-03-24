@@ -52,7 +52,9 @@ Defines the parameters and setup for an experiment.
   - `initial_conductivity_mS_cm`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`.
   - `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`.
   - `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`.
-- **Derived Fields**: `water_to_rock_ratio` (hybrid/property: `formatted_additives` from chemical_additives).
+- **Derived Fields**:
+  - `water_to_rock_ratio` (hybrid/property: `formatted_additives` from chemical_additives).
+  - `total_ferrous_iron_g` (Float, nullable): mass of ferrous iron (Fe²⁺) in grams, derived from rock characterization FeO wt% × `FE_IN_FEO_FRACTION` × `rock_mass_g`; see `docs/CALCULATIONS.md` for full formula.
 - **Relationships**: `chemical_additives` → One-to-Many with `ChemicalAdditive`.
 - **Note**: Legacy fields like `catalyst`, `buffer_system`, `surfactant` are deprecated in favor of `ChemicalAdditive`.
 
