@@ -4,7 +4,13 @@ from __future__ import annotations
 import re
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from database.models.analysis import ExternalAnalysis, PXRFReading
+from database.models.characterization import ElementalAnalysis
+from database.models.enums import AnalysisType
+from database.models.xrd import XRDAnalysis
 
 log = structlog.get_logger(__name__)
 
@@ -38,18 +44,13 @@ def normalize_pxrf_reading_no(raw: str) -> str:
 
 def evaluate_characterized(db: Session, sample_id: str) -> bool:
     """Return True if the sample meets at least one characterization criterion."""
-    from sqlalchemy import select
-    from database.models.analysis import ExternalAnalysis, PXRFReading
-    from database.models.characterization import ElementalAnalysis
-    from database.models.xrd import XRDAnalysis
-
     # 1. XRD type with a linked XRDAnalysis record
     has_xrd = db.execute(
         select(ExternalAnalysis.id)
         .join(XRDAnalysis, XRDAnalysis.external_analysis_id == ExternalAnalysis.id)
         .where(
             ExternalAnalysis.sample_id == sample_id,
-            ExternalAnalysis.analysis_type == "XRD",
+            ExternalAnalysis.analysis_type == AnalysisType.XRD.value,
         )
         .limit(1)
     ).first() is not None
@@ -62,7 +63,9 @@ def evaluate_characterized(db: Session, sample_id: str) -> bool:
         .join(ElementalAnalysis, ElementalAnalysis.external_analysis_id == ExternalAnalysis.id)
         .where(
             ExternalAnalysis.sample_id == sample_id,
-            ExternalAnalysis.analysis_type.in_(["Elemental", "Titration"]),
+            ExternalAnalysis.analysis_type.in_(
+                [AnalysisType.ELEMENTAL.value, AnalysisType.TITRATION.value]
+            ),
         )
         .limit(1)
     ).first() is not None
@@ -74,7 +77,7 @@ def evaluate_characterized(db: Session, sample_id: str) -> bool:
         select(ExternalAnalysis.pxrf_reading_no)
         .where(
             ExternalAnalysis.sample_id == sample_id,
-            ExternalAnalysis.analysis_type == "pXRF",
+            ExternalAnalysis.analysis_type == AnalysisType.PXRF.value,
             ExternalAnalysis.pxrf_reading_no.isnot(None),
         )
     ).scalars().all()
@@ -97,7 +100,12 @@ def log_sample_modification(
     old_values: dict | None = None,
     new_values: dict | None = None,
 ) -> None:
-    """Write a ModificationsLog entry for a sample-related change."""
+    """Write a ModificationsLog entry for a sample-related change.
+
+    NOTE: Requires ModificationsLog.sample_id column (added by Task 3 migration).
+    Will fail if called before that migration is applied.
+    """
+    # lazy import to avoid circular dependency
     from database.models.experiments import ModificationsLog
 
     db.add(ModificationsLog(

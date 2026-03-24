@@ -1,5 +1,9 @@
 """Unit tests for backend/services/samples.py"""
-from backend.services.samples import normalize_pxrf_reading_no
+from backend.services.samples import evaluate_characterized, normalize_pxrf_reading_no
+from database.models.analysis import ExternalAnalysis, PXRFReading
+from database.models.characterization import ElementalAnalysis, Analyte
+from database.models.samples import SampleInfo
+from database.models.xrd import XRDAnalysis
 
 
 def test_normalize_strips_whitespace():
@@ -17,14 +21,6 @@ def test_normalize_non_float_unchanged():
 
 def test_normalize_plain_int():
     assert normalize_pxrf_reading_no("7") == "7"
-
-
-import pytest
-from database.models.samples import SampleInfo
-from database.models.analysis import ExternalAnalysis, PXRFReading
-from database.models.xrd import XRDAnalysis
-from database.models.characterization import ElementalAnalysis, Analyte
-from backend.services.samples import evaluate_characterized
 
 
 def _sample(db, sid="CHAR_S01"):
