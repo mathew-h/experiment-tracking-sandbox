@@ -83,7 +83,7 @@ export function SampleSelector({ value, onChange, onCreateNew }: Props) {
 
       {open && !value && (
         <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-surface-raised border border-surface-border rounded shadow-lg">
-          {options.slice(0, 30).map((s) => (
+          {options.map((s) => (
             <li
               key={s.sample_id}
               onMouseDown={() => handleSelect(s.sample_id)}
