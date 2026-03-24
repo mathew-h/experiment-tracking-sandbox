@@ -2,7 +2,7 @@
 
 ## Current Active Milestone
 <!-- This line is updated by the agent at the start of each milestone -->
-**Active:** M8 — Testing and Docs
+**Active:** M9 — Sample Management
 
 ## Milestone Status
 | ID | Name | Branch | Status |
@@ -16,7 +16,7 @@
 | M6 | Bulk Uploads | feature/m6-bulk-uploads | Complete |
 | M7 | Reactor Dashboard | feature/m7-reactor-dashboard | Complete |
 | M8 | Testing and Docs | feature/m8-testing-docs | Complete |
-| M9 | Sample Management | feature/m9-sample-management | Planned |
+| M9 | Sample Management | feature/m9-sample-management | In Progress |
 
 ## How to Use
 Before starting any task, read the file for the active milestone.

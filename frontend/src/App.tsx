@@ -9,6 +9,7 @@ import { ExperimentDetailPage } from '@/pages/ExperimentDetail'
 import { NewExperimentPage } from '@/pages/NewExperiment'
 import { BulkUploadsPage } from '@/pages/BulkUploads'
 import { SamplesPage } from '@/pages/Samples'
+import { SampleDetailPage } from '@/pages/SampleDetail'
 import { ChemicalsPage } from '@/pages/Chemicals'
 import { AnalysisPage } from '@/pages/Analysis'
 
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="/experiments/:id" element={<ExperimentDetailPage />} />
           <Route path="/bulk-uploads" element={<BulkUploadsPage />} />
           <Route path="/samples" element={<SamplesPage />} />
+          <Route path="/samples/:sampleId" element={<SampleDetailPage />} />
           <Route path="/chemicals" element={<ChemicalsPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
         </Route>
