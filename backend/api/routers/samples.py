@@ -266,7 +266,7 @@ def update_sample(
     if sample is None:
         raise HTTPException(status_code=404, detail="Sample not found")
 
-    old_values = {k: getattr(sample, k) for k in payload.model_fields}
+    old_values = {k: getattr(sample, k) for k in type(payload).model_fields}
     updates = payload.model_dump(exclude_unset=True)
     manual_characterized = "characterized" in updates
 
