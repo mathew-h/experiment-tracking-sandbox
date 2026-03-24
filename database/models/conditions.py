@@ -31,7 +31,8 @@ class ExperimentalConditions(Base):
     buffer_system = Column(String, nullable=True)
     
     water_to_rock_ratio = Column(Float, nullable=True)
-    
+    total_ferrous_iron_g = Column(Float, nullable=True)  # Derived: (FeO wt% / 100) * FE_IN_FEO_FRACTION * rock_mass_g
+
     # DEPRECATED: Now calculated in ChemicalAdditive model
     catalyst_percentage = Column(Float, nullable=True)
     catalyst_ppm = Column(Float, nullable=True)
