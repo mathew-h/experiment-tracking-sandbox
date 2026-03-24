@@ -54,7 +54,8 @@ class ExperimentalConditions(Base):
     ammonium_chloride_concentration = Column(Float, nullable=True)  # optional
     
    
-    initial_alkalinity = Column(Float, nullable=True) 
+    initial_alkalinity = Column(Float, nullable=True)
+    total_ferrous_iron = Column(Float, nullable=True)  # grams of initial Fe(II) in the system
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

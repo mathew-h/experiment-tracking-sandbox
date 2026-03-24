@@ -98,6 +98,10 @@ class ScalarResults(Base):
     # Hydrogen yield normalized by rock mass (g/ton rock)
     h2_grams_per_ton_yield = Column(Float, nullable=True)
 
+    # Ferrous iron yield derived from H2 and NH3 measurements
+    ferrous_iron_yield_h2_pct = Column(Float, nullable=True)   # H2-derived Fe(II) yield (%)
+    ferrous_iron_yield_nh3_pct = Column(Float, nullable=True)  # NH3-derived Fe(II) yield (%)
+
     background_experiment_id = Column(String, nullable=True)
     background_experiment_fk = Column(Integer, ForeignKey("experiments.id", ondelete="SET NULL"), nullable=True)
     background_experiment = relationship("Experiment", back_populates="scalar_data", foreign_keys=[background_experiment_fk])
