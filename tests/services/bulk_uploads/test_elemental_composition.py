@@ -146,7 +146,7 @@ def test_unknown_sample_id_recorded_as_error(db_session: Session):
 
 
 def test_updates_existing_elemental_analysis(db_session: Session):
-    """Re-uploading the same sample+analyte updates, not creates."""
+    """Re-uploading the same sample+analyte with overwrite=True updates, not creates."""
     _seed_sample(db_session, "S_ELEM004")
     _seed_analyte(db_session, "Fe2O3")
 
@@ -156,7 +156,7 @@ def test_updates_existing_elemental_analysis(db_session: Session):
 
     xlsx2 = make_excel(["sample_id", "Fe2O3"], [["S_ELEM004", 15.0]])
     created, updated, skipped, errors = ElementalCompositionService.bulk_upsert_wide_from_excel(
-        db_session, xlsx2
+        db_session, xlsx2, overwrite=True
     )
 
     assert errors == [], f"Unexpected errors: {errors}"
@@ -192,6 +192,206 @@ def test_blank_sample_id_rows_skipped(db_session: Session):
 
     assert created == 0
     assert skipped == 1
+
+
+def test_skip_existing_overwrite_false(db_session: Session):
+    """overwrite=False (default): re-uploading an existing (sample_id, analyte) preserves original value."""
+    _seed_sample(db_session, "S_SKIP01")
+    _seed_analyte(db_session, "TiO2")
+
+    xlsx1 = make_excel(["sample_id", "TiO2"], [["S_SKIP01", 3.5]])
+    ElementalCompositionService.bulk_upsert_wide_from_excel(db_session, xlsx1)
+    db_session.flush()
+
+    xlsx2 = make_excel(["sample_id", "TiO2"], [["S_SKIP01", 9.9]])
+    created, updated, skipped, errors = ElementalCompositionService.bulk_upsert_wide_from_excel(
+        db_session, xlsx2, overwrite=False
+    )
+
+    assert errors == []
+    assert created == 0
+    assert updated == 0
+
+    row = (
+        db_session.query(ElementalAnalysis)
+        .join(Analyte, Analyte.id == ElementalAnalysis.analyte_id)
+        .filter(Analyte.analyte_symbol == "TiO2", ElementalAnalysis.sample_id == "S_SKIP01")
+        .first()
+    )
+    assert row is not None
+    assert row.analyte_composition == pytest.approx(3.5), "Existing value must be preserved when overwrite=False"
+
+
+def test_overwrite_existing_overwrite_true(db_session: Session):
+    """overwrite=True: re-uploading an existing (sample_id, analyte) replaces the value."""
+    _seed_sample(db_session, "S_OVR01")
+    _seed_analyte(db_session, "K2O")
+
+    xlsx1 = make_excel(["sample_id", "K2O"], [["S_OVR01", 0.5]])
+    ElementalCompositionService.bulk_upsert_wide_from_excel(db_session, xlsx1)
+    db_session.flush()
+
+    xlsx2 = make_excel(["sample_id", "K2O"], [["S_OVR01", 1.8]])
+    created, updated, skipped, errors = ElementalCompositionService.bulk_upsert_wide_from_excel(
+        db_session, xlsx2, overwrite=True
+    )
+
+    assert errors == []
+    assert updated == 1
+    assert created == 0
+
+    row = (
+        db_session.query(ElementalAnalysis)
+        .join(Analyte, Analyte.id == ElementalAnalysis.analyte_id)
+        .filter(Analyte.analyte_symbol == "K2O", ElementalAnalysis.sample_id == "S_OVR01")
+        .first()
+    )
+    assert row.analyte_composition == pytest.approx(1.8)
+
+
+def test_null_cell_does_not_clear_existing_value(db_session: Session):
+    """Null/blank cell in the upload file never clears an existing value, even with overwrite=True."""
+    _seed_sample(db_session, "S_NULL01")
+    _seed_analyte(db_session, "P2O5")
+
+    xlsx1 = make_excel(["sample_id", "P2O5"], [["S_NULL01", 0.08]])
+    ElementalCompositionService.bulk_upsert_wide_from_excel(db_session, xlsx1)
+    db_session.flush()
+
+    xlsx2 = make_excel(["sample_id", "P2O5"], [["S_NULL01", None]])
+    created, updated, skipped, errors = ElementalCompositionService.bulk_upsert_wide_from_excel(
+        db_session, xlsx2, overwrite=True
+    )
+
+    assert errors == []
+    row = (
+        db_session.query(ElementalAnalysis)
+        .join(Analyte, Analyte.id == ElementalAnalysis.analyte_id)
+        .filter(Analyte.analyte_symbol == "P2O5", ElementalAnalysis.sample_id == "S_NULL01")
+        .first()
+    )
+    assert row is not None
+    assert row.analyte_composition == pytest.approx(0.08), "Null cell must never clear existing value"
+
+
+# ---------------------------------------------------------------------------
+# ActlabsRockTitrationService overwrite tests
+# ---------------------------------------------------------------------------
+
+def _make_actlabs_xlsx(sample_id: str, values: dict) -> bytes:
+    """Build a minimal ActLabs-format xlsx with one data row."""
+    import io
+    import openpyxl
+    symbols = list(values.keys())
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Report Number", "12345"])
+    ws.append(["Report Date", "2026-01-01"])
+    ws.append(["sample_id"] + symbols)
+    ws.append([None] + ["ppm"] * len(symbols))
+    ws.append([None] + ["0.01"] * len(symbols))
+    ws.append(["Analysis Method"] + ["FUS-ICP"] * len(symbols))
+    ws.append([sample_id] + [values[s] for s in symbols])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_actlabs_skip_existing_overwrite_false(db_session: Session):
+    """ActlabsRockTitrationService: overwrite=False preserves existing values."""
+    from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
+
+    sample = SampleInfo(sample_id="S_ACT_SKIP")
+    db_session.add(sample)
+    db_session.flush()
+
+    xlsx1 = _make_actlabs_xlsx("S_ACT_SKIP", {"Fe": 55000.0})
+    ActlabsRockTitrationService.import_excel(db_session, xlsx1)
+    db_session.flush()
+
+    xlsx2 = _make_actlabs_xlsx("S_ACT_SKIP", {"Fe": 99999.0})
+    created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
+        db_session, xlsx2, overwrite=False
+    )
+
+    assert errors == []
+    assert updated == 0
+
+    analyte = db_session.query(Analyte).filter(Analyte.analyte_symbol.ilike("Fe")).first()
+    row = db_session.query(ElementalAnalysis).filter(
+        ElementalAnalysis.sample_id == "S_ACT_SKIP",
+        ElementalAnalysis.analyte_id == analyte.id,
+    ).first()
+    assert row.analyte_composition == pytest.approx(55000.0), "Existing value must be preserved when overwrite=False"
+
+
+def test_actlabs_overwrite_existing_overwrite_true(db_session: Session):
+    """ActlabsRockTitrationService: overwrite=True replaces existing values."""
+    from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
+
+    sample = SampleInfo(sample_id="S_ACT_OVR")
+    db_session.add(sample)
+    db_session.flush()
+
+    xlsx1 = _make_actlabs_xlsx("S_ACT_OVR", {"Mg": 12000.0})
+    ActlabsRockTitrationService.import_excel(db_session, xlsx1)
+    db_session.flush()
+
+    xlsx2 = _make_actlabs_xlsx("S_ACT_OVR", {"Mg": 88888.0})
+    created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
+        db_session, xlsx2, overwrite=True
+    )
+
+    assert errors == []
+    assert updated == 1
+
+    analyte = db_session.query(Analyte).filter(Analyte.analyte_symbol.ilike("Mg")).first()
+    row = db_session.query(ElementalAnalysis).filter(
+        ElementalAnalysis.sample_id == "S_ACT_OVR",
+        ElementalAnalysis.analyte_id == analyte.id,
+    ).first()
+    assert row.analyte_composition == pytest.approx(88888.0)
+
+
+def test_actlabs_null_cell_does_not_clear_existing(db_session: Session):
+    """ActlabsRockTitrationService: nd/blank cells never clear existing values, even with overwrite=True."""
+    import io
+    import openpyxl
+    from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
+
+    sample = SampleInfo(sample_id="S_ACT_NULL")
+    db_session.add(sample)
+    db_session.flush()
+
+    xlsx1 = _make_actlabs_xlsx("S_ACT_NULL", {"Ni": 500.0})
+    ActlabsRockTitrationService.import_excel(db_session, xlsx1)
+    db_session.flush()
+
+    # Second upload has "nd" (non-detect) for Ni — must not clear the existing value
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Report Number", "99999"])
+    ws.append(["Report Date", "2026-01-01"])
+    ws.append(["sample_id", "Ni"])
+    ws.append([None, "ppm"])
+    ws.append([None, "0.01"])
+    ws.append(["Analysis Method", "FUS-ICP"])
+    ws.append(["S_ACT_NULL", "nd"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
+        db_session, buf.getvalue(), overwrite=True
+    )
+
+    assert errors == []
+    analyte = db_session.query(Analyte).filter(Analyte.analyte_symbol.ilike("Ni")).first()
+    row = db_session.query(ElementalAnalysis).filter(
+        ElementalAnalysis.sample_id == "S_ACT_NULL",
+        ElementalAnalysis.analyte_id == analyte.id,
+    ).first()
+    assert row is not None
+    assert row.analyte_composition == pytest.approx(500.0), "nd cell must never clear existing value"
 
 
 def test_actlabs_import_sets_external_analysis_id(db_session: Session):

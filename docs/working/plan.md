@@ -1,11 +1,19 @@
-# Project Working Memory
+# Working Memory — Experiment Tracking System
 
-## Current Status
-**Active Milestone:** M8 — Testing and Docs
-**Branch:** `feature/m8-testing-docs`
-**Last Updated:** 2026-03-23
+<!-- ============================================================
+     QUICK ORIENTATION (always read — keep under 15 lines)
+     ============================================================ -->
+## Current State
+- **Active branch:** `feature/m9-sample-management`
+- **Last completed:** M8 Testing and Docs sign-off; Pre-M9 elemental composition reconciliation (2026-03-24)
+- **Blocked on:** nothing
+- **Next action:** M9 Sample Management — `docs/superpowers/plans/2026-03-23-m9-sample-management.md`
 
 ---
+
+<!-- ============================================================
+     MILESTONE DETAIL (read only for milestone tasks)
+     ============================================================ -->
 
 ## M8 — Testing and Docs: COMPLETE
 
@@ -120,6 +128,28 @@ Spec: `docs/superpowers/specs/2026-03-23-m8-testing-docs-design.md`
 ### Next Action
 **M8 SIGNED OFF** — next milestone is M9 Sample Management on `feature/m9-sample-management`.
 Plan: `docs/superpowers/plans/2026-03-23-m9-sample-management.md`
+
+---
+
+## Pre-M9 Reconciliation — Elemental Composition Upload: COMPLETE (2026-03-24)
+
+### Task
+Reconcile `ElementalCompositionService` and `ActlabsRockTitrationService` write logic:
+both services share a single `_write_elemental_record` helper with an explicit `overwrite` flag.
+
+### Changes Made
+- `backend/services/bulk_uploads/actlabs_titration_data.py`:
+  - Added module-level `_write_elemental_record(db, ext_analysis_id, sample_id, analyte, value, overwrite)` helper
+  - `ElementalCompositionService.bulk_upsert_wide_from_excel`: added `overwrite: bool = False`; removed inline upsert block; calls shared helper
+  - `ActlabsRockTitrationService.import_excel`: added `overwrite: bool = False`; removed inline upsert block; calls shared helper
+- `tests/services/bulk_uploads/test_elemental_composition.py`: +7 tests (15 total)
+- `docs/upload_templates/actlabs_titration_data.md`: documented overwrite flag and behavior table
+
+### Behavior Contract
+- `overwrite=False` (default): INSERT new records; SKIP existing (preserves original value)
+- `overwrite=True`: INSERT new records; UPDATE existing records
+- Null/blank/nd cells always skipped regardless of overwrite flag
+- Return tuple `(created, updated, skipped_rows, errors)` preserved for both services
 
 ---
 

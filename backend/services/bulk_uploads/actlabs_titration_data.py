@@ -11,6 +11,42 @@ from database import Analyte, ElementalAnalysis, SampleInfo
 from database.models.analysis import ExternalAnalysis
 
 
+def _write_elemental_record(
+    db: Session,
+    ext_analysis_id: int,
+    sample_id: str,
+    analyte: "Analyte",
+    value: float,
+    overwrite: bool,
+) -> "Tuple[int, int]":
+    """Write a single ElementalAnalysis record. Returns (created_delta, updated_delta).
+
+    When overwrite=False, any existing record is preserved and (0, 0) is returned.
+    When overwrite=True, any existing record is updated and (0, 1) is returned.
+    Null/blank values must never be passed to this function.
+    """
+    existing = (
+        db.query(ElementalAnalysis)
+        .filter(
+            ElementalAnalysis.external_analysis_id == ext_analysis_id,
+            ElementalAnalysis.analyte_id == analyte.id,
+        )
+        .first()
+    )
+    if existing:
+        if overwrite:
+            existing.analyte_composition = value
+            return 0, 1
+        return 0, 0
+    db.add(ElementalAnalysis(
+        external_analysis_id=ext_analysis_id,
+        sample_id=sample_id,
+        analyte_id=analyte.id,
+        analyte_composition=value,
+    ))
+    return 1, 0
+
+
 class AnalyteService:
     @staticmethod
     def bulk_upsert_from_excel(db: Session, file_bytes: bytes) -> Tuple[int, int, int, List[str]]:
@@ -58,6 +94,7 @@ class ElementalCompositionService:
         db: Session,
         file_bytes: bytes,
         default_unit: Optional[str] = None,
+        overwrite: bool = False,
     ) -> Tuple[int, int, int, List[str]]:
         """
         Upsert ElementalAnalysis from a wide Excel file:
@@ -158,25 +195,11 @@ class ElementalCompositionService:
                     except Exception:
                         continue
 
-                    existing = (
-                        db.query(ElementalAnalysis)
-                        .filter(
-                            ElementalAnalysis.external_analysis_id == ext_analysis_id,
-                            ElementalAnalysis.analyte_id == analyte.id,
-                        )
-                        .first()
+                    delta_c, delta_u = _write_elemental_record(
+                        db, ext_analysis_id, sample_id, analyte, fval, overwrite
                     )
-                    if existing:
-                        existing.analyte_composition = fval
-                        updated += 1
-                    else:
-                        db.add(ElementalAnalysis(
-                            external_analysis_id=ext_analysis_id,
-                            sample_id=sample_id,
-                            analyte_id=analyte.id,
-                            analyte_composition=fval,
-                        ))
-                        created += 1
+                    created += delta_c
+                    updated += delta_u
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
 
@@ -390,7 +413,7 @@ class ActlabsRockTitrationService:
         return diags, warnings
 
     @classmethod
-    def import_excel(cls, db: Session, file_bytes: bytes) -> Tuple[int, int, int, List[str]]:
+    def import_excel(cls, db: Session, file_bytes: bytes, overwrite: bool = False) -> Tuple[int, int, int, List[str]]:
         """
         Import ActLabs Excel to normalized tables.
         - Upserts analytes (last header wins for units)
@@ -474,25 +497,11 @@ class ActlabsRockTitrationService:
                     # If misaligned, skip
                     continue
                 ext_id = _get_ext_analysis_id(sample_id)
-                existing = (
-                    db.query(ElementalAnalysis)
-                    .filter(
-                        ElementalAnalysis.external_analysis_id == ext_id,
-                        ElementalAnalysis.analyte_id == analyte.id,
-                    )
-                    .first()
+                delta_c, delta_u = _write_elemental_record(
+                    db, ext_id, sample_id, analyte, vnum, overwrite
                 )
-                if existing:
-                    existing.analyte_composition = vnum
-                    results_updated += 1
-                else:
-                    db.add(ElementalAnalysis(
-                        external_analysis_id=ext_id,
-                        sample_id=sample_id,
-                        analyte_id=analyte.id,
-                        analyte_composition=vnum,
-                    ))
-                    results_created += 1
+                results_created += delta_c
+                results_updated += delta_u
 
         return results_created, results_updated, skipped, errors
 
