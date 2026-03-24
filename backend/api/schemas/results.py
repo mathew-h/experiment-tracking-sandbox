@@ -84,6 +84,8 @@ class ScalarResponse(BaseModel):
     h2_micromoles: Optional[float] = None
     h2_mass_ug: Optional[float] = None
     h2_grams_per_ton_yield: Optional[float] = None
+    ferrous_iron_yield_h2_pct: Optional[float] = None
+    ferrous_iron_yield_nh3_pct: Optional[float] = None
     co2_partial_pressure_MPa: Optional[float] = None
     background_experiment_fk: Optional[int] = None
 
