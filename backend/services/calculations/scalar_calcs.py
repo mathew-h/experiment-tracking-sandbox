@@ -123,7 +123,6 @@ def recalculate_scalar(instance: object, session: Session) -> None:
     )
 
     # Ferrous iron yield — NH3 derived
-    gross = getattr(instance, 'gross_ammonium_concentration_mM', None)
     bg_nh3 = getattr(instance, 'background_ammonium_concentration_mM', None)
     instance.ferrous_iron_yield_nh3_pct = calculate_ferrous_iron_yield_nh3(
         gross_ammonium_mM=gross,

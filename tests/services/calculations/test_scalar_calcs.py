@@ -367,8 +367,6 @@ def test_recalculate_scalar_sets_h2_yield_when_total_fe_set():
 
 def test_recalculate_scalar_h2_yield_none_when_no_total_fe():
     """ferrous_iron_yield_h2_pct is None when total_ferrous_iron not set."""
-    # NOTE: Passes in stub phase because recalculate_scalar does not yet write
-    # ferrous_iron_yield_h2_pct. Becomes a true regression guard after Task 3 wiring.
     s = make_scalar(
         h2_concentration=100.0,
         gas_sampling_volume_ml=10.0,
@@ -394,8 +392,6 @@ def test_recalculate_scalar_sets_nh3_yield_when_total_fe_set():
 
 def test_recalculate_scalar_nh3_yield_none_when_no_total_fe():
     """ferrous_iron_yield_nh3_pct is None when total_ferrous_iron not set."""
-    # NOTE: Passes in stub phase because recalculate_scalar does not yet write
-    # ferrous_iron_yield_nh3_pct. Becomes a true regression guard after Task 3 wiring.
     s = make_scalar(
         gross_ammonium_concentration_mM=10.0,
         sampling_volume_mL=100.0,
