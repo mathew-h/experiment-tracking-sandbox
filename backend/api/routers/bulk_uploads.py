@@ -28,10 +28,15 @@ async def upload_scalar_results(
 ) -> UploadResponse:
     """Upload a Solution Chemistry Excel file and upsert scalar results."""
     import sys  # noqa: PLC0415
+    from types import ModuleType  # noqa: PLC0415
     if "frontend.config.variable_config" not in sys.modules:
-        from types import ModuleType
         _stub = ModuleType("frontend.config.variable_config")
-        _stub.SCALAR_RESULTS_TEMPLATE_HEADERS = {
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules["frontend.config.variable_config"] = _stub
+    _vc = sys.modules["frontend.config.variable_config"]
+    if not hasattr(_vc, "SCALAR_RESULTS_TEMPLATE_HEADERS"):
+        _vc.SCALAR_RESULTS_TEMPLATE_HEADERS = {
             "measurement_date": "Date",
             "experiment_id": "Experiment ID",
             "time_post_reaction": "Time (days)",
@@ -45,13 +50,13 @@ async def upload_scalar_results(
             "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
             "final_ph": "Final pH",
             "ferrous_iron_yield": "Fe2+ Yield (%)",
+            "final_nitrate_concentration_mM": "Final Nitrate (mM)",
             "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
+            "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
             "final_conductivity_mS_cm": "Conductivity (mS/cm)",
+            "final_alkalinity_mg_L": "Alkalinity (mg/L)",
             "overwrite": "Overwrite",
         }
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
     from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     created, updated, skipped, errors, feedbacks = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
@@ -94,6 +99,16 @@ async def upload_pxrf(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a pXRF CSV/Excel file."""
+    import sys  # noqa: PLC0415
+    from types import ModuleType  # noqa: PLC0415
+    if "frontend.config.variable_config" not in sys.modules:
+        _stub = ModuleType("frontend.config.variable_config")
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules["frontend.config.variable_config"] = _stub
+    _vc = sys.modules["frontend.config.variable_config"]
+    if not hasattr(_vc, "PXRF_REQUIRED_COLUMNS"):
+        _vc.PXRF_REQUIRED_COLUMNS = {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
     from backend.services.bulk_uploads.pxrf_data import PXRFUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
@@ -171,17 +186,19 @@ async def upload_icp_oes(
 ) -> UploadResponse:
     """Upload an ICP-OES CSV file and ingest elemental data."""
     import sys  # noqa: PLC0415
+    from types import ModuleType  # noqa: PLC0415
     if "frontend.config.variable_config" not in sys.modules:
-        from types import ModuleType
         _stub = ModuleType("frontend.config.variable_config")
-        _stub.ICP_FIXED_ELEMENT_FIELDS = [
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules["frontend.config.variable_config"] = _stub
+    _vc = sys.modules["frontend.config.variable_config"]
+    if not hasattr(_vc, "ICP_FIXED_ELEMENT_FIELDS"):
+        _vc.ICP_FIXED_ELEMENT_FIELDS = [
             "fe", "si", "mg", "ca", "ni", "cu", "mo", "zn", "mn", "cr",
             "co", "al", "sr", "y", "nb", "sb", "cs", "ba", "nd", "gd",
             "pt", "rh", "ir", "pd", "ru", "os", "tl",
         ]
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
     from backend.services.icp_service import ICPService  # noqa: PLC0415
     file_bytes = await file.read()
     try:

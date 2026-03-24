@@ -16,6 +16,7 @@
 | M6 | Bulk Uploads | feature/m6-bulk-uploads | Complete |
 | M7 | Reactor Dashboard | feature/m7-reactor-dashboard | Complete |
 | M8 | Testing and Docs | feature/m8-testing-docs | Not Started |
+| M9 | Sample Management | feature/m9-sample-management | Not Started |
 
 ## How to Use
 Before starting any task, read the file for the active milestone.

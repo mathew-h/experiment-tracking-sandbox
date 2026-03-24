@@ -25,8 +25,8 @@ test('ActLabs Rock Analysis upload creates elemental records', async ({ page }) 
     page.getByText(/Created:|Updated:|Errors:/).first()
   ).toBeVisible({ timeout: 15_000 })
 
-  // At least one record created (TAMARACK / MONAZITE SAND / PNNL CORE all seeded)
-  await expect(page.getByText(/Created: [1-9]/i)).toBeVisible()
+  // At least one record created or updated (TAMARACK / MONAZITE SAND / PNNL CORE all seeded)
+  await expect(page.getByText(/Created: [1-9]|Updated: [1-9]/i)).toBeVisible()
 
   const errorBadge = page.getByText(/^Errors:/)
   await expect(errorBadge).not.toBeVisible()

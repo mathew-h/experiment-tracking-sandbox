@@ -11,13 +11,11 @@ test('master results sync button triggers sync', async ({ page }) => {
   await page.goto('/bulk-uploads')
   await page.getByText('Master Results Sync').click()
 
-  // The Sync Now button is only visible when a path is configured.
-  // If the settings panel is shown instead, complete the precondition setup first.
-  const syncBtn = page.getByRole('button', { name: /sync now/i })
+  const syncBtn = page.getByRole('button', { name: 'Sync from SharePoint', exact: true })
   await expect(syncBtn).toBeVisible({ timeout: 5_000 })
 
   await syncBtn.click()
 
-  // Wait for result — any of created / updated / skipped indicates sync ran
-  await expect(page.getByText(/created|updated|skipped/i)).toBeVisible({ timeout: 20_000 })
+  // Wait for result — any badge with count indicates sync ran
+  await expect(page.getByText(/Created:|Updated:|Skipped:/i).first()).toBeVisible({ timeout: 20_000 })
 })
