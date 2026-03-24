@@ -65,13 +65,15 @@ def calculate_ferrous_iron_yield_nh3(
 def recalculate_scalar(instance: object, session: Session) -> None:
     """Recalculate all derived fields on a ScalarResults instance.
 
-    Sets: grams_per_ton_yield, h2_micromoles, h2_mass_ug, h2_grams_per_ton_yield.
+    Sets: grams_per_ton_yield, h2_micromoles, h2_mass_ug, h2_grams_per_ton_yield,
+          ferrous_iron_yield_h2_pct, ferrous_iron_yield_nh3_pct.
 
     Reads rock_mass_g and water_volume_mL via:
         instance.result_entry.experiment.conditions
     """
     rock_mass: float | None = None
     liquid_volume_ml: float | None = None
+    total_ferrous_iron_g: float | None = None
 
     result_entry = getattr(instance, 'result_entry', None)
     if result_entry is not None:
@@ -81,6 +83,7 @@ def recalculate_scalar(instance: object, session: Session) -> None:
             if conditions is not None:
                 rock_mass = getattr(conditions, 'rock_mass_g', None)
                 liquid_volume_ml = getattr(conditions, 'water_volume_mL', None)
+                total_ferrous_iron_g = getattr(conditions, 'total_ferrous_iron', None)
 
     # Prefer sampling_volume_mL when available
     sampling_vol = getattr(instance, 'sampling_volume_mL', None)
@@ -111,6 +114,23 @@ def recalculate_scalar(instance: object, session: Session) -> None:
             instance.grams_per_ton_yield = None
     else:
         instance.grams_per_ton_yield = None
+
+    # Ferrous iron yield — H2 derived
+    h2_micromoles = getattr(instance, 'h2_micromoles', None)
+    instance.ferrous_iron_yield_h2_pct = calculate_ferrous_iron_yield_h2(
+        h2_micromoles=h2_micromoles,
+        total_ferrous_iron_g=total_ferrous_iron_g,
+    )
+
+    # Ferrous iron yield — NH3 derived
+    gross = getattr(instance, 'gross_ammonium_concentration_mM', None)
+    bg_nh3 = getattr(instance, 'background_ammonium_concentration_mM', None)
+    instance.ferrous_iron_yield_nh3_pct = calculate_ferrous_iron_yield_nh3(
+        gross_ammonium_mM=gross,
+        background_ammonium_mM=bg_nh3,
+        solution_volume_mL=liquid_volume_ml,
+        total_ferrous_iron_g=total_ferrous_iron_g,
+    )
 
 
 def _calculate_hydrogen(instance: object) -> None:
