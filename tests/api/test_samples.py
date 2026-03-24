@@ -178,3 +178,76 @@ def test_delete_photo(client, db_session, tmp_path, monkeypatch):
     db_session.refresh(photo)
     resp = client.delete(f"/api/samples/PHOTO_S03/photos/{photo.id}")
     assert resp.status_code == 204
+
+
+def test_create_analysis_pxrf_warn_missing_reading(client, db_session):
+    _make_sample(db_session, "ANA_S01")
+    payload = {
+        "analysis_type": "pXRF",
+        "pxrf_reading_no": "9876",
+        "description": "Handheld scan",
+    }
+    resp = client.post("/api/samples/ANA_S01/analyses", json=payload)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["analysis"]["analysis_type"] == "pXRF"
+    assert any("9876" in w for w in body["warnings"])
+
+
+def test_create_analysis_pxrf_no_warn_when_reading_exists(client, db_session):
+    _make_sample(db_session, "ANA_S02")
+    db_session.add(PXRFReading(reading_no="42"))
+    db_session.commit()
+    payload = {"analysis_type": "pXRF", "pxrf_reading_no": "42"}
+    resp = client.post("/api/samples/ANA_S02/analyses", json=payload)
+    assert resp.status_code == 201
+    assert resp.json()["warnings"] == []
+
+
+def test_create_analysis_updates_characterized(client, db_session):
+    from database.models.xrd import XRDAnalysis
+    _make_sample(db_session, "ANA_S03")
+    payload = {"analysis_type": "XRD", "description": "Diffraction"}
+    resp = client.post("/api/samples/ANA_S03/analyses", json=payload)
+    assert resp.status_code == 201
+    ea_id = resp.json()["analysis"]["id"]
+    # Add XRDAnalysis row to trigger characterized
+    xrd = XRDAnalysis(external_analysis_id=ea_id, mineral_phases={})
+    db_session.add(xrd)
+    db_session.commit()
+    # Patch sample to re-trigger evaluation
+    resp2 = client.patch("/api/samples/ANA_S03", json={"country": "USA"})
+    assert resp2.json()["characterized"] is True
+
+
+def test_list_analyses_by_sample(client, db_session):
+    _make_sample(db_session, "ANA_S04")
+    db_session.add(ExternalAnalysis(sample_id="ANA_S04", analysis_type="XRD"))
+    db_session.add(ExternalAnalysis(sample_id="ANA_S04", analysis_type="pXRF"))
+    db_session.commit()
+    resp = client.get("/api/samples/ANA_S04/analyses")
+    assert resp.status_code == 200
+    types = [a["analysis_type"] for a in resp.json()]
+    assert "XRD" in types
+    assert "pXRF" in types
+
+
+def test_delete_analysis(client, db_session):
+    _make_sample(db_session, "ANA_S05")
+    ea = ExternalAnalysis(sample_id="ANA_S05", analysis_type="XRD")
+    db_session.add(ea)
+    db_session.commit()
+    db_session.refresh(ea)
+    resp = client.delete(f"/api/samples/ANA_S05/analyses/{ea.id}")
+    assert resp.status_code == 204
+
+
+def test_get_activity_returns_modifications(client, db_session):
+    _make_sample(db_session, "ACT_S01")
+    # Patch triggers a ModificationsLog entry via log_sample_modification
+    client.patch("/api/samples/ACT_S01", json={"country": "Australia"})
+    resp = client.get("/api/samples/ACT_S01/activity")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    assert data[0]["modified_table"] == "sample_info"

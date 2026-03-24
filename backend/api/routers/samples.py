@@ -17,8 +17,9 @@ from backend.api.schemas.samples import (
     SampleListItem, SampleListResponse, SampleGeoItem, SampleDetail,
     LinkedExperiment, SamplePhotoResponse,
     ExternalAnalysisResponse, AnalysisFileResponse, ElementalAnalysisItem,
+    ExternalAnalysisCreate, ExternalAnalysisWithWarnings,
 )
-from backend.services.samples import evaluate_characterized, log_sample_modification
+from backend.services.samples import evaluate_characterized, log_sample_modification, normalize_pxrf_reading_no
 from backend.config.settings import get_settings
 
 PHOTO_ALLOWED_TYPES = {"image/jpeg", "image/png"}
@@ -390,3 +391,150 @@ def delete_photo(
     )
     db.delete(photo)
     db.commit()
+
+
+# ── POST /api/samples/{sample_id}/analyses ────────────────────────────────
+@router.post("/{sample_id}/analyses", response_model=ExternalAnalysisWithWarnings, status_code=201)
+def create_analysis(
+    sample_id: str,
+    payload: ExternalAnalysisCreate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ExternalAnalysisWithWarnings:
+    from database.models.analysis import ExternalAnalysis as EA, PXRFReading
+    from sqlalchemy.orm import selectinload as sl
+
+    if db.get(SampleInfo, sample_id) is None:
+        raise HTTPException(status_code=404, detail="Sample not found")
+
+    warnings: list[str] = []
+
+    normalized_readings: list[str] = []
+    if payload.pxrf_reading_no:
+        for raw in payload.pxrf_reading_no.split(","):
+            normed = normalize_pxrf_reading_no(raw)
+            if normed:
+                normalized_readings.append(normed)
+                if db.get(PXRFReading, normed) is None:
+                    warnings.append(
+                        f"pXRF reading '{normed}' not found in database — "
+                        "it may be uploaded later via bulk upload"
+                    )
+
+    ea_data = payload.model_dump()
+    if normalized_readings:
+        ea_data["pxrf_reading_no"] = ",".join(normalized_readings)
+
+    ea = EA(sample_id=sample_id, **ea_data)
+    db.add(ea)
+    db.flush()
+
+    # Reload with files relationship to satisfy _to_analysis_response
+    db.execute(
+        select(EA)
+        .where(EA.id == ea.id)
+        .options(sl(EA.analysis_files))
+    ).scalar_one()
+
+    sample = db.get(SampleInfo, sample_id)
+    sample.characterized = evaluate_characterized(db, sample_id)
+
+    log_sample_modification(
+        db, sample_id=sample_id, modified_by=current_user.email,
+        modification_type="create", modified_table="external_analyses",
+        new_values={**ea_data, "id": ea.id},
+    )
+    db.commit()
+    db.refresh(ea)
+    return ExternalAnalysisWithWarnings(
+        analysis=_to_analysis_response(ea), warnings=warnings
+    )
+
+
+# ── GET /api/samples/{sample_id}/analyses ────────────────────────────────
+@router.get("/{sample_id}/analyses", response_model=list[ExternalAnalysisResponse])
+def list_analyses(
+    sample_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[ExternalAnalysisResponse]:
+    from database.models.analysis import ExternalAnalysis as EA
+    from sqlalchemy.orm import selectinload as sl
+
+    rows = db.execute(
+        select(EA)
+        .where(EA.sample_id == sample_id)
+        .options(sl(EA.analysis_files))
+        .order_by(EA.analysis_date)
+    ).scalars().all()
+    return [_to_analysis_response(r) for r in rows]
+
+
+# ── DELETE /api/samples/{sample_id}/analyses/{analysis_id} ───────────────
+@router.delete("/{sample_id}/analyses/{analysis_id}", status_code=204)
+def delete_analysis(
+    sample_id: str,
+    analysis_id: int,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+):
+    from database.models.analysis import ExternalAnalysis as EA
+    from sqlalchemy.orm import selectinload as sl
+
+    ea = db.execute(
+        select(EA)
+        .where(
+            EA.id == analysis_id,
+            EA.sample_id == sample_id,
+        )
+        .options(sl(EA.analysis_files))
+    ).scalar_one_or_none()
+    if ea is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    for af in ea.analysis_files:
+        p = Path(af.file_path)
+        if p.exists():
+            p.unlink()
+
+    log_sample_modification(
+        db, sample_id=sample_id, modified_by=current_user.email,
+        modification_type="delete", modified_table="external_analyses",
+        old_values={"id": ea.id, "analysis_type": ea.analysis_type},
+    )
+    db.delete(ea)
+
+    sample = db.get(SampleInfo, sample_id)
+    if sample:
+        sample.characterized = evaluate_characterized(db, sample_id)
+
+    db.commit()
+
+
+# ── GET /api/samples/{sample_id}/activity ─────────────────────────────────
+@router.get("/{sample_id}/activity")
+def get_sample_activity(
+    sample_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+):
+    from database.models.experiments import ModificationsLog
+
+    rows = db.execute(
+        select(ModificationsLog)
+        .where(ModificationsLog.sample_id == sample_id)
+        .order_by(ModificationsLog.created_at.desc())
+        .limit(100)
+    ).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "modified_by": r.modified_by,
+            "modification_type": r.modification_type,
+            "modified_table": r.modified_table,
+            "old_values": r.old_values,
+            "new_values": r.new_values,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
