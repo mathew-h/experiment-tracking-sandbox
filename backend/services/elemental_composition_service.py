@@ -54,6 +54,8 @@ def get_analyte_wt_pct(
     if sample_id is None:
         return None
 
+    # Local imports to avoid circular import: this service is imported by
+    # conditions_calcs.py, which is imported by the model layer event listeners.
     from database.models.analysis import ExternalAnalysis
     from database.models.characterization import ElementalAnalysis, Analyte
 

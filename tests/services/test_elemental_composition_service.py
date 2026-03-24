@@ -1,8 +1,10 @@
 # tests/services/test_elemental_composition_service.py
 import pytest
+from unittest.mock import MagicMock
 from backend.services.elemental_composition_service import (
     calculate_total_ferrous_iron_g,
     FE_IN_FEO_FRACTION,
+    get_analyte_wt_pct,
 )
 
 
@@ -37,10 +39,6 @@ def test_zero_feo_returns_zero():
     """0.0 wt% FeO → 0.0 g (not None)."""
     result = calculate_total_ferrous_iron_g(feo_wt_pct=0.0, rock_mass_g=5.0)
     assert result == pytest.approx(0.0)
-
-
-from unittest.mock import MagicMock
-from backend.services.elemental_composition_service import get_analyte_wt_pct
 
 
 def _mock_session(scalar_result):
