@@ -19,7 +19,8 @@ def make_conditions(**kwargs):
 
 
 def make_session(experiment_sample_id=None, feo_wt_pct=None):
-    """Mock session. get() returns a stub Experiment; execute() returns feo_wt_pct."""
+    """Mock session. get() returns None when experiment_sample_id is None (experiment not found),
+    otherwise returns a stub Experiment with sample_id set. execute() returns feo_wt_pct."""
     session = MagicMock()
     if experiment_sample_id is not None:
         exp_stub = types.SimpleNamespace(sample_id=experiment_sample_id)
@@ -31,24 +32,28 @@ def make_session(experiment_sample_id=None, feo_wt_pct=None):
 
 
 def test_water_to_rock_ratio_computed():
+    """Standard case: ratio = water_volume_mL / rock_mass_g."""
     cond = make_conditions(water_volume_mL=500.0, rock_mass_g=10.0)
     recalculate_conditions(cond, make_session())
     assert cond.water_to_rock_ratio == pytest.approx(50.0)
 
 
 def test_water_to_rock_ratio_zero_rock_mass_is_none():
+    """Zero rock mass must not produce divide-by-zero — result is None."""
     cond = make_conditions(water_volume_mL=500.0, rock_mass_g=0.0)
     recalculate_conditions(cond, make_session())
     assert cond.water_to_rock_ratio is None
 
 
 def test_water_to_rock_ratio_missing_volume_is_none():
+    """Missing water volume → ratio is None."""
     cond = make_conditions(water_volume_mL=None, rock_mass_g=10.0)
     recalculate_conditions(cond, make_session())
     assert cond.water_to_rock_ratio is None
 
 
 def test_water_to_rock_ratio_missing_rock_mass_is_none():
+    """Missing rock mass → ratio is None."""
     cond = make_conditions(water_volume_mL=500.0, rock_mass_g=None)
     recalculate_conditions(cond, make_session())
     assert cond.water_to_rock_ratio is None
