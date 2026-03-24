@@ -26,6 +26,7 @@ class ConditionsCreate(BaseModel):
     initial_nitrate_concentration: Optional[float] = None
     initial_dissolved_oxygen: Optional[float] = None
     initial_alkalinity: Optional[float] = None
+    total_ferrous_iron: Optional[float] = None
     core_height_cm: Optional[float] = None
     core_width_cm: Optional[float] = None
     core_volume_cm3: Optional[float] = None
@@ -48,6 +49,7 @@ class ConditionsUpdate(BaseModel):
     initial_nitrate_concentration: Optional[float] = None
     initial_dissolved_oxygen: Optional[float] = None
     initial_alkalinity: Optional[float] = None
+    total_ferrous_iron: Optional[float] = None
     confining_pressure: Optional[float] = None
     pore_pressure: Optional[float] = None
     core_height_cm: Optional[float] = None
@@ -79,6 +81,7 @@ class ConditionsResponse(BaseModel):
     initial_nitrate_concentration: Optional[float] = None
     initial_dissolved_oxygen: Optional[float] = None
     initial_alkalinity: Optional[float] = None
+    total_ferrous_iron: Optional[float] = None
     confining_pressure: Optional[float] = None
     pore_pressure: Optional[float] = None
     core_height_cm: Optional[float] = None

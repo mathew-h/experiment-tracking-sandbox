@@ -12,6 +12,27 @@ const CF_SLOTS = ['CF01', 'CF02']
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED'] as const
 type ExperimentStatus = typeof STATUS_OPTIONS[number]
 
+// Static hardware specs — used for both occupied and empty slots.
+// Source: lab hardware inventory (issue #2).
+const REACTOR_SPECS: Record<string, { volume_mL: number; material: string; vendor: string }> = {
+  R01: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
+  R02: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
+  R03: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
+  R04: { volume_mL: 300, material: 'Titanium',  vendor: 'Tan' },
+  R05: { volume_mL: 500, material: 'Titanium',  vendor: 'Yushen' },
+  R06: { volume_mL: 500, material: 'Titanium',  vendor: 'Yushen' },
+  R07: { volume_mL: 500, material: 'Titanium',  vendor: 'Yushen' },
+  R08: { volume_mL: 100, material: 'Titanium',  vendor: 'Tan' },
+  R09: { volume_mL: 100, material: 'Titanium',  vendor: 'Tan' },
+  R10: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+  R11: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+  R12: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+  R13: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+  R14: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+  R15: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+  R16: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
+}
+
 function statusColors(status: string | null) {
   switch (status) {
     case 'ONGOING':
@@ -99,6 +120,33 @@ function StatusBadge({
   )
 }
 
+function ReactorSpecsBadge({
+  volume_mL,
+  material,
+  vendor,
+}: {
+  volume_mL: number | null
+  material: string | null
+  vendor: string | null
+}) {
+  if (!volume_mL && !material && !vendor) return null
+  return (
+    <div className="flex flex-wrap gap-x-2 gap-y-0.5 pt-1 border-t border-surface-border mt-1">
+      {volume_mL != null && (
+        <span className="text-2xs text-ink-muted">
+          <span className="font-mono-data text-ink-secondary">{volume_mL}</span> mL
+        </span>
+      )}
+      {material && (
+        <span className="text-2xs text-ink-muted">{material}</span>
+      )}
+      {vendor && (
+        <span className="text-2xs text-ink-muted">{vendor}</span>
+      )}
+    </div>
+  )
+}
+
 function ReactorCard({
   label,
   card,
@@ -167,9 +215,21 @@ function ReactorCard({
               </span>
             )}
           </div>
+          <ReactorSpecsBadge
+            volume_mL={card!.volume_mL ?? REACTOR_SPECS[label]?.volume_mL ?? null}
+            material={card!.material ?? REACTOR_SPECS[label]?.material ?? null}
+            vendor={card!.vendor ?? REACTOR_SPECS[label]?.vendor ?? null}
+          />
         </div>
       ) : (
-        <p className="text-xs text-ink-muted mt-1">No active experiment</p>
+        <div className="space-y-1">
+          <p className="text-xs text-ink-muted mt-1">No active experiment</p>
+          <ReactorSpecsBadge
+            volume_mL={REACTOR_SPECS[label]?.volume_mL ?? null}
+            material={REACTOR_SPECS[label]?.material ?? null}
+            vendor={REACTOR_SPECS[label]?.vendor ?? null}
+          />
+        </div>
       )}
     </Card>
   )
@@ -248,6 +308,33 @@ function ReactorDetailModal({
               <dd className="font-mono-data text-ink-secondary">
                 {card.started_at.slice(0, 10)}
               </dd>
+            </div>
+          )}
+          {(card.volume_mL != null || card.material || card.vendor) && (
+            <div className="pt-2 border-t border-surface-border">
+              <p className="text-ink-muted text-2xs uppercase tracking-wider mb-1.5">
+                Hardware
+              </p>
+              <div className="space-y-1.5">
+                {card.volume_mL != null && (
+                  <div className="flex gap-2">
+                    <dt className="text-ink-muted w-28 shrink-0">Volume</dt>
+                    <dd className="font-mono-data text-ink-secondary">{card.volume_mL} mL</dd>
+                  </div>
+                )}
+                {card.material && (
+                  <div className="flex gap-2">
+                    <dt className="text-ink-muted w-28 shrink-0">Material</dt>
+                    <dd className="text-ink-secondary">{card.material}</dd>
+                  </div>
+                )}
+                {card.vendor && (
+                  <div className="flex gap-2">
+                    <dt className="text-ink-muted w-28 shrink-0">Vendor</dt>
+                    <dd className="text-ink-secondary">{card.vendor}</dd>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {card.description && (

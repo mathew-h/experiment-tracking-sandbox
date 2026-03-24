@@ -36,7 +36,7 @@ Stores timestamped notes/logs for an experiment.
 
 ### `ModificationsLog`
 Audit trail for tracking changes to records.
-- **Fields**: `experiment_id`, `experiment_fk`, `modified_by`, `modification_type` (create/update/delete), `modified_table`, `old_values` (JSON), `new_values` (JSON), `created_at`.
+- **Fields**: `experiment_id`, `experiment_fk`, `sample_id` (String, nullable — bare String ID, no FK, matching `experiment_id` pattern), `modified_by`, `modification_type` (create/update/delete), `modified_table`, `old_values` (JSON), `new_values` (JSON), `created_at`.
 
 ---
 

@@ -34,7 +34,7 @@ def recalculate_conditions(instance: ExperimentalConditions, session: Session) -
     from database.models.experiments import Experiment  # local import avoids circular import risk
 
     sample_id = None
-    if instance.experiment_fk is not None:
+    if getattr(instance, 'experiment_fk', None) is not None:
         experiment = session.get(Experiment, instance.experiment_fk)
         if experiment is not None:
             sample_id = experiment.sample_id
@@ -44,3 +44,14 @@ def recalculate_conditions(instance: ExperimentalConditions, session: Session) -
         feo_wt_pct=feo_wt_pct,
         rock_mass_g=rock_mass,
     )
+
+    # Propagate to all linked ScalarResults so that changes to total_ferrous_iron
+    # (and rock_mass_g / water_volume_mL) are reflected in previously-stored scalar results.
+    # Lazy import avoids load-time circular import: conditions_calcs ← scalar_calcs.
+    from backend.services.calculations.scalar_calcs import recalculate_scalar
+    experiment = getattr(instance, 'experiment', None)
+    if experiment is not None:
+        for result in getattr(experiment, 'results', None) or []:
+            scalar = getattr(result, 'scalar_data', None)
+            if scalar is not None:
+                recalculate_scalar(scalar, session)
