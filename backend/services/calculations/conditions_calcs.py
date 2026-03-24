@@ -33,13 +33,4 @@ def recalculate_conditions(instance: ExperimentalConditions, session: Session) -
         for result in getattr(experiment, 'results', None) or []:
             scalar = getattr(result, 'scalar_data', None)
             if scalar is not None:
-                # Ensure scalar can resolve conditions via result_entry → experiment → conditions.
-                # On real ORM objects this relationship is already set.  In tests (SimpleNamespace)
-                # the back-reference may be absent, so we inject it temporarily.
-                if getattr(scalar, 'result_entry', None) is None:
-                    scalar.result_entry = result
-                if getattr(result, 'experiment', None) is None:
-                    result.experiment = experiment
-                if getattr(experiment, 'conditions', None) is None:
-                    experiment.conditions = instance
                 recalculate_scalar(scalar, session)
