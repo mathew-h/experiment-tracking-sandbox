@@ -2,10 +2,6 @@
 from __future__ import annotations
 
 import re
-import structlog
-from sqlalchemy.orm import Session
-
-log = structlog.get_logger(__name__)
 
 
 def normalize_pxrf_reading_no(raw: str) -> str:
