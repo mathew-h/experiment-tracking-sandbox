@@ -136,6 +136,44 @@ h2_grams_per_ton_yield = 1,000,000 × (h2_mass_g / rock_mass_g)
 
 Set to `None` if `rock_mass_g` is missing or H2 inputs are insufficient.
 
+### Ferrous Iron Yield — H₂ Derived (`ferrous_iron_yield_h2_pct`)
+
+Stoichiometry: 3 mol Fe²⁺ per 1 mol H₂
+
+```
+Fe²⁺_consumed_g = (h2_micromoles × 3 / 1,000,000) × 55.845
+yield_h2_pct    = (Fe²⁺_consumed_g / total_ferrous_iron_g) × 100
+```
+
+- Reads `h2_micromoles` (already computed from H₂ gas inputs — see above)
+- Reads `total_ferrous_iron` from `ExperimentalConditions` via `result_entry → experiment → conditions`
+- Set to `None` if `h2_micromoles` is `None` or `total_ferrous_iron` is `None` or ≤ 0
+
+**Verification:** 1,000 µmol H₂ with 1.0 g `total_ferrous_iron` → (0.003 mol × 55.845) / 1.0 × 100 = **16.75%**
+
+### Ferrous Iron Yield — NH₃ Derived (`ferrous_iron_yield_nh3_pct`)
+
+Stoichiometry: 9 mol Fe²⁺ per 2 mol NH₃ (ratio = 4.5)
+
+```
+net_ammonium_mM  = max(0, gross_ammonium_concentration_mM − background_ammonium_concentration_mM)
+                   [background defaults to 0.3 mM if not provided]
+total_NH3_mol    = (net_ammonium_mM / 1000) × (solution_volume_mL / 1000)
+Fe²⁺_consumed_g  = total_NH3_mol × 4.5 × 55.845
+yield_nh3_pct    = (Fe²⁺_consumed_g / total_ferrous_iron_g) × 100
+```
+
+- `solution_volume_mL`: prefers `sampling_volume_mL`; falls back to `water_volume_mL` from conditions
+  (identical fallback chain as `grams_per_ton_yield`)
+- Set to `None` if `gross_ammonium_concentration_mM`, `solution_volume_mL`, or `total_ferrous_iron` is `None` or ≤ 0
+- Net concentration clamped to ≥ 0
+
+**Verification:** 10 mM gross (0.3 mM background), 100 mL, 1.0 g `total_ferrous_iron` →
+0.00097 mol × 4.5 × 55.845 / 1.0 × 100 = **24.38%**
+
+> Note: legacy `ferrous_iron_yield` column (manual-entry, deprecated) remains in the schema for
+> backward data compatibility but is excluded from new calculations and UI forms.
+
 ---
 
 ## Utility Functions
