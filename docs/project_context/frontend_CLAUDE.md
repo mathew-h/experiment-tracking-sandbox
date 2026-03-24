@@ -51,3 +51,7 @@ Requires changes in exactly 3 places — missing any one silently omits the fiel
 ## Design System
 All color/font tokens in `frontend/src/assets/brand.ts` — never hardcode hex values in components.
 Tailwind config mirrors these tokens. CSS custom properties in `frontend/src/styles/tokens.css`.
+
+## Server Management (Non-Negotiable)
+Never start or stop the Vite dev server. Assume it is already running on
+port 5173 (or 5174). If the dev server is unreachable, report to the user.

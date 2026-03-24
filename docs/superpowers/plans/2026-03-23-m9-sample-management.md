@@ -2,13 +2,25 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate and improve the full sample management workflow from legacy Streamlit into the React + FastAPI stack, adding map view, characterized auto-evaluation, photo gallery, and pXRF analysis linkage.
+**Goal:** Migrate and improve the full sample management workflow from legacy Streamlit into the React + FastAPI stack, adding map view (bookmarked — see below), characterized auto-evaluation, photo gallery, and pXRF analysis linkage.
 
-**Architecture:** New `backend/services/samples.py` handles `evaluate_characterized` and `normalize_pxrf_reading_no` business logic. The existing samples router is extended with photo upload, analysis CRUD, geo, and delete endpoints. Frontend replaces the Samples stub with a full inventory page (table + map toggle), New Sample Modal, four-tab detail page, and a reusable SampleSelector component.
+**Architecture:** New `backend/services/samples.py` handles `evaluate_characterized` and `normalize_pxrf_reading_no` business logic. The existing samples router is extended with photo upload, analysis CRUD, geo, and delete endpoints. Frontend replaces the Samples stub with a full inventory page (table + map toggle — **map toggle bookmarked** until noted otherwise), New Sample Modal, four-tab detail page, and a reusable SampleSelector component.
 
-**Tech Stack:** FastAPI + SQLAlchemy + PostgreSQL (backend), React 18 + React Query + Tailwind (frontend), react-leaflet + leaflet + react-leaflet-markercluster (map), pytest FastAPI TestClient (all tests).
+**Tech Stack:** FastAPI + SQLAlchemy + PostgreSQL (backend), React 18 + React Query + Tailwind (frontend). **Map stack** (react-leaflet, leaflet, clustering package — see Tasks 9–10) applies only after the map bookmark is removed. pytest FastAPI TestClient (all tests).
 
 **Testing strategy:** pytest API tests in `tests/api/test_samples.py` and service unit tests in `tests/services/test_samples_service.py`. No Playwright E2E — validate through the API and unit tests only.
+
+### Bookmark: map UI — do not complete until noted otherwise
+
+The **map feature** is **bookmarked**: Leaflet map view, clustered markers, the Samples page table/map toggle, and **Tasks 9–10** in this plan. **Do not** implement those tasks or mark them complete, and **do not** wire map UI into Task 11, until this bookmark is **explicitly removed** from this document.
+
+| Scope | While bookmark is active |
+|--------|---------------------------|
+| **Tasks 9–10** | Do not start; leave every checkbox unchecked. |
+| **Task 11** | Ship a **table-only** Samples inventory page: no `MapView`, no `listGeo` / `samples-geo` query, no `ViewMode` toggle, no map branch or “no coordinates” list tied to the map. The large Step 1 code block is the **post-bookmark** target; until then, implement the equivalent table, filters, pagination, modals, and delete flow without map dependencies. |
+| **Tasks 4–5** (`SampleGeoItem`, `GET /api/samples/geo`) | Optional API groundwork; may ship with M9 even while the map UI is deferred. |
+| **Task 8** (`samples.ts`) | `SampleGeoItem` type and `listGeo` may be included for API parity or omitted until the map work runs — either is acceptable. |
+| **Task 16** (`SAMPLES.md`) | Omit end-user documentation of the map view until the bookmark is removed. |
 
 ---
 
@@ -24,7 +36,7 @@
 - `frontend/src/pages/SampleDetail/ActivityTab.tsx`
 - `frontend/src/pages/SampleDetail/NewSampleModal.tsx` — create form modal
 - `frontend/src/components/ui/SampleSelector.tsx` — combobox with chip + create-new
-- `frontend/src/components/map/MapView.tsx` — leaflet map with clustering
+- `frontend/src/components/map/MapView.tsx` — leaflet map with clustering (**bookmarked** — see “Bookmark: map UI”)
 
 **Modify:**
 - `database/models/experiments.py` — add `sample_id` nullable String to `ModificationsLog`
@@ -1073,7 +1085,9 @@ pytest tests/api/test_samples.py::test_upload_photo_returns_201 -v
 
 - [ ] **Step 3: Add photo endpoints to router**
 
-Append to `backend/api/routers/samples.py`:
+**⚠️ IMPORT PLACEMENT:** The imports below (`os`, `uuid`, `Path`, `File`, `Form`, `UploadFile`, `get_settings`) must be added at the **top** of `backend/api/routers/samples.py` with the existing imports — not appended at the end. Function signatures reference `File`, `Form`, and `UploadFile` at definition time; placing imports after function definitions will cause `NameError`. Add these lines to the existing import block first, then append the endpoint functions at the bottom of the file.
+
+Append to `backend/api/routers/samples.py` (imports at top, endpoints at bottom):
 
 ```python
 import os
@@ -1397,7 +1411,7 @@ def delete_analysis(
 pytest tests/api/test_samples.py -v
 ```
 
-Target: all passing.
+Target: all tests pass **except** `test_get_activity_returns_modifications` — that test is intentionally written here but depends on the `GET /api/samples/{id}/activity` endpoint which is implemented in Task 13 Step 7. Expect that test to return 404 and fail until Task 13 is complete. All other tests must pass.
 
 - [ ] **Step 5: Run full test suite**
 
@@ -1418,6 +1432,8 @@ git commit -m "[M9] Task 7: analysis CRUD endpoints + pXRF normalization + chara
 
 **Files:**
 - Modify: `frontend/src/api/samples.ts`
+
+> **Map bookmark:** `SampleGeoItem` and `listGeo` in the snippet below are for the map feature. You may keep them for API parity or omit them until the map bookmark is removed (see “Bookmark: map UI”).
 
 - [ ] **Step 1: Replace samples.ts**
 
@@ -1626,6 +1642,8 @@ git commit -m "[M9] Task 8: extend samples API client with all M9 types"
 
 ## Task 9: Install Map Packages
 
+> **BOOKMARK — DO NOT COMPLETE** until the “Bookmark: map UI” section is removed from this plan (or you are explicitly directed otherwise). Do not install packages or check off steps until then.
+
 **Files:**
 - Modify: `frontend/package.json`
 
@@ -1660,6 +1678,8 @@ git commit -m "[M9] Task 9: install leaflet + react-leaflet + react-leaflet-clus
 ---
 
 ## Task 10: MapView Component
+
+> **BOOKMARK — DO NOT COMPLETE** until the “Bookmark: map UI” section is removed from this plan (or you are explicitly directed otherwise).
 
 **Files:**
 - Create: `frontend/src/components/map/MapView.tsx`
@@ -1750,6 +1770,18 @@ git commit -m "[M9] Task 10: MapView component with leaflet clustering"
 **Files:**
 - Modify: `frontend/src/pages/Samples.tsx`
 
+> **Map bookmark (partial):** Until “Bookmark: map UI” is lifted, implement **table-only** — no imports or usage from Tasks 9–10, no map toggle, no `listGeo` / geo query, and no map UI block. The Step 1 snippet below is the **full** design after the bookmark is removed.
+
+> **⚠️ BOOKMARK ACTIVE — DO NOT USE THE CODE BLOCK AS-IS.** The Step 1 snippet is the post-bookmark target. While the bookmark is active, you **must omit** the following lines from the implementation or the TypeScript build will fail (`MapView` does not exist yet):
+> - Remove: `import { MapView } from '@/components/map/MapView'`
+> - Remove: `type ViewMode = 'table' | 'map'`
+> - Remove: `const [view, setView] = useState<ViewMode>('table')`
+> - Remove: the `useQuery` for `samplesApi.listGeo()` / `samples-geo`
+> - Remove: the view-toggle button group (table/map radio buttons)
+> - Remove: `{view === 'map' && geoData && ...}` map render block
+> - Remove: `StatusBadge` from the import — use `Badge` only (see fixes below)
+> Also remove `StatusBadge` from the `@/components/ui` import line (it is already corrected in the code block below).
+
 Replace the stub with a full implementation:
 
 - [ ] **Step 1: Rewrite Samples.tsx**
@@ -1762,7 +1794,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { samplesApi, type SampleListParams } from '@/api/samples'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
-  Badge, StatusBadge, Button, Input, Select, Modal, PageSpinner, useToast,
+  Badge, Button, Input, Select, Modal, PageSpinner, useToast,
 } from '@/components/ui'
 import { MapView } from '@/components/map/MapView'
 import { NewSampleModal } from './SampleDetail/NewSampleModal'
@@ -1964,9 +1996,9 @@ export function SamplesPage() {
                       {[s.locality, s.state, s.country].filter(Boolean).join(', ') || '—'}
                     </Td>
                     <Td>
-                      <StatusBadge variant={s.characterized ? 'success' : 'neutral'}>
+                      <Badge variant={s.characterized ? 'success' : 'default'}>
                         {s.characterized ? 'Yes' : 'No'}
-                      </StatusBadge>
+                      </Badge>
                     </Td>
                     <Td>
                       <div className="flex gap-1">
@@ -2022,6 +2054,7 @@ export function SamplesPage() {
       {/* Delete confirmation */}
       {deleteTarget && (
         <Modal
+          open={!!deleteTarget}
           title="Delete Sample"
           onClose={() => setDeleteTarget(null)}
           footer={
@@ -2165,6 +2198,7 @@ export function NewSampleModal({ onClose, onCreated }: Props) {
 
   return (
     <Modal
+      open
       title="New Sample"
       size="lg"
       onClose={onClose}
@@ -2435,7 +2469,7 @@ export function OverviewTab({ sample }: Props) {
               </div>
               <div>
                 <dt className="text-xs text-ink-muted">Characterized</dt>
-                <dd><StatusBadge variant={sample.characterized ? 'success' : 'neutral'}>{charLabel}</StatusBadge></dd>
+                <dd><Badge variant={sample.characterized ? 'success' : 'default'}>{charLabel}</Badge></dd>
               </div>
             </dl>
           ) : (
@@ -2957,9 +2991,9 @@ export function SampleSelector({ value, onChange, onCreateNew }: Props) {
                   <span className="text-ink-muted ml-2">{s.rock_classification}</span>
                 )}
               </span>
-              <StatusBadge variant={s.characterized ? 'success' : 'neutral'} className="text-xs">
+              <Badge variant={s.characterized ? 'success' : 'default'} className="text-xs">
                 {s.characterized ? 'Char.' : 'Unch.'}
-              </StatusBadge>
+              </Badge>
             </li>
           ))}
           {onCreateNew && (
@@ -3066,7 +3100,7 @@ git commit -m "[M9] Task 15: fix test/lint failures from full suite run"
 - Modify: `docs/working/plan.md`
 - Modify: `docs/milestones/MILESTONE_INDEX.md`
 
-- [ ] **Step 1: Write SAMPLES.md** — researcher-facing guide covering creating samples, uploading photos, adding analyses, reading the map view, understanding Characterized status.
+- [ ] **Step 1: Write SAMPLES.md** — researcher-facing guide covering creating samples, uploading photos, adding analyses, understanding Characterized status. **While the map bookmark is active**, omit the map view; add a map section only after the bookmark is removed.
 
 - [ ] **Step 2: Write SAMPLE_CHARACTERIZED_LOGIC.md** — developer guide explaining the three conditions, `evaluate_characterized` function, when it's called, manual override behavior.
 
@@ -3088,6 +3122,8 @@ git commit -m "[M9] Task 16: documentation — SAMPLES.md, CHARACTERIZED_LOGIC.m
 ## Execution Handoff
 
 Plan saved to `docs/superpowers/plans/2026-03-23-m9-sample-management.md`.
+
+**Map UI is bookmarked** — see “Bookmark: map UI” under the plan header. Skip Tasks 9–10 and the map portions of Task 11 until that section is removed or you are told otherwise.
 
 **Two execution options:**
 

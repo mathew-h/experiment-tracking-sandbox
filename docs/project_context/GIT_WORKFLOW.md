@@ -3,36 +3,53 @@
 ## Branch Structure
 ```
 main          ← production-ready only; never commit directly
-  └─ develop  ← integration; feature branches merge here first
-       ├─ infra/lab-pc-server-setup
-       ├─ feature/m1-postgres-migration
-       ├─ feature/m2-calculation-engine
-       ├─ feature/m3-fastapi-backend
-       ├─ feature/m4-react-shell
+  └─ develop  ← integration; all feature branches merge here first
+       ├─ feature/m1-postgres-migration   ← milestone branches
        ├─ feature/m5-experiment-pages
-       ├─ feature/m6-bulk-uploads
-       ├─ feature/m7-reactor-dashboard
-       └─ feature/m8-testing-docs
+       ├─ fix/issue-47-water-rock-ratio   ← issue branches
+       ├─ fix/issue-52-icp-null-dilution
+       └─ chore/add-experiment-id-index   ← inline/chore branches
 ```
 
 ## Branch Rules
-- Create feature branch from `develop`, never from `main`
-- One branch per milestone; sub-tasks are commits within that branch
-- Feature branch → `develop`: requires agent review + Test Writer Agent pass
-- `develop` → `main`: requires explicit user sign-off
+
+### Milestone branches
+- Named `feature/m<number>-<short-description>`
+- Created from `develop` at milestone start
+- One branch per milestone; sub-tasks are commits within it
+- Merged to `develop` after agent review + Test Writer Agent pass
+
+### Issue branches
+- Named `fix/issue-<number>-<short-description>` (bug fixes)
+- Named `feat/issue-<number>-<short-description>` (new feature issues)
+- Created from `develop` before any code is written
+- Merged to `develop` after task completes and tests pass
+- Branch is deleted after merge
+
+### Inline branches
+- Required when the task changes any tracked file (code, migrations, config)
+- Named by type:
+  - `fix/<short-description>` — bug fix with no issue number
+  - `feat/<short-description>` — small feature addition
+  - `chore/<short-description>` — config, tooling, docs-only change
+  - `refactor/<short-description>` — restructuring without behavior change
+- Skip branching only for: read-only tasks, documentation-only edits to
+  `docs/working/`, or a change to a single comment or string literal
+- Created from `develop` before any code is written
+- Merged to `develop` after task completes
+
+### Universal rules
+- Never create a branch from `main`
+- Never commit directly to `develop` or `main`
 - Never force-push to `develop` or `main`
-- Delete feature branches after successful merge
+- Delete branches after successful merge
+- If unsure whether a branch is needed, create one — it costs nothing
 
-## Commit Message Format
-```
-[M<number>] <imperative short description> (<50 chars max)
+Routine commit, merge, and cleanup steps for agents: `.claude/commands/complete-task.md` (Steps 3–4).
 
-- Detail bullet if needed
-- Tests added: <yes/no, what kind>
-- Docs updated: <yes/no, what>
+## Commit messages
 
-Refs: #<issue number if applicable>
-```
+Subject-line prefixes and body bullets by task type: `.claude/CLAUDE.md` section 10.
 
 ## Pre-Merge Checklist
 - [ ] All tests pass (`pytest` backend, `vitest` frontend)

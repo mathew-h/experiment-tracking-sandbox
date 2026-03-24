@@ -6,12 +6,30 @@
 
 ## 1. Start Every Session With This
 
-1. Run `/start-task` — this reads working memory, orients to the active milestone, and confirms scope
+1. Run `/start-task` — classify task mode (`milestone` / `issue` / `inline`), create or confirm the branch, load context, confirm scope
 2. Never begin coding without completing the `/start-task` checklist
+3. **Git:** follow `docs/GIT_WORKFLOW.md`. Branch in `/start-task` Step 2 before context load; state branch (or skip) in Step 4 scope confirmation
 
 ---
 
-## 2. Project Overview
+## 2. Task Mode
+
+Every session operates in one of three modes. The mode is set during `/start-task`
+and governs which context files are loaded and whether `plan.md` is updated.
+
+| Mode | Trigger | plan.md | Milestone files |
+|------|---------|---------|-----------------|
+| `milestone` | User references a milestone | Full read + update | Yes |
+| `issue` | GitHub issue number or URL | Header only, no update | No |
+| `inline` | Direct prompt description | Skip | No |
+
+The current mode must be stated in the scope confirmation (Step 4 of `/start-task`).
+
+For `issue`, "no update" applies at session start; `/complete-task` still updates `plan.md` when the issue is resolved.
+
+---
+
+## 3. Project Overview
 
 A laboratory experiment tracking system for a small geochemistry team (2-5 users).
 Researchers log experiments, upload bulk analytical data, track samples and chemicals,
@@ -24,7 +42,7 @@ and visualize reactor status. Data exports to Power BI.
 
 ---
 
-## 3. Agent System
+## 4. Agent System
 
 You operate as the **Conductor Agent**. Load `.claude/skills/conductor.md` now.
 
@@ -36,7 +54,7 @@ Sub-agent skills (load when relevant):
 
 ---
 
-## 4. Active Milestone
+## 5. Active Milestone
 
 **Current: M4 — React Shell** (`feature/m4-react-shell`)
 
@@ -46,7 +64,7 @@ Do not begin a milestone until the previous one has received explicit user sign-
 
 ---
 
-## 5. What Is Locked
+## 6. What Is Locked
 
 Full details in `docs/LOCKED_COMPONENTS.md`. Summary:
 
@@ -58,16 +76,15 @@ Full details in `docs/LOCKED_COMPONENTS.md`. Summary:
 
 ---
 
-## 6. Working Memory
+## 7. Working Memory
 
 `docs/working/plan.md` is the project's working memory.
-Read it at the start of every session.
-Update it after every completed task.
+Read and update rules depend on **task mode** (section 2).
 It tracks what has been done, what decisions were made, and what comes next.
 
 ---
 
-## 7. Key Reference Files
+## 8. Key Reference Files
 
 | Need | Read |
 |------|------|
@@ -84,7 +101,7 @@ It tracks what has been done, what decisions were made, and what comes next.
 
 ---
 
-## 8. Stop and Ask the User When
+## 9. Stop and Ask the User When
 
 - A schema change affects more than one model
 - A new third-party package is needed
@@ -99,23 +116,44 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 
 ---
 
-## 9. Commit Format
+## 10. Commit Format
 
+**Milestone tasks:**
 ```
-[M<number>] <imperative description> (<50 chars)
+[M<number>] <imperative description>
 
 - Detail if needed
 - Tests added: yes/no
 - Docs updated: yes/no
 ```
 
-## 10. MCP Servers
+**Issue tasks:**
+```
+[#<issue-number>] <imperative description>
+
+- Detail if needed
+- Tests added: yes/no
+- Docs updated: yes/no
+```
+
+**Inline tasks:**
+```
+[fix|feat|chore|refactor] <imperative description>
+
+- Detail if needed
+- Tests added: yes/no
+- Docs updated: yes/no
+```
+
+All descriptions: imperative mood, under 50 characters, no trailing period.
+
+## 11. MCP Servers
 Notion MCP (`notion`, `author`) is disabled for this project via `.mcp.json` -- not needed and consumes significant context tokens.
 Claude.ai Slack and Microsoft 365 plugins are disabled for this project via `disabledMcpServers` in `.mcp.json` -- not needed and consume significant context tokens. If they reappear, disable via Cursor Settings > Features > MCP.
 
 ---
 
-## 11. Documentation Sync — `docs/project_context/`
+## 12. Documentation Sync — `docs/project_context/`
 
 `docs/project_context/` is the **external team folder**. It receives copies of all documentation
 files so the broader team can stay informed of schema changes, API updates, and app functionality.
