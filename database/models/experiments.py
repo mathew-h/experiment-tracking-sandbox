@@ -95,6 +95,7 @@ class ModificationsLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     experiment_id = Column(String, nullable=True, index=True) # Human-readable ID, nullable as it might log other things? Or should be non-null? Let's keep nullable for now.
     experiment_fk = Column(Integer, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=True) # FK to Experiment PK, nullable to match experiment_id
+    sample_id = Column(String, nullable=True, index=True)  # sample-related modifications
     modified_by = Column(String)  # Username or identifier of who made the change
     modification_type = Column(String)  # e.g., 'create', 'update', 'delete'
     modified_table = Column(String)  # Which table was modified

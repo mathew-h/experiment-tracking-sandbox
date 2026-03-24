@@ -26,6 +26,9 @@ class Settings(BaseSettings):
         r"\01_R&D\02_Results\Master Reactor Sampling Tracker.xlsx"
     )
 
+    # File storage
+    sample_photos_dir: str = "sample_photos"
+
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
 
