@@ -5,9 +5,9 @@
      ============================================================ -->
 ## Current State
 - **Active branch:** `feature/m9-sample-management`
-- **Last completed:** M8 Testing and Docs sign-off; Pre-M9 elemental composition reconciliation (2026-03-24)
-- **Blocked on:** nothing
-- **Next action:** M9 Sample Management — `docs/superpowers/plans/2026-03-23-m9-sample-management.md`
+- **Last completed:** M9 Sample Management — all 16 tasks complete (2026-03-24)
+- **Blocked on:** user sign-off for M9
+- **Next action:** Merge `feature/m9-sample-management` → `infra/lab-pc-server-setup` after sign-off
 
 ---
 
