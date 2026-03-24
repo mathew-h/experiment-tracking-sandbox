@@ -11,6 +11,11 @@ from alembic import op
 import sqlalchemy as sa
 
 
+# NOTE: This file was copied from branch feature/issue-1-total-ferrous-iron to extend
+# the Alembic chain for feature/m9-sample-management. If the issue-1 branch has already
+# been merged to main before M9, this migration will already be applied — do NOT run it
+# again. Confirm with: alembic current
+
 # revision identifiers, used by Alembic.
 revision: str = '923c3229734d'
 down_revision: Union[str, None] = '0e95bf7dffaf'
