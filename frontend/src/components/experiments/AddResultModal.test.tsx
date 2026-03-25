@@ -63,6 +63,11 @@ describe('AddResultModal', () => {
     // THE CORE CONTRACT TEST.
     // experimentPk=42 (integer), experimentStringId="HPHT_001" (string).
     // The payload must send experiment_fk=42, not "HPHT_001".
+
+    // The spy intercepts correctly because AddResultModal calls resultsApi.createResult(...)
+    // through the module object reference — not a destructured local copy.
+    // If the component is ever refactored to `const { createResult } = resultsApi`, this spy
+    // would stop intercepting and the test would silently time out.
     const mockCreate = vi
       .spyOn(resultsModule.resultsApi, 'createResult')
       .mockResolvedValue(STUB_RESULT)
@@ -121,6 +126,10 @@ describe('AddResultModal', () => {
     // set via event.target.value normally.  We use Object.defineProperty to
     // force the string through so the React onChange handler receives it and
     // the component's isNaN() validation branch is exercised.
+    // This works because fireEvent propagates e.target.value directly from the patched
+    // element property, bypassing jsdom's number sanitization.
+    // If jsdom behavior changes, the fallback is: install @testing-library/user-event
+    // and use `await userEvent.type(daysInput, 'not-a-number')` instead.
     const daysInput = screen.getByLabelText(/days post-reaction/i)
     Object.defineProperty(daysInput, 'value', {
       writable: true,
