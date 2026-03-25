@@ -52,7 +52,7 @@ export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
           <div className="flex-1">
             <label className="block text-xs font-medium text-ink-secondary mb-1">Chemical</label>
             <select
-              className="w-full bg-surface-input border border-surface-border rounded px-2 py-1.5 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+              className="w-full bg-surface-raised border border-surface-border rounded px-2 py-1.5 text-sm text-navy-900 focus:outline-none focus:ring-1 focus:ring-brand-red/50"
               value={row.compound_id ?? ''}
               onChange={(e) => {
                 const opt = compounds?.find((c) => c.id === parseInt(e.target.value))

@@ -13,10 +13,20 @@ export interface Compound {
 export interface ChemicalAdditive {
   id: number
   compound_id: number
-  compound_name: string
-  amount: number | null
-  unit: string | null
+  amount: number
+  unit: string
   addition_order: number | null
+  mass_in_grams: number | null
+  moles_added: number | null
+  catalyst_ppm: number | null
+  compound: Compound | null
+}
+
+export interface AdditivePayload {
+  compound_id: number
+  amount: number
+  unit: string
+  addition_order?: number
 }
 
 export const chemicalsApi = {
@@ -32,6 +42,6 @@ export const chemicalsApi = {
   listAdditives: (conditionsId: number) =>
     apiClient.get<ChemicalAdditive[]>(`/chemicals/additives/${conditionsId}`).then((r) => r.data),
 
-  addAdditive: (conditionsId: number, payload: Partial<ChemicalAdditive>) =>
+  addAdditive: (conditionsId: number, payload: AdditivePayload) =>
     apiClient.post<ChemicalAdditive>(`/chemicals/additives/${conditionsId}`, payload).then((r) => r.data),
 }

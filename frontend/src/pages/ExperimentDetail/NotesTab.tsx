@@ -27,7 +27,7 @@ export function NotesTab({ experimentId, notes }: Props) {
       {/* Add note */}
       <div className="space-y-2">
         <textarea
-          className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary placeholder-ink-muted focus:outline-none focus:ring-1 focus:ring-brand-red/50 resize-none"
+          className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 placeholder-ink-muted focus:outline-none focus:ring-1 focus:ring-brand-red/50 resize-none"
           rows={3}
           placeholder="Add a note…"
           value={text}

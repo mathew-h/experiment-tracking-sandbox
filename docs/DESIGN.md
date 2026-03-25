@@ -40,6 +40,17 @@
 
 ---
 
+## Form Input Text Color Rule
+
+Browser `<input>`, `<select>`, and `<textarea>` elements may render with a white/light browser-default background regardless of Tailwind background classes (especially `bg-surface-raised`). To ensure text is always readable:
+
+- **Always use `text-navy-900` (`#05172B`) for input/select/textarea text** — not `text-ink-primary` (#F0F4F8).
+- **Never use `bg-surface-input`** — this token is not defined in the Tailwind config and results in a white browser-default background.
+- For textareas and inline `<textarea>` elements, use `bg-surface-raised text-navy-900`.
+- `text-ink-primary` is correct for static display text on dark navy surfaces — but not for editable form fields.
+
+---
+
 ## CSS Variables (reference)
 
 ```css

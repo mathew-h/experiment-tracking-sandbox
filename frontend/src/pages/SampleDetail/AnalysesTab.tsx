@@ -74,7 +74,7 @@ export function AnalysesTab({ sample }: Props) {
             <select
               value={form.analysis_type}
               onChange={(e) => setForm((f) => ({ ...f, analysis_type: e.target.value }))}
-              className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none"
+              className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none"
             >
               {ANALYSIS_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -85,7 +85,7 @@ export function AnalysesTab({ sample }: Props) {
               <input
                 value={form.pxrf_reading_no ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, pxrf_reading_no: e.target.value }))}
-                className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none"
+                className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none"
               />
             </div>
           )}
@@ -95,7 +95,7 @@ export function AnalysesTab({ sample }: Props) {
               <input
                 value={form.magnetic_susceptibility ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, magnetic_susceptibility: e.target.value }))}
-                className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none"
+                className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none"
               />
             </div>
           )}
@@ -104,7 +104,7 @@ export function AnalysesTab({ sample }: Props) {
             <input
               value={form.description ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none"
+              className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none"
             />
           </div>
           {warnings.length > 0 && (
