@@ -173,5 +173,90 @@ Write-Step "Step 6: Create log directories"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Write-OK "Log directory ready: $LogDir"
 
-Write-Host "`n[Steps 7-11 not yet implemented]"
+# -- Step 7: Register NSSM service (idempotent) --------------------------------
+Write-Step "Step 7: Register NSSM Windows service"
+
+$svcStatus = nssm status $ServiceName 2>&1
+if ($svcStatus -notmatch "Can't open service") {
+    Write-Skip "Service '$ServiceName' already registered - skipping"
+} else {
+    & nssm install $ServiceName $VenvUvicorn
+    & nssm set $ServiceName AppParameters "backend.api.main:app --host 0.0.0.0 --port $AppPort"
+    & nssm set $ServiceName AppDirectory $RepoRoot
+    & nssm set $ServiceName AppEnvironmentExtra "DOTENV_PATH=$EnvFile"
+    & nssm set $ServiceName AppStdout (Join-Path $LogDir "stdout.log")
+    & nssm set $ServiceName AppStderr (Join-Path $LogDir "stderr.log")
+    & nssm set $ServiceName Start SERVICE_AUTO_START
+    Write-OK "Service '$ServiceName' registered (auto-start on boot)"
+}
+
+# -- Step 8: Open firewall (idempotent) ----------------------------------------
+Write-Step "Step 8: Open firewall (port $AppPort)"
+
+$existingRule = Get-NetFirewallRule -DisplayName "Experiment Tracker" -ErrorAction SilentlyContinue
+if ($existingRule) {
+    Write-Skip "Firewall rule 'Experiment Tracker' already exists"
+} else {
+    New-NetFirewallRule `
+        -DisplayName "Experiment Tracker" `
+        -Direction   Inbound `
+        -Protocol    TCP `
+        -LocalPort   $AppPort `
+        -Action      Allow `
+        -Profile     Private, Domain | Out-Null
+    Write-OK "Firewall rule created (Private + Domain profiles, inbound TCP port $AppPort)"
+}
+
+# -- Step 9: Register nightly update task --------------------------------------
+Write-Step "Step 9: Register nightly update task ($UpdateTime daily)"
+
+$UpdateScript = Join-Path $RepoRoot "update.ps1"
+$Action   = New-ScheduledTaskAction `
+                -Execute  "powershell.exe" `
+                -Argument "-ExecutionPolicy Bypass -File `"$UpdateScript`""
+$Trigger  = New-ScheduledTaskTrigger -Daily -At $UpdateTime
+$Settings = New-ScheduledTaskSettingsSet `
+                -RestartCount    1 `
+                -RestartInterval (New-TimeSpan -Minutes 5)
+
+Write-Host ""
+Write-Host "  Windows requires your account password to run this task when you are not logged in." -ForegroundColor Yellow
+Write-Host "  You will be prompted for your Windows credentials now." -ForegroundColor Yellow
+$Cred = Get-Credential -Message "Enter your Windows account credentials for the scheduled task" -UserName $env:USERNAME
+
+Register-ScheduledTask `
+    -TaskName  $TaskName `
+    -Action    $Action `
+    -Trigger   $Trigger `
+    -Settings  $Settings `
+    -User      $Cred.UserName `
+    -Password  $Cred.GetNetworkCredential().Password `
+    -RunLevel  Highest `
+    -Force | Out-Null
+
+Write-OK "Task '$TaskName' registered (daily at $UpdateTime)"
+Write-Host "  NOTE: If you change your Windows password, update this task's credentials:" -ForegroundColor Gray
+Write-Host "        Task Scheduler -> Task Scheduler Library -> $TaskName -> Properties -> enter new password" -ForegroundColor Gray
+
+# -- Step 10: Start service ----------------------------------------------------
+Write-Step "Step 10: Start service"
+
+& nssm start $ServiceName
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  The service failed to start. Check the error log:" -ForegroundColor Red
+    Write-Host "  type `"$(Join-Path $LogDir 'stderr.log')`"" -ForegroundColor Red
+    Fail "Service start failed"
+}
+Write-OK "Service '$ServiceName' started"
+
+# -- Step 11: Success ----------------------------------------------------------
+$hostname = $env:COMPUTERNAME
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "  Setup complete!" -ForegroundColor Green
+Write-Host "  App running at:          http://${hostname}:${AppPort}" -ForegroundColor Green
+Write-Host "  Nightly updates at:      $UpdateTime" -ForegroundColor Green
+Write-Host "  Logs:                    $LogDir" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host ""
 Read-Host "Press Enter to exit"
