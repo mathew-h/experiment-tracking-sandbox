@@ -202,3 +202,131 @@ def test_next_ids_includes_autoclave(client):
     assert 'Autoclave' in data
     assert isinstance(data['Autoclave'], int)
     assert data['Autoclave'] >= 1
+
+
+# ============================================================
+# Additive endpoints (Issue #7)
+# ============================================================
+from database.models.chemicals import Compound, ChemicalAdditive
+from database.models.conditions import ExperimentalConditions as _EC
+
+
+def _make_exp_with_conditions(db, exp_id="TEST_001"):
+    """Create experiment + conditions row, return (experiment, conditions)."""
+    from database.models.experiments import Experiment
+    from database.models.enums import ExperimentStatus
+    from sqlalchemy import select, func as sqlfunc
+    max_num = db.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0
+    exp = Experiment(experiment_id=exp_id, experiment_number=max_num + 1, status=ExperimentStatus.ONGOING)
+    db.add(exp)
+    db.flush()
+    cond = _EC(experiment_fk=exp.id, experiment_id=exp_id)
+    db.add(cond)
+    db.commit()
+    db.refresh(exp)
+    db.refresh(cond)
+    return exp, cond
+
+
+def _make_compound_for_additives(db, name="TestChem"):
+    c = Compound(name=name, formula="TC", molecular_weight_g_mol=50.0)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+def test_list_experiment_additives_empty(client, db_session):
+    _make_exp_with_conditions(db_session, "ADDTEST_001")
+    resp = client.get("/api/experiments/ADDTEST_001/additives")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_upsert_additive_creates(client, db_session):
+    exp, _ = _make_exp_with_conditions(db_session, "ADDTEST_002")
+    compound = _make_compound_for_additives(db_session, "MgOH2")
+    resp = client.put(
+        f"/api/experiments/{exp.experiment_id}/additives/{compound.id}",
+        json={"amount": 5.0, "unit": "g"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["compound_id"] == compound.id
+    assert data["amount"] == 5.0
+
+
+def test_upsert_additive_updates_existing(client, db_session):
+    exp, _ = _make_exp_with_conditions(db_session, "ADDTEST_003")
+    compound = _make_compound_for_additives(db_session, "NaCl")
+    # Create first
+    client.put(
+        f"/api/experiments/{exp.experiment_id}/additives/{compound.id}",
+        json={"amount": 1.0, "unit": "g"}
+    )
+    # Update
+    resp = client.put(
+        f"/api/experiments/{exp.experiment_id}/additives/{compound.id}",
+        json={"amount": 99.0, "unit": "mg"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["amount"] == 99.0
+    assert resp.json()["unit"] == "mg"
+
+
+def test_upsert_additive_experiment_not_found(client, db_session):
+    compound = _make_compound_for_additives(db_session, "Orphan")
+    resp = client.put(
+        f"/api/experiments/NONEXISTENT/additives/{compound.id}",
+        json={"amount": 1.0, "unit": "g"}
+    )
+    assert resp.status_code == 404
+
+
+def test_upsert_additive_no_conditions(client, db_session):
+    """Experiment exists but has no conditions row — should 404."""
+    from database.models.experiments import Experiment
+    from database.models.enums import ExperimentStatus
+    from sqlalchemy import select, func as sqlfunc
+    max_num = db_session.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0
+    exp = Experiment(experiment_id="NOCOND_001", experiment_number=max_num + 1, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.commit()
+    compound = _make_compound_for_additives(db_session, "NoCond")
+    resp = client.put(
+        f"/api/experiments/NOCOND_001/additives/{compound.id}",
+        json={"amount": 1.0, "unit": "g"}
+    )
+    assert resp.status_code == 404
+
+
+def test_upsert_additive_compound_not_found(client, db_session):
+    """Upsert with a compound_id that doesn't exist should 404."""
+    _make_exp_with_conditions(db_session, "ADDTEST_006")
+    resp = client.put(
+        "/api/experiments/ADDTEST_006/additives/99999",
+        json={"amount": 1.0, "unit": "g"}
+    )
+    assert resp.status_code == 404
+
+
+def test_delete_additive(client, db_session):
+    exp, _ = _make_exp_with_conditions(db_session, "ADDTEST_004")
+    compound = _make_compound_for_additives(db_session, "ToDelete")
+    # Create additive first
+    client.put(
+        f"/api/experiments/{exp.experiment_id}/additives/{compound.id}",
+        json={"amount": 2.0, "unit": "g"}
+    )
+    # Delete it
+    resp = client.delete(f"/api/experiments/{exp.experiment_id}/additives/{compound.id}")
+    assert resp.status_code == 204
+    # Verify gone
+    list_resp = client.get(f"/api/experiments/{exp.experiment_id}/additives")
+    assert list_resp.json() == []
+
+
+def test_delete_additive_not_found(client, db_session):
+    _make_exp_with_conditions(db_session, "ADDTEST_005")
+    resp = client.delete("/api/experiments/ADDTEST_005/additives/99999")
+    assert resp.status_code == 404

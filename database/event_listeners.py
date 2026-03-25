@@ -245,8 +245,10 @@ def calculate_additive_derived_values(mapper, connection, target):
     Automatically calculate derived values for ChemicalAdditive before insert or update.
     This includes mass conversions, molar calculations, concentrations, and catalyst-specific
     values (elemental_metal_mass, catalyst_percentage, catalyst_ppm).
+    Uses the calculation registry to avoid coupling to legacy model methods.
     """
-    target.calculate_derived_values()
+    from backend.services.calculations.registry import recalculate
+    recalculate(target, None)
 
 @event.listens_for(Session, 'before_flush')
 def update_experiment_lineage_on_flush(session, flush_context, instances):

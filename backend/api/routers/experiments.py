@@ -14,6 +14,10 @@ from backend.api.schemas.experiments import (
     NoteCreate, NoteResponse,
 )
 from backend.api.schemas.results import ResultWithFlagsResponse
+from database.models.chemicals import Compound, ChemicalAdditive
+from database.models.conditions import ExperimentalConditions
+from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
+from backend.services.calculations.registry import recalculate
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -221,6 +225,97 @@ def update_experiment_status(
     db.commit()
     db.refresh(exp)
     return ExperimentResponse.model_validate(exp)
+
+
+@router.get("/{experiment_id}/additives", response_model=list[AdditiveResponse])
+def list_experiment_additives(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[AdditiveResponse]:
+    """List chemical additives for an experiment by its string ID. Returns [] if no conditions exist."""
+    conditions = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if conditions is None:
+        return []
+    rows = db.execute(
+        select(ChemicalAdditive)
+        .where(ChemicalAdditive.experiment_id == conditions.id)
+        .order_by(ChemicalAdditive.addition_order)
+    ).scalars().all()
+    return [AdditiveResponse.model_validate(r) for r in rows]
+
+
+@router.put("/{experiment_id}/additives/{compound_id}", response_model=AdditiveResponse)
+def upsert_experiment_additive(
+    experiment_id: str,
+    compound_id: int,
+    payload: ChemicalAdditiveUpsert,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> AdditiveResponse:
+    """Upsert a chemical additive for an experiment — create if new, update if exists.
+
+    Accepts experiment string ID and resolves conditions row internally.
+    ChemicalAdditive.experiment_id is a FK to experimental_conditions.id (not experiments.id).
+    """
+    conditions = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if conditions is None:
+        raise HTTPException(status_code=404, detail="Experiment conditions not found")
+    compound = db.get(Compound, compound_id)
+    if compound is None:
+        raise HTTPException(status_code=404, detail="Compound not found")
+    existing = db.execute(
+        select(ChemicalAdditive)
+        .where(ChemicalAdditive.experiment_id == conditions.id)
+        .where(ChemicalAdditive.compound_id == compound_id)
+    ).scalar_one_or_none()
+    if existing:
+        for k, v in payload.model_dump(exclude_unset=True).items():
+            setattr(existing, k, v)
+        additive = existing
+    else:
+        additive = ChemicalAdditive(
+            experiment_id=conditions.id,
+            compound_id=compound_id,
+            **payload.model_dump(),
+        )
+        db.add(additive)
+    db.flush()
+    recalculate(additive, db)
+    db.commit()
+    db.refresh(additive)
+    log.info("additive_upserted", experiment_id=experiment_id, compound_id=compound_id)
+    return AdditiveResponse.model_validate(additive)
+
+
+@router.delete("/{experiment_id}/additives/{compound_id}", status_code=204)
+def delete_experiment_additive(
+    experiment_id: str,
+    compound_id: int,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> Response:
+    """Remove a chemical additive from an experiment."""
+    conditions = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if conditions is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    additive = db.execute(
+        select(ChemicalAdditive)
+        .where(ChemicalAdditive.experiment_id == conditions.id)
+        .where(ChemicalAdditive.compound_id == compound_id)
+    ).scalar_one_or_none()
+    if additive is None:
+        raise HTTPException(status_code=404, detail="Additive not found")
+    db.delete(additive)
+    db.commit()
+    log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
+    return Response(status_code=204)
 
 
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
