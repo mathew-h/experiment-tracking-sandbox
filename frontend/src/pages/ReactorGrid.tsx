@@ -57,7 +57,7 @@ function StatusBadge({
 
   const { mutate, isPending } = useMutation({
     mutationFn: (newStatus: string) =>
-      experimentsApi.patchStatus(card.experiment_id, newStatus),
+      experimentsApi.patchStatus(card.experiment_id!, newStatus),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
