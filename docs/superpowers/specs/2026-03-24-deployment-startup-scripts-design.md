@@ -76,12 +76,21 @@ A lab technician who can follow step-by-step written instructions but should not
    - Verify git is on PATH
    - On any failure: print actionable message and exit 1 (e.g., "NSSM not found — download from nssm.cc and add to PATH, then re-run setup.ps1")
 
-2. **`.env` check**
+2. **`.env` check (root)**
    - If `.env` does not exist: copy `.env.example` → `.env`
    - Print the full path to `.env`
-   - Print the list of required fields (DATABASE_URL, FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, FIREBASE_CLIENT_EMAIL, FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN)
-   - Pause: "Fill in all required values in `.env`, then press any key to continue"
+   - Print the required fields: `DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`
+   - Other fields (`APP_ENV`, `API_PORT`, `CORS_ORIGINS`, `LOG_LEVEL`, `BACKUP_DIR`, `PUBLIC_COPY_DIR`) have usable defaults
+   - Pause: "Fill in the required values in `.env`, then press any key to continue"
    - If `.env` already exists: skip silently
+
+2b. **`frontend/.env.local` check**
+   - If `frontend/.env.local` does not exist: copy `frontend/.env.example` → `frontend/.env.local`
+   - Print the full path to `frontend/.env.local`
+   - Print the six required fields: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`
+   - Pause: "Fill in all Firebase values in `frontend/.env.local` (get from Firebase Console → Project Settings → Your Apps → Web App), then press any key to continue"
+   - **Critical:** without these values the app starts but Firebase auth is silently bypassed
+   - If `frontend/.env.local` already exists: skip silently
 
 3. **Create venv + install Python dependencies**
    - `python -m venv .venv`
@@ -122,7 +131,7 @@ A lab technician who can follow step-by-step written instructions but should not
    - `setup.ps1` will prompt for the current user's Windows password to store credentials — this is a Windows requirement for tasks that run when the user is not logged in
    - **Important for lab tech:** if the Windows account password is changed later, the scheduled task will stop working silently. To re-enter credentials: open Task Scheduler → Task Scheduler Library → `ExperimentTrackerUpdate` → Properties → enter current password
    - On failure: retry once after 5 minutes
-   - **Idempotency:**  is called with  flag, which overwrites an existing task of the same name. This means re-running `setup.ps1` to change `$UpdateTime` will correctly update the task schedule without error
+   - **Idempotency:** `Register-ScheduledTask` is called with `-Force`, which overwrites an existing task of the same name — re-running `setup.ps1` to change `$UpdateTime` correctly updates the task schedule
    - This note must appear in `STARTUP_GUIDE.md` under the scheduled update section
 
 10. **Start service**
