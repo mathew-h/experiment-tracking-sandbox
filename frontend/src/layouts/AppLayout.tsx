@@ -73,16 +73,6 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
-  {
-    path: '/analysis',
-    label: 'Analysis',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M1 12L5 8l3 3 3-4 3 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M1 3h14" stroke="currentColor" strokeWidth="1" strokeDasharray="1 2"/>
-      </svg>
-    ),
-  },
 ]
 
 /** Root app shell: sidebar navigation, top bar, and main content outlet. */

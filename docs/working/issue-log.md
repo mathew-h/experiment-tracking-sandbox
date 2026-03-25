@@ -25,6 +25,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 12 Playwright e2e tests; 21 existing backend sample API tests all pass
 - **Decision logged:** no
 
+## 2026-03-24 | inline — Remove Analysis tab from sidebar
+- **Files changed:** `frontend/src/layouts/AppLayout.tsx` — removed Analysis nav item from navItems array
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-03-24 | inline — Experiment detail UI: input text color, chemical additives editor, tab rename
 - **Files changed:** `frontend/src/components/ui/Input.tsx`, `frontend/src/components/ui/Select.tsx`, `frontend/src/pages/ExperimentDetail/ConditionsTab.tsx`, `frontend/src/pages/ExperimentDetail/index.tsx`, `frontend/src/api/chemicals.ts`, `frontend/src/pages/ExperimentDetail/NotesTab.tsx`, `frontend/src/pages/NewExperiment/Step1BasicInfo.tsx`, `frontend/src/pages/NewExperiment/Step3Additives.tsx`, `frontend/src/pages/SampleDetail/AnalysesTab.tsx`, `frontend/src/pages/SampleDetail/NewSampleModal.tsx`, `frontend/src/pages/SampleDetail/OverviewTab.tsx`, `frontend/src/pages/SampleDetail/PhotosTab.tsx`, `frontend/src/components/ui/SampleSelector.tsx`, `docs/DESIGN.md`
 - **Tests added:** no
