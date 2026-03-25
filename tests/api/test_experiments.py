@@ -213,8 +213,6 @@ from database.models.conditions import ExperimentalConditions as _EC
 
 def _make_exp_with_conditions(db, exp_id="TEST_001"):
     """Create experiment + conditions row, return (experiment, conditions)."""
-    from database.models.experiments import Experiment
-    from database.models.enums import ExperimentStatus
     from sqlalchemy import select, func as sqlfunc
     max_num = db.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0
     exp = Experiment(experiment_id=exp_id, experiment_number=max_num + 1, status=ExperimentStatus.ONGOING)
@@ -285,8 +283,6 @@ def test_upsert_additive_experiment_not_found(client, db_session):
 
 def test_upsert_additive_no_conditions(client, db_session):
     """Experiment exists but has no conditions row — should 404."""
-    from database.models.experiments import Experiment
-    from database.models.enums import ExperimentStatus
     from sqlalchemy import select, func as sqlfunc
     max_num = db_session.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0
     exp = Experiment(experiment_id="NOCOND_001", experiment_number=max_num + 1, status=ExperimentStatus.ONGOING)
