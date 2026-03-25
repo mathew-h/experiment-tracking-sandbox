@@ -65,6 +65,8 @@ if ($pyVer -match 'Python (\d+)\.(\d+)') {
     if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 11)) {
         Fail "Python 3.11+ required, found: $pyVer. Download from https://python.org"
     }
+} else {
+    Fail "Could not parse Python version from: '$pyVer'. Ensure Python 3.11+ is installed and on PATH."
 }
 
 $nodeVer = node --version 2>&1
@@ -72,6 +74,8 @@ if ($nodeVer -match 'v(\d+)') {
     if ([int]$Matches[1] -lt 18) {
         Fail "Node 18+ required, found: $nodeVer. Download from https://nodejs.org"
     }
+} else {
+    Fail "Could not parse Node version from: '$nodeVer'. Ensure Node 18+ is installed and on PATH."
 }
 Write-OK "All prerequisites found"
 
@@ -79,6 +83,9 @@ Write-OK "All prerequisites found"
 Write-Step "Step 2: Root .env check"
 
 if (-not (Test-Path $EnvFile)) {
+    if (-not (Test-Path $EnvExample)) {
+        Fail ".env.example not found in repo root. Re-clone the repository or contact the maintainer."
+    }
     Copy-Item $EnvExample $EnvFile
     Write-Host ""
     Write-Host "  Created: $EnvFile" -ForegroundColor Yellow
@@ -97,6 +104,9 @@ if (-not (Test-Path $EnvFile)) {
 Write-Step "Step 2b: Frontend .env.local check"
 
 if (-not (Test-Path $FrontendEnv)) {
+    if (-not (Test-Path $FrontendEnvExample)) {
+        Fail "frontend/.env.example not found. Re-clone the repository or contact the maintainer."
+    }
     Copy-Item $FrontendEnvExample $FrontendEnv
     Write-Host ""
     Write-Host "  Created: $FrontendEnv" -ForegroundColor Yellow
@@ -115,5 +125,53 @@ if (-not (Test-Path $FrontendEnv)) {
     Write-Skip "frontend/.env.local already exists"
 }
 
-Write-Host "`n[Remaining steps not yet implemented]"
+# -- Step 3: Create venv + install Python dependencies ------------------------
+Write-Step "Step 3: Create venv and install Python dependencies"
+
+$VenvDir = Join-Path $RepoRoot ".venv"
+if (-not (Test-Path $VenvDir)) {
+    & python -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0) { Fail "Failed to create virtual environment" }
+    Write-OK "venv created"
+} else {
+    Write-Skip "venv already exists - running pip install anyway to ensure deps are current"
+}
+
+& $VenvPip install -r (Join-Path $RepoRoot "requirements.txt") -q
+if ($LASTEXITCODE -ne 0) { Fail "pip install failed. Check requirements.txt and your internet connection." }
+Write-OK "Python dependencies installed"
+
+# -- Step 4: Run database migrations ------------------------------------------
+Write-Step "Step 4: Run database migrations"
+
+Push-Location $RepoRoot
+try {
+    & $VenvAlembic upgrade head
+    if ($LASTEXITCODE -ne 0) { Fail "Alembic migration failed. Ensure DATABASE_URL in .env is correct and PostgreSQL is running." }
+    Write-OK "Database migrations applied"
+} finally {
+    Pop-Location
+}
+
+# -- Step 5: Build frontend ---------------------------------------------------
+Write-Step "Step 5: Build frontend (this may take a minute)"
+
+Push-Location $FrontendDir
+try {
+    & npm install --silent
+    if ($LASTEXITCODE -ne 0) { Fail "npm install failed. Check your internet connection." }
+    & npm run build
+    if ($LASTEXITCODE -ne 0) { Fail "npm run build failed. Check frontend/.env.local has all required values." }
+    Write-OK "Frontend built to frontend/dist/"
+} finally {
+    Pop-Location
+}
+
+# -- Step 6: Create log directories -------------------------------------------
+Write-Step "Step 6: Create log directories"
+
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+Write-OK "Log directory ready: $LogDir"
+
+Write-Host "`n[Steps 7-11 not yet implemented]"
 Read-Host "Press Enter to exit"
