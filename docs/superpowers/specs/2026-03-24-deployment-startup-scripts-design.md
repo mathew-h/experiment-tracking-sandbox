@@ -122,6 +122,7 @@ A lab technician who can follow step-by-step written instructions but should not
    - `setup.ps1` will prompt for the current user's Windows password to store credentials — this is a Windows requirement for tasks that run when the user is not logged in
    - **Important for lab tech:** if the Windows account password is changed later, the scheduled task will stop working silently. To re-enter credentials: open Task Scheduler → Task Scheduler Library → `ExperimentTrackerUpdate` → Properties → enter current password
    - On failure: retry once after 5 minutes
+   - **Idempotency:**  is called with  flag, which overwrites an existing task of the same name. This means re-running `setup.ps1` to change `$UpdateTime` will correctly update the task schedule without error
    - This note must appear in `STARTUP_GUIDE.md` under the scheduled update section
 
 10. **Start service**
@@ -146,9 +147,11 @@ A lab technician who can follow step-by-step written instructions but should not
    - On failure (merge conflict, detached HEAD, network error): log error, exit 1, do not proceed
 
 2. **Detect changed files**
-   - Use `ORIG_HEAD` for diffing: git writes `ORIG_HEAD` during any pull that advances HEAD (`git diff ORIG_HEAD --name-only`)
-   - If `ORIG_HEAD` does not exist (first-ever pull, or no-op pull that didn't move HEAD): default all flags to `$true` as a safe fallback — run all steps
-   - If `ORIG_HEAD` equals `HEAD` (no-op pull, nothing changed): set `$nothingChanged = $true`, skip all conditional steps and skip service restart
+   - Capture HEAD before pull: `$headBefore = git rev-parse HEAD`
+   - After the pull: `$headAfter = git rev-parse HEAD`
+   - If `$headBefore -eq $headAfter`: set `$nothingChanged = $true`, skip all conditional steps and skip service restart; log `SKIPPED — already up to date`
+   - If `ORIG_HEAD` does not exist (first-ever pull on a fresh clone): default all flags to `$true` as a safe fallback — run all steps
+   - Otherwise diff: `git diff $headBefore $headAfter --name-only`
    - Set flags:
      - `$reinstallDeps` — true if `requirements.txt` appears in the diff
      - `$runMigrations` — true if any file under `alembic/versions/` appears in the diff
@@ -161,8 +164,10 @@ A lab technician who can follow step-by-step written instructions but should not
    - If `$runMigrations`: `.venv\Scripts\alembic upgrade head`
 
 5. **Conditionally: rebuild frontend**
-   - If `$rebuildFrontend`: `npm run build` in `frontend/`
-   - If the build fails: log the error, exit 1, **do not restart the service** — serve the last working build rather than restart into a broken state
+   - If `$rebuildFrontend`:
+     - `npm install` in `frontend/` (required if `package.json` changed, safe to run even if it didn't)
+     - `npm run build` in `frontend/`
+   - If either command fails: log the error, exit 1, **do not restart the service** — serve the last working build rather than restart into a broken state
 
 6. **Restart service (conditional)**
    - If `$nothingChanged`: skip restart, log `[timestamp] SKIPPED — no changes pulled`
