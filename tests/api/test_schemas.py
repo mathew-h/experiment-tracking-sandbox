@@ -1,7 +1,7 @@
 from datetime import datetime
 from backend.api.schemas.experiments import ExperimentCreate, ExperimentResponse
 from backend.api.schemas.conditions import ConditionsCreate, ConditionsResponse
-from backend.api.schemas.results import ScalarCreate, ResultResponse
+from backend.api.schemas.results import ScalarCreate, ResultResponse, ResultCreate
 from backend.api.schemas.chemicals import CompoundResponse, AdditiveCreate
 
 
@@ -166,3 +166,44 @@ def test_additive_upsert_valid():
     a = ChemicalAdditiveUpsert(amount=5.0, unit=AmountUnit.GRAM)
     assert a.amount == 5.0
     assert a.unit == AmountUnit.GRAM
+
+
+# --- Issue #8 ResultCreate FK contract tests ---
+
+def test_result_create_requires_integer_fk():
+    """experiment_fk must be a strict integer; non-numeric strings must be rejected."""
+    from pydantic import ValidationError
+    import pytest
+    with pytest.raises(ValidationError):
+        ResultCreate(experiment_fk="HPHT_001", description="Day 7")
+
+
+def test_result_create_rejects_numeric_string_fk():
+    """With strict=True, even a numeric string like '42' must be rejected (no coercion)."""
+    from pydantic import ValidationError
+    import pytest
+    with pytest.raises(ValidationError):
+        ResultCreate(experiment_fk="42", description="Day 7")
+
+
+def test_result_create_valid_integer_fk():
+    """A real integer must be accepted."""
+    r = ResultCreate(experiment_fk=42, description="Day 7")
+    assert r.experiment_fk == 42
+    assert isinstance(r.experiment_fk, int)
+
+
+def test_result_create_fk_field_has_description():
+    """experiment_fk Field must carry a description explaining the integer PK contract."""
+    field_info = ResultCreate.model_fields["experiment_fk"]
+    assert field_info.description is not None
+    desc_lower = field_info.description.lower()
+    assert "integer" in desc_lower or "pk" in desc_lower
+
+
+def test_result_create_missing_description_fails():
+    """description is required — omitting it raises ValidationError."""
+    from pydantic import ValidationError
+    import pytest
+    with pytest.raises(ValidationError):
+        ResultCreate(experiment_fk=1)
