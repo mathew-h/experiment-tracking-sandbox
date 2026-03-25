@@ -8,6 +8,7 @@ const AMOUNT_UNITS = ['g', 'mg', 'mL', 'μL', 'mM', 'M', 'ppm', 'mmol', 'mol', '
   .map((u) => ({ value: u, label: u }))
 
 export interface AdditiveRow {
+  id: string
   compound_id: number | null
   compound_name: string
   amount: string
@@ -23,7 +24,6 @@ interface Props {
 
 interface RowEditorProps {
   row: AdditiveRow
-  index: number
   onPatch: (patch: Partial<AdditiveRow>) => void
   onRemove: () => void
 }
@@ -110,9 +110,6 @@ function RowEditor({ row, onPatch, onRemove }: RowEditorProps) {
             {results.length === 0 && query.trim().length < 2 && (
               <p className="px-3 py-2 text-xs text-ink-muted">Type to search…</p>
             )}
-            {results.length === 0 && query.trim().length >= 2 && hasExactMatch === false && (
-              <p className="px-3 py-2 text-xs text-ink-muted">No matches</p>
-            )}
           </div>
         )}
       </div>
@@ -154,7 +151,7 @@ function RowEditor({ row, onPatch, onRemove }: RowEditorProps) {
 
 /** Step 3 of new experiment wizard: chemical additives table with compound typeahead picker. */
 export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
-  const addRow = () => onChange([...rows, { compound_id: null, compound_name: '', amount: '', unit: 'g' }])
+  const addRow = () => onChange([...rows, { id: crypto.randomUUID(), compound_id: null, compound_name: '', amount: '', unit: 'g' }])
 
   const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i))
 
@@ -176,9 +173,8 @@ export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
 
       {rows.map((row, i) => (
         <RowEditor
-          key={i}
+          key={row.id}
           row={row}
-          index={i}
           onPatch={(patch) => patchRow(i, patch)}
           onRemove={() => removeRow(i)}
         />
