@@ -76,11 +76,21 @@ A lab technician who can follow step-by-step written instructions but should not
    - Verify git is on PATH
    - On any failure: print actionable message and exit 1 (e.g., "NSSM not found — download from nssm.cc and add to PATH, then re-run setup.ps1")
 
-2. **`.env` check**
+2. **`.env` check (root)**
    - If `.env` does not exist: copy `.env.example` → `.env`
    - Print the full path to `.env`
-   - Pause: "Fill in your credentials in `.env`, then press any key to continue"
+   - Print the required fields: `DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`
+   - Other fields (`APP_ENV`, `API_PORT`, `CORS_ORIGINS`, `LOG_LEVEL`, `BACKUP_DIR`, `PUBLIC_COPY_DIR`) have usable defaults
+   - Pause: "Fill in the required values in `.env`, then press any key to continue"
    - If `.env` already exists: skip silently
+
+2b. **`frontend/.env.local` check**
+   - If `frontend/.env.local` does not exist: copy `frontend/.env.example` → `frontend/.env.local`
+   - Print the full path to `frontend/.env.local`
+   - Print the six required fields: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`
+   - Pause: "Fill in all Firebase values in `frontend/.env.local` (get from Firebase Console → Project Settings → Your Apps → Web App), then press any key to continue"
+   - **Critical:** without these values the app starts but Firebase auth is silently bypassed
+   - If `frontend/.env.local` already exists: skip silently
 
 3. **Create venv + install Python dependencies**
    - `python -m venv .venv`
@@ -97,27 +107,32 @@ A lab technician who can follow step-by-step written instructions but should not
 6. **Create log directories**
    - `C:\Logs\experiment-tracker\` (stdout, stderr, updates)
 
-7. **Register NSSM service**
+7. **Register NSSM service (idempotent)**
    - Service name: `ExperimentTracker`
-   - Executable: `.venv\Scripts\uvicorn.exe`
+   - Check if service already exists via `nssm status ExperimentTracker`; if it does, skip registration entirely (print "Service already registered — skipping")
+   - Executable: `.venv\Scripts\uvicorn.exe` — implementer must verify this path resolves correctly for the repo structure; the uvicorn entry point is `backend.api.main:app`
    - Parameters: `backend.api.main:app --host 0.0.0.0 --port 8000`
-   - Working directory: repo root
+   - Working directory: repo root (absolute path, derived from script location)
    - Env extra: `DOTENV_PATH=<repo-root>\.env`
    - Stdout log: `C:\Logs\experiment-tracker\stdout.log`
    - Stderr log: `C:\Logs\experiment-tracker\stderr.log`
    - Start type: `SERVICE_AUTO_START`
 
-8. **Open firewall**
-   - `New-NetFirewallRule` for port 8000, inbound, TCP, private profile only
+8. **Open firewall (idempotent)**
+   - `New-NetFirewallRule` for port 8000, inbound, TCP, Private **and Domain** profiles
    - Skip if rule named "Experiment Tracker" already exists
+   - **Note:** Both Private and Domain profiles are included because Windows may classify a domain-joined lab network as Domain rather than Private; using only Private would silently block LAN access in that environment
 
 9. **Register nightly update task**
    - Task name: `ExperimentTrackerUpdate`
-   - Trigger: daily at 02:00
+   - Trigger: daily at 02:00 (configurable via `$UpdateTime` variable at top of `setup.ps1`)
    - Action: `powershell.exe -ExecutionPolicy Bypass -File "<repo-root>\update.ps1"`
-   - Run whether user is logged on or not
+   - Principal: the **current user** (the admin running `setup.ps1`), with password stored in the Task Scheduler credential vault
+   - `setup.ps1` will prompt for the current user's Windows password to store credentials — this is a Windows requirement for tasks that run when the user is not logged in
+   - **Important for lab tech:** if the Windows account password is changed later, the scheduled task will stop working silently. To re-enter credentials: open Task Scheduler → Task Scheduler Library → `ExperimentTrackerUpdate` → Properties → enter current password
    - On failure: retry once after 5 minutes
-   - Configurable via `$UpdateTime` variable at top of `setup.ps1` (default `"02:00"`)
+   - **Idempotency:** `Register-ScheduledTask` is called with `-Force`, which overwrites an existing task of the same name — re-running `setup.ps1` to change `$UpdateTime` correctly updates the task schedule
+   - This note must appear in `STARTUP_GUIDE.md` under the scheduled update section
 
 10. **Start service**
     - `nssm start ExperimentTracker`
@@ -141,11 +156,15 @@ A lab technician who can follow step-by-step written instructions but should not
    - On failure (merge conflict, detached HEAD, network error): log error, exit 1, do not proceed
 
 2. **Detect changed files**
-   - `git diff HEAD@{1} --name-only` against previous HEAD
+   - Capture HEAD before pull: `$headBefore = git rev-parse HEAD`
+   - After the pull: `$headAfter = git rev-parse HEAD`
+   - If `$headBefore -eq $headAfter`: set `$nothingChanged = $true`, skip all conditional steps and skip service restart; log `SKIPPED — already up to date`
+   - If `ORIG_HEAD` does not exist (first-ever pull on a fresh clone): default all flags to `$true` as a safe fallback — run all steps
+   - Otherwise diff: `git diff $headBefore $headAfter --name-only`
    - Set flags:
-     - `$reinstallDeps` — true if `requirements.txt` changed
-     - `$runMigrations` — true if any file under `alembic/versions/` changed
-     - `$rebuildFrontend` — true if any file under `frontend/src/` or `frontend/package.json` changed
+     - `$reinstallDeps` — true if `requirements.txt` appears in the diff
+     - `$runMigrations` — true if any file under `alembic/versions/` appears in the diff
+     - `$rebuildFrontend` — true if any file under `frontend/src/` or `frontend/package.json` appears in the diff
 
 3. **Conditionally: reinstall Python dependencies**
    - If `$reinstallDeps`: `.venv\Scripts\pip install -r requirements.txt`
@@ -154,11 +173,15 @@ A lab technician who can follow step-by-step written instructions but should not
    - If `$runMigrations`: `.venv\Scripts\alembic upgrade head`
 
 5. **Conditionally: rebuild frontend**
-   - If `$rebuildFrontend`: `npm run build` in `frontend/`
+   - If `$rebuildFrontend`:
+     - `npm install` in `frontend/` (required if `package.json` changed, safe to run even if it didn't)
+     - `npm run build` in `frontend/`
+   - If either command fails: log the error, exit 1, **do not restart the service** — serve the last working build rather than restart into a broken state
 
-6. **Restart service**
-   - `nssm restart ExperimentTracker`
-   - Always runs regardless of which steps above ran
+6. **Restart service (conditional)**
+   - If `$nothingChanged`: skip restart, log `[timestamp] SKIPPED — no changes pulled`
+   - Otherwise: `nssm restart ExperimentTracker`
+   - **Design note:** the restart is skipped on no-op pulls to avoid brief unavailability at 02:00 on nights with no updates
 
 7. **Log outcome**
    - Append to `C:\Logs\experiment-tracker\updates.log`:
@@ -183,11 +206,12 @@ The `ExperimentTrackerUpdate` Task Scheduler entry (registered by `setup.ps1`) i
 ### `docs/deployment/STARTUP_GUIDE.md` (new)
 
 Sections:
-1. **Prerequisites** — Python 3.11+, Node 18+, NSSM, git — with download links
-2. **First-time setup** — clone → fill `.env` → run `setup.ps1` → verify at `http://<hostname>:8000`
+1. **Prerequisites** — Python 3.11+, Node 18+, NSSM, git — with download links for each
+2. **First-time setup** — clone → fill `.env` (with field-by-field description of every required value) → run `setup.ps1` → enter Windows password when prompted → verify at `http://<hostname>:8000`
 3. **Manual updates** — right-click `update.ps1` → Run with PowerShell
-4. **Verify scheduled updates** — how to check the Task Scheduler entry (UI path + PowerShell one-liner)
-5. **Troubleshooting** — service won't start, port blocked, blank frontend, update failed — each with a diagnostic one-liner
+4. **Scheduled updates** — how to verify the Task Scheduler entry is registered (UI path + PowerShell one-liner); what to do if Windows password changes (re-enter credentials via Task Scheduler UI — step-by-step with screenshots if possible)
+5. **Changing the update schedule** — edit `$UpdateTime` at the top of `setup.ps1` and re-run the Task Scheduler registration step
+6. **Troubleshooting** — service won't start, port blocked (including domain network caveat), blank frontend, update failed — each with a diagnostic one-liner
 
 ### `docs/deployment/PRODUCTION_DEPLOYMENT.md` (updated)
 
