@@ -40,6 +40,17 @@
 
 ---
 
+## Form Input Token Rule
+
+All form fields (`<input>`, `<select>`, `<textarea>`) must use the dedicated `surface.input` token:
+
+- **Background:** `bg-surface-input` (`#0a2440`) — defined in Tailwind config; renders as dark navy
+- **Text:** `text-ink-primary` (`#F0F4F8`) — near-white, readable on the navy background
+- **Never omit `bg-surface-input`** — without an explicit background class, browsers default to white and `text-ink-primary` becomes invisible
+- The `Input` and `Select` UI components use `bg-surface-raised` (same value as `surface.input`); raw `<input>`/`<textarea>`/`<select>` elements must use `bg-surface-input` explicitly
+
+---
+
 ## CSS Variables (reference)
 
 ```css

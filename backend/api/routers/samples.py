@@ -201,7 +201,7 @@ def get_sample(
             LinkedExperiment(
                 experiment_id=e.experiment_id,
                 experiment_type=(
-                    e.conditions.experiment_type.value
+                    e.conditions.experiment_type
                     if e.conditions and e.conditions.experiment_type else None
                 ),
                 status=e.status.value if e.status else None,

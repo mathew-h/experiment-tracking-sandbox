@@ -28,6 +28,7 @@ export default {
           overlay: '#0e3158',
           border:  '#1a3a5c',
           muted:   '#133355',
+          input:   '#0a2440',
         },
         // Text hierarchy
         ink: {
