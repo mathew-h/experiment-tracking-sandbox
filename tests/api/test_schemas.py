@@ -102,3 +102,67 @@ def test_compound_response_from_orm():
                           hazard_class=None, catalog_number=None)
     r = CompoundResponse.model_validate(obj)
     assert r.name == "NaCl"
+
+
+# --- Issue #7 compound/additive schema tests ---
+
+from pydantic import ValidationError
+import pytest
+from backend.api.schemas.chemicals import CompoundCreate, CompoundUpdate, ChemicalAdditiveUpsert
+from database.models.enums import AmountUnit
+
+
+def test_compound_create_name_too_short():
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="X")
+
+
+def test_compound_create_name_max_length():
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="A" * 101)
+
+
+def test_compound_create_cas_invalid_format():
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="Sodium", cas_number="NaCl-X")
+
+
+def test_compound_create_cas_too_short():
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="Sodium", cas_number="123")
+
+
+def test_compound_create_cas_valid():
+    c = CompoundCreate(name="Sodium", cas_number="7647-14-5")
+    assert c.cas_number == "7647-14-5"
+
+
+def test_compound_create_mw_out_of_range():
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="Sodium", molecular_weight_g_mol=0.0)
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="Sodium", molecular_weight_g_mol=20000)
+
+
+def test_compound_create_density_out_of_range():
+    with pytest.raises(ValidationError):
+        CompoundCreate(name="Sodium", density_g_cm3=100)
+
+
+def test_compound_update_partial():
+    u = CompoundUpdate(name="New Name")
+    assert u.name == "New Name"
+    assert u.formula is None
+
+
+def test_additive_upsert_amount_must_be_positive():
+    with pytest.raises(ValidationError):
+        ChemicalAdditiveUpsert(amount=0, unit=AmountUnit.GRAM)
+    with pytest.raises(ValidationError):
+        ChemicalAdditiveUpsert(amount=-1, unit=AmountUnit.GRAM)
+
+
+def test_additive_upsert_valid():
+    a = ChemicalAdditiveUpsert(amount=5.0, unit=AmountUnit.GRAM)
+    assert a.amount == 5.0
+    assert a.unit == AmountUnit.GRAM
