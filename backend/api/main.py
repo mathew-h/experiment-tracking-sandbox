@@ -67,7 +67,11 @@ if _DIST.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str) -> FileResponse:
-        """Serve React SPA — all non-API routes return index.html."""
+        """Serve React SPA — static files from dist/, everything else returns index.html."""
+        # Serve static files (images, etc.) from dist/ if they exist
+        static_file = _DIST / full_path
+        if full_path and static_file.is_file():
+            return FileResponse(static_file)
         index = _DIST / "index.html"
         return FileResponse(index)
 

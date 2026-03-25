@@ -46,6 +46,15 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no
 - **Decision logged:** yes — updated `docs/DESIGN.md` with Form Input Text Color Rule: use `text-navy-900` for all form fields, never `bg-surface-input` (undefined token)
 
+## 2026-03-25 | inline — Production deployment setup and fixes
+- **Files changed:**
+  - `setup.ps1` — fixed npm `--legacy-peer-deps`, NSSM stderr try/catch, Azure AD `whoami` credential prefill, Python 3.13 venv creation via `py -3.13`, NSSM service uses `python -m uvicorn` instead of `uvicorn.exe` (Windows Store Python inaccessible to SYSTEM)
+  - `backup.ps1` — created: daily pg_dump to `C:\Backups\experiments\`, 30-day retention, logs to `C:\Logs\experiment-tracker\backup.log`
+  - `backend/api/main.py` — SPA catch-all now serves static files from `dist/` root (fixes logo not rendering)
+  - `alembic/versions/88c99be25944_merge_migration_heads.py` — auto-generated merge of two alembic heads
+- **Tests added:** no — deployment scripts and static file serving; ESLint passed on changed frontend files
+- **Decision logged:** no
+
 ## 2026-03-25 | issue #7 — Chemicals page and additive picker wiring
 - **Files changed:**
   - `backend/api/schemas/chemicals.py` — added `CompoundUpdate`, `ChemicalAdditiveUpsert`; validators on name, CAS, MW, density, amount
