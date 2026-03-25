@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 import pandas as pd
@@ -9,8 +10,8 @@ from sqlalchemy import func
 
 from database import SampleInfo, SamplePhotos, ExternalAnalysis
 from database.models.analysis import PXRFReading
-from utils.storage import save_file
-from utils.pxrf import split_normalized_pxrf_readings
+from backend.services.samples import normalize_pxrf_reading_no
+from backend.config.settings import get_settings
 
 
 class RockInventoryService:
@@ -187,7 +188,15 @@ class RockInventoryService:
                 if 'pxrf_reading_no' in df.columns:
                     try:
                         pxrf_val = row.get('pxrf_reading_no')
-                        reading_numbers = split_normalized_pxrf_readings(pxrf_val)
+                        _pxrf_str = (
+                            str(pxrf_val).strip()
+                            if pxrf_val is not None and not (isinstance(pxrf_val, float) and pd.isna(pxrf_val))
+                            else ''
+                        )
+                        reading_numbers = (
+                            [normalize_pxrf_reading_no(r) for r in _pxrf_str.split(',') if r.strip()]
+                            if _pxrf_str else []
+                        )
                         if reading_numbers:
                             for reading_no in reading_numbers:
                                 # Prevent duplicates per reading
@@ -275,8 +284,10 @@ class RockInventoryService:
                         continue
 
                     # Use actual database sample_id (canonical format) for storage
-                    storage_folder = f"sample_photos/{sample.sample_id}"
-                    saved_path = save_file(data, simple_name, folder=storage_folder)
+                    dest_dir = Path(get_settings().sample_photos_dir) / sample.sample_id
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    saved_path = str(dest_dir / simple_name)
+                    Path(saved_path).write_bytes(data)
                     existing_photo = (
                         db.query(SamplePhotos)
                         .filter(SamplePhotos.sample_id == sample.sample_id, SamplePhotos.file_name == simple_name)

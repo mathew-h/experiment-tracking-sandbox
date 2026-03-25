@@ -188,33 +188,28 @@ test('new sample modal creates sample and redirects to detail page', async ({ pa
 
 // ── Rock inventory bulk upload ───────────────────────────────────────────────
 
-test('rock inventory upload card renders and accepts files', async ({ page }) => {
-  // NOTE: The rock_inventory.py parser imports `utils.storage` and `utils.pxrf`
-  // which are legacy modules that no longer exist as a standalone package. The
-  // backend endpoint therefore returns 500 at runtime (locked component — cannot
-  // fix without explicit user sign-off). This test validates the UI layer only:
-  // the card opens, the file input is accessible, and the template download link
-  // is present. The actual upload result is not asserted here.
+test('rock inventory upload creates or updates sample record', async ({ page }) => {
   await page.goto('/bulk-uploads')
 
-  // Card header should be visible in the collapsed list
-  await expect(page.getByRole('button', { name: /rock inventory/i })).toBeVisible()
-
-  // Expand the Rock Inventory card by clicking its header button
+  // Expand the Rock Inventory card
   await page.getByRole('button', { name: /rock inventory/i }).click()
 
-  // After expanding: help text and file zone should be visible
-  await expect(
-    page.getByText(/required column: sample_id/i)
-  ).toBeVisible({ timeout: 5_000 })
-
-  // The template download button should be present
-  const card = page.locator('.border.rounded-lg').filter({
+  const card = page.locator('.rounded-lg').filter({
     has: page.getByRole('button', { name: /rock inventory/i }),
   })
-  await expect(card.getByRole('button', { name: /download template/i })).toBeVisible()
-
-  // The hidden file input is accessible for programmatic upload
   const fileInput = card.locator('input[type="file"]')
-  await expect(fileInput).toBeAttached()
+  await fileInput.setInputFiles(ROCK_INVENTORY_FIXTURE)
+
+  // Result badges must appear
+  await expect(
+    page.getByText(/Created:|Updated:|Skipped:/).first()
+  ).toBeVisible({ timeout: 15_000 })
+
+  // No errors badge
+  await expect(page.getByText(/^Errors:/)).not.toBeVisible()
+
+  // The fixture sample should now be navigable
+  await page.goto('/samples/E2E-SAMPLE-MGMT-01')
+  await expect(page.getByRole('heading', { name: 'E2E-SAMPLE-MGMT-01' })).toBeVisible({ timeout: 8_000 })
+  await expect(page.getByText('Peridotite').first()).toBeVisible()
 })
