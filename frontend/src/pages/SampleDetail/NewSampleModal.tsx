@@ -199,7 +199,7 @@ export function NewSampleModal({ onClose, onCreated }: Props) {
               disabled={busy}
               rows={3}
               className={[
-                'w-full bg-surface-raised border border-surface-border rounded text-sm text-navy-900',
+                'w-full bg-surface-raised border border-surface-border rounded text-sm text-ink-primary',
                 'placeholder-ink-muted px-3 py-2 resize-none',
                 'transition-colors duration-100',
                 'focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30',

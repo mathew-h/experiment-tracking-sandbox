@@ -36,7 +36,7 @@ export function PhotosTab({ sample }: Props) {
               placeholder="Description (optional)"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none"
+              className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none"
             />
             <button
               onClick={() => uploadMutation.mutate()}

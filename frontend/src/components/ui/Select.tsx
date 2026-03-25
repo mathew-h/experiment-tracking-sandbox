@@ -34,7 +34,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             ref={ref}
             id={selectId}
             className={[
-              'w-full h-8 bg-surface-raised border rounded text-sm text-navy-900 appearance-none cursor-pointer',
+              'w-full h-8 bg-surface-raised border rounded text-sm text-ink-primary appearance-none cursor-pointer',
               'transition-colors duration-100',
               'focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30',
               error ? 'border-red-500' : 'border-surface-border hover:border-ink-muted',

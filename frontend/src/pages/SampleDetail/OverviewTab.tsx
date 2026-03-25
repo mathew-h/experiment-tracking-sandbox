@@ -85,7 +85,7 @@ export function OverviewTab({ sample }: Props) {
                   <input
                     value={form[k]}
                     onChange={set(k)}
-                    className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+                    className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
                   />
                 </div>
               ))}
@@ -96,7 +96,7 @@ export function OverviewTab({ sample }: Props) {
                     type="number"
                     value={form[k]}
                     onChange={set(k)}
-                    className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+                    className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
                   />
                 </div>
               ))}
@@ -107,7 +107,7 @@ export function OverviewTab({ sample }: Props) {
                 rows={3}
                 value={form.description}
                 onChange={set('description')}
-                className="w-full bg-surface-raised border border-surface-border rounded px-3 py-2 text-sm text-navy-900 resize-none focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+                className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary resize-none focus:outline-none focus:ring-1 focus:ring-brand-red/50"
               />
             </div>
             <div className="flex gap-2 justify-end">
