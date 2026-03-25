@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
+
 from database.models.enums import AmountUnit
 
 
@@ -73,11 +74,16 @@ class CompoundResponse(BaseModel):
 
 
 class ChemicalAdditiveUpsert(BaseModel):
-    """Payload for PUT /api/experiments/{id}/additives/{compound_id}."""
+    """Payload for PUT /api/experiments/{id}/additives/{compound_id}.
+
+    compound_id and experiment_id are provided via path parameters, not in the body.
+    """
     amount: float = Field(gt=0)
     unit: AmountUnit
     addition_order: Optional[int] = None
     addition_method: Optional[str] = None
+    purity: Optional[float] = None
+    lot_number: Optional[str] = None
 
 
 class AdditiveCreate(BaseModel):
