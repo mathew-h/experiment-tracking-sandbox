@@ -83,12 +83,10 @@ export function NewExperimentPage() {
         pore_pressure: toFloat(step2.pore_pressure),
       })
 
-      // 4. Create additives
+      // 4. Create additives (upsert; deduped by Step 3 component logic)
       for (const row of additives) {
         if (row.compound_id && row.amount) {
-          const cond = await conditionsApi.getByExperiment(exp.experiment_id)
-          await chemicalsApi.addAdditive(cond.id, {
-            compound_id: row.compound_id,
+          await chemicalsApi.upsertAdditive(exp.experiment_id, row.compound_id, {
             amount: parseFloat(row.amount),
             unit: row.unit,
           })
