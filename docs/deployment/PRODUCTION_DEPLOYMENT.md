@@ -71,37 +71,19 @@ cd ..
 
 The build output lands in `frontend/dist/`. FastAPI serves these static files at the root URL — no separate Node server is needed in production.
 
-### 6. Register uvicorn as a Windows service using NSSM
+### 6. Run `setup.ps1`
 
-Open an elevated command prompt (Run as Administrator):
+Right-click `setup.ps1` at the repo root and choose **Run with PowerShell**. This handles all remaining setup automatically:
+- Creates the Python virtual environment and installs dependencies
+- Runs database migrations
+- Builds the React frontend
+- Registers the `ExperimentTracker` Windows service via NSSM (auto-starts on boot)
+- Opens the firewall on port 8000 (Private + Domain profiles)
+- Registers a nightly update task in Task Scheduler
 
-```powershell
-nssm install ExperimentTracker "C:\Apps\experiment-tracking\.venv\Scripts\uvicorn.exe"
-nssm set ExperimentTracker AppParameters "backend.api.main:app --host 0.0.0.0 --port 8000"
-nssm set ExperimentTracker AppDirectory "C:\Apps\experiment-tracking"
-nssm set ExperimentTracker AppEnvironmentExtra "DOTENV_PATH=C:\Apps\experiment-tracking\.env"
-nssm set ExperimentTracker AppStdout "C:\Logs\experiment-tracker\stdout.log"
-nssm set ExperimentTracker AppStderr "C:\Logs\experiment-tracker\stderr.log"
-nssm set ExperimentTracker Start SERVICE_AUTO_START
-nssm start ExperimentTracker
-```
+See `docs/deployment/STARTUP_GUIDE.md` for the full step-by-step walkthrough, including credential requirements and troubleshooting.
 
-Verify the service is running:
-```powershell
-nssm status ExperimentTracker
-```
-
-### 7. Open the firewall for LAN access (port 8000)
-
-In an elevated PowerShell session:
-
-```powershell
-New-NetFirewallRule -DisplayName "Experiment Tracker" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private
-```
-
-This allows access from the local network only. Do not open port 8000 to the public internet.
-
-### 8. Verify access
+### 7. Verify access
 
 Users on the LAN can now open:
 ```
@@ -112,24 +94,13 @@ http://<lab-pc-hostname>:8000
 
 ## Updating the App
 
-After merging changes into the main branch:
+Right-click `update.ps1` at the repo root and choose **Run with PowerShell**, or wait for the nightly scheduled update (runs at 02:00 by default).
 
+The script automatically detects what changed (Python dependencies, database migrations, frontend files) and only rebuilds what is needed, then restarts the service.
+
+To check the update log:
 ```powershell
-cd C:\Apps\experiment-tracking
-
-# 1. Pull latest code
-git pull
-
-# 2. Apply any new migrations
-.venv\Scripts\alembic upgrade head
-
-# 3. Rebuild the frontend (only if frontend files changed)
-cd frontend
-npm run build
-cd ..
-
-# 4. Restart the service
-nssm restart ExperimentTracker
+Get-Content "C:\Logs\experiment-tracker\updates.log" -Tail 20
 ```
 
 ---
