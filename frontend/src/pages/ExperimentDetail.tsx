@@ -1,11 +1,16 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { resultsApi } from '@/api/results'
 import { Card, CardHeader, CardBody, StatusBadge, Button, PageSpinner, Badge } from '@/components/ui'
+import { AddResultModal } from '@/components/experiments/AddResultModal'
 
 export function ExperimentDetailPage() {
+  // id is the string experiment_id from the URL (e.g. "HPHT_001").
+  // For write operations, use experiment.id (integer PK) — see AddResultModal.
   const { id } = useParams<{ id: string }>()
+  const [addResultOpen, setAddResultOpen] = useState(false)
 
   const { data: experiment, isLoading, error } = useQuery({
     queryKey: ['experiment', id],
@@ -105,6 +110,10 @@ export function ExperimentDetailPage() {
       <Card padding="none">
         <CardHeader label="Results">
           <Badge variant="default">{results?.length ?? 0} timepoints</Badge>
+          {/* experiment.id is the integer PK passed to AddResultModal — not the URL string `id` */}
+          <Button variant="primary" size="xs" onClick={() => setAddResultOpen(true)}>
+            + Add
+          </Button>
         </CardHeader>
         <CardBody>
           {results?.length === 0 && <p className="text-sm text-ink-muted text-center py-6">No results recorded</p>}
@@ -119,6 +128,18 @@ export function ExperimentDetailPage() {
           ))}
         </CardBody>
       </Card>
+
+      {/*
+        AddResultModal receives experiment.id (integer PK from the API response),
+        NOT `id` from useParams() which is the string experiment_id.
+        This enforces the FK contract: experiment_fk = experiments.id (integer).
+      */}
+      <AddResultModal
+        experimentPk={experiment.id}
+        experimentStringId={id!}
+        open={addResultOpen}
+        onClose={() => setAddResultOpen(false)}
+      />
     </div>
   )
 }

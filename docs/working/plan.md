@@ -184,6 +184,50 @@ Build the complete API layer. All business logic lives here. The React app never
 
 ---
 
+## Issue #8 — Fix experiment_fk result write paths: COMPLETE
+
+### Branch
+`fix/issue-8-experiment-fk-result-writes` — cut from `feature/m4-react-shell`
+
+### Problem
+`experiment_id` (string label e.g. "HPHT_001") and `experiments.id` (integer PK) were being conflated on result write paths. A string could be passed as `experiment_fk`, bypassing the FK constraint silently in some cases.
+
+### What Was Done
+- Added `ConfigDict(strict=True)` to `ResultCreate` — Pydantic v2 no longer coerces `"42"` → `42`
+- Added `Field(description=...)` to `experiment_fk` clarifying it is the integer PK
+- Added FK existence guard in `create_result` router: `db.get(Experiment, payload.experiment_fk)` → 404 if not found
+- Rewrote `frontend/src/api/results.ts` with typed `ResultCreate`/`ScalarCreate` interfaces (`experiment_fk: number`)
+- Built `AddResultModal` component with `experimentPk: number` prop — structural TypeScript guard
+- Wired `ExperimentDetail` to pass `experiment.id` (integer from query) not URL string `id`
+- Vitest + jsdom + React Testing Library setup for frontend unit tests
+- 5 schema tests, 4 router tests, 5 API contract tests, 8 AddResultModal component tests
+
+### Decisions Made
+- `strict=True` applied only to `ResultCreate` (not all schemas) to avoid breaking existing callers
+- FK existence check returns 404 with a message that explicitly names the correct field
+- jsdom `type="number"` sanitization workaround via `Object.defineProperty` documented in test comments
+- ESM spy via `vi.spyOn(resultsModule, 'resultsApi')` documented as assumption in test comments
+
+### Tests
+- Backend: 50 passing (`pytest tests/api/ -v`)
+- Frontend: 13 passing (`npx vitest run`)
+
+### Commits
+- `1379675` — initial implementation (schema, router, frontend API, AddResultModal, ExperimentDetail)
+- `203e950` — plan document
+- `c9f117c` — strict=True on ResultCreate
+- `b86fef4` — schema tests (5 new in test_schemas.py)
+- `12ad10e` — router tests (4 new in test_results.py)
+- `56afcf1` — vitest setup
+- `0d2cea1` — API contract tests
+- `fef1c1c` — AddResultModal component tests
+- `545c23e` — test comments (ESM spy + jsdom fragility)
+
+### Sign-off
+- [ ] Pending user sign-off — merge or PR decision deferred
+
+---
+
 ## M5 — Experiment Pages: NOT STARTED
 
 ### Objective
