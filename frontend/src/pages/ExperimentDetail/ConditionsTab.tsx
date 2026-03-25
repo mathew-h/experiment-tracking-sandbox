@@ -68,11 +68,13 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
   })
 
   const upsertAdditiveMutation = useMutation({
-    mutationFn: () =>
-      chemicalsApi.upsertAdditive(experimentId, selectedCompound!.id, {
+    mutationFn: () => {
+      if (!selectedCompound) throw new Error('No compound selected')
+      return chemicalsApi.upsertAdditive(experimentId, selectedCompound.id, {
         amount: parseFloat(additiveAmount),
         unit: additiveUnit,
-      }),
+      })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['additives', experimentId] })
       success('Additive saved')
@@ -95,7 +97,10 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
   })
 
   const patchMutation = useMutation({
-    mutationFn: () => conditionsApi.patch(conditions!.id, form),
+    mutationFn: () => {
+      if (!conditions) throw new Error('No conditions to patch')
+      return conditionsApi.patch(conditions.id, form)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
       queryClient.invalidateQueries({ queryKey: ['conditions', experimentId] })
