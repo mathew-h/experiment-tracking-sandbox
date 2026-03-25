@@ -74,10 +74,20 @@ def create_result(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ResultResponse:
+    # Validate that experiment_fk references experiments.id (integer PK).
+    # The frontend must never pass the string experiment_id in this field.
+    exp = db.get(Experiment, payload.experiment_fk)
+    if exp is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Experiment with id={payload.experiment_fk} not found. "
+                   "Pass experiments.id (integer PK), not the string experiment_id.",
+        )
     result = ExperimentalResults(**payload.model_dump())
     db.add(result)
     db.commit()
     db.refresh(result)
+    log.info("result_created", experiment_fk=result.experiment_fk, result_id=result.id)
     return ResultResponse.model_validate(result)
 
 

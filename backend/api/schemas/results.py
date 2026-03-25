@@ -1,12 +1,17 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from database.models.enums import AmmoniumQuantMethod
 
 
 class ResultCreate(BaseModel):
-    experiment_fk: int
+    # experiment_fk must be experiments.id (the integer primary key), NOT the
+    # human-readable experiment_id string (e.g. "HPHT_001").  Resolve the full
+    # Experiment object from the API first, then pass experiment.id here.
+    experiment_fk: int = Field(
+        description="FK to experiments.id (integer PK). Never pass the string experiment_id."
+    )
     time_post_reaction_days: Optional[float] = None
     time_post_reaction_bucket_days: Optional[float] = None
     cumulative_time_post_reaction_days: Optional[float] = None
