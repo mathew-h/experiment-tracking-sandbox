@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { chemicalsApi } from '@/api/chemicals'
-import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Input, PageSpinner } from '@/components/ui'
+import { chemicalsApi, type Compound } from '@/api/chemicals'
+import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Input, PageSpinner, Button } from '@/components/ui'
+import { CompoundFormModal } from '@/components/CompoundFormModal'
 
-/** Chemical inventory page: searchable compound table and additive management. */
+/** Chemical inventory page: searchable compound table with add and edit actions. */
 export function ChemicalsPage() {
   const [search, setSearch] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<Compound | null>(null)
 
   const { data: compounds, isLoading, error } = useQuery({
     queryKey: ['compounds', search],
@@ -21,6 +24,9 @@ export function ChemicalsPage() {
             {compounds ? `${compounds.length} compounds` : 'Chemical compound inventory'}
           </p>
         </div>
+        <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
+          + Add Compound
+        </Button>
       </div>
 
       <div className="w-64">
@@ -38,6 +44,7 @@ export function ChemicalsPage() {
       </div>
 
       {isLoading && <PageSpinner />}
+
       {error && <p className="text-sm text-red-400">Failed to load compounds</p>}
 
       {compounds && (
@@ -48,14 +55,16 @@ export function ChemicalsPage() {
               <Th>Formula</Th>
               <Th>CAS</Th>
               <Th className="text-right">MW (g/mol)</Th>
+              <Th className="text-right">Density (g/cm³)</Th>
               <Th>Preferred Unit</Th>
               <Th>Supplier</Th>
+              <Th></Th>
             </tr>
           </TableHead>
           <TableBody>
             {compounds.length === 0 ? (
               <TableRow>
-                <Td colSpan={6} className="text-center py-8 text-ink-muted">No compounds found</Td>
+                <Td colSpan={8} className="text-center py-8 text-ink-muted">No compounds found</Td>
               </TableRow>
             ) : (
               compounds.map((c) => (
@@ -64,14 +73,36 @@ export function ChemicalsPage() {
                   <Td className="font-mono-data">{c.formula ?? '—'}</Td>
                   <Td className="font-mono-data text-ink-muted">{c.cas_number ?? '—'}</Td>
                   <TdValue>{c.molecular_weight_g_mol?.toFixed(2) ?? '—'}</TdValue>
+                  <TdValue>{c.density_g_cm3?.toFixed(3) ?? '—'}</TdValue>
                   <Td className="font-mono-data text-ink-muted">{c.preferred_unit ?? '—'}</Td>
                   <Td className="text-ink-muted">{c.supplier ?? '—'}</Td>
+                  <Td>
+                    <button
+                      onClick={() => setEditTarget(c)}
+                      className="text-xs text-ink-muted hover:text-ink-primary transition-colors px-1"
+                    >
+                      Edit
+                    </button>
+                  </Td>
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
       )}
+
+      <CompoundFormModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSuccess={() => setAddOpen(false)}
+      />
+
+      <CompoundFormModal
+        open={Boolean(editTarget)}
+        onClose={() => setEditTarget(null)}
+        onSuccess={() => setEditTarget(null)}
+        initial={editTarget ?? undefined}
+      />
     </div>
   )
 }
