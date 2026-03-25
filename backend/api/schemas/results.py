@@ -6,6 +6,8 @@ from database.models.enums import AmmoniumQuantMethod
 
 
 class ResultCreate(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     # experiment_fk must be experiments.id (the integer primary key), NOT the
     # human-readable experiment_id string (e.g. "HPHT_001").  Resolve the full
     # Experiment object from the API first, then pass experiment.id here.
