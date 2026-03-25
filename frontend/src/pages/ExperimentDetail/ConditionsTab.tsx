@@ -1,13 +1,22 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { conditionsApi, type ConditionsResponse, type ConditionsPayload } from '@/api/conditions'
-import { chemicalsApi, type AdditivePayload } from '@/api/chemicals'
+import { chemicalsApi, type Compound } from '@/api/chemicals'
 import { Button, Input, Select, Modal, useToast } from '@/components/ui'
+import { CompoundFormModal } from '@/components/CompoundFormModal'
 
 const FEEDSTOCK_OPTIONS = [
   { value: 'Nitrogen', label: 'Nitrogen' },
   { value: 'Nitrate', label: 'Nitrate' },
   { value: 'Blank', label: 'None / Blank' },
+]
+
+const ADDITIVE_UNIT_OPTIONS = [
+  { value: 'g', label: 'g' }, { value: 'mg', label: 'mg' },
+  { value: 'mM', label: 'mM' }, { value: 'ppm', label: 'ppm' },
+  { value: '% of Rock', label: '% of Rock' }, { value: 'mL', label: 'mL' },
+  { value: 'μL', label: 'μL' }, { value: 'mol', label: 'mol' },
+  { value: 'mmol', label: 'mmol' },
 ]
 
 interface Props {
@@ -31,32 +40,58 @@ function Row({ label, value, unit }: { label: string; value: unknown; unit?: str
 export function ConditionsTab({ conditions, experimentId }: Props) {
   const [editOpen, setEditOpen] = useState(false)
   const [form, setForm] = useState<Partial<ConditionsPayload>>({})
+
+  // Add additive modal state
   const [addAdditiveOpen, setAddAdditiveOpen] = useState(false)
-  const [additiveForm, setAdditiveForm] = useState<Partial<AdditivePayload>>({})
+  const [selectedCompound, setSelectedCompound] = useState<{ id: number; name: string } | null>(null)
+  const [additiveAmount, setAdditiveAmount] = useState('')
+  const [additiveUnit, setAdditiveUnit] = useState('g')
+  const [compoundQuery, setCompoundQuery] = useState('')
+  const [compoundDropdownOpen, setCompoundDropdownOpen] = useState(false)
+  const [createCompoundOpen, setCreateCompoundOpen] = useState(false)
+  const [createCompoundName, setCreateCompoundName] = useState('')
+
   const queryClient = useQueryClient()
   const { success, error: toastError } = useToast()
 
+  // Additives — keyed by experiment string ID (not conditions integer ID)
   const { data: additives = [] } = useQuery({
-    queryKey: ['additives', conditions?.id],
-    queryFn: () => chemicalsApi.listAdditives(conditions!.id),
-    enabled: Boolean(conditions?.id),
+    queryKey: ['additives', experimentId],
+    queryFn: () => chemicalsApi.listExperimentAdditives(experimentId),
   })
 
-  const { data: compounds = [] } = useQuery({
-    queryKey: ['compounds'],
-    queryFn: () => chemicalsApi.listCompounds(),
-    enabled: addAdditiveOpen,
+  // Compound search for picker
+  const { data: compoundResults = [] } = useQuery({
+    queryKey: ['compounds', compoundQuery],
+    queryFn: () => chemicalsApi.listCompounds({ search: compoundQuery, limit: 10 }),
+    enabled: compoundQuery.length >= 1 && compoundDropdownOpen,
   })
 
-  const addAdditiveMutation = useMutation({
-    mutationFn: () => chemicalsApi.addAdditive(conditions!.id, additiveForm as AdditivePayload),
+  const upsertAdditiveMutation = useMutation({
+    mutationFn: () =>
+      chemicalsApi.upsertAdditive(experimentId, selectedCompound!.id, {
+        amount: parseFloat(additiveAmount),
+        unit: additiveUnit,
+      }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['additives', conditions!.id] })
-      success('Additive added')
+      queryClient.invalidateQueries({ queryKey: ['additives', experimentId] })
+      success('Additive saved')
       setAddAdditiveOpen(false)
-      setAdditiveForm({})
+      setSelectedCompound(null)
+      setAdditiveAmount('')
+      setAdditiveUnit('g')
+      setCompoundQuery('')
     },
-    onError: (err: Error) => toastError('Failed to add additive', err.message),
+    onError: (err: Error) => toastError('Failed to save additive', err.message),
+  })
+
+  const deleteAdditiveMutation = useMutation({
+    mutationFn: (compoundId: number) => chemicalsApi.deleteAdditive(experimentId, compoundId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['additives', experimentId] })
+      success('Additive removed')
+    },
+    onError: (err: Error) => toastError('Failed to remove additive', err.message),
   })
 
   const patchMutation = useMutation({
@@ -91,10 +126,22 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
     setEditOpen(true)
   }
 
+  const closeAddModal = () => {
+    setAddAdditiveOpen(false)
+    setSelectedCompound(null)
+    setAdditiveAmount('')
+    setAdditiveUnit('g')
+    setCompoundQuery('')
+  }
+
   if (!conditions) return <p className="text-sm text-ink-muted p-4">No conditions recorded for this experiment.</p>
 
   const set = (k: keyof ConditionsPayload) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((p) => ({ ...p, [k]: e.target.value === '' ? undefined : (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value)) }))
+
+  const hasExactCompoundMatch = compoundResults.some(
+    (c: Compound) => c.name.toLowerCase() === compoundQuery.toLowerCase()
+  )
 
   return (
     <>
@@ -138,18 +185,26 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
         ) : (
           <div className="space-y-1">
             {additives.map((a) => (
-              <div key={a.id} className="flex items-baseline gap-4 py-1 border-b border-surface-border/50">
+              <div key={a.id} className="flex items-baseline gap-4 py-1 border-b border-surface-border/50 group">
                 <span className="text-xs text-ink-secondary w-44 shrink-0">{a.compound?.name ?? `Compound #${a.compound_id}`}</span>
                 <span className="text-xs font-mono-data text-ink-primary">{a.amount} {a.unit}</span>
                 {a.mass_in_grams != null && (
                   <span className="text-xs text-ink-muted">{a.mass_in_grams.toFixed(4)} g</span>
                 )}
+                <button
+                  onClick={() => deleteAdditiveMutation.mutate(a.compound_id)}
+                  className="ml-auto text-xs text-ink-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                  type="button"
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
 
+      {/* Edit Conditions Modal */}
       <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Conditions">
         <div className="space-y-3 p-4">
           <div className="grid grid-cols-2 gap-3">
@@ -177,52 +232,109 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
         </div>
       </Modal>
 
-      <Modal open={addAdditiveOpen} onClose={() => { setAddAdditiveOpen(false); setAdditiveForm({}) }} title="Add Chemical Additive">
+      {/* Add Additive Modal */}
+      <Modal open={addAdditiveOpen} onClose={closeAddModal} title="Add Chemical Additive">
         <div className="space-y-3 p-4">
-          <Select
-            label="Compound"
-            options={compounds.map((c) => ({ value: String(c.id), label: c.formula ? `${c.name} (${c.formula})` : c.name }))}
-            placeholder="Select compound…"
-            value={additiveForm.compound_id != null ? String(additiveForm.compound_id) : ''}
-            onChange={(e) => setAdditiveForm((p) => ({ ...p, compound_id: Number(e.target.value) || undefined }))}
-          />
+          {/* Compound typeahead */}
+          <div className="relative">
+            <label className="block text-xs font-medium text-ink-secondary mb-1">Compound</label>
+            {selectedCompound ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-ink-primary font-medium">{selectedCompound.name}</span>
+                <button
+                  type="button"
+                  className="text-xs text-ink-muted hover:text-ink-primary"
+                  onClick={() => { setSelectedCompound(null); setCompoundQuery('') }}
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  className="w-full bg-surface-input border border-surface-border rounded px-2 py-1.5 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+                  placeholder="Search compounds…"
+                  value={compoundQuery}
+                  onChange={(e) => { setCompoundQuery(e.target.value); setCompoundDropdownOpen(true) }}
+                  onFocus={() => setCompoundDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setCompoundDropdownOpen(false), 150)}
+                  autoComplete="off"
+                />
+                {compoundDropdownOpen && compoundQuery.length >= 1 && (
+                  <div className="absolute z-10 left-0 right-0 top-full mt-0.5 bg-surface-raised border border-surface-border rounded shadow-lg max-h-48 overflow-y-auto">
+                    {compoundResults.map((c: Compound) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-sm text-ink-primary hover:bg-surface-border/30"
+                        onMouseDown={() => {
+                          setSelectedCompound({ id: c.id, name: c.name })
+                          setCompoundQuery(c.name)
+                          setCompoundDropdownOpen(false)
+                        }}
+                      >
+                        {c.name}{c.formula ? ` (${c.formula})` : ''}
+                      </button>
+                    ))}
+                    {!hasExactCompoundMatch && compoundQuery.trim().length >= 2 && (
+                      <button
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-sm text-brand-red hover:bg-surface-border/30 border-t border-surface-border/50"
+                        onMouseDown={() => {
+                          setCreateCompoundName(compoundQuery)
+                          setCompoundDropdownOpen(false)
+                          setCreateCompoundOpen(true)
+                        }}
+                      >
+                        Create "{compoundQuery.trim()}"
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="Amount"
               type="number"
-              value={additiveForm.amount ?? ''}
-              onChange={(e) => setAdditiveForm((p) => ({ ...p, amount: e.target.value === '' ? undefined : Number(e.target.value) }))}
+              value={additiveAmount}
+              onChange={(e) => setAdditiveAmount(e.target.value)}
             />
             <Select
               label="Unit"
-              options={[
-                { value: 'g', label: 'g' },
-                { value: 'mg', label: 'mg' },
-                { value: 'mM', label: 'mM' },
-                { value: 'ppm', label: 'ppm' },
-                { value: '% of Rock', label: '% of Rock' },
-                { value: 'mL', label: 'mL' },
-                { value: 'μL', label: 'μL' },
-                { value: 'mol', label: 'mol' },
-                { value: 'mmol', label: 'mmol' },
-              ]}
+              options={ADDITIVE_UNIT_OPTIONS}
               placeholder="Unit…"
-              value={additiveForm.unit ?? ''}
-              onChange={(e) => setAdditiveForm((p) => ({ ...p, unit: e.target.value || undefined }))}
+              value={additiveUnit}
+              onChange={(e) => setAdditiveUnit(e.target.value)}
             />
           </div>
+
           <div className="flex gap-2 justify-end pt-2">
-            <Button variant="ghost" onClick={() => { setAddAdditiveOpen(false); setAdditiveForm({}) }}>Cancel</Button>
+            <Button variant="ghost" onClick={closeAddModal}>Cancel</Button>
             <Button
               variant="primary"
-              loading={addAdditiveMutation.isPending}
-              disabled={!additiveForm.compound_id || !additiveForm.amount || !additiveForm.unit}
-              onClick={() => addAdditiveMutation.mutate()}
+              loading={upsertAdditiveMutation.isPending}
+              disabled={!selectedCompound || !additiveAmount || !additiveUnit}
+              onClick={() => upsertAdditiveMutation.mutate()}
             >
-              Add
+              Save
             </Button>
           </div>
         </div>
+
+        <CompoundFormModal
+          open={createCompoundOpen}
+          onClose={() => setCreateCompoundOpen(false)}
+          onSuccess={(compound) => {
+            setSelectedCompound({ id: compound.id, name: compound.name })
+            setCompoundQuery(compound.name)
+            setCreateCompoundOpen(false)
+          }}
+          initialName={createCompoundName}
+          minimal
+        />
       </Modal>
     </>
   )
