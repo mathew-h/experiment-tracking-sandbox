@@ -123,3 +123,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Files changed:** `database/event_listeners.py`
 - **Tests added:** no — no dedicated view tests exist; syntax verified via `ast.parse`; pre-existing test collection errors unrelated to this change
 - **Decision logged:** no
+
+## 2026-03-26 | inline — Fix bulk upload UniqueViolation (PostgreSQL sequence desync)
+- **Root cause:** SQLite→PostgreSQL migration inserted rows with explicit IDs; sequences were never updated, so every new INSERT tried id=1/2/3 and collided with existing data (external_analyses, modifications_log, and potentially others)
+- **Files changed:**
+  - `database/database.py` — added `reset_postgres_sequences()`: inspects all tables with an `id` column, calls `setval(pg_get_serial_sequence(table, 'id'), MAX(id))` for each; no-op if sequences are already correct; skips tables without a serial sequence
+  - `backend/api/main.py` — added FastAPI `lifespan` context manager that calls `reset_postgres_sequences()` on every startup
+- **Tests added:** no — requires a live PostgreSQL instance; manual re-run of both uploads is the acceptance test
+- **Decision logged:** no
