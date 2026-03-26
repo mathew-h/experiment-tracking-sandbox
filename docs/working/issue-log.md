@@ -46,6 +46,15 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no
 - **Decision logged:** yes — updated `docs/DESIGN.md` with Form Input Text Color Rule: use `text-navy-900` for all form fields, never `bg-surface-input` (undefined token)
 
+## 2026-03-25 | inline — Production deployment setup and fixes
+- **Files changed:**
+  - `setup.ps1` — fixed npm `--legacy-peer-deps`, NSSM stderr try/catch, Azure AD `whoami` credential prefill, Python 3.13 venv creation via `py -3.13`, NSSM service uses `python -m uvicorn` instead of `uvicorn.exe` (Windows Store Python inaccessible to SYSTEM)
+  - `backup.ps1` — created: daily pg_dump to `C:\Backups\experiments\`, 30-day retention, logs to `C:\Logs\experiment-tracker\backup.log`
+  - `backend/api/main.py` — SPA catch-all now serves static files from `dist/` root (fixes logo not rendering)
+  - `alembic/versions/88c99be25944_merge_migration_heads.py` — auto-generated merge of two alembic heads
+- **Tests added:** no — deployment scripts and static file serving; ESLint passed on changed frontend files
+- **Decision logged:** no
+
 ## 2026-03-25 | issue #7 — Chemicals page and additive picker wiring
 - **Files changed:**
   - `backend/api/schemas/chemicals.py` — added `CompoundUpdate`, `ChemicalAdditiveUpsert`; validators on name, CAS, MW, density, amount
@@ -62,4 +71,41 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/NewExperiment/index.tsx` — switched submission to `upsertAdditive`
   - `frontend/e2e/journeys/12-chemicals.spec.ts` — e2e journey for chemicals page and additive flow
 - **Tests added:** yes — 11 backend schema tests, 19 backend API tests, 1 Playwright e2e journey (12-chemicals.spec.ts)
+- **Decision logged:** no
+
+## 2026-03-25 | inline — Backfill all M3 calculated fields (migration 012)
+- **Files changed:**
+  - `database/data_migrations/recalculate_all_registry_012.py` — new: `_backfill_conditions`, `_backfill_scalars`, `run_migration` with `--dry-run` flag
+  - `database/data_migrations/__init__.py` — new: package marker
+  - `tests/data_migrations/__init__.py` — new: package marker
+  - `tests/data_migrations/test_recalculate_all_registry_012.py` — new: 3 integration tests
+- **Tests added:** yes — 3 integration tests (conditions water_to_rock_ratio, additive mass_in_grams, scalar grams_per_ton_yield)
+- **Decision logged:** no
+
+## 2026-03-25 | fix — Remove Files tab; collapse entry log rows
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — removed Files tab from tab bar
+  - `frontend/src/pages/ExperimentDetail/ModificationsTab.tsx` — refactored to collapsible `ModRow` component; rows start collapsed
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-25 | issue #5 — Copy From Existing toggle on New Experiment wizard
+- **Files changed:**
+  - `frontend/src/pages/NewExperiment/CopyFromExisting.tsx` — new: toggle button, inline debounced search input (300ms), scrollable dropdown (experiment_id / experiment_type / status), badge + clear state
+  - `frontend/src/pages/NewExperiment/index.tsx` — added `handleCopyFrom` (parallel fetch of experiment detail + conditions + additives, maps all fields), `handleClearCopy` (resets step to 0 + all form state), copy banner with dismiss, `CopyFromExisting` wired into header
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-25 | inline — Background ammonium default 0.2 mM and bulk-apply endpoint
+- **Files changed:**
+  - `database/models/results.py` — `background_ammonium_concentration_mM` column: added `default=0.2, server_default=text("0.2")`
+  - `alembic/versions/a1b2c3d4e5f6_background_ammonium_default_0_2.py` — new migration: sets server_default + backfills existing NULL rows to 0.2
+  - `backend/services/calculations/scalar_calcs.py` — both hardcoded `0.3` fallbacks → `0.2`; docstring updated
+  - `backend/api/schemas/results.py` — `ScalarCreate` field default `None` → `0.2`; added `BackgroundAmmoniumUpdate` / `BackgroundAmmoniumUpdated` schemas
+  - `backend/services/bulk_uploads/scalar_results.py` — rows without background column now receive `0.2` default
+  - `backend/api/routers/experiments.py` — new `PATCH /{experiment_id}/background-ammonium` endpoint; bulk-applies value to all scalar results and triggers recalculation
+  - `frontend/src/api/experiments.ts` — added `setBackgroundAmmonium(experimentId, value)`
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — "Background NH₄: 0.2 mM" button; inline input; `useMutation` with cache invalidation
+  - `tests/api/test_background_ammonium.py` — new: 6 API tests
+- **Tests added:** yes — 6 backend API tests (404, no-scalars, bulk update, recalc trigger, negative rejection, schema default)
 - **Decision logged:** no
