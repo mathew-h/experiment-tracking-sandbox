@@ -90,152 +90,448 @@ def before_flush_handler(session, flush_context, instances):
         if sample_id:
             update_sample_characterized_status(session, sample_id)
 
-# Ensure additives summary view exists (SQLite) at import time
+# ---------------------------------------------------------------------------
+# Reporting views for Power BI and direct SQL access.
+# All views are dropped and recreated at import time so their definitions
+# stay in sync with the current schema.  Failures are silently ignored so
+# a missing DB at startup does not block the application.
+# ---------------------------------------------------------------------------
+
+_VIEWS = [
+    # ------------------------------------------------------------------
+    # v_experiments
+    # One row per experiment.  Includes key setup fields pulled from
+    # experimental_conditions and the first note entry as the description.
+    # ------------------------------------------------------------------
+    ("v_experiments", """
+        CREATE VIEW v_experiments AS
+        SELECT
+            e.experiment_id,
+            e.experiment_number,
+            e.status,
+            e.researcher,
+            e.date,
+            e.sample_id,
+            e.base_experiment_id,
+            ec.reactor_number,
+            ec.rock_mass_g,
+            ec.water_volume_mL,
+            ec.initial_ph,
+            ec.experiment_type,
+            ec.feedstock,
+            (SELECT n.note_text
+             FROM experiment_notes n
+             WHERE n.experiment_fk = e.id
+             ORDER BY n.created_at ASC
+             LIMIT 1) AS description
+        FROM experiments e
+        LEFT JOIN experimental_conditions ec ON ec.experiment_fk = e.id
+    """),
+
+    # ------------------------------------------------------------------
+    # v_experiment_conditions
+    # One row per experiment — full set of reactor / setup parameters.
+    # Deprecated legacy fields (catalyst, buffer_system, surfactant, etc.)
+    # are excluded; use v_chemical_additives for additive details.
+    # ------------------------------------------------------------------
+    ("v_experiment_conditions", """
+        CREATE VIEW v_experiment_conditions AS
+        SELECT
+            e.experiment_id,
+            ec.experiment_type,
+            ec.temperature_c,
+            ec.particle_size,
+            ec.initial_ph,
+            ec.rock_mass_g,
+            ec.water_volume_mL,
+            ec.water_to_rock_ratio,
+            ec.reactor_number,
+            ec.feedstock,
+            ec.stir_speed_rpm,
+            ec.room_temp_pressure_psi,
+            ec.rxn_temp_pressure_psi,
+            ec.co2_partial_pressure_MPa,
+            ec.confining_pressure,
+            ec.pore_pressure,
+            ec.flow_rate,
+            ec.initial_conductivity_mS_cm,
+            ec.initial_nitrate_concentration,
+            ec.initial_dissolved_oxygen,
+            ec.initial_alkalinity,
+            ec.core_height_cm,
+            ec.core_width_cm,
+            ec.core_volume_cm3,
+            ec.total_ferrous_iron_g,
+            ec.total_ferrous_iron
+        FROM experiments e
+        JOIN experimental_conditions ec ON ec.experiment_fk = e.id
+    """),
+
+    # ------------------------------------------------------------------
+    # v_chemical_additives
+    # One row per additive per experiment (long format).
+    # Join key to other views: experiment_id.
+    # ------------------------------------------------------------------
+    ("v_chemical_additives", """
+        CREATE VIEW v_chemical_additives AS
+        SELECT
+            e.experiment_id,
+            c.name        AS compound_name,
+            c.formula,
+            ca.amount,
+            ca.unit,
+            ca.addition_order,
+            ca.addition_method,
+            ca.purity,
+            ca.mass_in_grams,
+            ca.moles_added,
+            ca.final_concentration,
+            ca.concentration_units,
+            ca.elemental_metal_mass,
+            ca.catalyst_percentage,
+            ca.catalyst_ppm
+        FROM chemical_additives ca
+        JOIN experimental_conditions ec ON ec.id = ca.experiment_id
+        JOIN experiments e             ON e.id  = ec.experiment_fk
+        JOIN compounds c               ON c.id  = ca.compound_id
+    """),
+
+    # ------------------------------------------------------------------
+    # v_experiment_additives_summary
+    # Convenience one-liner per experiment: all additives concatenated.
+    # ------------------------------------------------------------------
+    ("v_experiment_additives_summary", """
+        CREATE VIEW v_experiment_additives_summary AS
+        SELECT
+            e.experiment_id,
+            GROUP_CONCAT(c.name || ' ' || CAST(ca.amount AS TEXT) || ' ' || ca.unit, '; ') AS additives_summary
+        FROM chemical_additives ca
+        JOIN experimental_conditions ec ON ec.id = ca.experiment_id
+        JOIN experiments e              ON e.id  = ec.experiment_fk
+        JOIN compounds c                ON c.id  = ca.compound_id
+        GROUP BY e.experiment_id
+    """),
+
+    # ------------------------------------------------------------------
+    # v_sample_info
+    # One row per sample — core geological metadata.
+    # ------------------------------------------------------------------
+    ("v_sample_info", """
+        CREATE VIEW v_sample_info AS
+        SELECT
+            sample_id,
+            rock_classification,
+            state,
+            country,
+            locality,
+            latitude,
+            longitude,
+            description,
+            characterized
+        FROM sample_info
+    """),
+
+    # ------------------------------------------------------------------
+    # v_sample_characterization
+    # One row per external analysis per sample.
+    # pxrf_reading_no is included as a link key only; element data lives
+    # in v_pxrf_characterization.
+    # ------------------------------------------------------------------
+    ("v_sample_characterization", """
+        CREATE VIEW v_sample_characterization AS
+        SELECT
+            ea.sample_id,
+            ea.id          AS external_analysis_id,
+            ea.analysis_type,
+            ea.analysis_date,
+            ea.laboratory,
+            ea.analyst,
+            ea.description,
+            ea.magnetic_susceptibility,
+            ea.pxrf_reading_no
+        FROM external_analyses ea
+        WHERE ea.sample_id IS NOT NULL
+    """),
+
+    # ------------------------------------------------------------------
+    # v_pxrf_characterization
+    # One row per pXRF reading per sample.
+    # pxrf_reading_no on external_analyses may be comma-separated when
+    # multiple readings were averaged; the LIKE join expands those cases
+    # so each individual reading gets its own row.
+    # ------------------------------------------------------------------
+    ("v_pxrf_characterization", """
+        CREATE VIEW v_pxrf_characterization AS
+        SELECT
+            ea.sample_id,
+            pr.reading_no  AS pxrf_reading_no,
+            ea.analysis_date,
+            pr."Fe"        AS fe_ppm,
+            pr."Mg"        AS mg_ppm,
+            pr."Ni"        AS ni_ppm,
+            pr."Cu"        AS cu_ppm,
+            pr."Si"        AS si_ppm,
+            pr."Co"        AS co_ppm,
+            pr."Mo"        AS mo_ppm,
+            pr."Al"        AS al_ppm,
+            pr."Ca"        AS ca_ppm,
+            pr."K"         AS k_ppm,
+            pr."Au"        AS au_ppm,
+            pr."Zn"        AS zn_ppm
+        FROM external_analyses ea
+        JOIN pxrf_readings pr ON (
+            ea.pxrf_reading_no = pr.reading_no
+            OR ea.pxrf_reading_no LIKE pr.reading_no || ',%'
+            OR ea.pxrf_reading_no LIKE '%,' || pr.reading_no || ',%'
+            OR ea.pxrf_reading_no LIKE '%,' || pr.reading_no
+        )
+        WHERE ea.sample_id IS NOT NULL
+          AND ea.pxrf_reading_no IS NOT NULL
+    """),
+
+    # ------------------------------------------------------------------
+    # v_sample_elemental_comp
+    # One row per external analysis per sample, pivoted wide.
+    # All 63 analyte symbols are represented as columns; values are NULL
+    # when that analyte was not measured for a given analysis.
+    # Column aliases use safe SQL identifiers (Fe2O3(T) → Fe2O3_T,
+    # "Total 2" → Total_2) to avoid quoting issues in Power BI.
+    # ------------------------------------------------------------------
+    ("v_sample_elemental_comp", """
+        CREATE VIEW v_sample_elemental_comp AS
+        SELECT
+            ea.sample_id,
+            ea.id           AS external_analysis_id,
+            ea.analysis_date,
+            ea.laboratory,
+            ea.analyst,
+            MAX(CASE WHEN a.analyte_symbol = 'FeO'      THEN el.analyte_composition END) AS FeO,
+            MAX(CASE WHEN a.analyte_symbol = 'SiO2'     THEN el.analyte_composition END) AS SiO2,
+            MAX(CASE WHEN a.analyte_symbol = 'Al2O3'    THEN el.analyte_composition END) AS Al2O3,
+            MAX(CASE WHEN a.analyte_symbol = 'Fe2O3'    THEN el.analyte_composition END) AS Fe2O3,
+            MAX(CASE WHEN a.analyte_symbol = 'MnO'      THEN el.analyte_composition END) AS MnO,
+            MAX(CASE WHEN a.analyte_symbol = 'MgO'      THEN el.analyte_composition END) AS MgO,
+            MAX(CASE WHEN a.analyte_symbol = 'CaO'      THEN el.analyte_composition END) AS CaO,
+            MAX(CASE WHEN a.analyte_symbol = 'Na2O'     THEN el.analyte_composition END) AS Na2O,
+            MAX(CASE WHEN a.analyte_symbol = 'K2O'      THEN el.analyte_composition END) AS K2O,
+            MAX(CASE WHEN a.analyte_symbol = 'TiO2'     THEN el.analyte_composition END) AS TiO2,
+            MAX(CASE WHEN a.analyte_symbol = 'P2O5'     THEN el.analyte_composition END) AS P2O5,
+            MAX(CASE WHEN a.analyte_symbol = 'LOI'      THEN el.analyte_composition END) AS LOI,
+            MAX(CASE WHEN a.analyte_symbol = 'LOI2'     THEN el.analyte_composition END) AS LOI2,
+            MAX(CASE WHEN a.analyte_symbol = 'Total'    THEN el.analyte_composition END) AS Total,
+            MAX(CASE WHEN a.analyte_symbol = 'Total 2'  THEN el.analyte_composition END) AS Total_2,
+            MAX(CASE WHEN a.analyte_symbol = 'Fe2O3(T)' THEN el.analyte_composition END) AS Fe2O3_T,
+            MAX(CASE WHEN a.analyte_symbol = 'Sc'       THEN el.analyte_composition END) AS Sc,
+            MAX(CASE WHEN a.analyte_symbol = 'Be'       THEN el.analyte_composition END) AS Be,
+            MAX(CASE WHEN a.analyte_symbol = 'V'        THEN el.analyte_composition END) AS V,
+            MAX(CASE WHEN a.analyte_symbol = 'Cr'       THEN el.analyte_composition END) AS Cr,
+            MAX(CASE WHEN a.analyte_symbol = 'Co'       THEN el.analyte_composition END) AS Co,
+            MAX(CASE WHEN a.analyte_symbol = 'Ni'       THEN el.analyte_composition END) AS Ni,
+            MAX(CASE WHEN a.analyte_symbol = 'Cu'       THEN el.analyte_composition END) AS Cu,
+            MAX(CASE WHEN a.analyte_symbol = 'Zn'       THEN el.analyte_composition END) AS Zn,
+            MAX(CASE WHEN a.analyte_symbol = 'Ga'       THEN el.analyte_composition END) AS Ga,
+            MAX(CASE WHEN a.analyte_symbol = 'Ge'       THEN el.analyte_composition END) AS Ge,
+            MAX(CASE WHEN a.analyte_symbol = 'As'       THEN el.analyte_composition END) AS As,
+            MAX(CASE WHEN a.analyte_symbol = 'Rb'       THEN el.analyte_composition END) AS Rb,
+            MAX(CASE WHEN a.analyte_symbol = 'Sr'       THEN el.analyte_composition END) AS Sr,
+            MAX(CASE WHEN a.analyte_symbol = 'Y'        THEN el.analyte_composition END) AS Y,
+            MAX(CASE WHEN a.analyte_symbol = 'Zr'       THEN el.analyte_composition END) AS Zr,
+            MAX(CASE WHEN a.analyte_symbol = 'Nb'       THEN el.analyte_composition END) AS Nb,
+            MAX(CASE WHEN a.analyte_symbol = 'Mo'       THEN el.analyte_composition END) AS Mo,
+            MAX(CASE WHEN a.analyte_symbol = 'Ag'       THEN el.analyte_composition END) AS Ag,
+            MAX(CASE WHEN a.analyte_symbol = 'In'       THEN el.analyte_composition END) AS In_,
+            MAX(CASE WHEN a.analyte_symbol = 'Sn'       THEN el.analyte_composition END) AS Sn,
+            MAX(CASE WHEN a.analyte_symbol = 'Sb'       THEN el.analyte_composition END) AS Sb,
+            MAX(CASE WHEN a.analyte_symbol = 'Cs'       THEN el.analyte_composition END) AS Cs,
+            MAX(CASE WHEN a.analyte_symbol = 'Ba'       THEN el.analyte_composition END) AS Ba,
+            MAX(CASE WHEN a.analyte_symbol = 'La'       THEN el.analyte_composition END) AS La,
+            MAX(CASE WHEN a.analyte_symbol = 'Ce'       THEN el.analyte_composition END) AS Ce,
+            MAX(CASE WHEN a.analyte_symbol = 'Pr'       THEN el.analyte_composition END) AS Pr,
+            MAX(CASE WHEN a.analyte_symbol = 'Nd'       THEN el.analyte_composition END) AS Nd,
+            MAX(CASE WHEN a.analyte_symbol = 'Sm'       THEN el.analyte_composition END) AS Sm,
+            MAX(CASE WHEN a.analyte_symbol = 'Eu'       THEN el.analyte_composition END) AS Eu,
+            MAX(CASE WHEN a.analyte_symbol = 'Gd'       THEN el.analyte_composition END) AS Gd,
+            MAX(CASE WHEN a.analyte_symbol = 'Tb'       THEN el.analyte_composition END) AS Tb,
+            MAX(CASE WHEN a.analyte_symbol = 'Dy'       THEN el.analyte_composition END) AS Dy,
+            MAX(CASE WHEN a.analyte_symbol = 'Ho'       THEN el.analyte_composition END) AS Ho,
+            MAX(CASE WHEN a.analyte_symbol = 'Er'       THEN el.analyte_composition END) AS Er,
+            MAX(CASE WHEN a.analyte_symbol = 'Tm'       THEN el.analyte_composition END) AS Tm,
+            MAX(CASE WHEN a.analyte_symbol = 'Yb'       THEN el.analyte_composition END) AS Yb,
+            MAX(CASE WHEN a.analyte_symbol = 'Lu'       THEN el.analyte_composition END) AS Lu,
+            MAX(CASE WHEN a.analyte_symbol = 'Hf'       THEN el.analyte_composition END) AS Hf,
+            MAX(CASE WHEN a.analyte_symbol = 'Ta'       THEN el.analyte_composition END) AS Ta,
+            MAX(CASE WHEN a.analyte_symbol = 'W'        THEN el.analyte_composition END) AS W,
+            MAX(CASE WHEN a.analyte_symbol = 'Tl'       THEN el.analyte_composition END) AS Tl,
+            MAX(CASE WHEN a.analyte_symbol = 'Pb'       THEN el.analyte_composition END) AS Pb,
+            MAX(CASE WHEN a.analyte_symbol = 'Bi'       THEN el.analyte_composition END) AS Bi,
+            MAX(CASE WHEN a.analyte_symbol = 'Th'       THEN el.analyte_composition END) AS Th,
+            MAX(CASE WHEN a.analyte_symbol = 'U'        THEN el.analyte_composition END) AS U,
+            MAX(CASE WHEN a.analyte_symbol = 'S'        THEN el.analyte_composition END) AS S,
+            MAX(CASE WHEN a.analyte_symbol = 'C'        THEN el.analyte_composition END) AS C,
+            MAX(CASE WHEN a.analyte_symbol = 'Pt'       THEN el.analyte_composition END) AS Pt,
+            MAX(CASE WHEN a.analyte_symbol = 'Pd'       THEN el.analyte_composition END) AS Pd,
+            MAX(CASE WHEN a.analyte_symbol = 'Au'       THEN el.analyte_composition END) AS Au
+        FROM external_analyses ea
+        JOIN elemental_analysis el ON el.external_analysis_id = ea.id
+        JOIN analytes a             ON a.id = el.analyte_id
+        WHERE ea.sample_id IS NOT NULL
+        GROUP BY ea.sample_id, ea.id, ea.analysis_date, ea.laboratory, ea.analyst
+    """),
+
+    # ------------------------------------------------------------------
+    # v_experiment_xrd
+    # One row per mineral phase per timepoint per experiment (long format).
+    # Mineral names are dynamic so a wide pivot is not feasible here.
+    # Join key to other views: experiment_id.
+    # ------------------------------------------------------------------
+    ("v_experiment_xrd", """
+        CREATE VIEW v_experiment_xrd AS
+        SELECT
+            xp.experiment_id,
+            xp.time_post_reaction_days,
+            xp.mineral_name,
+            xp.amount      AS amount_pct,
+            xp.rwp,
+            xp.measurement_date
+        FROM xrd_phases xp
+        WHERE xp.experiment_fk IS NOT NULL
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_scalar
+    # One row per primary result timepoint.
+    # Join key to v_results_h2 and v_results_icp: result_id.
+    # ------------------------------------------------------------------
+    ("v_results_scalar", """
+        CREATE VIEW v_results_scalar AS
+        SELECT
+            er.id                                    AS result_id,
+            e.experiment_id,
+            er.experiment_fk,
+            er.time_post_reaction_days,
+            er.time_post_reaction_bucket_days,
+            er.cumulative_time_post_reaction_days,
+            sr.gross_ammonium_concentration_mM,
+            sr.background_ammonium_concentration_mM,
+            sr.grams_per_ton_yield,
+            sr.final_ph,
+            sr.final_nitrate_concentration_mM,
+            sr.ferrous_iron_yield,
+            sr.ferrous_iron_yield_h2_pct,
+            sr.ferrous_iron_yield_nh3_pct,
+            sr.final_dissolved_oxygen_mg_L,
+            sr.final_conductivity_mS_cm,
+            sr.final_alkalinity_mg_L,
+            sr.co2_partial_pressure_MPa,
+            sr.sampling_volume_mL,
+            sr.ammonium_quant_method,
+            sr.background_experiment_fk,
+            sr.measurement_date                      AS scalar_measurement_date,
+            sr.nmr_run_date
+        FROM experimental_results er
+        JOIN experiments e        ON e.id  = er.experiment_fk
+        LEFT JOIN scalar_results sr ON sr.result_id = er.id
+        WHERE er.is_primary_timepoint_result = 1
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_h2
+    # One row per primary result timepoint where H2 was measured.
+    # Rows with no H2 concentration are excluded.
+    # Join key to v_results_scalar: result_id.
+    # ------------------------------------------------------------------
+    ("v_results_h2", """
+        CREATE VIEW v_results_h2 AS
+        SELECT
+            er.id                       AS result_id,
+            e.experiment_id,
+            er.experiment_fk,
+            er.time_post_reaction_days,
+            er.time_post_reaction_bucket_days,
+            sr.h2_concentration,
+            sr.h2_concentration_unit,
+            sr.gas_sampling_volume_ml,
+            sr.gas_sampling_pressure_MPa,
+            sr.h2_micromoles,
+            sr.h2_mass_ug,
+            sr.h2_grams_per_ton_yield,
+            sr.gc_run_date
+        FROM experimental_results er
+        JOIN experiments e      ON e.id  = er.experiment_fk
+        JOIN scalar_results sr  ON sr.result_id = er.id
+        WHERE er.is_primary_timepoint_result = 1
+          AND sr.h2_concentration IS NOT NULL
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_icp
+    # One row per primary result timepoint where ICP data exists.
+    # All 27 fixed element columns exposed with _ppm suffix.
+    # icp_run_date is sourced from scalar_results (master upload field).
+    # Join key to v_results_scalar: result_id.
+    # ------------------------------------------------------------------
+    ("v_results_icp", """
+        CREATE VIEW v_results_icp AS
+        SELECT
+            er.id                       AS result_id,
+            e.experiment_id,
+            er.experiment_fk,
+            er.time_post_reaction_days,
+            er.time_post_reaction_bucket_days,
+            icp.dilution_factor         AS icp_dilution_factor,
+            icp.instrument_used         AS icp_instrument_used,
+            icp.raw_label               AS icp_raw_label,
+            icp.sample_date             AS icp_sample_date,
+            sr.icp_run_date,
+            icp.fe   AS fe_ppm,
+            icp.si   AS si_ppm,
+            icp.mg   AS mg_ppm,
+            icp.ca   AS ca_ppm,
+            icp.ni   AS ni_ppm,
+            icp.cu   AS cu_ppm,
+            icp.mo   AS mo_ppm,
+            icp.zn   AS zn_ppm,
+            icp.mn   AS mn_ppm,
+            icp.cr   AS cr_ppm,
+            icp.co   AS co_ppm,
+            icp.al   AS al_ppm,
+            icp.sr   AS sr_ppm,
+            icp.y    AS y_ppm,
+            icp.nb   AS nb_ppm,
+            icp.sb   AS sb_ppm,
+            icp.cs   AS cs_ppm,
+            icp.ba   AS ba_ppm,
+            icp.nd   AS nd_ppm,
+            icp.gd   AS gd_ppm,
+            icp.pt   AS pt_ppm,
+            icp.rh   AS rh_ppm,
+            icp.ir   AS ir_ppm,
+            icp.pd   AS pd_ppm,
+            icp.ru   AS ru_ppm,
+            icp.os   AS os_ppm,
+            icp.tl   AS tl_ppm
+        FROM experimental_results er
+        JOIN experiments e          ON e.id  = er.experiment_fk
+        JOIN icp_results icp        ON icp.result_id = er.id
+        LEFT JOIN scalar_results sr ON sr.result_id  = er.id
+        WHERE er.is_primary_timepoint_result = 1
+    """),
+]
+
 try:
     with engine.connect() as conn:
-        conn.execute(text("DROP VIEW IF EXISTS v_experiment_additives_summary;"))
-        conn.execute(text(
-            """
-            CREATE VIEW v_experiment_additives_summary AS
-            SELECT e.experiment_id AS experiment_id,
-                   GROUP_CONCAT(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; ') AS additives_summary
-            FROM chemical_additives a
-            JOIN experimental_conditions ec ON ec.id = a.experiment_id
-            JOIN experiments e ON e.id = ec.experiment_fk
-            JOIN compounds c ON c.id = a.compound_id
-            GROUP BY e.experiment_id;
-            """
-        ))
+        # Drop all managed views plus the legacy monolithic view
+        for view_name, _ in _VIEWS:
+            conn.execute(text(f"DROP VIEW IF EXISTS {view_name};"))
         conn.execute(text("DROP VIEW IF EXISTS v_primary_experiment_results;"))
-        conn.execute(text(
-            """
-            CREATE VIEW v_primary_experiment_results AS
-            WITH base AS (
-                SELECT
-                    er.id,
-                    er.experiment_fk,
-                    er.time_post_reaction_days,
-                    COALESCE(er.time_post_reaction_bucket_days, ROUND(er.time_post_reaction_days, 4)) AS bucket_key,
-                    er.time_post_reaction_bucket_days,
-                    er.cumulative_time_post_reaction_days,
-                    er.description,
-                    er.created_at,
-                    er.is_primary_timepoint_result
-                FROM experimental_results er
-                WHERE er.is_primary_timepoint_result = 1
-            ),
-            scalar_bucket AS (
-                SELECT
-                    er.experiment_fk,
-                    COALESCE(er.time_post_reaction_bucket_days, ROUND(er.time_post_reaction_days, 4)) AS bucket_key,
-                    sr.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY er.experiment_fk, COALESCE(er.time_post_reaction_bucket_days, ROUND(er.time_post_reaction_days, 4))
-                        ORDER BY er.is_primary_timepoint_result DESC, er.id DESC
-                    ) AS rn
-                FROM experimental_results er
-                JOIN scalar_results sr ON sr.result_id = er.id
-            ),
-            icp_bucket AS (
-                SELECT
-                    er.experiment_fk,
-                    COALESCE(er.time_post_reaction_bucket_days, ROUND(er.time_post_reaction_days, 4)) AS bucket_key,
-                    icp.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY er.experiment_fk, COALESCE(er.time_post_reaction_bucket_days, ROUND(er.time_post_reaction_days, 4))
-                        ORDER BY er.is_primary_timepoint_result DESC, er.id DESC
-                    ) AS rn
-                FROM experimental_results er
-                JOIN icp_results icp ON icp.result_id = er.id
-            )
-            SELECT
-                e.experiment_id AS experiment_id,
-                b.experiment_fk AS experiment_fk,
-                b.id AS result_id,
-                b.time_post_reaction_days AS time_post_reaction_days,
-                b.time_post_reaction_bucket_days AS time_post_reaction_bucket_days,
-                b.cumulative_time_post_reaction_days AS cumulative_time_post_reaction_days,
-                b.description AS result_description,
-                b.created_at AS result_created_at,
 
-                -- Scalar Results (resolved by experiment + time bucket)
-                sr.id AS scalar_result_id,
-                sr.gross_ammonium_concentration_mM AS gross_ammonium_concentration_mM,
-                sr.background_ammonium_concentration_mM AS background_ammonium_concentration_mM,
-                sr.grams_per_ton_yield AS grams_per_ton_yield,
-                sr.final_ph AS final_ph,
-                sr.final_nitrate_concentration_mM AS final_nitrate_concentration_mM,
-                sr.ferrous_iron_yield AS ferrous_iron_yield,
-                sr.final_dissolved_oxygen_mg_L AS final_dissolved_oxygen_mg_L,
-                sr.final_conductivity_mS_cm AS final_conductivity_mS_cm,
-                sr.final_alkalinity_mg_L AS final_alkalinity_mg_L,
-                sr.co2_partial_pressure_MPa AS co2_partial_pressure_MPa,
-                sr.sampling_volume_mL AS sampling_volume_mL,
-                sr.ammonium_quant_method AS ammonium_quant_method,
-                sr.background_experiment_fk AS background_experiment_fk,
-                sr.measurement_date AS scalar_measurement_date,
+        # Recreate all views
+        for _, view_sql in _VIEWS:
+            conn.execute(text(view_sql))
 
-                -- Hydrogen Data
-                sr.h2_concentration AS h2_concentration,
-                sr.h2_concentration_unit AS h2_concentration_unit,
-                sr.gas_sampling_volume_ml AS gas_sampling_volume_ml,
-                sr.gas_sampling_pressure_MPa AS gas_sampling_pressure_MPa,
-                sr.h2_micromoles AS h2_micromoles,
-                sr.h2_mass_ug AS h2_mass_ug,
-                sr.h2_grams_per_ton_yield AS h2_grams_per_ton_yield,
-
-                -- ICP Results (resolved by experiment + time bucket)
-                icp.id AS icp_result_id,
-                icp.dilution_factor AS icp_dilution_factor,
-                icp.raw_label AS icp_raw_label,
-                icp.measurement_date AS icp_measurement_date,
-                icp.sample_date AS icp_sample_date,
-                icp.instrument_used AS icp_instrument_used,
-
-                -- ICP Elements
-                icp.fe AS icp_fe_ppm,
-                icp.si AS icp_si_ppm,
-                icp.ni AS icp_ni_ppm,
-                icp.cu AS icp_cu_ppm,
-                icp.mo AS icp_mo_ppm,
-                icp.zn AS icp_zn_ppm,
-                icp.mn AS icp_mn_ppm,
-                icp.ca AS icp_ca_ppm,
-                icp.cr AS icp_cr_ppm,
-                icp.co AS icp_co_ppm,
-                icp.mg AS icp_mg_ppm,
-                icp.al AS icp_al_ppm,
-                icp.sr AS icp_sr_ppm,
-                icp.y AS icp_y_ppm,
-                icp.nb AS icp_nb_ppm,
-                icp.sb AS icp_sb_ppm,
-                icp.cs AS icp_cs_ppm,
-                icp.ba AS icp_ba_ppm,
-                icp.nd AS icp_nd_ppm,
-                icp.gd AS icp_gd_ppm,
-                icp.pt AS icp_pt_ppm,
-                icp.rh AS icp_rh_ppm,
-                icp.ir AS icp_ir_ppm,
-                icp.pd AS icp_pd_ppm,
-                icp.ru AS icp_ru_ppm,
-                icp.os AS icp_os_ppm,
-                icp.tl AS icp_tl_ppm
-
-            FROM base b
-            JOIN experiments e ON e.id = b.experiment_fk
-            LEFT JOIN scalar_bucket sr
-                ON sr.experiment_fk = b.experiment_fk
-               AND sr.bucket_key = b.bucket_key
-               AND sr.rn = 1
-            LEFT JOIN icp_bucket icp
-                ON icp.experiment_fk = b.experiment_fk
-               AND icp.bucket_key = b.bucket_key
-               AND icp.rn = 1;
-            """
-        ))
         conn.commit()
 except Exception:
-    # Safe to ignore at import; view creation isn't critical at this moment
+    # Safe to ignore at import; views are recreated on next successful start
     pass
 
 @event.listens_for(ChemicalAdditive, 'before_insert')

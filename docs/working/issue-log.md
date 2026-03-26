@@ -118,3 +118,8 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/Login.tsx` — replaced "Contact lab admin" text with tabbed Sign in / Request access UI; RegisterForm posts to `/api/auth/register`; success state shows confirmation; client-side domain validation
 - **Tests added:** no — public endpoint with Firestore dependency; no test fixture for Firestore pending_users
 - **Decision logged:** no
+
+## 2026-03-26 | inline — Expand Power BI reporting views in event_listeners.py
+- **Files changed:** `database/event_listeners.py`
+- **Tests added:** no — no dedicated view tests exist; syntax verified via `ast.parse`; pre-existing test collection errors unrelated to this change
+- **Decision logged:** no
