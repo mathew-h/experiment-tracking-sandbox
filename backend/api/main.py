@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 from __future__ import annotations
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +18,16 @@ from backend.api.routers import (
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from database.database import reset_postgres_sequences
+    reset_postgres_sequences()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Experiment Tracking System API",
     description="Backend API for laboratory experiment tracking",
     version="1.0.0",
