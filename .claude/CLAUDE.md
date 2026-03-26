@@ -9,6 +9,7 @@
 1. Run `/start-task` — classify task mode (`milestone` / `issue` / `inline`), create or confirm the branch, load context, confirm scope
 2. Never begin coding without completing the `/start-task` checklist
 3. **Git:** follow `docs/GIT_WORKFLOW.md`. Branch in `/start-task` Step 2 before context load; state branch (or skip) in Step 4 scope confirmation
+4. **Pull requests:** Always use `--base develop` when creating PRs (e.g. `gh pr create --base develop`). Never rely on GitHub’s default branch.
 
 ---
 

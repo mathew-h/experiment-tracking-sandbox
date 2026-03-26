@@ -1,5 +1,24 @@
 # Git Workflow
 
+## Prerequisites
+
+`develop` must exist **locally and on the remote** before any branch work (all feature, fix, chore, and milestone branches are created from `develop`). If the repository only has `main`:
+
+```bash
+git checkout -b develop main
+git push -u origin develop
+```
+
+**One-time setup (stale `origin/HEAD`):** After clone, align the remote’s symbolic ref so tools that follow `origin/HEAD` behave correctly:
+
+```bash
+git remote set-head origin -a
+```
+
+## GitHub default branch
+
+GitHub’s default branch is `main`. **All pull requests must target `develop` explicitly** (for example `gh pr create --base develop`, or the web UI with base set to `develop`). Never rely on GitHub’s default when creating PRs, or the merge will bypass the integration layer.
+
 ## Branch Structure
 ```
 main          ← production-ready only; never commit directly
@@ -17,7 +36,7 @@ main          ← production-ready only; never commit directly
 - Named `feature/m<number>-<short-description>`
 - Created from `develop` at milestone start
 - One branch per milestone; sub-tasks are commits within it
-- Merged to `develop` after agent review + Test Writer Agent pass
+- Integrated into `develop` via **pull request with base `develop`** (not direct merge to `main`) after agent review + Test Writer Agent pass
 
 ### Issue branches
 - Named `fix/issue-<number>-<short-description>` (bug fixes)
@@ -33,6 +52,7 @@ main          ← production-ready only; never commit directly
   - `feat/<short-description>` — small feature addition
   - `chore/<short-description>` — config, tooling, docs-only change
   - `refactor/<short-description>` — restructuring without behavior change
+  - `infra/<short-description>` — server setup, deployment config, environment changes
 - Skip branching only for: read-only tasks, documentation-only edits to
   `docs/working/`, or a change to a single comment or string literal
 - Created from `develop` before any code is written
