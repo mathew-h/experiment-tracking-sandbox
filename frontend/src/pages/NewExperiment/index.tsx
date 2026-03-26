@@ -9,6 +9,7 @@ import { Step1BasicInfo, type Step1Data } from './Step1BasicInfo'
 import { Step2Conditions, type Step2Data } from './Step2Conditions'
 import { Step3Additives, type AdditiveRow } from './Step3Additives'
 import { Step4Review } from './Step4Review'
+import { CopyFromExisting } from './CopyFromExisting'
 import type { ExperimentType } from './fieldVisibility'
 
 const STEPS = ['Basic Info', 'Conditions', 'Additives', 'Review']
@@ -35,6 +36,10 @@ function toFloat(s: string): number | undefined {
   return isNaN(n) ? undefined : n
 }
 
+function numToStr(n: number | null | undefined): string {
+  return n != null ? String(n) : ''
+}
+
 /** Four-step wizard for creating a new experiment (Basic Info → Conditions → Additives → Review). */
 export function NewExperimentPage() {
   const navigate = useNavigate()
@@ -44,6 +49,72 @@ export function NewExperimentPage() {
   const [step1, setStep1] = useState(defaultStep1)
   const [step2, setStep2] = useState(defaultStep2)
   const [additives, setAdditives] = useState<AdditiveRow[]>([])
+  const [copiedFrom, setCopiedFrom] = useState<string | null>(null)
+  const [copyBannerDismissed, setCopyBannerDismissed] = useState(false)
+
+  async function handleCopyFrom(sourceId: string) {
+    try {
+      const [exp, conditions, sourceAdditives] = await Promise.all([
+        experimentsApi.get(sourceId),
+        conditionsApi.getByExperiment(sourceId).catch(() => null),
+        chemicalsApi.listExperimentAdditives(sourceId).catch(() => []),
+      ])
+
+      setStep1((s) => ({
+        ...s,
+        experimentId: '',
+        status: 'ONGOING',
+        date: new Date().toISOString().split('T')[0],
+        note: '',
+        sampleId: exp.sample_id ?? '',
+        experimentType: (exp.conditions?.experiment_type as ExperimentType | undefined) ?? '',
+      }))
+
+      if (conditions) {
+        setStep2({
+          temperature_c: numToStr(conditions.temperature_c),
+          initial_ph: numToStr(conditions.initial_ph),
+          rock_mass_g: numToStr(conditions.rock_mass_g),
+          water_volume_mL: numToStr(conditions.water_volume_mL),
+          particle_size: conditions.particle_size ?? '',
+          feedstock: conditions.feedstock ?? '',
+          reactor_number: conditions.reactor_number != null ? String(conditions.reactor_number) : '',
+          stir_speed_rpm: numToStr(conditions.stir_speed_rpm),
+          initial_conductivity_mS_cm: numToStr(conditions.initial_conductivity_mS_cm),
+          room_temp_pressure_psi: numToStr(conditions.room_temp_pressure_psi),
+          rxn_temp_pressure_psi: numToStr(conditions.rxn_temp_pressure_psi),
+          co2_partial_pressure_MPa: numToStr(conditions.co2_partial_pressure_MPa),
+          core_height_cm: numToStr(conditions.core_height_cm),
+          core_width_cm: numToStr(conditions.core_width_cm),
+          confining_pressure: numToStr(conditions.confining_pressure),
+          pore_pressure: numToStr(conditions.pore_pressure),
+        })
+      }
+
+      setAdditives(
+        sourceAdditives.map((a) => ({
+          id: crypto.randomUUID(),
+          compound_id: a.compound_id,
+          compound_name: a.compound?.name ?? '',
+          amount: String(a.amount),
+          unit: a.unit,
+        })),
+      )
+
+      setCopiedFrom(sourceId)
+      setCopyBannerDismissed(false)
+    } catch {
+      toastError('Copy failed', `Could not load experiment ${sourceId}`)
+    }
+  }
+
+  function handleClearCopy() {
+    setStep1(defaultStep1())
+    setStep2(defaultStep2())
+    setAdditives([])
+    setCopiedFrom(null)
+    setCopyBannerDismissed(false)
+  }
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -141,7 +212,25 @@ export function NewExperimentPage() {
   return (
     <div className="max-w-xl space-y-4">
       <div>
-        <h1 className="text-lg font-semibold text-ink-primary">New Experiment</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold text-ink-primary">New Experiment</h1>
+          <CopyFromExisting copiedFrom={copiedFrom} onSelect={handleCopyFrom} onClear={handleClearCopy} />
+        </div>
+        {copiedFrom && !copyBannerDismissed && (
+          <div className="mt-2 flex items-center justify-between gap-2 rounded bg-brand-red/10 border border-brand-red/20 px-3 py-2 text-xs text-ink-primary">
+            <span>
+              Fields copied from <span className="font-mono-data font-medium">{copiedFrom}</span>.
+              Review before submitting.
+            </span>
+            <button
+              type="button"
+              onClick={() => setCopyBannerDismissed(true)}
+              className="text-ink-muted hover:text-ink-primary shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div className="flex gap-1 mt-2">
           {STEPS.map((s, i) => (
             <div
