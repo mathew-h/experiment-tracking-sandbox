@@ -1,7 +1,10 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
+import logging
 import os
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -37,4 +40,44 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+
+def reset_postgres_sequences() -> None:
+    """
+    Reset all PostgreSQL serial sequences to be consistent with the current MAX(id).
+
+    After a SQLite→PostgreSQL migration (or any bulk import that inserts rows with
+    explicit IDs), the sequences are left at their initial values (1) while the table
+    data already has higher IDs.  Every subsequent INSERT then collides with an
+    existing primary key.
+
+    Safe to call on every startup — it is a no-op when sequences are already correct.
+    Only runs when the DATABASE_URL points to PostgreSQL.
+    """
+    if "postgresql" not in DATABASE_URL:
+        return
+
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+
+    reset_count = 0
+    with engine.connect() as conn:
+        for table in tables:
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if "id" not in cols:
+                continue
+            try:
+                conn.execute(text(
+                    f"SELECT setval("
+                    f"  pg_get_serial_sequence('{table}', 'id'),"
+                    f"  COALESCE((SELECT MAX(id) FROM \"{table}\"), 1)"
+                    f")"
+                ))
+                reset_count += 1
+            except Exception:
+                # Table may use a UUID PK or have no sequence — skip silently.
+                pass
+        conn.commit()
+
+    logger.info("reset_postgres_sequences: reset %d sequence(s)", reset_count) 
