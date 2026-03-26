@@ -1,8 +1,11 @@
+import logging
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session, attributes
 from .models import ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment
 from .database import engine
 from .lineage_utils import update_experiment_lineage, update_orphaned_derivations
+
+logger = logging.getLogger(__name__)
 
 def update_sample_characterized_status(session: Session, sample_id: str):
     """
@@ -204,7 +207,7 @@ _VIEWS = [
         CREATE VIEW v_experiment_additives_summary AS
         SELECT
             e.experiment_id,
-            GROUP_CONCAT(c.name || ' ' || CAST(ca.amount AS TEXT) || ' ' || ca.unit, '; ') AS additives_summary
+            STRING_AGG(c.name || ' ' || ca.amount::TEXT || ' ' || ca.unit, '; ') AS additives_summary
         FROM chemical_additives ca
         JOIN experimental_conditions ec ON ec.id = ca.experiment_id
         JOIN experiments e              ON e.id  = ec.experiment_fk
@@ -431,7 +434,7 @@ _VIEWS = [
         FROM experimental_results er
         JOIN experiments e        ON e.id  = er.experiment_fk
         LEFT JOIN scalar_results sr ON sr.result_id = er.id
-        WHERE er.is_primary_timepoint_result = 1
+        WHERE er.is_primary_timepoint_result = TRUE
     """),
 
     # ------------------------------------------------------------------
@@ -459,7 +462,7 @@ _VIEWS = [
         FROM experimental_results er
         JOIN experiments e      ON e.id  = er.experiment_fk
         JOIN scalar_results sr  ON sr.result_id = er.id
-        WHERE er.is_primary_timepoint_result = 1
+        WHERE er.is_primary_timepoint_result = TRUE
           AND sr.h2_concentration IS NOT NULL
     """),
 
@@ -514,7 +517,7 @@ _VIEWS = [
         JOIN experiments e          ON e.id  = er.experiment_fk
         JOIN icp_results icp        ON icp.result_id = er.id
         LEFT JOIN scalar_results sr ON sr.result_id  = er.id
-        WHERE er.is_primary_timepoint_result = 1
+        WHERE er.is_primary_timepoint_result = TRUE
     """),
 ]
 
@@ -522,17 +525,20 @@ try:
     with engine.connect() as conn:
         # Drop all managed views plus the legacy monolithic view
         for view_name, _ in _VIEWS:
-            conn.execute(text(f"DROP VIEW IF EXISTS {view_name};"))
-        conn.execute(text("DROP VIEW IF EXISTS v_primary_experiment_results;"))
+            conn.execute(text(f"DROP VIEW IF EXISTS {view_name} CASCADE;"))
+        conn.execute(text("DROP VIEW IF EXISTS v_primary_experiment_results CASCADE;"))
 
         # Recreate all views
-        for _, view_sql in _VIEWS:
-            conn.execute(text(view_sql))
+        for view_name, view_sql in _VIEWS:
+            try:
+                conn.execute(text(view_sql))
+            except Exception as e:
+                logger.error("Failed to create view %s: %s", view_name, e)
+                raise
 
         conn.commit()
-except Exception:
-    # Safe to ignore at import; views are recreated on next successful start
-    pass
+except Exception as e:
+    logger.error("Reporting view creation failed: %s", e)
 
 @event.listens_for(ChemicalAdditive, 'before_insert')
 @event.listens_for(ChemicalAdditive, 'before_update')
