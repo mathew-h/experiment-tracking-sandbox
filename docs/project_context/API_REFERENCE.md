@@ -42,10 +42,62 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/samples` | List samples. Query: `country`, `rock_classification`, `skip`, `limit` |
-| GET | `/api/samples/{sample_id}` | Get sample |
-| POST | `/api/samples` | Create sample |
-| PATCH | `/api/samples/{sample_id}` | Update sample |
+| GET | `/api/samples` | List samples. Query: `search`, `country`, `rock_classification`, `characterized`, `has_pxrf`, `has_xrd`, `has_elemental`, `skip`, `limit` |
+| GET | `/api/samples/geo` | Samples with coordinates only (for map view). Returns `[{sample_id, latitude, longitude, rock_classification, characterized}]` |
+| GET | `/api/samples/{sample_id}` | Full sample detail with linked experiments, photos, analyses, elemental results |
+| POST | `/api/samples` | Create sample. Auto-evaluates `characterized` on creation. |
+| PATCH | `/api/samples/{sample_id}` | Update mutable fields. Auto-evaluates `characterized` unless `characterized` is explicitly set in the payload. |
+| DELETE | `/api/samples/{sample_id}` | Delete sample. Returns 409 if experiments are linked. Returns 204. |
+| POST | `/api/samples/{sample_id}/photos` | Upload photo (JPEG/PNG, max 20 MB). Returns `201 SamplePhotoResponse`. |
+| DELETE | `/api/samples/{sample_id}/photos/{photo_id}` | Delete photo from DB and disk. Returns 204. |
+| GET | `/api/samples/{sample_id}/analyses` | List external analyses for the sample |
+| POST | `/api/samples/{sample_id}/analyses` | Create external analysis. pXRF: normalizes `pxrf_reading_no`, returns warnings for unmatched reading numbers. Auto-evaluates `characterized`. |
+| DELETE | `/api/samples/{sample_id}/analyses/{analysis_id}` | Delete analysis. Auto-evaluates `characterized`. Returns 204. |
+| GET | `/api/samples/{sample_id}/activity` | Last 100 modification log entries for the sample |
+
+### GET /api/samples
+
+Query parameters:
+- `search` (string) — filter by sample_id or locality (case-insensitive substring)
+- `country` (string) — exact match
+- `rock_classification` (string) — case-insensitive substring
+- `characterized` (bool) — filter by characterized status
+- `has_pxrf`, `has_xrd`, `has_elemental` (bool) — filter by analysis type presence
+- `skip` / `limit` (int, default limit=50)
+
+Response shape:
+```json
+{
+  "items": [
+    {
+      "sample_id": "SMP-042",
+      "rock_classification": "Peridotite",
+      "country": "Oman",
+      "locality": "Samail Ophiolite",
+      "characterized": true,
+      "created_at": "2026-03-01T09:00:00Z"
+    }
+  ],
+  "total": 14,
+  "skip": 0,
+  "limit": 50
+}
+```
+
+### POST /api/samples/{sample_id}/analyses — pXRF notes
+
+When `analysis_type` is `"pXRF"` and `pxrf_reading_no` is provided, the server:
+1. Normalizes the reading number (strip whitespace, convert `"1.0"` → `"1"`)
+2. Looks up `PXRFReading` by the normalized key
+3. If not found, returns `ExternalAnalysisWithWarnings` (HTTP 201) with a `warnings` array — creation still succeeds
+
+Response (pXRF with missing reading):
+```json
+{
+  "analysis": { ... },
+  "warnings": ["pXRF reading '42' not found in database — analysis created but reading is unlinked"]
+}
+```
 
 ## Chemicals
 

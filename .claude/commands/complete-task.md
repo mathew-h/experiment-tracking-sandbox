@@ -41,13 +41,15 @@ Commit all changes for this task first (required before push/merge). Use the for
 ## Step 4 — Merge and clean up
 
 ### If task type = milestone
-- Do not merge — milestone branches stay open until full milestone sign-off
+- Do not merge locally — milestone branches stay open until full milestone sign-off
 - Push the branch: `git push origin <branch-name>`
+- When opening a PR (for review or integration), use **`gh pr create --base develop`** (or the web UI with base `develop`). GitHub defaults to `main`; omitting an explicit base bypasses the integration layer.
 
 ### If task type = issue or inline (and a branch was created)
 1. Run the pre-merge checklist from `docs/GIT_WORKFLOW.md`
 2. Push the branch: `git push origin <branch-name>`
 3. If tests pass and checklist is clear:
+   - **Verify `develop` exists locally** before merging: `git rev-parse --verify develop` must succeed. If it fails, stop with a clear message: create `develop` per Prerequisites in `docs/GIT_WORKFLOW.md` — do not run `git checkout develop` and surface an opaque error.
    - Merge to develop: `git checkout develop && git merge --no-ff <branch-name>`
    - Delete the branch: `git branch -d <branch-name> && git push origin --delete <branch-name>`
 4. If tests fail or checklist has blockers:
