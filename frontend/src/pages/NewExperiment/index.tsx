@@ -67,7 +67,7 @@ export function NewExperimentPage() {
         date: new Date().toISOString().split('T')[0],
         note: '',
         sampleId: exp.sample_id ?? '',
-        experimentType: (exp.conditions?.experiment_type as ExperimentType | undefined) ?? '',
+        experimentType: (conditions?.experiment_type as ExperimentType | undefined) ?? '',
       }))
 
       if (conditions) {
@@ -109,6 +109,7 @@ export function NewExperimentPage() {
   }
 
   function handleClearCopy() {
+    setStep(0)
     setStep1(defaultStep1())
     setStep2(defaultStep2())
     setAdditives([])
