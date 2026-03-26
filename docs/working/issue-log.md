@@ -109,3 +109,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_background_ammonium.py` — new: 6 API tests
 - **Tests added:** yes — 6 backend API tests (404, no-scalars, bulk update, recalc trigger, negative rejection, schema default)
 - **Decision logged:** no
+
+## 2026-03-26 | inline — Register / Request Access form on login screen
+- **Files changed:**
+  - `backend/api/schemas/auth.py` — new: `RegisterRequest` (email domain, role, display name, password validators), `RegisterResponse`
+  - `backend/api/routers/auth.py` — new: `POST /api/auth/register` (public, no token); calls `auth.user_management.create_pending_user_request()`; 409 on duplicate email
+  - `backend/api/main.py` — included `auth` router
+  - `frontend/src/pages/Login.tsx` — replaced "Contact lab admin" text with tabbed Sign in / Request access UI; RegisterForm posts to `/api/auth/register`; success state shows confirmation; client-side domain validation
+- **Tests added:** no — public endpoint with Firestore dependency; no test fixture for Firestore pending_users
+- **Decision logged:** no
