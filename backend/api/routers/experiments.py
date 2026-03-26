@@ -13,7 +13,10 @@ from backend.api.schemas.experiments import (
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse,
 )
-from backend.api.schemas.results import ResultWithFlagsResponse
+from backend.api.schemas.results import (
+    ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
+)
+from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
@@ -316,6 +319,47 @@ def delete_experiment_additive(
     db.commit()
     log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
     return Response(status_code=204)
+
+
+@router.patch("/{experiment_id}/background-ammonium", response_model=BackgroundAmmoniumUpdated)
+def set_experiment_background_ammonium(
+    experiment_id: str,
+    payload: BackgroundAmmoniumUpdate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> BackgroundAmmoniumUpdated:
+    """Apply a single background ammonium value to every scalar result for an experiment.
+
+    Updates background_ammonium_concentration_mM on all ScalarResults rows for the
+    experiment and triggers recalculation of derived yield fields on each row.
+    """
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    result_ids = db.execute(
+        select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
+    ).scalars().all()
+
+    scalars = db.execute(
+        select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
+    ).scalars().all()
+
+    for scalar in scalars:
+        scalar.background_ammonium_concentration_mM = payload.value
+        db.flush()
+        recalculate(scalar, db)
+
+    db.commit()
+    log.info(
+        "background_ammonium_updated",
+        experiment_id=experiment_id,
+        value=payload.value,
+        count=len(scalars),
+    )
+    return BackgroundAmmoniumUpdated(updated=len(scalars))
 
 
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
