@@ -45,12 +45,14 @@ export function CopyFromExisting({ onSelect, onClear, copiedFrom }: Props) {
   function handleToggleOpen() {
     setOpen(true)
     setQuery('')
+    setDropdownOpen(false)
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   function handleClear() {
     setOpen(false)
     setQuery('')
+    setDropdownOpen(false)
     onClear()
   }
 
