@@ -73,6 +73,29 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 11 backend schema tests, 19 backend API tests, 1 Playwright e2e journey (12-chemicals.spec.ts)
 - **Decision logged:** no
 
+## 2026-03-25 | inline — Backfill all M3 calculated fields (migration 012)
+- **Files changed:**
+  - `database/data_migrations/recalculate_all_registry_012.py` — new: `_backfill_conditions`, `_backfill_scalars`, `run_migration` with `--dry-run` flag
+  - `database/data_migrations/__init__.py` — new: package marker
+  - `tests/data_migrations/__init__.py` — new: package marker
+  - `tests/data_migrations/test_recalculate_all_registry_012.py` — new: 3 integration tests
+- **Tests added:** yes — 3 integration tests (conditions water_to_rock_ratio, additive mass_in_grams, scalar grams_per_ton_yield)
+- **Decision logged:** no
+
+## 2026-03-25 | fix — Remove Files tab; collapse entry log rows
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — removed Files tab from tab bar
+  - `frontend/src/pages/ExperimentDetail/ModificationsTab.tsx` — refactored to collapsible `ModRow` component; rows start collapsed
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-25 | issue #5 — Copy From Existing toggle on New Experiment wizard
+- **Files changed:**
+  - `frontend/src/pages/NewExperiment/index.tsx` — added `handleCopyFrom`, `handleClearCopy`, copy banner, `CopyFromExisting` integration
+  - `frontend/src/pages/NewExperiment/CopyFromExisting.tsx` — new component (referenced; created on that branch)
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-03-25 | inline — Background ammonium default 0.2 mM and bulk-apply endpoint
 - **Files changed:**
   - `database/models/results.py` — `background_ammonium_concentration_mM` column: added `default=0.2, server_default=text("0.2")`
