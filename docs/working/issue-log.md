@@ -91,8 +91,8 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 
 ## 2026-03-25 | issue #5 — Copy From Existing toggle on New Experiment wizard
 - **Files changed:**
-  - `frontend/src/pages/NewExperiment/index.tsx` — added `handleCopyFrom`, `handleClearCopy`, copy banner, `CopyFromExisting` integration
-  - `frontend/src/pages/NewExperiment/CopyFromExisting.tsx` — new component (referenced; created on that branch)
+  - `frontend/src/pages/NewExperiment/CopyFromExisting.tsx` — new: toggle button, inline debounced search input (300ms), scrollable dropdown (experiment_id / experiment_type / status), badge + clear state
+  - `frontend/src/pages/NewExperiment/index.tsx` — added `handleCopyFrom` (parallel fetch of experiment detail + conditions + additives, maps all fields), `handleClearCopy` (resets step to 0 + all form state), copy banner with dismiss, `CopyFromExisting` wired into header
 - **Tests added:** no
 - **Decision logged:** no
 
