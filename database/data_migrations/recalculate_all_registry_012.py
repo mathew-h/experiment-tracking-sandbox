@@ -64,7 +64,7 @@ from sqlalchemy.orm import Session, joinedload
 from database import SessionLocal
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
-from database.models.results import ExperimentalResults
+from database.models.results import ExperimentalResults, ScalarResults
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -173,32 +173,118 @@ def _backfill_conditions(db: Session, dry_run: bool = False) -> tuple[int, int]:
     return cond_ok, add_ok
 
 
+def _backfill_scalars(db: Session, dry_run: bool = False) -> int:
+    """Safety-net pass: recalculate all ScalarResults rows.
+
+    ``_backfill_conditions`` already propagates to ScalarResults via the
+    conditions calculator, but any ScalarResults row whose parent conditions
+    had no linked results at the time of the conditions pass will be missed.
+    This function provides an explicit pass over every ScalarResults row to
+    ensure nothing is left with stale calculated fields.
+
+    Parameters
+    ----------
+    db:
+        Active SQLAlchemy session.
+    dry_run:
+        When True, recalculations are performed in memory but the session is
+        never committed (changes are discarded at the end of each chunk).
+
+    Returns
+    -------
+    int
+        Count of ScalarResults rows successfully processed.
+    """
+    all_scalars: list[ScalarResults] = (
+        db.query(ScalarResults)
+        .options(
+            joinedload(ScalarResults.result_entry)
+            .joinedload(ExperimentalResults.experiment)
+            .joinedload(Experiment.conditions),
+        )
+        .all()
+    )
+
+    ok = 0
+    err = 0
+
+    for chunk_idx, chunk in enumerate(_chunked(all_scalars, CHUNK_SIZE), start=1):
+        chunk_ok = 0
+        chunk_err = 0
+
+        for scalar in chunk:
+            try:
+                recalculate(scalar, db)
+                chunk_ok += 1
+            except Exception as exc:
+                print(f"[WARN] scalar id={scalar.id}: {exc}")
+                chunk_err += 1
+
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+
+        ok += chunk_ok
+        err += chunk_err
+
+        print(
+            f"[INFO] Chunk {chunk_idx}: "
+            f"scalars ok={chunk_ok} err={chunk_err}"
+        )
+
+    print(
+        f"[INFO] _backfill_scalars complete — ok={ok} err={err}"
+        + (" (DRY RUN — nothing committed)" if dry_run else "")
+    )
+    return ok
+
+
 # ---------------------------------------------------------------------------
-# Script entrypoint (Task 2 adds run_migration and _backfill_scalars)
+# Top-level migration runner
 # ---------------------------------------------------------------------------
+
+def run_migration(dry_run: bool = False) -> None:
+    """Run all backfill passes for migration 012.
+
+    Parameters
+    ----------
+    dry_run:
+        When True, all recalculations are performed in memory but no changes
+        are committed to the database.
+    """
+    db: Session = SessionLocal()
+    try:
+        print("=== Migration 012: recalculate_all_registry ===")
+        if dry_run:
+            print("[INFO] DRY RUN mode — no changes will be committed.")
+
+        print("\n[1/2] Backfilling ExperimentalConditions + ChemicalAdditives ...")
+        print("      (conditions_calcs.py propagates to ScalarResults internally)")
+        cond_ok, add_ok = _backfill_conditions(db, dry_run=dry_run)
+
+        print("\n[2/2] ScalarResults safety-net pass ...")
+        scalar_ok = _backfill_scalars(db, dry_run=dry_run)
+
+        print("\nMigration 012 complete.")
+        print(f"  conditions updated : {cond_ok}")
+        print(f"  additives updated  : {add_ok}")
+        print(f"  scalars updated    : {scalar_ok}")
+        if dry_run:
+            print("  DRY RUN — no changes committed.")
+    except Exception as exc:
+        print(f"[ERROR] Migration aborted: {exc}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+        print("=== Migration 012 finished ===")
+
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Migration 012: backfill all calculated fields via M3 registry."
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Recalculate in memory only; do not commit changes.",
-    )
+    parser = argparse.ArgumentParser(description="Migration 012: backfill all calculated fields.")
+    parser.add_argument("--dry-run", action="store_true", help="Preview without committing.")
     args = parser.parse_args()
-
-    db: Session = SessionLocal()
-    try:
-        print("=== Migration 012: recalculate_all_registry ===")
-        if args.dry_run:
-            print("[INFO] DRY RUN mode — no changes will be committed.")
-        _backfill_conditions(db, dry_run=args.dry_run)
-    except Exception as exc:
-        print(f"[ERROR] Migration aborted: {exc}")
-        db.rollback()
-    finally:
-        db.close()
-        print("=== Migration 012 finished ===")
+    run_migration(dry_run=args.dry_run)

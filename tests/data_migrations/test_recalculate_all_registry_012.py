@@ -93,3 +93,50 @@ class TestBackfillConditionsAdditiveMass:
 
         migration_session.refresh(additive)
         assert additive.mass_in_grams == pytest.approx(0.5)
+
+
+def test_backfill_scalars_computes_grams_per_ton_yield(migration_session):
+    """_backfill_scalars should populate grams_per_ton_yield from gross ammonium + rock mass."""
+    from database.data_migrations.recalculate_all_registry_012 import _backfill_scalars
+    from database.models import ExperimentalResults, ScalarResults
+
+    experiment = Experiment(experiment_id="BACKFILL_003", experiment_number=903)
+    migration_session.add(experiment)
+    migration_session.flush()
+
+    conditions = ExperimentalConditions(
+        experiment_id="BACKFILL_003",
+        experiment_fk=experiment.id,
+        rock_mass_g=100.0,
+        water_volume_mL=500.0,
+    )
+    migration_session.add(conditions)
+    migration_session.flush()
+
+    result_entry = ExperimentalResults(
+        experiment_fk=experiment.id,
+        time_post_reaction_days=7.0,
+        time_post_reaction_bucket_days=7,
+        description="t=7d",
+        is_primary_timepoint_result=True,
+    )
+    migration_session.add(result_entry)
+    migration_session.flush()
+
+    scalar = ScalarResults(
+        result_id=result_entry.id,
+        gross_ammonium_concentration_mM=10.0,
+        background_ammonium_concentration_mM=0.3,
+        sampling_volume_mL=100.0,
+        grams_per_ton_yield=None,  # simulate pre-existing NULL
+    )
+    migration_session.add(scalar)
+    migration_session.flush()
+
+    _backfill_scalars(migration_session)
+
+    migration_session.refresh(scalar)
+    # net = 9.7 mM, vol = 0.1 L → ammonia_mass_g = (9.7/1000) * 0.1 * 18.04 ≈ 0.01750 g
+    # yield = 1e6 * 0.01750 / 100 ≈ 174.99 g/t
+    assert scalar.grams_per_ton_yield is not None
+    assert scalar.grams_per_ton_yield == pytest.approx(174.99, rel=0.01)
