@@ -26,6 +26,7 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 $RepoRoot           = Split-Path -Parent $PSCommandPath
 $VenvPip            = Join-Path $RepoRoot ".venv\Scripts\pip.exe"
 $VenvAlembic        = Join-Path $RepoRoot ".venv\Scripts\alembic.exe"
+$VenvPython         = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $VenvUvicorn        = Join-Path $RepoRoot ".venv\Scripts\uvicorn.exe"
 $FrontendDir        = Join-Path $RepoRoot "frontend"
 $EnvFile            = Join-Path $RepoRoot ".env"
@@ -130,9 +131,18 @@ Write-Step "Step 3: Create venv and install Python dependencies"
 
 $VenvDir = Join-Path $RepoRoot ".venv"
 if (-not (Test-Path $VenvDir)) {
-    & python -m venv $VenvDir
+    # Use Python 3.13 (non-Store install) — required for greenlet wheel compatibility
+    # and for NSSM service access (Windows Store Python is inaccessible to SYSTEM)
+    $py313 = try { py -3.13 -c "import sys; print(sys.executable)" 2>&1 } catch { $null }
+    if ($py313 -and (Test-Path $py313)) {
+        & $py313 -m venv $VenvDir
+    } else {
+        Write-Host "  WARNING: Python 3.13 not found via 'py -3.13'. Falling back to default 'python'." -ForegroundColor Yellow
+        Write-Host "  Install Python 3.13 from python.org for best compatibility." -ForegroundColor Yellow
+        & python -m venv $VenvDir
+    }
     if ($LASTEXITCODE -ne 0) { Fail "Failed to create virtual environment" }
-    Write-OK "venv created"
+    Write-OK "venv created (Python 3.13)"
 } else {
     Write-Skip "venv already exists - running pip install anyway to ensure deps are current"
 }
@@ -158,7 +168,7 @@ Write-Step "Step 5: Build frontend (this may take a minute)"
 
 Push-Location $FrontendDir
 try {
-    & npm install --silent
+    & npm install --silent --legacy-peer-deps
     if ($LASTEXITCODE -ne 0) { Fail "npm install failed. Check your internet connection." }
     & npm run build
     if ($LASTEXITCODE -ne 0) { Fail "npm run build failed. Check frontend/.env.local has all required values." }
@@ -176,14 +186,15 @@ Write-OK "Log directory ready: $LogDir"
 # -- Step 7: Register NSSM service (idempotent) --------------------------------
 Write-Step "Step 7: Register NSSM Windows service"
 
-$svcStatus = nssm status $ServiceName 2>&1
+$svcStatus = try { nssm status $ServiceName 2>&1 } catch { "Can't open service!" }
+$svcStatus = "$svcStatus"
 if ($svcStatus -notmatch "Can't open service") {
     Write-Skip "Service '$ServiceName' already registered - skipping"
 } else {
-    & nssm install $ServiceName $VenvUvicorn
-    & nssm set $ServiceName AppParameters "backend.api.main:app --host 0.0.0.0 --port $AppPort"
+    & nssm install $ServiceName $VenvPython
+    & nssm set $ServiceName AppParameters "-m uvicorn backend.api.main:app --host 0.0.0.0 --port $AppPort"
     & nssm set $ServiceName AppDirectory $RepoRoot
-    & nssm set $ServiceName AppEnvironmentExtra "DOTENV_PATH=$EnvFile"
+    & nssm set $ServiceName AppEnvironmentExtra "DOTENV_PATH=$EnvFile" "VIRTUAL_ENV=$RepoRoot\.venv"
     & nssm set $ServiceName AppStdout (Join-Path $LogDir "stdout.log")
     & nssm set $ServiceName AppStderr (Join-Path $LogDir "stderr.log")
     & nssm set $ServiceName Start SERVICE_AUTO_START
@@ -222,7 +233,8 @@ $Settings = New-ScheduledTaskSettingsSet `
 Write-Host ""
 Write-Host "  Windows requires your account password to run this task when you are not logged in." -ForegroundColor Yellow
 Write-Host "  You will be prompted for your Windows credentials now." -ForegroundColor Yellow
-$Cred = Get-Credential -Message "Enter your Windows account credentials for the scheduled task" -UserName $env:USERNAME
+$whoami = whoami
+$Cred = Get-Credential -Message "Enter your Windows account credentials for the scheduled task" -UserName $whoami
 
 Register-ScheduledTask `
     -TaskName  $TaskName `

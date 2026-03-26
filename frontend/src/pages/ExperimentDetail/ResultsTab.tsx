@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi, type ResultWithFlags } from '@/api/experiments'
 import { resultsApi } from '@/api/results'
 import { Badge, PageSpinner } from '@/components/ui'
+
+const DEFAULT_BACKGROUND_NH4 = 0.2
 
 function fmt(n: number | null | undefined, decimals = 2) {
   return n != null ? n.toFixed(decimals) : '—'
@@ -82,10 +84,22 @@ interface Props { experimentId: string }
 /** Results tab: timepoint result cards with scalar chemistry and ICP data. */
 export function ResultsTab({ experimentId }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const [bgInput, setBgInput] = useState(false)
+  const [bgValue, setBgValue] = useState(String(DEFAULT_BACKGROUND_NH4))
+  const queryClient = useQueryClient()
 
   const { data: results, isLoading } = useQuery({
     queryKey: ['experiment-results', experimentId],
     queryFn: () => experimentsApi.getResults(experimentId),
+  })
+
+  const bgMutation = useMutation({
+    mutationFn: (value: number) => experimentsApi.setBackgroundAmmonium(experimentId, value),
+    onSuccess: () => {
+      setBgInput(false)
+      queryClient.invalidateQueries({ queryKey: ['experiment-results', experimentId] })
+      queryClient.invalidateQueries({ queryKey: ['scalar'] })
+    },
   })
 
   const toggle = (id: number) => setExpanded((s) => {
@@ -99,6 +113,49 @@ export function ResultsTab({ experimentId }: Props) {
 
   return (
     <div>
+      {/* Background NH₄ action bar */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-border">
+        {bgInput ? (
+          <>
+            <label className="text-xs text-ink-secondary">Background NH₄ (mM)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={bgValue}
+              onChange={(e) => setBgValue(e.target.value)}
+              className="w-20 text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary font-mono-data"
+              autoFocus
+            />
+            <button
+              onClick={() => {
+                const parsed = parseFloat(bgValue)
+                if (!isNaN(parsed) && parsed >= 0) bgMutation.mutate(parsed)
+              }}
+              disabled={bgMutation.isPending}
+              className="text-xs px-2 py-1 bg-navy-700 text-white rounded hover:bg-navy-600 disabled:opacity-50"
+            >
+              {bgMutation.isPending ? 'Applying…' : 'Apply to all'}
+            </button>
+            <button
+              onClick={() => setBgInput(false)}
+              className="text-xs px-2 py-1 text-ink-muted hover:text-ink-primary"
+            >
+              Cancel
+            </button>
+            {bgMutation.isError && (
+              <span className="text-xs text-red-500">Failed — try again</span>
+            )}
+          </>
+        ) : (
+          <button
+            onClick={() => { setBgValue(String(DEFAULT_BACKGROUND_NH4)); setBgInput(true) }}
+            className="text-xs text-ink-secondary hover:text-ink-primary underline-offset-2 hover:underline"
+          >
+            Background NH₄: {DEFAULT_BACKGROUND_NH4} mM
+          </button>
+        )}
+      </div>
       {/* Header row */}
       <div className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted">
         <span></span>
