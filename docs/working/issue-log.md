@@ -72,3 +72,17 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/e2e/journeys/12-chemicals.spec.ts` — e2e journey for chemicals page and additive flow
 - **Tests added:** yes — 11 backend schema tests, 19 backend API tests, 1 Playwright e2e journey (12-chemicals.spec.ts)
 - **Decision logged:** no
+
+## 2026-03-25 | inline — Background ammonium default 0.2 mM and bulk-apply endpoint
+- **Files changed:**
+  - `database/models/results.py` — `background_ammonium_concentration_mM` column: added `default=0.2, server_default=text("0.2")`
+  - `alembic/versions/a1b2c3d4e5f6_background_ammonium_default_0_2.py` — new migration: sets server_default + backfills existing NULL rows to 0.2
+  - `backend/services/calculations/scalar_calcs.py` — both hardcoded `0.3` fallbacks → `0.2`; docstring updated
+  - `backend/api/schemas/results.py` — `ScalarCreate` field default `None` → `0.2`; added `BackgroundAmmoniumUpdate` / `BackgroundAmmoniumUpdated` schemas
+  - `backend/services/bulk_uploads/scalar_results.py` — rows without background column now receive `0.2` default
+  - `backend/api/routers/experiments.py` — new `PATCH /{experiment_id}/background-ammonium` endpoint; bulk-applies value to all scalar results and triggers recalculation
+  - `frontend/src/api/experiments.ts` — added `setBackgroundAmmonium(experimentId, value)`
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — "Background NH₄: 0.2 mM" button; inline input; `useMutation` with cache invalidation
+  - `tests/api/test_background_ammonium.py` — new: 6 API tests
+- **Tests added:** yes — 6 backend API tests (404, no-scalars, bulk update, recalc trigger, negative rejection, schema default)
+- **Decision logged:** no
