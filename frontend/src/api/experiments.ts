@@ -113,6 +113,9 @@ export const experimentsApi = {
   getResults: (experimentId: string) =>
     apiClient.get<ResultWithFlags[]>(`/experiments/${experimentId}/results`).then((r) => r.data),
 
+  setBackgroundAmmonium: (experimentId: string, value: number) =>
+    apiClient.patch<{ updated: number }>(`/experiments/${experimentId}/background-ammonium`, { value }).then((r) => r.data),
+
   addNote: (experimentId: string, text: string) =>
     apiClient.post(`/experiments/${experimentId}/notes`, { note_text: text }).then((r) => r.data),
 

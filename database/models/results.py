@@ -71,7 +71,7 @@ class ScalarResults(Base):
     # Scalar fields
     ferrous_iron_yield = Column(Float, nullable=True)  # in percentage
     gross_ammonium_concentration_mM = Column(Float, nullable=True)  # in mM
-    background_ammonium_concentration_mM = Column(Float, nullable=True)  # in mM
+    background_ammonium_concentration_mM = Column(Float, nullable=True, default=0.2, server_default=text("0.2"))  # in mM
     ammonium_quant_method = Column(String, nullable=True) # e.g., 'NMR', 'Colorimetric Assay'
     grams_per_ton_yield = Column(Float, nullable=True)  # yield in g/ton
     final_ph = Column(Float, nullable=True)

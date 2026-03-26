@@ -38,7 +38,7 @@ def calculate_ferrous_iron_yield_nh3(
     Stoichiometry: 9 mol Fe2+ per 2 mol NH3 (ratio = 4.5)
 
         net_ammonium_mM  = max(0, gross_ammonium_mM - background_ammonium_mM)
-                           [background defaults to 0.3 mM if None]
+                           [background defaults to 0.2 mM if None]
         total_NH3_mol    = (net_ammonium_mM / 1000) * (solution_volume_mL / 1000)
         Fe2+_consumed_g  = total_NH3_mol * 4.5 * FE_MOLAR_MASS
         yield_nh3_pct    = (Fe2+_consumed_g / total_ferrous_iron_g) * 100
@@ -54,7 +54,7 @@ def calculate_ferrous_iron_yield_nh3(
         or total_ferrous_iron_g <= 0
     ):
         return None
-    bg = background_ammonium_mM if background_ammonium_mM is not None else 0.3
+    bg = background_ammonium_mM if background_ammonium_mM is not None else 0.2
     net_mM = max(0.0, gross_ammonium_mM - bg)
     total_nh3_mol = (net_mM / 1000.0) * (solution_volume_mL / 1000.0)
     fe2_consumed_g = total_nh3_mol * 4.5 * FE_MOLAR_MASS
@@ -105,7 +105,7 @@ def recalculate_scalar(instance: object, session: Session) -> None:
     gross = getattr(instance, 'gross_ammonium_concentration_mM', None)
     if gross is not None and liquid_volume_ml is not None and liquid_volume_ml > 0:
         bg = getattr(instance, 'background_ammonium_concentration_mM', None)
-        bg = bg if bg is not None else 0.3
+        bg = bg if bg is not None else 0.2
         net_conc = max(0.0, gross - bg)
         ammonia_mass_g = (net_conc / 1000.0) * (liquid_volume_ml / 1000.0) * 18.04
         if rock_mass is not None and rock_mass > 0:

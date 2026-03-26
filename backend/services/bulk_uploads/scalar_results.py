@@ -231,6 +231,10 @@ class ScalarResultsUploadService:
             else:
                 clean['_overwrite'] = overwrite_all
 
+            # Default background ammonium to 0.2 mM when absent from the upload row.
+            if 'background_ammonium_concentration_mM' not in clean:
+                clean['background_ammonium_concentration_mM'] = 0.2
+
             cleaned_records.append(clean)
 
         # --- Dry run: validate only, no persist ---

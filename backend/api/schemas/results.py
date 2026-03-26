@@ -42,7 +42,7 @@ class ScalarCreate(BaseModel):
     final_nitrate_concentration_mM: Optional[float] = None
     final_alkalinity_mg_L: Optional[float] = None
     gross_ammonium_concentration_mM: Optional[float] = None
-    background_ammonium_concentration_mM: Optional[float] = None
+    background_ammonium_concentration_mM: Optional[float] = 0.2
     ammonium_quant_method: Optional[AmmoniumQuantMethod] = None
     ferrous_iron_yield: Optional[float] = None
     sampling_volume_mL: Optional[float] = None
@@ -123,6 +123,14 @@ class ResultWithFlagsResponse(BaseModel):
     gross_ammonium_concentration_mM: Optional[float] = None
     final_conductivity_mS_cm: Optional[float] = None
     final_ph: Optional[float] = None
+
+
+class BackgroundAmmoniumUpdate(BaseModel):
+    value: float = Field(ge=0.0, description="Background ammonium concentration to apply to all timepoints (mM)")
+
+
+class BackgroundAmmoniumUpdated(BaseModel):
+    updated: int
 
 
 class ICPCreate(BaseModel):
