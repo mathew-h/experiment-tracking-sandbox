@@ -5,14 +5,43 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _default_master_results_path() -> str:
-    return str(
-        Path.home()
-        / "Addis Energy"
+    """Resolve the SharePoint-synced master tracker path for the current machine.
+
+    When the server runs as a Windows service (SYSTEM account), Path.home()
+    resolves to the service profile, not the logged-in user's folder.
+    Scan C:\\Users\\ for any user directory that actually contains the file so
+    the default works on any machine without manual configuration.
+    """
+    import os  # noqa: PLC0415
+
+    relative = (
+        Path("Addis Energy")
         / "All Company - Addis Energy"
         / "01_R&D"
         / "02_Results"
         / "Master Reactor Sampling Tracker.xlsx"
     )
+
+    # 1. USERPROFILE env var — set by Windows for the interactive session user
+    userprofile = os.environ.get("USERPROFILE")
+    if userprofile:
+        candidate = Path(userprofile) / relative
+        if candidate.exists():
+            return str(candidate)
+
+    # 2. Scan C:\Users\ for any user who has the file (handles service-account context)
+    users_dir = Path(r"C:\Users")
+    if users_dir.exists():
+        for user_dir in sorted(users_dir.iterdir()):
+            if user_dir.is_dir():
+                candidate = user_dir / relative
+                if candidate.exists():
+                    return str(candidate)
+
+    # 3. Fall back to USERPROFILE / Path.home() even if the file doesn't exist yet
+    if userprofile:
+        return str(Path(userprofile) / relative)
+    return str(Path.home() / relative)
 
 
 class Settings(BaseSettings):
