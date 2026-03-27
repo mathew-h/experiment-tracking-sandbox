@@ -136,7 +136,7 @@ export function SamplesPage() {
                     <Td>{s.rock_classification ?? <span className="text-ink-muted">—</span>}</Td>
                     <Td className="max-w-xs">
                       {s.description
-                        ? <span className="block truncate text-ink-secondary" title={s.description}>{s.description}</span>
+                        ? <span className="block truncate" title={s.description}>{s.description}</span>
                         : <span className="text-ink-muted">—</span>}
                     </Td>
                     <Td className="text-ink-muted">
