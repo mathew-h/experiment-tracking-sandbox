@@ -1,3 +1,4 @@
+import pytest
 import io
 
 from database.models.samples import SampleInfo
@@ -271,3 +272,89 @@ def test_list_samples_search_by_description(client, db_session):
     assert resp.status_code == 200
     ids = [i["sample_id"] for i in resp.json()["items"]]
     assert "DESC_S02" in ids
+
+
+# ── Issue #12 regression tests ────────────────────────────────────────────
+
+def test_list_analyses_returns_pxrf_data(client, db_session):
+    """Bug A: list_analyses must populate pxrf_data when the reading exists."""
+    from database.models.analysis import PXRFReading, ExternalAnalysis
+    _make_sample(db_session, "BUG_A_S01")
+    db_session.add(PXRFReading(reading_no="77", fe=25.0, mg=10.0, si=30.0,
+                               ni=0.5, cu=0.1, co=0.05, mo=0.02, al=5.0,
+                               ca=1.0, k=0.3, au=0.0, zn=0.1))
+    db_session.add(ExternalAnalysis(sample_id="BUG_A_S01", analysis_type="pXRF",
+                                    pxrf_reading_no="77"))
+    db_session.commit()
+    resp = client.get("/api/samples/BUG_A_S01/analyses")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["pxrf_data"] is not None, "pxrf_data must not be null"
+    assert items[0]["pxrf_data"]["fe"] == pytest.approx(25.0)
+
+
+def test_list_analyses_returns_xrd_data(client, db_session):
+    """Bug A: list_analyses must populate xrd_data when an XRDAnalysis record exists."""
+    from database.models.analysis import ExternalAnalysis
+    from database.models.xrd import XRDAnalysis
+    _make_sample(db_session, "BUG_A_S02")
+    ea = ExternalAnalysis(sample_id="BUG_A_S02", analysis_type="XRD")
+    db_session.add(ea)
+    db_session.flush()
+    db_session.add(XRDAnalysis(
+        external_analysis_id=ea.id,
+        mineral_phases={"lizardite": 65.0, "magnetite": 35.0},
+    ))
+    db_session.commit()
+    resp = client.get("/api/samples/BUG_A_S02/analyses")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["xrd_data"] is not None, "xrd_data must not be null"
+    assert items[0]["xrd_data"]["mineral_phases"]["lizardite"] == pytest.approx(65.0)
+
+
+def test_get_sample_elemental_results_when_sample_id_null(client, db_session):
+    """Bug B: elemental_results must appear even when ElementalAnalysis.sample_id is NULL."""
+    from database.models.analysis import ExternalAnalysis
+    from database.models.characterization import ElementalAnalysis, Analyte
+    _make_sample(db_session, "BUG_B_S01")
+    analyte = Analyte(analyte_symbol="FeO", unit="%")
+    db_session.add(analyte)
+    db_session.flush()
+    ea = ExternalAnalysis(sample_id="BUG_B_S01", analysis_type="Elemental")
+    db_session.add(ea)
+    db_session.flush()
+    # Deliberately leave sample_id=None to reproduce the historical data pattern
+    db_session.add(ElementalAnalysis(
+        external_analysis_id=ea.id,
+        sample_id=None,
+        analyte_id=analyte.id,
+        analyte_composition=12.5,
+    ))
+    db_session.commit()
+    resp = client.get("/api/samples/BUG_B_S01")
+    assert resp.status_code == 200
+    results = resp.json()["elemental_results"]
+    assert len(results) == 1, "elemental_results must include rows where sample_id is NULL"
+    assert results[0]["analyte_symbol"] == "FeO"
+    assert results[0]["analyte_composition"] == pytest.approx(12.5)
+
+
+def test_create_analysis_response_includes_pxrf_data(client, db_session):
+    """Bug C: POST /analyses response must include pxrf_data when the reading exists."""
+    from database.models.analysis import PXRFReading
+    _make_sample(db_session, "BUG_C_S01")
+    db_session.add(PXRFReading(reading_no="88", fe=18.0, mg=8.0, si=28.0,
+                               ni=0.4, cu=0.2, co=0.03, mo=0.01, al=4.0,
+                               ca=0.8, k=0.2, au=0.0, zn=0.05))
+    db_session.commit()
+    resp = client.post(
+        "/api/samples/BUG_C_S01/analyses",
+        json={"analysis_type": "pXRF", "pxrf_reading_no": "88"},
+    )
+    assert resp.status_code == 201
+    analysis = resp.json()["analysis"]
+    assert analysis["pxrf_data"] is not None, "pxrf_data must not be null in POST response"
+    assert analysis["pxrf_data"]["fe"] == pytest.approx(18.0)
