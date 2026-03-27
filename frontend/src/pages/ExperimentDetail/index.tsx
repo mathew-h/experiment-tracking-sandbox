@@ -93,7 +93,7 @@ export function ExperimentDetailPage() {
       {/* Tab content */}
       <div className="bg-surface-card border border-surface-border rounded-lg overflow-hidden">
         {activeTab === 'Conditions' && (
-          <ConditionsTab conditions={conditions ?? null} experimentId={id!} />
+          <ConditionsTab conditions={conditions ?? null} experimentId={id!} experimentFk={experiment.id} />
         )}
         {activeTab === 'Results' && <ResultsTab experimentId={id!} experimentFk={experiment.id} />}
         {activeTab === 'Notes' && (

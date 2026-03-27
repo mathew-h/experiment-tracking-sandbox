@@ -19,9 +19,18 @@ const ADDITIVE_UNIT_OPTIONS = [
   { value: 'mmol', label: 'mmol' },
 ]
 
+const EXPERIMENT_TYPE_OPTIONS = [
+  { value: 'Serum',      label: 'Serum' },
+  { value: 'Autoclave',  label: 'Autoclave' },
+  { value: 'HPHT',       label: 'HPHT' },
+  { value: 'Core Flood', label: 'Core Flood' },
+  { value: 'Other',      label: 'Other' },
+]
+
 interface Props {
   conditions: ConditionsResponse | null
   experimentId: string
+  experimentFk: number
 }
 
 function Row({ label, value, unit }: { label: string; value: unknown; unit?: string }) {
@@ -37,7 +46,7 @@ function Row({ label, value, unit }: { label: string; value: unknown; unit?: str
 }
 
 /** Conditions tab: editable experimental setup parameters and chemical additives. */
-export function ConditionsTab({ conditions, experimentId }: Props) {
+export function ConditionsTab({ conditions, experimentId, experimentFk }: Props) {
   const [editOpen, setEditOpen] = useState(false)
   const [form, setForm] = useState<Partial<ConditionsPayload>>({})
 
@@ -96,22 +105,30 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
     onError: (err: Error) => toastError('Failed to remove additive', err.message),
   })
 
-  const patchMutation = useMutation({
+  const saveMutation = useMutation({
     mutationFn: () => {
-      if (!conditions) throw new Error('No conditions to patch')
+      if (!conditions) {
+        return conditionsApi.create({
+          ...form,
+          experiment_fk: experimentFk,
+          experiment_id: experimentId,
+        })
+      }
       return conditionsApi.patch(conditions.id, form)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
       queryClient.invalidateQueries({ queryKey: ['conditions', experimentId] })
-      success('Conditions updated')
+      success(conditions ? 'Conditions updated' : 'Details added')
       setEditOpen(false)
     },
-    onError: (err: Error) => toastError('Update failed', err.message),
+    onError: (err: Error) =>
+      toastError(conditions ? 'Update failed' : 'Failed to add details', err.message),
   })
 
   const openEdit = () => {
     setForm({
+      experiment_type: conditions?.experiment_type ?? undefined,
       temperature_c: conditions?.temperature_c ?? undefined,
       initial_ph: conditions?.initial_ph ?? undefined,
       rock_mass_g: conditions?.rock_mass_g ?? undefined,
@@ -139,8 +156,6 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
     setCompoundQuery('')
   }
 
-  if (!conditions) return <p className="text-sm text-ink-muted p-4">No conditions recorded for this experiment.</p>
-
   const set = (k: keyof ConditionsPayload) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((p) => ({ ...p, [k]: e.target.value === '' ? undefined : (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value)) }))
 
@@ -150,7 +165,14 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
 
   return (
     <>
-      <div className="p-4 space-y-1">
+      {!conditions ? (
+        <div className="p-8 flex flex-col items-center gap-3 text-center">
+          <p className="text-sm text-ink-muted">No conditions recorded for this experiment.</p>
+          <Button variant="ghost" size="sm" onClick={openEdit}>+ Add Details</Button>
+        </div>
+      ) : (
+        <>
+        <div className="p-4 space-y-1">
         <div className="flex justify-end mb-2">
           <Button variant="ghost" size="xs" onClick={openEdit}>Edit</Button>
         </div>
@@ -207,12 +229,21 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
             ))}
           </div>
         )}
-      </div>
+        </div>
+        </>
+      )}
 
       {/* Edit Conditions Modal */}
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Conditions">
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title={conditions ? 'Edit Conditions' : 'Add Details'}>
         <div className="space-y-3 p-4">
           <div className="grid grid-cols-2 gap-3">
+            <Select
+              label="Experiment Type"
+              options={EXPERIMENT_TYPE_OPTIONS}
+              value={form.experiment_type ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, experiment_type: e.target.value || undefined }))}
+              placeholder="Select type…"
+            />
             <Input label="Particle Size" type="text" value={form.particle_size ?? ''} onChange={(e) => setForm((p) => ({ ...p, particle_size: e.target.value || undefined }))} />
             <Input label="Temperature (°C)" type="number" value={form.temperature_c ?? ''} onChange={set('temperature_c')} />
             <Input label="Initial pH" type="number" value={form.initial_ph ?? ''} onChange={set('initial_ph')} />
@@ -232,7 +263,7 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button variant="primary" loading={patchMutation.isPending} onClick={() => patchMutation.mutate()}>Save</Button>
+            <Button variant="primary" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>Save</Button>
           </div>
         </div>
       </Modal>
