@@ -158,3 +158,9 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/DIRECTORY_STRUCTURE.md` — fix calc module names; fix auth file name (firebase.py→firebase_auth.py); fix backend/core→backend/config/settings.py; fix dependencies file→dir; remove non-existent component subdirs
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-03-26 | inline — Fix floating-point display in expanded scalar row
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `ExpandedRow` scalar values: replaced `String(val)` with `fmt(val as number, 1)` so all scalar fields render to 1 decimal place
+- **Tests added:** no
+- **Decision logged:** no
