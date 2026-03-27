@@ -124,6 +124,32 @@ export function OverviewTab({ sample }: Props) {
         )}
       </div>
 
+      {sample.elemental_results.length > 0 && (
+        <div className="rounded-lg border border-surface-border bg-surface-raised p-4">
+          <h3 className="text-sm font-medium text-ink-primary mb-3">Elemental Composition</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-ink-muted border-b border-surface-border">
+                <th className="pb-2 pr-4">Analyte</th>
+                <th className="pb-2 pr-4">Value</th>
+                <th className="pb-2">Unit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sample.elemental_results.map((r) => (
+                <tr key={r.analyte_symbol} className="border-b border-surface-border/50">
+                  <td className="py-2 pr-4 font-mono-data text-ink-primary">{r.analyte_symbol}</td>
+                  <td className="py-2 pr-4 font-mono-data text-ink-secondary">
+                    {r.analyte_composition != null ? r.analyte_composition.toFixed(4) : '—'}
+                  </td>
+                  <td className="py-2 text-ink-muted">{r.unit}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {sample.experiments.length > 0 && (
         <div className="rounded-lg border border-surface-border bg-surface-raised p-4">
           <h3 className="text-sm font-medium text-ink-primary mb-3">Linked Experiments</h3>

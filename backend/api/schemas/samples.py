@@ -121,6 +121,29 @@ class AnalysisFileResponse(BaseModel):
     created_at: datetime
 
 
+class PXRFElementalData(BaseModel):
+    """Averaged elemental values from one or more pXRF readings."""
+    reading_count: int
+    fe: Optional[float] = None
+    mg: Optional[float] = None
+    ni: Optional[float] = None
+    cu: Optional[float] = None
+    si: Optional[float] = None
+    co: Optional[float] = None
+    mo: Optional[float] = None
+    al: Optional[float] = None
+    ca: Optional[float] = None
+    k: Optional[float] = None
+    au: Optional[float] = None
+    zn: Optional[float] = None
+
+
+class XRDPhaseData(BaseModel):
+    """Mineral phase data from an XRD analysis."""
+    mineral_phases: dict[str, float]
+    analysis_parameters: Optional[dict] = None
+
+
 class ExternalAnalysisResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +158,8 @@ class ExternalAnalysisResponse(BaseModel):
     magnetic_susceptibility: Optional[str] = None
     created_at: datetime
     analysis_files: list[AnalysisFileResponse] = []
+    pxrf_data: Optional[PXRFElementalData] = None
+    xrd_data: Optional[XRDPhaseData] = None
 
 
 class ExternalAnalysisWithWarnings(BaseModel):

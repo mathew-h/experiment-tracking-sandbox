@@ -55,6 +55,27 @@ export interface SamplePhoto {
   created_at: string
 }
 
+export interface PXRFElementalData {
+  reading_count: number
+  fe: number | null
+  mg: number | null
+  ni: number | null
+  cu: number | null
+  si: number | null
+  co: number | null
+  mo: number | null
+  al: number | null
+  ca: number | null
+  k: number | null
+  au: number | null
+  zn: number | null
+}
+
+export interface XRDPhaseData {
+  mineral_phases: Record<string, number>
+  analysis_parameters: Record<string, unknown> | null
+}
+
 export interface ExternalAnalysis {
   id: number
   sample_id: string | null
@@ -67,6 +88,8 @@ export interface ExternalAnalysis {
   magnetic_susceptibility: string | null
   created_at: string
   analysis_files: AnalysisFile[]
+  pxrf_data: PXRFElementalData | null
+  xrd_data: XRDPhaseData | null
 }
 
 export interface AnalysisFile {

@@ -18,6 +18,7 @@ from backend.api.schemas.samples import (
     LinkedExperiment, SamplePhotoResponse,
     ExternalAnalysisResponse, AnalysisFileResponse, ElementalAnalysisItem,
     ExternalAnalysisCreate, ExternalAnalysisWithWarnings,
+    PXRFElementalData, XRDPhaseData,
 )
 from backend.services.samples import evaluate_characterized, log_sample_modification, normalize_pxrf_reading_no
 from backend.config.settings import get_settings
@@ -161,6 +162,8 @@ def get_sample(
 ) -> SampleDetail:
     from database.models.conditions import ExperimentalConditions
     from database.models.characterization import ElementalAnalysis
+    from database.models.analysis import PXRFReading
+    from database.models.xrd import XRDAnalysis
 
     sample = db.execute(
         select(SampleInfo)
@@ -168,12 +171,35 @@ def get_sample(
         .options(
             selectinload(SampleInfo.photos),
             selectinload(SampleInfo.external_analyses).selectinload(ExternalAnalysis.analysis_files),
+            selectinload(SampleInfo.external_analyses).selectinload(ExternalAnalysis.xrd_analysis),
             selectinload(SampleInfo.experiments).selectinload(Experiment.conditions),
             selectinload(SampleInfo.elemental_results).selectinload(ElementalAnalysis.analyte),
         )
     ).scalar_one_or_none()
     if sample is None:
         raise HTTPException(status_code=404, detail="Sample not found")
+
+    # Bulk-fetch all pXRF readings referenced by this sample's analyses
+    all_reading_nos: set[str] = set()
+    for a in sample.external_analyses:
+        if a.analysis_type == "pXRF" and a.pxrf_reading_no:
+            for raw in a.pxrf_reading_no.split(","):
+                normed = normalize_pxrf_reading_no(raw)
+                if normed:
+                    all_reading_nos.add(normed)
+
+    pxrf_map: dict[str, PXRFReading] = {}
+    if all_reading_nos:
+        readings = db.execute(
+            select(PXRFReading).where(PXRFReading.reading_no.in_(all_reading_nos))
+        ).scalars().all()
+        pxrf_map = {r.reading_no: r for r in readings}
+
+    # Auto-correct characterized flag if pXRF readings have since been ingested
+    new_characterized = evaluate_characterized(db, sample_id)
+    if new_characterized != sample.characterized:
+        sample.characterized = new_characterized
+        db.commit()
 
     return SampleDetail(
         sample_id=sample.sample_id,
@@ -187,7 +213,7 @@ def get_sample(
         characterized=sample.characterized,
         created_at=sample.created_at,
         photos=[SamplePhotoResponse.model_validate(p) for p in sample.photos],
-        analyses=[_to_analysis_response(a) for a in sample.external_analyses],
+        analyses=[_to_analysis_response(a, pxrf_map) for a in sample.external_analyses],
         elemental_results=[
             ElementalAnalysisItem(
                 analyte_symbol=r.analyte.analyte_symbol,
@@ -212,7 +238,44 @@ def get_sample(
     )
 
 
-def _to_analysis_response(a: ExternalAnalysis) -> ExternalAnalysisResponse:
+_PXRF_ELEMENTS = ["fe", "mg", "ni", "cu", "si", "co", "mo", "al", "ca", "k", "au", "zn"]
+
+
+def _avg_pxrf(a: ExternalAnalysis, pxrf_map: dict) -> "PXRFElementalData | None":
+    """Average elemental values across all resolved pXRF readings for an analysis."""
+    if a.analysis_type != "pXRF" or not a.pxrf_reading_no:
+        return None
+    readings = []
+    for raw in a.pxrf_reading_no.split(","):
+        normed = normalize_pxrf_reading_no(raw)
+        if normed and normed in pxrf_map:
+            readings.append(pxrf_map[normed])
+    if not readings:
+        return None
+    averaged: dict = {"reading_count": len(readings)}
+    for el in _PXRF_ELEMENTS:
+        vals = [v for r in readings if (v := getattr(r, el)) is not None]
+        averaged[el] = sum(vals) / len(vals) if vals else None
+    return PXRFElementalData(**averaged)
+
+
+def _get_xrd_data(a: ExternalAnalysis) -> "XRDPhaseData | None":
+    """Extract mineral phases from a linked XRDAnalysis record."""
+    if a.analysis_type != "XRD":
+        return None
+    xrd = getattr(a, "xrd_analysis", None)
+    if not xrd or not xrd.mineral_phases:
+        return None
+    return XRDPhaseData(
+        mineral_phases=xrd.mineral_phases,
+        analysis_parameters=xrd.analysis_parameters,
+    )
+
+
+def _to_analysis_response(
+    a: ExternalAnalysis,
+    pxrf_map: dict | None = None,
+) -> ExternalAnalysisResponse:
     return ExternalAnalysisResponse(
         id=a.id,
         sample_id=a.sample_id,
@@ -225,6 +288,8 @@ def _to_analysis_response(a: ExternalAnalysis) -> ExternalAnalysisResponse:
         magnetic_susceptibility=a.magnetic_susceptibility,
         created_at=a.created_at,
         analysis_files=[AnalysisFileResponse.model_validate(f) for f in a.analysis_files],
+        pxrf_data=_avg_pxrf(a, pxrf_map or {}),
+        xrd_data=_get_xrd_data(a),
     )
 
 
