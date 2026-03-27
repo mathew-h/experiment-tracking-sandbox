@@ -19,6 +19,14 @@ const ADDITIVE_UNIT_OPTIONS = [
   { value: 'mmol', label: 'mmol' },
 ]
 
+const EXPERIMENT_TYPE_OPTIONS = [
+  { value: 'Serum',      label: 'Serum' },
+  { value: 'Autoclave',  label: 'Autoclave' },
+  { value: 'HPHT',       label: 'HPHT' },
+  { value: 'Core Flood', label: 'Core Flood' },
+  { value: 'Other',      label: 'Other' },
+]
+
 interface Props {
   conditions: ConditionsResponse | null
   experimentId: string
@@ -120,6 +128,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
 
   const openEdit = () => {
     setForm({
+      experiment_type: conditions?.experiment_type ?? undefined,
       temperature_c: conditions?.temperature_c ?? undefined,
       initial_ph: conditions?.initial_ph ?? undefined,
       rock_mass_g: conditions?.rock_mass_g ?? undefined,
@@ -225,9 +234,16 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
       )}
 
       {/* Edit Conditions Modal */}
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Conditions">
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title={conditions ? 'Edit Conditions' : 'Add Details'}>
         <div className="space-y-3 p-4">
           <div className="grid grid-cols-2 gap-3">
+            <Select
+              label="Experiment Type"
+              options={EXPERIMENT_TYPE_OPTIONS}
+              value={form.experiment_type ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, experiment_type: e.target.value || undefined }))}
+              placeholder="Select type…"
+            />
             <Input label="Particle Size" type="text" value={form.particle_size ?? ''} onChange={(e) => setForm((p) => ({ ...p, particle_size: e.target.value || undefined }))} />
             <Input label="Temperature (°C)" type="number" value={form.temperature_c ?? ''} onChange={set('temperature_c')} />
             <Input label="Initial pH" type="number" value={form.initial_ph ?? ''} onChange={set('initial_ph')} />
