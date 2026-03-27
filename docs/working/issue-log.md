@@ -164,3 +164,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `ExpandedRow` scalar values: replaced `String(val)` with `fmt(val as number, 1)` so all scalar fields render to 1 decimal place
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-03-26 | inline — Add v_sample_xrd reporting view
+- **Files changed:**
+  - `database/event_listeners.py` — added `v_sample_xrd` entry to `_VIEWS`; joins `xrd_phases → external_analyses → sample_info`; filters to XRD analyses with `sample_id IS NOT NULL` and `time_post_reaction_days IS NULL`
+  - `docs/POWERBI_MODEL.md` — created: full catalog of all 11 Power BI views across Experiment, Result, and Sample sections with relationship map
+- **Tests added:** no — pure SQL DDL; verified against dev DB (233 rows, 6 columns, correct types)
+- **Decision logged:** no
