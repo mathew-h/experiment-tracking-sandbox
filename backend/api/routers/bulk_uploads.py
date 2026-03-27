@@ -247,8 +247,7 @@ async def upload_xrd_mineralogy(
     file_bytes = await file.read()
     try:
         created, updated, skipped, errors = XRDAutoDetectService.upload(db, file_bytes)
-        if not errors:
-            db.commit()
+        db.commit()
     except Exception as exc:
         db.rollback()
         log.error("xrd_upload_failed", error=str(exc))
