@@ -187,3 +187,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/services/bulk_uploads/test_elemental_upload_recalc.py` — 6 new tests
 - **Tests added:** yes — helper unit tests (happy path, null rock mass, multiple experiments, isolation) + integration tests for both upload paths
 - **Decision logged:** no
+
+## 2026-03-27 | issue #14 — Fuzzy matching for master result upload sync
+- **Files changed:**
+  - `backend/services/bulk_uploads/_id_match.py` — added leading-zero stripping step to `normalize_id`; updated module docstring examples
+  - `backend/services/scalar_results_service.py` — replaced `_find_experiment`'s hand-rolled SQL normalization with `fuzzy_find_experiment` from `_id_match`
+  - `tests/services/bulk_uploads/test_id_match.py` — created: 16 parametrized unit tests for `normalize_id` (force lower, strip symbols, strip leading zeros, edge cases)
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — added 3 integration tests for fuzzy-matched IDs in master upload
+- **Tests added:** yes
+- **Decision logged:** no
