@@ -252,11 +252,11 @@ def test_ferrous_iron_yield_nh3_regression():
 
 
 def test_ferrous_iron_yield_nh3_default_background():
-    """When background is None, defaults to 0.3 mM — same result as explicit 0.3 mM."""
+    """When background is None, defaults to 0.2 mM — same result as explicit 0.2 mM."""
     from backend.services.calculations.scalar_calcs import calculate_ferrous_iron_yield_nh3
     result_explicit = calculate_ferrous_iron_yield_nh3(
         gross_ammonium_mM=10.0,
-        background_ammonium_mM=0.3,
+        background_ammonium_mM=0.2,
         solution_volume_mL=100.0,
         total_ferrous_iron_g=1.0,
     )
