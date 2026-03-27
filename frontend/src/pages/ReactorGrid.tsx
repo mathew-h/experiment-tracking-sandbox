@@ -168,9 +168,6 @@ function ReactorCard({
     >
       <div className="flex items-start justify-between mb-2">
         <div>
-          <p className="text-2xs text-ink-muted uppercase tracking-wider font-medium mb-0.5">
-            Reactor
-          </p>
           <p className="text-xl font-bold text-ink-primary font-mono-data leading-none">{label}</p>
         </div>
         {occupied ? (
@@ -195,12 +192,9 @@ function ReactorCard({
             </p>
           )}
           {card!.description && (
-            <p className="text-xs text-ink-muted line-clamp-2 leading-snug italic">
+            <p className="text-xs text-ink-secondary line-clamp-2 leading-snug italic">
               {card!.description}
             </p>
-          )}
-          {card!.experiment_type && (
-            <p className="text-xs text-ink-muted">{card!.experiment_type}</p>
           )}
           <div className="flex items-center gap-3 pt-0.5">
             {card!.temperature_c != null && (
