@@ -197,6 +197,15 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes
 - **Decision logged:** no
 
+## 2026-03-27 | issue #17 — Add v_dim_timepoints conformed time dimension view
+- **Files changed:**
+  - `database/event_listeners.py` — added `v_dim_timepoints` to `_VIEWS` list (before `v_results_scalar`); one row per primary timepoint per experiment
+  - `tests/views/__init__.py` — new package marker
+  - `tests/views/test_dim_timepoints.py` — 6 tests: view existence, primary-only filtering, multi-experiment rows, column correctness, result_id alignment with scalar and ICP views
+  - `docs/POWERBI_MODEL.md` — added view to Experiment Views table, updated relationship diagram (results now route through `v_dim_timepoints`), added Field Visibility Guide section, added XRD independent-time note
+- **Tests added:** yes — 6 pytest tests (PostgreSQL-backed)
+- **Decision logged:** no
+
 ## 2026-03-27 | issue #13 — Sample list description column and searchable description
 - **Files changed:**
   - `backend/api/schemas/samples.py` — added `description: Optional[str] = None` to `SampleListItem`
