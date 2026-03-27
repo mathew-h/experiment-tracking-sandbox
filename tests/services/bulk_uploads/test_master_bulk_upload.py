@@ -154,3 +154,58 @@ def test_missing_duration_rows_skipped(db_session: Session):
 
     assert created == 0
     assert skipped == 1
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy-matching tests (Issue #14)
+# ---------------------------------------------------------------------------
+
+def test_from_bytes_matches_experiment_with_leading_zeros(db_session: Session):
+    """DB stores 'HPHT_1'; spreadsheet contains 'HPHT_001' — should match."""
+    _seed_experiment(db_session, "HPHT_1", 7801)
+
+    xlsx = _master_excel([
+        ["HPHT_001", 5.0, "Day 5", None, None, None, None,
+         3.0, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+    assert feedbacks[0]["action"] == "created"
+
+
+def test_from_bytes_matches_experiment_with_dot_separator(db_session: Session):
+    """DB stores 'Serum_MH_101'; spreadsheet contains 'Serum.MH.101' — should match."""
+    _seed_experiment(db_session, "Serum_MH_101", 7802)
+
+    xlsx = _master_excel([
+        ["Serum.MH.101", 10.0, "Day 10", None, None, None, None,
+         None, None, None, None, 6.8, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+    assert feedbacks[0]["action"] == "created"
+
+
+def test_from_bytes_matches_experiment_with_leading_zeros_and_symbols(db_session: Session):
+    """Combined: DB stores 'HPHT_14B'; spreadsheet uses 'HPHT-014B' — should match."""
+    _seed_experiment(db_session, "HPHT_14B", 7803)
+
+    xlsx = _master_excel([
+        ["HPHT-014B", 3.0, "Day 3", None, None, None, None,
+         None, None, None, None, 7.5, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+    assert feedbacks[0]["action"] == "created"
