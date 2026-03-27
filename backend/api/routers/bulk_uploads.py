@@ -59,9 +59,16 @@ async def upload_scalar_results(
         }
     from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
-    created, updated, skipped, errors, feedbacks = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
-        db, file_bytes
-    )
+    try:
+        created, updated, skipped, errors, feedbacks = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
+            db, file_bytes
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        log.error("scalar_upload_failed", error=str(exc))
+        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
+                              message="Upload failed")
     log.info("scalar_upload", created=created, updated=updated, user=current_user.email)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
@@ -83,7 +90,9 @@ async def upload_new_experiments(
         created, updated, skipped, errors, warnings, _info = (
             NewExperimentsUploadService.bulk_upsert_from_excel(db, file_bytes)
         )
+        db.commit()
     except Exception as exc:
+        db.rollback()
         log.error("new_experiments_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
@@ -113,7 +122,10 @@ async def upload_pxrf(
     file_bytes = await file.read()
     try:
         created, updated, skipped, errors = PXRFUploadService.ingest_from_bytes(db, file_bytes)
+        db.commit()
     except Exception as exc:
+        db.rollback()
+        log.error("pxrf_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
@@ -131,7 +143,10 @@ async def upload_aeris_xrd(
     file_bytes = await file.read()
     try:
         created, updated, skipped, errors = AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
+        db.commit()
     except Exception as exc:
+        db.rollback()
+        log.error("aeris_xrd_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,

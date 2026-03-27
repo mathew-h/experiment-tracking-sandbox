@@ -26,10 +26,11 @@ def upgrade() -> None:
         existing_nullable=True,
     )
     # Backfill all existing rows where the value was never recorded.
+    # Column name requires double-quotes in PostgreSQL (mixed-case identifier).
     op.execute(
-        "UPDATE scalar_results "
-        "SET background_ammonium_concentration_mM = 0.2 "
-        "WHERE background_ammonium_concentration_mM IS NULL"
+        'UPDATE scalar_results '
+        'SET "background_ammonium_concentration_mM" = 0.2 '
+        'WHERE "background_ammonium_concentration_mM" IS NULL'
     )
 
 
