@@ -213,3 +213,11 @@ test('rock inventory upload creates or updates sample record', async ({ page }) 
   await expect(page.getByRole('heading', { name: 'E2E-SAMPLE-MGMT-01' })).toBeVisible({ timeout: 8_000 })
   await expect(page.getByText('Peridotite').first()).toBeVisible()
 })
+
+// ── Issue #13: Description column ───────────────────────────────────────────
+
+test('sample list table has Description column header', async ({ page }) => {
+  await page.goto('/samples')
+  await expect(page.locator('thead')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('columnheader', { name: /description/i })).toBeVisible()
+})
