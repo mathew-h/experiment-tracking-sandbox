@@ -51,7 +51,7 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
             ].map(([label, val, unit]) => val != null ? (
               <div key={String(label)} className="text-xs">
                 <span className="text-ink-muted">{label}: </span>
-                <span className="font-mono-data text-ink-primary">{String(val)}{unit ? ` ${unit}` : ''}</span>
+                <span className="font-mono-data text-ink-primary">{fmt(val as number, 1)}{unit ? ` ${unit}` : ''}</span>
               </div>
             ) : null)}
           </div>
