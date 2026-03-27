@@ -22,6 +22,7 @@ export interface SampleListItem {
   locality: string | null
   state: string | null
   country: string | null
+  description: string | null
   characterized: boolean
   experiment_count: number
   has_pxrf: boolean

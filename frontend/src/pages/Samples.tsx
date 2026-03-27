@@ -112,6 +112,7 @@ export function SamplesPage() {
               <tr>
                 <Th>Sample ID</Th>
                 <Th>Classification</Th>
+                <Th>Description</Th>
                 <Th>Location</Th>
                 <Th>Characterized</Th>
                 <Th>Analyses</Th>
@@ -122,7 +123,7 @@ export function SamplesPage() {
             <TableBody>
               {data.items.length === 0 ? (
                 <TableRow>
-                  <Td colSpan={7} className="text-center py-8 text-ink-muted">No samples found</Td>
+                  <Td colSpan={8} className="text-center py-8 text-ink-muted">No samples found</Td>
                 </TableRow>
               ) : (
                 data.items.map((s) => (
@@ -133,6 +134,11 @@ export function SamplesPage() {
                   >
                     <Td className="font-mono-data text-ink-primary">{s.sample_id}</Td>
                     <Td>{s.rock_classification ?? <span className="text-ink-muted">—</span>}</Td>
+                    <Td className="max-w-xs">
+                      {s.description
+                        ? <span className="block truncate text-ink-secondary" title={s.description}>{s.description}</span>
+                        : <span className="text-ink-muted">—</span>}
+                    </Td>
                     <Td className="text-ink-muted">
                       {[s.locality, s.state, s.country].filter(Boolean).join(', ') || '—'}
                     </Td>
