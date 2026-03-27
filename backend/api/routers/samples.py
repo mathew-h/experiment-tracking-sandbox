@@ -527,8 +527,9 @@ def create_analysis(
     )
     db.commit()
     db.refresh(ea)
+    pxrf_map = _build_pxrf_map([ea], db)
     return ExternalAnalysisWithWarnings(
-        analysis=_to_analysis_response(ea), warnings=warnings
+        analysis=_to_analysis_response(ea, pxrf_map), warnings=warnings
     )
 
 
