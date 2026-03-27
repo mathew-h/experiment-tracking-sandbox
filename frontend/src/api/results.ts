@@ -36,6 +36,8 @@ export interface ResultCreate {
   time_post_reaction_bucket_days?: number | null
   cumulative_time_post_reaction_days?: number | null
   is_primary_timepoint_result?: boolean
+  brine_modification_description?: string | null
+  measurement_date?: string | null
 }
 
 export interface ScalarResult {
@@ -90,6 +92,7 @@ export interface ScalarCreate {
   gas_sampling_pressure_MPa?: number | null
   background_experiment_fk?: number | null
   co2_partial_pressure_MPa?: number | null
+  measurement_date?: string | null
 }
 
 export const resultsApi = {
@@ -102,6 +105,9 @@ export const resultsApi = {
 
   createScalar: (payload: ScalarCreate) =>
     apiClient.post<ScalarResult>('/results/scalar', payload).then((r) => r.data),
+
+  getScalar: (resultId: number) =>
+    apiClient.get<ScalarResult>(`/results/scalar/${resultId}`).then((r) => r.data),
 
   listScalar: (params?: { result_id?: number }) =>
     apiClient.get<ScalarResult[]>('/results/scalar/', { params }).then((r) => r.data),

@@ -19,6 +19,7 @@ class ResultCreate(BaseModel):
     cumulative_time_post_reaction_days: Optional[float] = None
     is_primary_timepoint_result: bool = True
     description: str
+    brine_modification_description: Optional[str] = None
 
 
 class ResultResponse(BaseModel):
