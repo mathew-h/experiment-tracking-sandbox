@@ -34,7 +34,8 @@ export const test = base.extend<AuthTestFixtures, AuthWorkerFixtures>({
       await loginPage.goto('http://localhost:5173/login')
       await loginPage.getByPlaceholder('you@addisenergy.com').fill(process.env.E2E_EMAIL!)
       await loginPage.getByPlaceholder('••••••••').fill(process.env.E2E_PASSWORD!)
-      await loginPage.getByRole('button', { name: /sign in/i }).click()
+      // Use type="submit" to avoid matching the "Sign in" tab button added with the Register tab
+      await loginPage.locator('button[type="submit"]').click()
 
       // Wait for redirect away from login page (dashboard is at /)
       await loginPage.waitForFunction(

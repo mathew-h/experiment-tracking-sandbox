@@ -217,6 +217,19 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 2 backend API tests, 1 Playwright e2e test
 - **Decision logged:** no
 
+## 2026-03-27 | inline — Fix missing db.commit() in bulk upload endpoints + e2e regression suite
+
+- **Root cause:** Four bulk upload endpoints (`upload_scalar_results`, `upload_new_experiments`, `upload_pxrf`, `upload_aeris_xrd`) were missing `db.commit()`. SQLAlchemy sessions use `autocommit=False` — without an explicit commit, `db.close()` in the `get_db` `finally` block silently rolls back all flushed changes. Endpoints returned correct created/updated counts from in-memory session state, making uploads appear successful while data was discarded.
+- **Files changed:**
+  - `backend/api/routers/bulk_uploads.py` — added `db.commit()` + `db.rollback()` pattern to `upload_scalar_results`, `upload_new_experiments`, `upload_pxrf`, `upload_aeris_xrd`
+  - `frontend/e2e/fixtures/auth.ts` — fixed login selector: `button[type="submit"]` instead of `getByRole('button', { name: /sign in/i })` (ambiguous after Register tab added)
+  - `frontend/e2e/journeys/13-master-bulk-upload.spec.ts` — new e2e regression suite (3 tests): master results upload + Serum_MP_032 results verification, solution chemistry commit regression, actlabs rock upload
+  - `docs/sample_data/A25-09781final.xlsx` — added actlabs sample file for e2e test
+  - `docs/sample_data/Master Reactor Sampling Tracker.xlsx` — updated with new Serum_MP experiments
+  - `alembic/versions/a1b2c3d4e5f6_background_ammonium_default_0_2.py` — fixed raw SQL to quote mixed-case column name for PostgreSQL (`"background_ammonium_concentration_mM"`)
+- **Tests added:** yes — 3 Playwright e2e tests (all passing)
+- **Decision logged:** no
+
 ## 2026-03-27 | inline — Fix bulk upload row failures aborting entire batch (master results, actlabs, ICP-OES)
 - **Root causes:**
   - `master_bulk_upload._process_bytes`: no savepoints → flush errors broke session for all subsequent rows; router's `if not errors: db.commit()` silently rolled back valid rows when any row failed
