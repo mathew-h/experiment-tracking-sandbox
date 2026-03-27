@@ -7,7 +7,7 @@ import { chemicalsApi } from '@/api/chemicals'
 import { Card, CardHeader, CardBody, useToast } from '@/components/ui'
 import { Step1BasicInfo, type Step1Data } from './Step1BasicInfo'
 import { Step2Conditions, type Step2Data } from './Step2Conditions'
-import { Step3Additives, type AdditiveRow } from './Step3Additives'
+import { Step3Additives, generateId, type AdditiveRow } from './Step3Additives'
 import { Step4Review } from './Step4Review'
 import { CopyFromExisting } from './CopyFromExisting'
 import type { ExperimentType } from './fieldVisibility'
@@ -93,7 +93,7 @@ export function NewExperimentPage() {
 
       setAdditives(
         sourceAdditives.map((a) => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           compound_id: a.compound_id,
           compound_name: a.compound?.name ?? '',
           amount: String(a.amount),

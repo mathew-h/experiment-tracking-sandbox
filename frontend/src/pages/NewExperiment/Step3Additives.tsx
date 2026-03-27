@@ -7,6 +7,14 @@ import { CompoundFormModal } from '@/components/CompoundFormModal'
 const AMOUNT_UNITS = ['g', 'mg', 'mL', 'μL', 'mM', 'M', 'ppm', 'mmol', 'mol', '% of Rock', 'wt%']
   .map((u) => ({ value: u, label: u }))
 
+/** UUID v4 generator that works in non-secure (HTTP) contexts. */
+export function generateId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 export interface AdditiveRow {
   id: string
   compound_id: number | null
@@ -151,7 +159,7 @@ function RowEditor({ row, onPatch, onRemove }: RowEditorProps) {
 
 /** Step 3 of new experiment wizard: chemical additives table with compound typeahead picker. */
 export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
-  const addRow = () => onChange([...rows, { id: crypto.randomUUID(), compound_id: null, compound_name: '', amount: '', unit: 'g' }])
+  const addRow = () => onChange([...rows, { id: generateId(), compound_id: null, compound_name: '', amount: '', unit: 'g' }])
 
   const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i))
 
