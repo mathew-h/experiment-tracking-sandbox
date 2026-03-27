@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import Experiment, ExperimentalResults, ModificationsLog
 from backend.services.result_merge_utils import find_timepoint_candidates
+from backend.services.bulk_uploads._id_match import fuzzy_find_experiment
 
 # Column aliases accepted in the upload file
 _EXPERIMENT_ID_ALIASES = {"experiment_id", "experiment id", "exp_id", "exp id"}
@@ -138,21 +139,18 @@ class TimepointModificationsService:
                 if ow_val is not None and not (isinstance(ow_val, float) and pd.isna(ow_val)):
                     row_overwrite = _parse_bool(ow_val)
 
-            # --- Resolve experiment ---
-            experiment = (
-                db.query(Experiment)
-                .filter(Experiment.experiment_id == exp_id)
-                .first()
-            )
+            # --- Resolve experiment (fuzzy: case-insensitive, symbols stripped) ---
+            experiment = fuzzy_find_experiment(db, exp_id)
             if not experiment:
                 errors.append(f"Row {row_num}: experiment '{exp_id}' not found")
                 continue
+            canonical_exp_id = experiment.experiment_id
 
             # --- Find matching timepoint row ---
             candidates = find_timepoint_candidates(db, experiment.id, tp)
             if not candidates:
                 errors.append(
-                    f"Row {row_num}: no result row found for experiment='{exp_id}' "
+                    f"Row {row_num}: no result row found for experiment='{canonical_exp_id}' "
                     f"time_point={tp}"
                 )
                 continue
@@ -164,7 +162,7 @@ class TimepointModificationsService:
                 skipped += 1
                 feedbacks.append({
                     "row": row_num,
-                    "experiment_id": exp_id,
+                    "experiment_id": canonical_exp_id,
                     "time_point": tp,
                     "status": "skipped",
                     "reason": "modification already set; pass overwrite_existing=true to replace",
@@ -177,7 +175,7 @@ class TimepointModificationsService:
 
             # Audit log
             db.add(ModificationsLog(
-                experiment_id=exp_id,
+                experiment_id=canonical_exp_id,
                 experiment_fk=experiment.id,
                 modified_by=modified_by,
                 modification_type="update",
@@ -188,7 +186,7 @@ class TimepointModificationsService:
             updated += 1
             feedbacks.append({
                 "row": row_num,
-                "experiment_id": exp_id,
+                "experiment_id": canonical_exp_id,
                 "time_point": tp,
                 "status": "updated",
                 "result_id": target.id,

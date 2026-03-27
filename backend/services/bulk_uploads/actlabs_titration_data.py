@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import Analyte, ElementalAnalysis, SampleInfo
 from database.models.analysis import ExternalAnalysis
+from backend.services.bulk_uploads._id_match import fuzzy_find_sample
 
 
 def _write_elemental_record(
@@ -174,13 +175,14 @@ class ElementalCompositionService:
                     skipped += 1
                     continue
 
-                # Ensure sample exists
-                sample = db.query(SampleInfo).filter(SampleInfo.sample_id == sample_id).first()
+                # Ensure sample exists (fuzzy: case-insensitive, symbols stripped)
+                sample = fuzzy_find_sample(db, sample_id)
                 if not sample:
                     errors.append(f"Row {idx+2}: sample_id '{sample_id}' not found")
                     continue
+                canonical_id = sample.sample_id
 
-                ext_analysis_id = _get_or_create_ext_analysis(sample_id)
+                ext_analysis_id = _get_or_create_ext_analysis(canonical_id)
 
                 for symbol in analyte_headers:
                     analyte = symbol_to_analyte.get(str(symbol).lower())
@@ -196,7 +198,7 @@ class ElementalCompositionService:
                         continue
 
                     delta_c, delta_u = _write_elemental_record(
-                        db, ext_analysis_id, sample_id, analyte, fval, overwrite
+                        db, ext_analysis_id, canonical_id, analyte, fval, overwrite
                     )
                     created += delta_c
                     updated += delta_u
@@ -479,11 +481,12 @@ class ActlabsRockTitrationService:
             sample_id = str(sid_raw).strip()
             if not sample_id:
                 continue
-            # ensure sample exists
-            sample = db.query(SampleInfo).filter(SampleInfo.sample_id == sample_id).first()
+            # ensure sample exists (fuzzy: case-insensitive, symbols stripped)
+            sample = fuzzy_find_sample(db, sample_id)
             if not sample:
                 errors.append(f"Row {i+5}: sample_id '{sample_id}' not found")
                 continue
+            canonical_id = sample.sample_id
 
             for sym, (col_idx, _unit) in symbol_to_col_unit.items():
                 if col_idx >= data.shape[1]:
@@ -496,9 +499,9 @@ class ActlabsRockTitrationService:
                 if not analyte:
                     # If misaligned, skip
                     continue
-                ext_id = _get_ext_analysis_id(sample_id)
+                ext_id = _get_ext_analysis_id(canonical_id)
                 delta_c, delta_u = _write_elemental_record(
-                    db, ext_id, sample_id, analyte, vnum, overwrite
+                    db, ext_id, canonical_id, analyte, vnum, overwrite
                 )
                 results_created += delta_c
                 results_updated += delta_u

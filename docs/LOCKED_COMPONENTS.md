@@ -34,7 +34,7 @@ All calculated/derived fields are **written to the database** at create/update t
 
 Derived fields by table:
 - `ExperimentalConditions`: `water_to_rock_ratio`
-- `ScalarResults`: `h2_micromoles`, `grams_per_ton_yield`, `h2_grams_per_ton_yield`, `net_ammonium_concentration_mM`
+- `ScalarResults`: `h2_micromoles`, `grams_per_ton_yield`, `h2_grams_per_ton_yield`
 - `ChemicalAdditive`: `mass_in_grams`, `moles_added`, `final_concentration`, `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm`
 
 ## Firebase Authentication
@@ -52,13 +52,18 @@ These parsers handle real instrument output formats with edge cases accumulated 
 | `icp_service.py` | Raw ICP-OES CSV, delimiter detection, dilution correction |
 | `actlabs_titration_data.py` | External titration lab reports |
 | `actlabs_xrd_report.py` | External XRD lab reports |
+| `xrd_upload.py` | Generic XRD file upload handler |
 | `aeris_xrd.py` | Time-series Aeris instrument XRD data |
 | `pxrf_data.py` | Portable XRF Excel uploads |
 | `rock_inventory.py` | Geological sample bulk upsert |
 | `chemical_inventory.py` | Chemical compound database updates |
 | `experiment_status.py` | Batch status and reactor assignment updates |
+| `experiment_additives.py` | Chemical additive bulk updates |
 | `quick_upload.py` | Metric-specific mini-templates |
 | `long_format.py` | Long-format LIMS-compatible data |
+| `metric_groups.py` | Grouped metric upload templates |
+| `timepoint_modifications.py` | Timepoint-level record modifications |
+| `master_bulk_upload.py` | Dispatcher routing uploads to the correct parser |
 
 ## Alembic Migration History
 
