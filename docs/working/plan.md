@@ -5,9 +5,23 @@
      ============================================================ -->
 ## Current State
 - **Active branch:** `feature/m9-sample-management`
-- **Last completed:** M9 Sample Management — all 16 tasks complete (2026-03-24)
+- **Last completed:** M9 Sample Management — all 16 tasks complete (2026-03-24); inline: conditions tab Add Details + experiment_type (2026-03-26)
 - **Blocked on:** user sign-off for M9
 - **Next action:** Merge `feature/m9-sample-management` → `infra/lab-pc-server-setup` after sign-off
+
+---
+
+## Inline Tasks (2026-03-26)
+
+### Conditions Tab: Add Details + experiment_type field
+- **Branch:** `fix/add-details-button-empty-experiment` — merged to `develop` → `main`
+- **Files:** `frontend/src/pages/ExperimentDetail/ConditionsTab.tsx`, `frontend/src/pages/ExperimentDetail/index.tsx`
+- **Changes:**
+  - Empty state with "+ Add Details" button when experiment has no conditions; calls `POST /conditions`
+  - Unified `saveMutation` (create when null, patch when existing)
+  - `experiment_type` dropdown (Serum / Autoclave / HPHT / Core Flood / Other) added to both Add and Edit modals
+  - Dynamic modal title: "Add Details" vs "Edit Conditions"
+- **Why:** Experiments created without conditions were stuck — no UI path to add them. Also needed `experiment_type` editable so Core Flood experiments correctly populate CF01/CF02 reactor slots on the dashboard.
 
 ---
 
