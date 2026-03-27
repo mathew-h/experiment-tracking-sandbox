@@ -174,13 +174,21 @@ def get_sample(
             selectinload(SampleInfo.external_analyses).selectinload(ExternalAnalysis.analysis_files),
             selectinload(SampleInfo.external_analyses).selectinload(ExternalAnalysis.xrd_analysis),
             selectinload(SampleInfo.experiments).selectinload(Experiment.conditions),
-            selectinload(SampleInfo.elemental_results).selectinload(ElementalAnalysis.analyte),
         )
     ).scalar_one_or_none()
     if sample is None:
         raise HTTPException(status_code=404, detail="Sample not found")
 
     pxrf_map = _build_pxrf_map(list(sample.external_analyses), db)
+
+    # Fetch elemental results via the external_analysis join to catch rows
+    # where ElementalAnalysis.sample_id is NULL (historical import pattern).
+    elemental_rows = db.execute(
+        select(ElementalAnalysis)
+        .join(ExternalAnalysis, ElementalAnalysis.external_analysis_id == ExternalAnalysis.id)
+        .where(ExternalAnalysis.sample_id == sample_id)
+        .options(selectinload(ElementalAnalysis.analyte))
+    ).scalars().all()
 
     # Auto-correct characterized flag if pXRF readings have since been ingested
     new_characterized = evaluate_characterized(db, sample_id)
@@ -207,7 +215,7 @@ def get_sample(
                 unit=r.analyte.unit,
                 analyte_composition=r.analyte_composition,
             )
-            for r in sample.elemental_results
+            for r in elemental_rows
             if r.analyte
         ],
         experiments=[
