@@ -95,7 +95,7 @@ export function ExperimentDetailPage() {
         {activeTab === 'Conditions' && (
           <ConditionsTab conditions={conditions ?? null} experimentId={id!} />
         )}
-        {activeTab === 'Results' && <ResultsTab experimentId={id!} />}
+        {activeTab === 'Results' && <ResultsTab experimentId={id!} experimentFk={experiment.id} />}
         {activeTab === 'Notes' && (
           <NotesTab experimentId={id!} notes={experiment.notes} />
         )}

@@ -131,3 +131,43 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `backend/api/main.py` — added FastAPI `lifespan` context manager that calls `reset_postgres_sequences()` on every startup
 - **Tests added:** no — requires a live PostgreSQL instance; manual re-run of both uploads is the acceptance test
 - **Decision logged:** no
+
+## 2026-03-26 | issue #9 — Add result entry form to Results tab
+- **Files changed:**
+  - `backend/api/schemas/results.py` — added `brine_modification_description: Optional[str] = None` to `ResultCreate`
+  - `frontend/src/api/results.ts` — added `getScalar(resultId)` calling `GET /api/results/scalar/{result_id}`; added `brine_modification_description` and `measurement_date` to `ResultCreate`; added `measurement_date` to `ScalarCreate`
+  - `frontend/src/pages/ExperimentDetail/AddResultsModal.tsx` — new: 9-field form modal; PSI→MPa conversion for gas pressure; two-step mutation (POST /api/results then POST /api/results/scalar); inline server error display; invalidates experiment-results cache on success
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — "Add Results" button in action bar (always visible); modal state; fixed `ExpandedRow` to use `getScalar()` instead of broken `listScalar`; added `experimentFk: number` prop
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — pass `experimentFk={experiment.id}` to `ResultsTab`
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-26 | inline — Fuzzy sample/experiment ID matching in bulk upload services
+- **Files changed:**
+  - `backend/services/bulk_uploads/_id_match.py` — new shared module: `normalize_id`, `fuzzy_find_sample`, `fuzzy_find_experiment`
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `ElementalCompositionService` and `ActlabsRockTitrationService` use `fuzzy_find_sample`; canonical ID used for all DB writes
+  - `backend/services/bulk_uploads/actlabs_xrd_report.py` — `XRDUploadService` uses `fuzzy_find_sample`; canonical ID used for ExternalAnalysis, XRDAnalysis, XRDPhase writes
+  - `backend/services/bulk_uploads/timepoint_modifications.py` — `TimepointModificationsService` uses `fuzzy_find_experiment`; canonical experiment ID used in audit log and feedback
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-26 | inline — Docs audit: correct implementation details across three docs
+- **Files changed:**
+  - `docs/CALCULATIONS.md` — fix background ammonium default 0.3→0.2 mM (3 places + verification result 24.38%→24.61%)
+  - `docs/LOCKED_COMPONENTS.md` — remove non-existent stored field `net_ammonium_concentration_mM`; add 5 undocumented parsers (xrd_upload, experiment_additives, metric_groups, timepoint_modifications, master_bulk_upload)
+  - `docs/DIRECTORY_STRUCTURE.md` — fix calc module names; fix auth file name (firebase.py→firebase_auth.py); fix backend/core→backend/config/settings.py; fix dependencies file→dir; remove non-existent component subdirs
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-26 | inline — Fix floating-point display in expanded scalar row
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `ExpandedRow` scalar values: replaced `String(val)` with `fmt(val as number, 1)` so all scalar fields render to 1 decimal place
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-26 | inline — Add v_sample_xrd reporting view
+- **Files changed:**
+  - `database/event_listeners.py` — added `v_sample_xrd` entry to `_VIEWS`; joins `xrd_phases → external_analyses → sample_info`; filters to XRD analyses with `sample_id IS NOT NULL` and `time_post_reaction_days IS NULL`
+  - `docs/POWERBI_MODEL.md` — created: full catalog of all 11 Power BI views across Experiment, Result, and Sample sections with relationship map
+- **Tests added:** no — pure SQL DDL; verified against dev DB (233 rows, 6 columns, correct types)
+- **Decision logged:** no

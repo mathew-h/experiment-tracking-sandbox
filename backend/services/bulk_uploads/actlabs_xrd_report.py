@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import SampleInfo, ExternalAnalysis, XRDAnalysis
 from database.models import XRDPhase
+from backend.services.bulk_uploads._id_match import fuzzy_find_sample
 
 
 class XRDUploadService:
@@ -53,11 +54,12 @@ class XRDUploadService:
                     skipped += 1
                     continue
 
-                # Validate sample exists
-                sample = db.query(SampleInfo).filter(SampleInfo.sample_id == sample_id).first()
+                # Validate sample exists (fuzzy: case-insensitive, symbols stripped)
+                sample = fuzzy_find_sample(db, sample_id)
                 if not sample:
                     errors.append(f"Row {idx+2}: sample_id '{sample_id}' not found")
                     continue
+                canonical_id = sample.sample_id
 
                 # Build mineral dict from columns, skipping blanks and non-numeric
                 mineral_data = {}
@@ -75,13 +77,13 @@ class XRDUploadService:
                 ext = (
                     db.query(ExternalAnalysis)
                     .filter(
-                        ExternalAnalysis.sample_id == sample_id,
+                        ExternalAnalysis.sample_id == canonical_id,
                         ExternalAnalysis.analysis_type == "XRD",
                     )
                     .first()
                 )
                 if not ext:
-                    ext = ExternalAnalysis(sample_id=sample_id, analysis_type="XRD")
+                    ext = ExternalAnalysis(sample_id=canonical_id, analysis_type="XRD")
                     db.add(ext)
                     db.flush()
                     created_ext += 1
@@ -109,7 +111,7 @@ class XRDUploadService:
                     phase = (
                         db.query(XRDPhase)
                         .filter(
-                            XRDPhase.sample_id == sample_id,
+                            XRDPhase.sample_id == canonical_id,
                             XRDPhase.mineral_name == display_name,
                         )
                         .first()
@@ -121,7 +123,7 @@ class XRDUploadService:
                         updated_phase += 1
                     else:
                         phase = XRDPhase(
-                            sample_id=sample_id,
+                            sample_id=canonical_id,
                             external_analysis_id=ext.id,
                             mineral_name=display_name,
                             amount=amount_val,

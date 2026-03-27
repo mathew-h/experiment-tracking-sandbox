@@ -104,7 +104,7 @@ grams_per_ton_yield = 1,000,000 × (ammonia_mass_g / rock_mass_g)
 ```
 
 - `volume_mL`: uses `sampling_volume_mL` if provided; otherwise falls back to `water_volume_mL` from conditions
-- `background_ammonium_concentration_mM` defaults to `0.3 mM` if not set
+- `background_ammonium_concentration_mM` defaults to `0.2 mM` if not set
 - Net concentration is clamped to `≥ 0` (negative background subtraction → 0 yield, not negative)
 - Set to `None` if `rock_mass_g` is missing or `≤ 0`
 
@@ -157,7 +157,7 @@ Stoichiometry: 9 mol Fe²⁺ per 2 mol NH₃ (ratio = 4.5)
 
 ```
 net_ammonium_mM  = max(0, gross_ammonium_concentration_mM − background_ammonium_concentration_mM)
-                   [background defaults to 0.3 mM if not provided]
+                   [background defaults to 0.2 mM if not provided]
 total_NH3_mol    = (net_ammonium_mM / 1000) × (solution_volume_mL / 1000)
 Fe²⁺_consumed_g  = total_NH3_mol × 4.5 × 55.845
 yield_nh3_pct    = (Fe²⁺_consumed_g / total_ferrous_iron_g) × 100
@@ -168,8 +168,8 @@ yield_nh3_pct    = (Fe²⁺_consumed_g / total_ferrous_iron_g) × 100
 - Set to `None` if `gross_ammonium_concentration_mM` is `None`; or if `solution_volume_mL` or `total_ferrous_iron` is `None` or ≤ 0
 - Net concentration clamped to ≥ 0
 
-**Verification:** 10 mM gross (0.3 mM background), 100 mL, 1.0 g `total_ferrous_iron` →
-0.00097 mol × 4.5 × 55.845 / 1.0 × 100 = **24.38%**
+**Verification:** 10 mM gross (0.2 mM background), 100 mL, 1.0 g `total_ferrous_iron` →
+0.00098 mol × 4.5 × 55.845 / 1.0 × 100 = **24.61%**
 
 > Note: legacy `ferrous_iron_yield` column (manual-entry, deprecated) remains in the schema for
 > backward data compatibility but is excluded from new calculations and UI forms.

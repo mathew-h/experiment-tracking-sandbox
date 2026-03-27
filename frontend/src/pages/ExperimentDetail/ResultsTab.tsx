@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi, type ResultWithFlags } from '@/api/experiments'
 import { resultsApi } from '@/api/results'
-import { Badge, PageSpinner } from '@/components/ui'
+import { Badge, Button, PageSpinner } from '@/components/ui'
+import { AddResultsModal } from './AddResultsModal'
 
 const DEFAULT_BACKGROUND_NH4 = 0.2
 
@@ -13,7 +14,7 @@ function fmt(n: number | null | undefined, decimals = 2) {
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
     queryKey: ['scalar', result.id],
-    queryFn: () => resultsApi.listScalar({ result_id: result.id }).then((d) => d[0] ?? null),
+    queryFn: () => resultsApi.getScalar(result.id),
     enabled: result.has_scalar,
   })
 
@@ -50,7 +51,7 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
             ].map(([label, val, unit]) => val != null ? (
               <div key={String(label)} className="text-xs">
                 <span className="text-ink-muted">{label}: </span>
-                <span className="font-mono-data text-ink-primary">{String(val)}{unit ? ` ${unit}` : ''}</span>
+                <span className="font-mono-data text-ink-primary">{fmt(val as number, 1)}{unit ? ` ${unit}` : ''}</span>
               </div>
             ) : null)}
           </div>
@@ -79,13 +80,17 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
   )
 }
 
-interface Props { experimentId: string }
+interface Props {
+  experimentId: string
+  experimentFk: number
+}
 
 /** Results tab: timepoint result cards with scalar chemistry and ICP data. */
-export function ResultsTab({ experimentId }: Props) {
+export function ResultsTab({ experimentId, experimentFk }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [bgInput, setBgInput] = useState(false)
   const [bgValue, setBgValue] = useState(String(DEFAULT_BACKGROUND_NH4))
+  const [showAddModal, setShowAddModal] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: results, isLoading } = useQuery({
@@ -109,90 +114,111 @@ export function ResultsTab({ experimentId }: Props) {
   })
 
   if (isLoading) return <PageSpinner />
-  if (!results?.length) return <p className="text-sm text-ink-muted p-4 text-center">No results recorded</p>
 
   return (
     <div>
-      {/* Background NH₄ action bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-border">
-        {bgInput ? (
-          <>
-            <label className="text-xs text-ink-secondary">Background NH₄ (mM)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={bgValue}
-              onChange={(e) => setBgValue(e.target.value)}
-              className="w-20 text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary font-mono-data"
-              autoFocus
-            />
+      {/* Action bar */}
+      <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-surface-border">
+        <div className="flex items-center gap-2">
+          {bgInput ? (
+            <>
+              <label className="text-xs text-ink-secondary">Background NH₄ (mM)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={bgValue}
+                onChange={(e) => setBgValue(e.target.value)}
+                className="w-20 text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary font-mono-data"
+                autoFocus
+              />
+              <button
+                onClick={() => {
+                  const parsed = parseFloat(bgValue)
+                  if (!isNaN(parsed) && parsed >= 0) bgMutation.mutate(parsed)
+                }}
+                disabled={bgMutation.isPending}
+                className="text-xs px-2 py-1 bg-navy-700 text-white rounded hover:bg-navy-600 disabled:opacity-50"
+              >
+                {bgMutation.isPending ? 'Applying…' : 'Apply to all'}
+              </button>
+              <button
+                onClick={() => setBgInput(false)}
+                className="text-xs px-2 py-1 text-ink-muted hover:text-ink-primary"
+              >
+                Cancel
+              </button>
+              {bgMutation.isError && (
+                <span className="text-xs text-red-500">Failed — try again</span>
+              )}
+            </>
+          ) : (
             <button
-              onClick={() => {
-                const parsed = parseFloat(bgValue)
-                if (!isNaN(parsed) && parsed >= 0) bgMutation.mutate(parsed)
-              }}
-              disabled={bgMutation.isPending}
-              className="text-xs px-2 py-1 bg-navy-700 text-white rounded hover:bg-navy-600 disabled:opacity-50"
+              onClick={() => { setBgValue(String(DEFAULT_BACKGROUND_NH4)); setBgInput(true) }}
+              className="text-xs text-ink-secondary hover:text-ink-primary underline-offset-2 hover:underline"
             >
-              {bgMutation.isPending ? 'Applying…' : 'Apply to all'}
+              Background NH₄: {DEFAULT_BACKGROUND_NH4} mM
             </button>
-            <button
-              onClick={() => setBgInput(false)}
-              className="text-xs px-2 py-1 text-ink-muted hover:text-ink-primary"
-            >
-              Cancel
-            </button>
-            {bgMutation.isError && (
-              <span className="text-xs text-red-500">Failed — try again</span>
-            )}
-          </>
-        ) : (
-          <button
-            onClick={() => { setBgValue(String(DEFAULT_BACKGROUND_NH4)); setBgInput(true) }}
-            className="text-xs text-ink-secondary hover:text-ink-primary underline-offset-2 hover:underline"
-          >
-            Background NH₄: {DEFAULT_BACKGROUND_NH4} mM
-          </button>
-        )}
-      </div>
-      {/* Header row */}
-      <div className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted">
-        <span></span>
-        <span>Time (d)</span>
-        <span>NH₄ (mM)</span>
-        <span>H₂ (µmol)</span>
-        <span>Cond. (mS/cm)</span>
-        <span>NH₄ (g/t)</span>
-        <span>H₂ (g/t)</span>
-        <span>pH</span>
-        <span>Flags</span>
-        <span></span>
-      </div>
-      {results.map((r) => (
-        <div key={r.id}>
-          <div
-            className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center"
-            onClick={() => toggle(r.id)}
-          >
-            <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
-            <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
-            <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
-            <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
-            <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
-            <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
-            <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
-            <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
-            <span className="flex gap-1 flex-wrap">
-              {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
-              {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
-              {!r.has_icp && !r.has_brine_modification && <span className="text-ink-muted text-xs">—</span>}
-            </span>
-            <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
-          </div>
-          {expanded.has(r.id) && <ExpandedRow result={r} />}
+          )}
         </div>
-      ))}
+        <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
+          + Add Results
+        </Button>
+      </div>
+
+      {/* Empty state */}
+      {!results?.length && (
+        <p className="text-sm text-ink-muted p-4 text-center">No results recorded</p>
+      )}
+
+      {results && results.length > 0 && (
+        <>
+          {/* Header row */}
+          <div className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted">
+            <span></span>
+            <span>Time (d)</span>
+            <span>NH₄ (mM)</span>
+            <span>H₂ (µmol)</span>
+            <span>Cond. (mS/cm)</span>
+            <span>NH₄ (g/t)</span>
+            <span>H₂ (g/t)</span>
+            <span>pH</span>
+            <span>Flags</span>
+            <span></span>
+          </div>
+          {results.map((r) => (
+            <div key={r.id}>
+              <div
+                className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center"
+                onClick={() => toggle(r.id)}
+              >
+                <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
+                <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
+                <span className="flex gap-1 flex-wrap">
+                  {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
+                  {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
+                  {!r.has_icp && !r.has_brine_modification && <span className="text-ink-muted text-xs">—</span>}
+                </span>
+                <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
+              </div>
+              {expanded.has(r.id) && <ExpandedRow result={r} />}
+            </div>
+          ))}
+        </>
+      )}
+
+      <AddResultsModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        experimentFk={experimentFk}
+        experimentId={experimentId}
+      />
     </div>
   )
 }
