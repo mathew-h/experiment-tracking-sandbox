@@ -401,6 +401,31 @@ _VIEWS = [
     """),
 
     # ------------------------------------------------------------------
+    # v_sample_xrd
+    # One row per mineral phase per sample (long format).
+    # Covers Mode A XRD mineralogy and actlabs_xrd_report uploads, both of
+    # which write XRDPhase rows keyed on (sample_id, mineral_name) with
+    # time_post_reaction_days = NULL.
+    # Join key to other sample views: sample_id.
+    # ------------------------------------------------------------------
+    ("v_sample_xrd", """
+        CREATE VIEW v_sample_xrd AS
+        SELECT
+            si.sample_id,
+            xp.mineral_name,
+            xp.amount          AS amount_pct,
+            ea.analysis_date,
+            ea.laboratory,
+            ea.analyst
+        FROM xrd_phases xp
+        JOIN external_analyses ea ON ea.id = xp.external_analysis_id
+        JOIN sample_info si       ON si.sample_id = ea.sample_id
+        WHERE ea.analysis_type = 'XRD'
+          AND ea.sample_id IS NOT NULL
+          AND xp.time_post_reaction_days IS NULL
+    """),
+
+    # ------------------------------------------------------------------
     # v_results_scalar
     # One row per primary result timepoint.
     # Join key to v_results_h2 and v_results_icp: result_id.
