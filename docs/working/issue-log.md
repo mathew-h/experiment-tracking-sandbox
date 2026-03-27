@@ -171,3 +171,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/POWERBI_MODEL.md` — created: full catalog of all 11 Power BI views across Experiment, Result, and Sample sections with relationship map
 - **Tests added:** no — pure SQL DDL; verified against dev DB (233 rows, 6 columns, correct types)
 - **Decision logged:** no
+
+## 2026-03-26 | inline — Auto-recalculate total_ferrous_iron_g on elemental upload
+- **Files changed:**
+  - `backend/services/elemental_composition_service.py` — added `recalculate_conditions_for_samples(db, sample_ids)` helper
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `ActlabsRockTitrationService.import_excel()` and `ElementalCompositionService.bulk_upsert_wide_from_excel()` now call helper after writing rows
+  - `tests/services/bulk_uploads/test_elemental_upload_recalc.py` — 6 new tests
+- **Tests added:** yes — helper unit tests (happy path, null rock mass, multiple experiments, isolation) + integration tests for both upload paths
+- **Decision logged:** no

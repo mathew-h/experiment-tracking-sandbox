@@ -168,6 +168,7 @@ class ElementalCompositionService:
             ext_analysis_cache[sample_id] = stub.id
             return stub.id
 
+        affected_sample_ids: set[str] = set()
         for idx, row in df.iterrows():
             try:
                 sample_id = str(row.get(sample_col) or '').strip()
@@ -202,8 +203,16 @@ class ElementalCompositionService:
                     )
                     created += delta_c
                     updated += delta_u
+                    if delta_c or delta_u:
+                        affected_sample_ids.add(canonical_id)
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
+
+        # Recalculate total_ferrous_iron_g for experiments linked to affected samples.
+        # Handles the case where result data was uploaded before rock characterisation.
+        if affected_sample_ids:
+            from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
+            recalculate_conditions_for_samples(db, affected_sample_ids)
 
         return created, updated, skipped, errors
 
@@ -474,6 +483,7 @@ class ActlabsRockTitrationService:
             return stub.id
 
         # Iterate rows
+        affected_sample_ids: set[str] = set()
         for i in range(len(data)):
             sid_raw = data.iat[i, sample_id_col]
             if pd.isna(sid_raw):
@@ -505,6 +515,14 @@ class ActlabsRockTitrationService:
                 )
                 results_created += delta_c
                 results_updated += delta_u
+                if delta_c or delta_u:
+                    affected_sample_ids.add(canonical_id)
+
+        # Recalculate total_ferrous_iron_g for experiments linked to affected samples.
+        # Handles the case where result data was uploaded before rock characterisation.
+        if affected_sample_ids:
+            from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
+            recalculate_conditions_for_samples(db, affected_sample_ids)
 
         return results_created, results_updated, skipped, errors
 
