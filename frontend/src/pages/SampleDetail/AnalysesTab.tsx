@@ -1,7 +1,56 @@
 // frontend/src/pages/SampleDetail/AnalysesTab.tsx
 import { useState } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
-import { samplesApi, type SampleDetail, type ExternalAnalysisCreate } from '@/api/samples'
+import { samplesApi, type SampleDetail, type ExternalAnalysisCreate, type ExternalAnalysis } from '@/api/samples'
+
+const PXRF_ELEMENT_LABELS: Record<string, string> = {
+  fe: 'Fe', mg: 'Mg', si: 'Si', ca: 'Ca', al: 'Al',
+  ni: 'Ni', cu: 'Cu', co: 'Co', mo: 'Mo', k: 'K', au: 'Au', zn: 'Zn',
+}
+
+function PXRFDataTable({ a }: { a: ExternalAnalysis }) {
+  if (!a.pxrf_data) return null
+  const d = a.pxrf_data
+  const elements = Object.entries(PXRF_ELEMENT_LABELS).filter(
+    ([key]) => d[key as keyof typeof d] != null
+  )
+  if (elements.length === 0) return null
+  return (
+    <div className="mt-2 ml-2 border-l border-surface-border/50 pl-3">
+      <p className="text-xs text-ink-muted mb-1">
+        Average of {d.reading_count} reading{d.reading_count !== 1 ? 's' : ''} (ppm)
+      </p>
+      <div className="grid grid-cols-4 gap-x-4 gap-y-1 text-xs">
+        {elements.map(([key, label]) => (
+          <div key={key} className="flex justify-between gap-2">
+            <span className="text-ink-muted font-mono-data">{label}</span>
+            <span className="text-ink-secondary font-mono-data">
+              {(d[key as keyof typeof d] as number).toFixed(1)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function XRDPhaseTable({ a }: { a: ExternalAnalysis }) {
+  if (!a.xrd_data || Object.keys(a.xrd_data.mineral_phases).length === 0) return null
+  const phases = Object.entries(a.xrd_data.mineral_phases).sort(([, a], [, b]) => b - a)
+  return (
+    <div className="mt-2 ml-2 border-l border-surface-border/50 pl-3">
+      <p className="text-xs text-ink-muted mb-1">Mineral phases (wt%)</p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {phases.map(([mineral, amount]) => (
+          <div key={mineral} className="flex justify-between gap-2">
+            <span className="text-ink-secondary capitalize">{mineral}</span>
+            <span className="text-ink-muted font-mono-data">{amount.toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 interface Props { sample: SampleDetail }
 
@@ -38,24 +87,29 @@ export function AnalysesTab({ sample }: Props) {
       {Object.entries(groups).map(([type, items]) => (
         <div key={type} className="rounded-lg border border-surface-border bg-surface-raised p-4">
           <h3 className="text-sm font-medium text-ink-primary mb-3">{type}</h3>
-          <table className="w-full text-sm">
-            <tbody>
-              {items.map((a) => (
-                <tr key={a.id} className="border-b border-surface-border/50">
-                  <td className="py-2 pr-4 text-ink-muted font-mono-data">
-                    {a.pxrf_reading_no ?? a.magnetic_susceptibility ?? a.description ?? '—'}
-                  </td>
-                  <td className="py-2 pr-4 text-ink-muted">
-                    {a.analysis_date ? new Date(a.analysis_date).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="py-2 pr-4 text-ink-muted">{a.laboratory ?? '—'}</td>
-                  <td className="py-2">
-                    <button className="text-xs text-red-400 hover:text-red-300" onClick={() => deleteMutation.mutate(a.id)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="space-y-2">
+            {items.map((a) => (
+              <div key={a.id} className="border-b border-surface-border/50 pb-2">
+                <div className="flex items-start justify-between text-sm">
+                  <div className="flex gap-4 text-ink-muted">
+                    <span className="font-mono-data">
+                      {a.pxrf_reading_no ?? a.magnetic_susceptibility ?? a.description ?? '—'}
+                    </span>
+                    <span>{a.analysis_date ? new Date(a.analysis_date).toLocaleDateString() : '—'}</span>
+                    <span>{a.laboratory ?? '—'}</span>
+                  </div>
+                  <button
+                    className="text-xs text-red-400 hover:text-red-300 shrink-0"
+                    onClick={() => deleteMutation.mutate(a.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+                <PXRFDataTable a={a} />
+                <XRDPhaseTable a={a} />
+              </div>
+            ))}
+          </div>
         </div>
       ))}
 

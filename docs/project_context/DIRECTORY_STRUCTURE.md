@@ -17,22 +17,21 @@ experiment_tracking/
 │
 ├── backend/
 │   ├── CLAUDE.md                      ← backend-scoped context
-│   ├── core/
-│   │   ├── logging.py                 ← structlog config, correlation_id middleware
-│   │   └── config.py                  ← pydantic-settings
+│   ├── config/
+│   │   └── settings.py                ← pydantic-settings
 │   ├── api/
 │   │   ├── main.py                    ← FastAPI app entry point
-│   │   ├── dependencies.py            ← DB session, auth dependencies
+│   │   ├── dependencies/              ← DB session, auth dependencies
 │   │   ├── routers/                   ← one file per domain
 │   │   └── schemas/                   ← Pydantic v2 models, one file per domain
 │   ├── auth/
-│   │   └── firebase.py                ← token verification
+│   │   └── firebase_auth.py           ← token verification
 │   └── services/
 │       ├── calculations/              ← CALCULATION ENGINE
 │       │   ├── __init__.py
-│       │   ├── conditions.py          ← water_to_rock_ratio
-│       │   ├── additives.py           ← mass_in_grams, moles_added, catalyst_ppm, etc.
-│       │   ├── results.py             ← h2_micromoles, yield calculations
+│       │   ├── conditions_calcs.py    ← water_to_rock_ratio
+│       │   ├── additive_calcs.py      ← mass_in_grams, moles_added, catalyst_ppm, etc.
+│       │   ├── scalar_calcs.py        ← h2_micromoles, yield calculations
 │       │   └── registry.py            ← trigger table: input field → affected derived fields
 │       └── bulk_uploads/              ← existing parsers (do not modify logic)
 │
@@ -56,12 +55,8 @@ experiment_tracking/
 │   │   ├── api/                       ← Axios client + domain API files
 │   │   ├── auth/                      ← Firebase provider + ProtectedRoute
 │   │   ├── components/
-│   │   │   ├── ui/                    ← base component library
-│   │   │   ├── ReactorDashboard/
-│   │   │   ├── ExperimentDetail/
-│   │   │   ├── SampleInput/
-│   │   │   ├── ResultsViewer/
-│   │   │   └── BulkUpload/
+│   │   │   ├── ui/                    ← base component library (shadcn/ui primitives)
+│   │   │   └── experiments/           ← experiment-scoped shared components
 │   │   ├── layouts/                   ← AppLayout, AuthLayout
 │   │   ├── pages/                     ← one file per route
 │   │   ├── styles/
