@@ -426,6 +426,26 @@ _VIEWS = [
     """),
 
     # ------------------------------------------------------------------
+    # v_dim_timepoints
+    # Conformed time dimension: one row per primary result timepoint per
+    # experiment.  Sits between v_experiments and the result fact views
+    # (v_results_scalar, v_results_h2, v_results_icp) so PowerBI report
+    # authors have a single authoritative source for time-axis fields.
+    # ------------------------------------------------------------------
+    ("v_dim_timepoints", """
+        CREATE VIEW v_dim_timepoints AS
+        SELECT
+            er.id                                  AS result_id,
+            e.experiment_id,
+            er.time_post_reaction_days,
+            er.time_post_reaction_bucket_days,
+            er.cumulative_time_post_reaction_days
+        FROM experimental_results er
+        JOIN experiments e ON e.id = er.experiment_fk
+        WHERE er.is_primary_timepoint_result = TRUE
+    """),
+
+    # ------------------------------------------------------------------
     # v_results_scalar
     # One row per primary result timepoint.
     # Join key to v_results_h2 and v_results_icp: result_id.
