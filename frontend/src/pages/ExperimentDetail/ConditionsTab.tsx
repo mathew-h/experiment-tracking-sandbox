@@ -22,6 +22,7 @@ const ADDITIVE_UNIT_OPTIONS = [
 interface Props {
   conditions: ConditionsResponse | null
   experimentId: string
+  experimentFk: number
 }
 
 function Row({ label, value, unit }: { label: string; value: unknown; unit?: string }) {
@@ -37,7 +38,7 @@ function Row({ label, value, unit }: { label: string; value: unknown; unit?: str
 }
 
 /** Conditions tab: editable experimental setup parameters and chemical additives. */
-export function ConditionsTab({ conditions, experimentId }: Props) {
+export function ConditionsTab({ conditions, experimentId, experimentFk }: Props) {
   const [editOpen, setEditOpen] = useState(false)
   const [form, setForm] = useState<Partial<ConditionsPayload>>({})
 
@@ -96,18 +97,25 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
     onError: (err: Error) => toastError('Failed to remove additive', err.message),
   })
 
-  const patchMutation = useMutation({
+  const saveMutation = useMutation({
     mutationFn: () => {
-      if (!conditions) throw new Error('No conditions to patch')
+      if (!conditions) {
+        return conditionsApi.create({
+          ...form,
+          experiment_fk: experimentFk,
+          experiment_id: experimentId,
+        })
+      }
       return conditionsApi.patch(conditions.id, form)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
       queryClient.invalidateQueries({ queryKey: ['conditions', experimentId] })
-      success('Conditions updated')
+      success(conditions ? 'Conditions updated' : 'Details added')
       setEditOpen(false)
     },
-    onError: (err: Error) => toastError('Update failed', err.message),
+    onError: (err: Error) =>
+      toastError(conditions ? 'Update failed' : 'Failed to add details', err.message),
   })
 
   const openEdit = () => {
@@ -232,7 +240,7 @@ export function ConditionsTab({ conditions, experimentId }: Props) {
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button variant="primary" loading={patchMutation.isPending} onClick={() => patchMutation.mutate()}>Save</Button>
+            <Button variant="primary" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>Save</Button>
           </div>
         </div>
       </Modal>
