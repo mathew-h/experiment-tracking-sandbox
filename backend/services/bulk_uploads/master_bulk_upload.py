@@ -154,6 +154,7 @@ def _process_bytes(
         # Remove None-valued optional fields so the service skips them
         result_data = {k: v for k, v in result_data.items() if v is not None or k == "_overwrite"}
 
+        savepoint = db.begin_nested()
         try:
             upsert = ScalarResultsService.create_scalar_result_ex(db, exp_id, result_data)
             exp_result = upsert.experimental_result
@@ -167,11 +168,14 @@ def _process_bytes(
                 created += 1
             else:
                 updated += 1
+            savepoint.commit()
             feedbacks.append({"row": row_num, "experiment_id": exp_id, "action": action})
 
         except ValueError as exc:
+            savepoint.rollback()
             errors.append(f"Row {row_num} ({exp_id}): {exc}")
         except Exception as exc:
+            savepoint.rollback()
             errors.append(f"Row {row_num} ({exp_id}): unexpected error — {exc}")
 
     return created, updated, skipped, errors, feedbacks

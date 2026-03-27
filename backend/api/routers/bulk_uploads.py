@@ -163,8 +163,7 @@ async def upload_master_results(
             file_bytes = await file.read()
             created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(db, file_bytes)
             mode = "upload"
-        if not errors:
-            db.commit()
+        db.commit()
     except Exception as exc:
         db.rollback()
         log.error("master_results_upload_failed", error=str(exc))
@@ -380,10 +379,7 @@ async def upload_actlabs_rock(
     file_bytes = await file.read()
     try:
         created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(db, file_bytes)
-        if not errors:
-            db.commit()
-        else:
-            db.rollback()
+        db.commit()
     except Exception as exc:
         db.rollback()
         log.error("actlabs_rock_upload_failed", error=str(exc))
