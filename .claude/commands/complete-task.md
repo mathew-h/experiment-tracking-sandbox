@@ -56,10 +56,20 @@ Commit all changes for this task first (required before push/merge). Use the for
    - Do not merge
    - Report what is blocking and wait for user instruction
 
+### If task type = issue (GitHub issue number or URL was the task trigger)
+Do this **after** the fix is merged to `develop` (Step 4 above) and you are not blocked.
+
+- **Close the issue** so the board stays accurate. GitHub only auto-closes from `Fixes #n` / `Closes #n` when the merging PR lands on the **default** branch; this repo’s PRs target `develop`, and the default is usually `main`, so do not rely on auto-close.
+- With GitHub CLI: `gh issue close <n> --reason completed` (use the issue number from `/start-task`).
+- Optionally add context: `gh issue comment <n> --body "Merged to develop in <short-sha or branch>; see commit subject."`
+- If the user prefers to keep the issue open until `develop` is promoted to `main`, **stop and ask** instead of closing—do not assume.
+
+If you used a **PR to `develop`** instead of a local merge, close the issue after that PR is merged (same `gh issue close` unless the user’s settings make auto-close work).
+
 ### If task type = inline and no branch was created
 - You already committed on the current branch in Step 3 (must not be `develop` or `main`)
 - If the current branch is `develop` or `main`, stop and ask the user
 
 ## Step 5 — Report
-State what was completed, what was recorded, and where.
+State what was completed, what was recorded, and where. For **issue** tasks, say whether the GitHub issue was closed (or skipped per user preference).
 Wait for sign-off before starting the next task.

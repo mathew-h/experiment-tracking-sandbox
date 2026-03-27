@@ -17,6 +17,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_experiment_conditions` | `experiment_id`, `experiment_type`, `temperature_c`, `particle_size`, `initial_ph`, `rock_mass_g`, `water_volume_mL`, `water_to_rock_ratio`, `reactor_number`, `feedstock`, `stir_speed_rpm`, `room_temp_pressure_psi`, `rxn_temp_pressure_psi`, `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`, `initial_conductivity_mS_cm`, `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`, `total_ferrous_iron_g` |
 | `public.v_chemical_additives` | `experiment_id`, `compound_name`, `formula`, `amount`, `unit`, `addition_order`, `addition_method`, `purity`, `mass_in_grams`, `moles_added`, `final_concentration`, `concentration_units`, `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm` |
 | `public.v_experiment_additives_summary` | `experiment_id`, `additives_summary` |
+| `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days` |
 | `public.v_experiment_xrd` | `experiment_id`, `time_post_reaction_days`, `mineral_name`, `amount_pct`, `rwp`, `measurement_date` |
 
 ---
@@ -50,16 +51,64 @@ v_experiments (experiment_id)    1 ──── 1 v_experiment_conditions (exper
 v_experiments (experiment_id)    1 ──── * v_chemical_additives (experiment_id)
 v_experiments (experiment_id)    1 ──── 1 v_experiment_additives_summary (experiment_id)
 v_experiments (experiment_id)    1 ──── * v_experiment_xrd (experiment_id)
-v_experiments (experiment_id)    1 ──── * v_results_scalar (experiment_id)
-v_results_scalar (result_id)     1 ──── 1 v_results_h2 (result_id)
-v_results_scalar (result_id)     1 ──── 1 v_results_icp (result_id)
+v_experiments (experiment_id)    1 ──── * v_dim_timepoints (experiment_id)
 
-v_sample_info (sample_id)        1 ──── * v_experiments (sample_id)
-v_sample_info (sample_id)        1 ──── * v_sample_characterization (sample_id)
-v_sample_info (sample_id)        1 ──── * v_pxrf_characterization (sample_id)
-v_sample_info (sample_id)        1 ──── * v_sample_elemental_comp (sample_id)
-v_sample_info (sample_id)        1 ──── * v_sample_xrd (sample_id)
+v_dim_timepoints (result_id)    1 ──── 1 v_results_scalar (result_id)
+v_dim_timepoints (result_id)    1 ──── 1 v_results_h2 (result_id)
+v_dim_timepoints (result_id)    1 ──── 1 v_results_icp (result_id)
+
+v_sample_info (sample_id)       1 ──── * v_experiments (sample_id)
+v_sample_info (sample_id)       1 ──── * v_sample_characterization (sample_id)
+v_sample_info (sample_id)       1 ──── * v_pxrf_characterization (sample_id)
+v_sample_info (sample_id)       1 ──── * v_sample_elemental_comp (sample_id)
+v_sample_info (sample_id)       1 ──── * v_sample_xrd (sample_id)
 ```
+
+---
+
+## Field Visibility Guide
+
+When configuring the PowerBI model, hide duplicate join keys in child tables so report
+authors can only select them from the authoritative dimension. This prevents the
+cross-filtering trap described in [issue #17](https://github.com/mathew-h/experiment-tracking-sandbox/issues/17).
+
+### `v_dim_timepoints`
+
+| Field | Visible? | Reason |
+|-------|----------|--------|
+| `time_post_reaction_days` | Yes | Authoritative source for time axis |
+| `time_post_reaction_bucket_days` | Yes | Authoritative source for bucketed time axis |
+| `cumulative_time_post_reaction_days` | Yes | Authoritative source for cumulative time |
+| `experiment_id` | **Hide** | Users get `experiment_id` from `v_experiments` |
+| `result_id` | **Hide** | Join key only |
+
+### `v_results_scalar`
+
+| Field | Action |
+|-------|--------|
+| `experiment_id` | **Hide** (already hidden today) |
+| `experiment_fk` | **Hide** |
+| `time_post_reaction_days` | **Hide** — use `v_dim_timepoints` |
+| `time_post_reaction_bucket_days` | **Hide** — use `v_dim_timepoints` |
+| `cumulative_time_post_reaction_days` | **Hide** — use `v_dim_timepoints` |
+
+### `v_results_h2`
+
+| Field | Action |
+|-------|--------|
+| `experiment_id` | **Hide** (already hidden today) |
+| `experiment_fk` | **Hide** |
+| `time_post_reaction_days` | **Hide** — use `v_dim_timepoints` |
+| `time_post_reaction_bucket_days` | **Hide** — use `v_dim_timepoints` |
+
+### `v_results_icp`
+
+| Field | Action |
+|-------|--------|
+| `experiment_id` | **Hide** (already hidden today) |
+| `experiment_fk` | **Hide** |
+| `time_post_reaction_days` | **Hide** — use `v_dim_timepoints` |
+| `time_post_reaction_bucket_days` | **Hide** — use `v_dim_timepoints` |
 
 ---
 
@@ -72,3 +121,7 @@ v_sample_info (sample_id)        1 ──── * v_sample_xrd (sample_id)
   Power BI when joining with `v_sample_elemental_comp` (which uses oxide symbols).
 - `v_experiment_additives_summary` is a convenience view; `v_chemical_additives` is the
   normalised long-format alternative for per-additive analysis.
+- `v_experiment_xrd` retains its own `time_post_reaction_days` and connects directly to
+  `v_experiments` via `experiment_id` — it is intentionally **not** routed through
+  `v_dim_timepoints`. XRD measurements follow a different schedule than scalar/H2/ICP
+  results and may not align with primary result timepoints.
