@@ -251,3 +251,23 @@ def test_get_activity_returns_modifications(client, db_session):
     data = resp.json()
     assert len(data) >= 1
     assert data[0]["modified_table"] == "sample_info"
+
+
+def test_list_samples_description_in_response(client, db_session):
+    s = SampleInfo(sample_id="DESC_S01", description="Olivine-rich dunite from Oman")
+    db_session.add(s)
+    db_session.commit()
+    resp = client.get("/api/samples")
+    assert resp.status_code == 200
+    item = next(i for i in resp.json()["items"] if i["sample_id"] == "DESC_S01")
+    assert item["description"] == "Olivine-rich dunite from Oman"
+
+
+def test_list_samples_search_by_description(client, db_session):
+    s = SampleInfo(sample_id="DESC_S02", description="Serpentinite with magnetite veins")
+    db_session.add(s)
+    db_session.commit()
+    resp = client.get("/api/samples", params={"search": "magnetite veins"})
+    assert resp.status_code == 200
+    ids = [i["sample_id"] for i in resp.json()["items"]]
+    assert "DESC_S02" in ids

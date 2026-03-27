@@ -141,6 +141,7 @@ def list_samples(
             locality=r.SampleInfo.locality,
             state=r.SampleInfo.state,
             country=r.SampleInfo.country,
+            description=r.SampleInfo.description,
             characterized=r.SampleInfo.characterized,
             created_at=r.SampleInfo.created_at,
             experiment_count=r.experiment_count,

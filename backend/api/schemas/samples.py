@@ -55,6 +55,7 @@ class SampleListItem(BaseModel):
     locality: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
+    description: Optional[str] = None
     characterized: bool
     experiment_count: int = 0
     has_pxrf: bool = False
