@@ -27,7 +27,7 @@ from backend.services.bulk_uploads._id_match import normalize_id
     # No false positives — zeros that are NOT leading
     ("HPHT_100", "hpht100"),      # 1 then 00 — not leading
     ("HPHT_0", "hpht0"),          # single zero alone, not followed by digit
-    ("HPHT_00", "hpht0"),         # multiple trailing zeros, no significant digit following
+    ("HPHT_00", "hpht0"),         # collision: second 0 satisfies lookahead, first is stripped — same as HPHT_0
     ("20250502_2A", "202505022a"), # date-style ID — internal zeros stay
     ("hpht1", "hpht1"),           # already normalized
 ])
