@@ -147,8 +147,6 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
     setCompoundQuery('')
   }
 
-  if (!conditions) return <p className="text-sm text-ink-muted p-4">No conditions recorded for this experiment.</p>
-
   const set = (k: keyof ConditionsPayload) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((p) => ({ ...p, [k]: e.target.value === '' ? undefined : (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value)) }))
 
@@ -158,7 +156,14 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
 
   return (
     <>
-      <div className="p-4 space-y-1">
+      {!conditions ? (
+        <div className="p-8 flex flex-col items-center gap-3 text-center">
+          <p className="text-sm text-ink-muted">No conditions recorded for this experiment.</p>
+          <Button variant="ghost" size="sm" onClick={openEdit}>+ Add Details</Button>
+        </div>
+      ) : (
+        <>
+        <div className="p-4 space-y-1">
         <div className="flex justify-end mb-2">
           <Button variant="ghost" size="xs" onClick={openEdit}>Edit</Button>
         </div>
@@ -215,7 +220,9 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
             ))}
           </div>
         )}
-      </div>
+        </div>
+        </>
+      )}
 
       {/* Edit Conditions Modal */}
       <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Conditions">
