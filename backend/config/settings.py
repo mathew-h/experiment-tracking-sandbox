@@ -1,6 +1,18 @@
 from __future__ import annotations
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_master_results_path() -> str:
+    return str(
+        Path.home()
+        / "Addis Energy"
+        / "All Company - Addis Energy"
+        / "01_R&D"
+        / "02_Results"
+        / "Master Reactor Sampling Tracker.xlsx"
+    )
 
 
 class Settings(BaseSettings):
@@ -20,11 +32,9 @@ class Settings(BaseSettings):
     firebase_client_id: str = ""
     firebase_client_cert_url: str = ""
 
-    # Master Results SharePoint path
-    master_results_path: str = (
-        r"C:\Users\MathewHearl\Addis Energy\All Company - Addis Energy"
-        r"\01_R&D\02_Results\Master Reactor Sampling Tracker.xlsx"
-    )
+    # Master Results SharePoint path — resolved from the current OS user at startup.
+    # Override via MASTER_RESULTS_PATH env var or the master_results_path AppConfig row.
+    master_results_path: str = _default_master_results_path()
 
     # File storage
     sample_photos_dir: str = "sample_photos"
