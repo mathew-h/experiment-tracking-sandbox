@@ -31,6 +31,50 @@ def calculate_total_ferrous_iron_g(
     return (feo_wt_pct / 100.0) * FE_IN_FEO_FRACTION * rock_mass_g
 
 
+def recalculate_conditions_for_samples(db: Session, sample_ids: set[str]) -> int:
+    """Recalculate total_ferrous_iron_g on ExperimentalConditions for all experiments
+    linked to the given sample_ids. Cascades to ScalarResults via the registry.
+
+    Called after any elemental upload that may have written new FeO data so that
+    experiments created before the rock data arrived get their derived fields set.
+
+    Returns count of conditions rows processed.
+    """
+    if not sample_ids:
+        return 0
+
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from backend.services.calculations.registry import recalculate
+
+    experiments = (
+        db.query(Experiment)
+        .filter(Experiment.sample_id.in_(sample_ids))
+        .all()
+    )
+
+    count = 0
+    for experiment in experiments:
+        conditions = (
+            db.query(ExperimentalConditions)
+            .filter_by(experiment_fk=experiment.id)
+            .first()
+        )
+        if conditions is None:
+            continue
+        try:
+            recalculate(conditions, db)
+            count += 1
+        except Exception:
+            log.warning(
+                "recalculate_conditions_for_samples_failed",
+                experiment_id=experiment.experiment_id,
+                exc_info=True,
+            )
+
+    return count
+
+
 def get_analyte_wt_pct(
     sample_id: str | None,
     db: Session,
