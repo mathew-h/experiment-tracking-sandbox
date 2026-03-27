@@ -37,9 +37,18 @@ function Log {
     Write-Host $entry
 }
 
+function Pause-IfInteractive {
+    # Only prompt when run in a real console window (not Task Scheduler / headless).
+    if ([Environment]::UserInteractive -and $Host.Name -ne 'Default Host') {
+        Write-Host ""
+        Read-Host "Press Enter to close"
+    }
+}
+
 function Abort {
     param($step, $detail)
     Log "FAILED -- step: $step -- error: $detail"
+    Pause-IfInteractive
     exit 1
 }
 
@@ -59,6 +68,7 @@ $headAfter = git -C $RepoRoot rev-parse HEAD 2>&1
 
 if ($headBefore -eq $headAfter) {
     Log "SKIPPED -- already up to date"
+    Pause-IfInteractive
     exit 0
 }
 
@@ -110,4 +120,5 @@ if ($LASTEXITCODE -ne 0) { Abort "nssm restart" "exit code $LASTEXITCODE -- chec
 
 # -- Step 7: Log success ------------------------------------------------------
 Log "SUCCESS -- deps:$depsStr migrations:$migrStr frontend:$frontStr"
+Pause-IfInteractive
 exit 0
