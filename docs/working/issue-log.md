@@ -142,6 +142,15 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no
 - **Decision logged:** no
 
+## 2026-03-26 | inline — Fuzzy sample/experiment ID matching in bulk upload services
+- **Files changed:**
+  - `backend/services/bulk_uploads/_id_match.py` — new shared module: `normalize_id`, `fuzzy_find_sample`, `fuzzy_find_experiment`
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `ElementalCompositionService` and `ActlabsRockTitrationService` use `fuzzy_find_sample`; canonical ID used for all DB writes
+  - `backend/services/bulk_uploads/actlabs_xrd_report.py` — `XRDUploadService` uses `fuzzy_find_sample`; canonical ID used for ExternalAnalysis, XRDAnalysis, XRDPhase writes
+  - `backend/services/bulk_uploads/timepoint_modifications.py` — `TimepointModificationsService` uses `fuzzy_find_experiment`; canonical experiment ID used in audit log and feedback
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-03-26 | inline — Docs audit: correct implementation details across three docs
 - **Files changed:**
   - `docs/CALCULATIONS.md` — fix background ammonium default 0.3→0.2 mM (3 places + verification result 24.38%→24.61%)
