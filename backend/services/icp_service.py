@@ -620,15 +620,18 @@ class ICPService:
         errors = []
 
         for idx, data in enumerate(processed_data):
+            savepoint = db.begin_nested()
             try:
                 experiment_id = data.get('experiment_id')
                 time_post_reaction = data.get('time_post_reaction')
 
                 if not experiment_id:
+                    savepoint.rollback()
                     errors.append(f"Sample {idx + 1}: Missing experiment_id.")
                     continue
 
                 if time_post_reaction is None:
+                    savepoint.rollback()
                     errors.append(f"Sample {idx + 1}: Missing time_post_reaction.")
                     continue
 
@@ -643,10 +646,13 @@ class ICPService:
                     results_to_add.append(result)
                     if was_update:
                         updated_count += 1
+                savepoint.commit()
 
             except ValueError as e:
+                savepoint.rollback()
                 errors.append(f"Sample {idx + 1}: {str(e)}")
             except Exception as e:
+                savepoint.rollback()
                 errors.append(f"Sample {idx + 1}: Unexpected error - {str(e)}")
 
         return results_to_add, updated_count, errors

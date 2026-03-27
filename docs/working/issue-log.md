@@ -216,3 +216,16 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/e2e/journeys/11-sample-management.spec.ts` — 1 new e2e test for Description column header
 - **Tests added:** yes — 2 backend API tests, 1 Playwright e2e test
 - **Decision logged:** no
+
+## 2026-03-27 | inline — Fix bulk upload row failures aborting entire batch (master results, actlabs, ICP-OES)
+- **Root causes:**
+  - `master_bulk_upload._process_bytes`: no savepoints → flush errors broke session for all subsequent rows; router's `if not errors: db.commit()` silently rolled back valid rows when any row failed
+  - `actlabs_titration_data.import_excel`: new `Analyte` rows added via `db.add()` without `db.flush()` before `db.query(Analyte).all()` (session has `autoflush=False`) → newly added analytes invisible to the query → elemental data silently skipped; router rolled back everything on any sample-not-found error
+  - `icp_service.bulk_create_icp_results`: no savepoints → `IntegrityError` from internal flush poisoned session; subsequent rows failed; final `db.commit()` raised; outer except called `db.rollback()` discarding all rows
+- **Files changed:**
+  - `backend/services/bulk_uploads/master_bulk_upload.py` — per-row `db.begin_nested()` savepoints
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `db.flush()` after analyte upsert loop, before `all_analytes` query
+  - `backend/api/routers/bulk_uploads.py` — master-results: removed `if not errors:` guard (always commit); actlabs-rock: removed `else: db.rollback()`
+  - `backend/services/icp_service.py` — per-sample `db.begin_nested()` savepoints in `bulk_create_icp_results`
+- **Tests added:** no
+- **Decision logged:** no

@@ -460,6 +460,11 @@ class ActlabsRockTitrationService:
             else:
                 db.add(Analyte(analyte_symbol=sym, unit=unit or "ppm"))
 
+        # Flush newly added analytes so they have PKs before the next query.
+        # The session has autoflush=False, so without this flush the query below
+        # would not see any analytes added in the loop above.
+        db.flush()
+
         # Preload analyte ids
         all_analytes = db.query(Analyte).all()
         symbol_to_analyte = {a.analyte_symbol.lower(): a for a in all_analytes}
