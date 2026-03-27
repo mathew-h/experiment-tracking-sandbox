@@ -187,3 +187,23 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/services/bulk_uploads/test_elemental_upload_recalc.py` — 6 new tests
 - **Tests added:** yes — helper unit tests (happy path, null rock mass, multiple experiments, isolation) + integration tests for both upload paths
 - **Decision logged:** no
+
+## 2026-03-27 | issue #14 — Fuzzy matching for master result upload sync
+- **Files changed:**
+  - `backend/services/bulk_uploads/_id_match.py` — added leading-zero stripping step to `normalize_id`; updated module docstring examples
+  - `backend/services/scalar_results_service.py` — replaced `_find_experiment`'s hand-rolled SQL normalization with `fuzzy_find_experiment` from `_id_match`
+  - `tests/services/bulk_uploads/test_id_match.py` — created: 16 parametrized unit tests for `normalize_id` (force lower, strip symbols, strip leading zeros, edge cases)
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — added 3 integration tests for fuzzy-matched IDs in master upload
+- **Tests added:** yes
+- **Decision logged:** no
+
+## 2026-03-27 | issue #13 — Sample list description column and searchable description
+- **Files changed:**
+  - `backend/api/schemas/samples.py` — added `description: Optional[str] = None` to `SampleListItem`
+  - `backend/api/routers/samples.py` — populated `description` in `list_samples` items comprehension
+  - `frontend/src/api/samples.ts` — added `description: string | null` to `SampleListItem` interface
+  - `frontend/src/pages/Samples.tsx` — added Description column (truncated with tooltip, em-dash fallback) between Classification and Location
+  - `tests/api/test_samples.py` — 2 new tests: `test_list_samples_description_in_response`, `test_list_samples_search_by_description`
+  - `frontend/e2e/journeys/11-sample-management.spec.ts` — 1 new e2e test for Description column header
+- **Tests added:** yes — 2 backend API tests, 1 Playwright e2e test
+- **Decision logged:** no
