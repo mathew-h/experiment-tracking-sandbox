@@ -180,21 +180,7 @@ def get_sample(
     if sample is None:
         raise HTTPException(status_code=404, detail="Sample not found")
 
-    # Bulk-fetch all pXRF readings referenced by this sample's analyses
-    all_reading_nos: set[str] = set()
-    for a in sample.external_analyses:
-        if a.analysis_type == "pXRF" and a.pxrf_reading_no:
-            for raw in a.pxrf_reading_no.split(","):
-                normed = normalize_pxrf_reading_no(raw)
-                if normed:
-                    all_reading_nos.add(normed)
-
-    pxrf_map: dict[str, PXRFReading] = {}
-    if all_reading_nos:
-        readings = db.execute(
-            select(PXRFReading).where(PXRFReading.reading_no.in_(all_reading_nos))
-        ).scalars().all()
-        pxrf_map = {r.reading_no: r for r in readings}
+    pxrf_map = _build_pxrf_map(list(sample.external_analyses), db)
 
     # Auto-correct characterized flag if pXRF readings have since been ingested
     new_characterized = evaluate_characterized(db, sample_id)
@@ -240,6 +226,27 @@ def get_sample(
 
 
 _PXRF_ELEMENTS = ["fe", "mg", "ni", "cu", "si", "co", "mo", "al", "ca", "k", "au", "zn"]
+
+
+def _build_pxrf_map(
+    analyses: "list[ExternalAnalysis]",
+    db: Session,
+) -> "dict[str, PXRFReading]":
+    """Return a {reading_no: PXRFReading} map for all pXRF analyses in the list."""
+    from database.models.analysis import PXRFReading
+    reading_nos: set[str] = set()
+    for a in analyses:
+        if a.analysis_type == "pXRF" and a.pxrf_reading_no:
+            for raw in a.pxrf_reading_no.split(","):
+                normed = normalize_pxrf_reading_no(raw)
+                if normed:
+                    reading_nos.add(normed)
+    if not reading_nos:
+        return {}
+    rows = db.execute(
+        select(PXRFReading).where(PXRFReading.reading_no.in_(reading_nos))
+    ).scalars().all()
+    return {r.reading_no: r for r in rows}
 
 
 def _avg_pxrf(a: ExternalAnalysis, pxrf_map: dict) -> "PXRFElementalData | None":
@@ -530,10 +537,11 @@ def list_analyses(
     rows = db.execute(
         select(EA)
         .where(EA.sample_id == sample_id)
-        .options(sl(EA.analysis_files))
+        .options(sl(EA.analysis_files), sl(EA.xrd_analysis))
         .order_by(EA.analysis_date)
     ).scalars().all()
-    return [_to_analysis_response(r) for r in rows]
+    pxrf_map = _build_pxrf_map(list(rows), db)
+    return [_to_analysis_response(r, pxrf_map) for r in rows]
 
 
 # ── DELETE /api/samples/{sample_id}/analyses/{analysis_id} ───────────────
