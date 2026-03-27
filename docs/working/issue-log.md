@@ -172,6 +172,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no — pure SQL DDL; verified against dev DB (233 rows, 6 columns, correct types)
 - **Decision logged:** no
 
+## 2026-03-27 | issue #15 — Fix '+ Add additive' button not working on new experiment Additives step
+- **Files changed:**
+  - `frontend/src/pages/NewExperiment/Step3Additives.tsx` — replaced `crypto.randomUUID()` with exported `generateId()` (Math.random-based UUID v4); safe in non-secure HTTP contexts
+  - `frontend/src/pages/NewExperiment/index.tsx` — imported `generateId` and replaced `crypto.randomUUID()` in `handleCopyFrom`
+- **Root cause:** `crypto.randomUUID()` is only available in secure contexts (HTTPS). The lab app runs on plain HTTP over LAN, so clicking the button threw a silent TypeError and added no row.
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-03-26 | inline — Auto-recalculate total_ferrous_iron_g on elemental upload
 - **Files changed:**
   - `backend/services/elemental_composition_service.py` — added `recalculate_conditions_for_samples(db, sample_ids)` helper
