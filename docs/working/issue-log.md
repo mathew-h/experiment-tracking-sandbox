@@ -131,3 +131,21 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `backend/api/main.py` — added FastAPI `lifespan` context manager that calls `reset_postgres_sequences()` on every startup
 - **Tests added:** no — requires a live PostgreSQL instance; manual re-run of both uploads is the acceptance test
 - **Decision logged:** no
+
+## 2026-03-26 | issue #9 — Add result entry form to Results tab
+- **Files changed:**
+  - `backend/api/schemas/results.py` — added `brine_modification_description: Optional[str] = None` to `ResultCreate`
+  - `frontend/src/api/results.ts` — added `getScalar(resultId)` calling `GET /api/results/scalar/{result_id}`; added `brine_modification_description` and `measurement_date` to `ResultCreate`; added `measurement_date` to `ScalarCreate`
+  - `frontend/src/pages/ExperimentDetail/AddResultsModal.tsx` — new: 9-field form modal; PSI→MPa conversion for gas pressure; two-step mutation (POST /api/results then POST /api/results/scalar); inline server error display; invalidates experiment-results cache on success
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — "Add Results" button in action bar (always visible); modal state; fixed `ExpandedRow` to use `getScalar()` instead of broken `listScalar`; added `experimentFk: number` prop
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — pass `experimentFk={experiment.id}` to `ResultsTab`
+- **Tests added:** no
+- **Decision logged:** no
+
+## 2026-03-26 | inline — Docs audit: correct implementation details across three docs
+- **Files changed:**
+  - `docs/CALCULATIONS.md` — fix background ammonium default 0.3→0.2 mM (3 places + verification result 24.38%→24.61%)
+  - `docs/LOCKED_COMPONENTS.md` — remove non-existent stored field `net_ammonium_concentration_mM`; add 5 undocumented parsers (xrd_upload, experiment_additives, metric_groups, timepoint_modifications, master_bulk_upload)
+  - `docs/DIRECTORY_STRUCTURE.md` — fix calc module names; fix auth file name (firebase.py→firebase_auth.py); fix backend/core→backend/config/settings.py; fix dependencies file→dir; remove non-existent component subdirs
+- **Tests added:** no
+- **Decision logged:** no
