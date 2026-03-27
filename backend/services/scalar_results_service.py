@@ -1,6 +1,5 @@
 from typing import Optional, Dict, Any, List, Tuple
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
 from database import Experiment, ExperimentalResults, ScalarResults, ModificationsLog
 from backend.services.result_merge_utils import (
     create_experimental_result_row,
@@ -317,25 +316,14 @@ class ScalarResultsService:
     
     @staticmethod
     def _find_experiment(db: Session, experiment_id: str) -> Optional[Experiment]:
+        """Find an experiment by ID using full fuzzy normalization.
+
+        Delegates to ``fuzzy_find_experiment`` from ``_id_match``, which normalizes
+        by lowercasing, stripping all non-alphanumeric characters, and stripping
+        leading zeros from numeric segments.
         """
-        Find experiment by ID with normalization (case insensitive, ignore hyphens/underscores).
-        
-        Args:
-            db: Database session
-            experiment_id: String experiment ID to search for
-            
-        Returns:
-            Experiment object or None if not found
-        """
-        # Normalize experiment_id: lower case and remove hyphens and underscores
-        exp_id_normalized = experiment_id.lower().replace('-', '').replace('_', '')
-        
-        # Query by normalized experiment_id
-        experiment = db.query(Experiment).filter(
-            func.lower(func.replace(func.replace(Experiment.experiment_id, '-', ''), '_', '')) == exp_id_normalized
-        ).options(joinedload(Experiment.conditions)).first()
-        
-        return experiment
+        from backend.services.bulk_uploads._id_match import fuzzy_find_experiment  # noqa: PLC0415
+        return fuzzy_find_experiment(db, experiment_id)
     
     @staticmethod
     def _find_or_create_experimental_result(
