@@ -55,6 +55,8 @@ export interface UploadRowProps {
   templateMode?: string
   /** If provided, shows a "Sync from SharePoint" button above the file zone */
   syncFn?: () => Promise<BulkUploadResult>
+  /** If provided, shown below the skipped badge when result.skipped > 0 */
+  skippedMessage?: string
   /** Optional content rendered inside the expanded panel (chips, extra fields, etc.) */
   topContent?: React.ReactNode
   isOpen: boolean
@@ -71,6 +73,7 @@ export function UploadRow({
   templateType,
   templateMode,
   syncFn,
+  skippedMessage,
   topContent,
   isOpen,
   onToggle,
@@ -207,6 +210,10 @@ export function UploadRow({
                   <Badge variant="warning">Warnings: {result.warnings.length}</Badge>
                 )}
               </div>
+
+              {result.skipped > 0 && skippedMessage && (
+                <p className="text-xs text-amber-400 leading-relaxed">{skippedMessage}</p>
+              )}
 
               {/* Error list */}
               {result.errors.length > 0 && (

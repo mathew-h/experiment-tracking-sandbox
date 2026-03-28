@@ -91,13 +91,15 @@ def _clean_mineral_name(col: str) -> str:
 
 
 def _parse_experiment_timepoint(
-    db: Session, file_bytes: bytes
+    db: Session, file_bytes: bytes, overwrite: bool = False
 ) -> Tuple[int, int, int, List[str]]:
     """
     Parse a wide-format XRD file with explicit Experiment ID + Time (days) columns.
 
     Each row is one experiment at one timepoint; all remaining columns are mineral phases.
-    Upserts XRDPhase rows keyed on (experiment_id, time_post_reaction_days, mineral_name).
+    When overwrite=False: upserts XRDPhase rows keyed on (experiment_id, time_post_reaction_days, mineral_name).
+    When overwrite=True: deletes ALL existing XRDPhase rows for each (experiment_id, time_post_reaction_days)
+    key before inserting the new set, so only the uploaded phases survive.
 
     Returns (created, updated, skipped, errors).
     """
@@ -143,6 +145,7 @@ def _parse_experiment_timepoint(
         return 0, 0, 0, ["No mineral phase columns detected."]
 
     exp_cache: dict[str, Optional[object]] = {}
+    cleared_keys: set[tuple[str, float]] = set()
 
     for idx, row in df.iterrows():
         row_num = idx + 2
@@ -183,6 +186,22 @@ def _parse_experiment_timepoint(
                     except ValueError:
                         pass  # Unrecognised format — leave as None
 
+        # When overwrite=True, delete all existing phases for this (experiment, timepoint)
+        # once per unique key within this file before inserting the new set.
+        if overwrite:
+            clear_key = (experiment.experiment_id, time_days)
+            if clear_key not in cleared_keys:
+                (
+                    db.query(XRDPhase)
+                    .filter(
+                        XRDPhase.experiment_id == experiment.experiment_id,
+                        XRDPhase.time_post_reaction_days == time_days,
+                    )
+                    .delete(synchronize_session=False)
+                )
+                db.flush()
+                cleared_keys.add(clear_key)
+
         for mcol in mineral_cols:
             raw_val = row.get(mcol)
             if raw_val is None or (isinstance(raw_val, float) and pd.isna(raw_val)):
@@ -194,23 +213,8 @@ def _parse_experiment_timepoint(
 
             mineral_name = _clean_mineral_name(mcol)
 
-            phase = (
-                db.query(XRDPhase)
-                .filter(
-                    XRDPhase.experiment_id == experiment.experiment_id,
-                    XRDPhase.time_post_reaction_days == time_days,
-                    XRDPhase.mineral_name == mineral_name,
-                )
-                .first()
-            )
-
-            if phase:
-                phase.amount = amount_val
-                phase.experiment_fk = experiment.id
-                if measurement_date is not None:
-                    phase.measurement_date = measurement_date
-                updated += 1
-            else:
+            if overwrite:
+                # After clearing, always insert fresh
                 db.add(XRDPhase(
                     experiment_fk=experiment.id,
                     experiment_id=experiment.experiment_id,
@@ -220,13 +224,40 @@ def _parse_experiment_timepoint(
                     measurement_date=measurement_date,
                 ))
                 created += 1
+            else:
+                phase = (
+                    db.query(XRDPhase)
+                    .filter(
+                        XRDPhase.experiment_id == experiment.experiment_id,
+                        XRDPhase.time_post_reaction_days == time_days,
+                        XRDPhase.mineral_name == mineral_name,
+                    )
+                    .first()
+                )
+
+                if phase:
+                    phase.amount = amount_val
+                    phase.experiment_fk = experiment.id
+                    if measurement_date is not None:
+                        phase.measurement_date = measurement_date
+                    updated += 1
+                else:
+                    db.add(XRDPhase(
+                        experiment_fk=experiment.id,
+                        experiment_id=experiment.experiment_id,
+                        time_post_reaction_days=time_days,
+                        mineral_name=mineral_name,
+                        amount=amount_val,
+                        measurement_date=measurement_date,
+                    ))
+                    created += 1
 
     return created, updated, skipped, errors
 
 
 class XRDAutoDetectService:
     @staticmethod
-    def upload(db: Session, file_bytes: bytes) -> Tuple[int, int, int, List[str]]:
+    def upload(db: Session, file_bytes: bytes, overwrite: bool = False) -> Tuple[int, int, int, List[str]]:
         """
         Auto-detect XRD file format and delegate to the appropriate parser.
 
@@ -235,16 +266,21 @@ class XRDAutoDetectService:
         - aeris:   Aeris instrument export (Sample ID values like 20260218_HPHT070-d19_02)
         - actlabs: ActLabs report (plain sample_id column)
 
+        The overwrite parameter applies to all three formats.
+        When overwrite=True, existing XRDPhase rows for each key are deleted before the new
+        set is inserted. For experiment-timepoint and aeris the key is
+        (experiment_id, time_post_reaction_days); for actlabs the key is sample_id.
+
         Returns (created, updated, skipped, errors).
         """
         fmt = _detect_format(file_bytes)
 
         if fmt == "experiment-timepoint":
-            return _parse_experiment_timepoint(db, file_bytes)
+            return _parse_experiment_timepoint(db, file_bytes, overwrite=overwrite)
 
         if fmt == "aeris":
             from backend.services.bulk_uploads.aeris_xrd import AerisXRDUploadService  # noqa: PLC0415
-            return AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
+            return AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes, overwrite=overwrite)
 
         if fmt == "actlabs":
             from backend.services.bulk_uploads.actlabs_xrd_report import XRDUploadService  # noqa: PLC0415
@@ -253,7 +289,7 @@ class XRDAutoDetectService:
                 created_json, updated_json,
                 created_phase, updated_phase,
                 skipped, errors,
-            ) = XRDUploadService.bulk_upsert_from_excel(db, file_bytes)
+            ) = XRDUploadService.bulk_upsert_from_excel(db, file_bytes, overwrite=overwrite)
             created = created_phase + created_ext
             updated = updated_phase + updated_ext
             return created, updated, skipped, errors
