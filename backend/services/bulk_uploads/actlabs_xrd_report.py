@@ -13,9 +13,16 @@ from backend.services.bulk_uploads._id_match import fuzzy_find_sample
 
 class XRDUploadService:
     @staticmethod
-    def bulk_upsert_from_excel(db: Session, file_bytes: bytes) -> Tuple[int, int, int, int, int, int, int, List[str]]:
+    def bulk_upsert_from_excel(
+        db: Session, file_bytes: bytes, overwrite: bool = False
+    ) -> Tuple[int, int, int, int, int, int, int, List[str]]:
         """
         Upsert XRD mineralogy per sample from an Excel file.
+
+        When overwrite=True, all existing XRDPhase rows for the sample are deleted
+        before inserting the new set so no stale phases survive. The XRDAnalysis.mineral_phases
+        JSON is always replaced (existing behavior).
+
         Returns (
           created_ext, updated_ext, created_json, updated_json, created_phase, updated_phase, skipped_rows, errors
         ).
@@ -34,7 +41,6 @@ class XRDUploadService:
         normalized = [str(c).strip() for c in df.columns]
         df.columns = normalized
 
-        # Resolve sample_id column (case-insensitive match)
         sample_col = None
         for c in df.columns:
             if c.lower() == "sample_id":
@@ -54,14 +60,12 @@ class XRDUploadService:
                     skipped += 1
                     continue
 
-                # Validate sample exists (fuzzy: case-insensitive, symbols stripped)
                 sample = fuzzy_find_sample(db, sample_id)
                 if not sample:
                     errors.append(f"Row {idx+2}: sample_id '{sample_id}' not found")
                     continue
                 canonical_id = sample.sample_id
 
-                # Build mineral dict from columns, skipping blanks and non-numeric
                 mineral_data = {}
                 for mcol in mineral_cols:
                     val = row.get(mcol)
@@ -90,7 +94,7 @@ class XRDUploadService:
                 else:
                     updated_ext += 1
 
-                # Upsert JSON model
+                # Upsert JSON model (always replace — existing behaviour)
                 xrd = db.query(XRDAnalysis).filter(XRDAnalysis.external_analysis_id == ext.id).first()
                 if xrd:
                     xrd.mineral_phases = mineral_data or None
@@ -100,7 +104,17 @@ class XRDUploadService:
                     db.add(xrd)
                     created_json += 1
 
-                # Upsert normalized phases per mineral
+                # When overwrite=True, clear all existing XRDPhase rows for this sample
+                # so no stale phases from a previous upload survive.
+                if overwrite:
+                    (
+                        db.query(XRDPhase)
+                        .filter(XRDPhase.sample_id == canonical_id)
+                        .delete(synchronize_session=False)
+                    )
+                    db.flush()
+
+                # Insert or upsert normalized phases per mineral
                 for mcol in mineral_cols:
                     display_name = str(mcol).strip()
                     key = display_name.lower()
@@ -108,28 +122,37 @@ class XRDUploadService:
                         continue
                     amount_val = mineral_data[key]
 
-                    phase = (
-                        db.query(XRDPhase)
-                        .filter(
-                            XRDPhase.sample_id == canonical_id,
-                            XRDPhase.mineral_name == display_name,
-                        )
-                        .first()
-                    )
-                    if phase:
-                        phase.amount = amount_val
-                        if phase.external_analysis_id is None:
-                            phase.external_analysis_id = ext.id
-                        updated_phase += 1
-                    else:
-                        phase = XRDPhase(
+                    if overwrite:
+                        db.add(XRDPhase(
                             sample_id=canonical_id,
                             external_analysis_id=ext.id,
                             mineral_name=display_name,
                             amount=amount_val,
-                        )
-                        db.add(phase)
+                        ))
                         created_phase += 1
+                    else:
+                        phase = (
+                            db.query(XRDPhase)
+                            .filter(
+                                XRDPhase.sample_id == canonical_id,
+                                XRDPhase.mineral_name == display_name,
+                            )
+                            .first()
+                        )
+                        if phase:
+                            phase.amount = amount_val
+                            if phase.external_analysis_id is None:
+                                phase.external_analysis_id = ext.id
+                            updated_phase += 1
+                        else:
+                            phase = XRDPhase(
+                                sample_id=canonical_id,
+                                external_analysis_id=ext.id,
+                                mineral_name=display_name,
+                                amount=amount_val,
+                            )
+                            db.add(phase)
+                            created_phase += 1
 
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
