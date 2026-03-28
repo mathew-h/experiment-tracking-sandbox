@@ -298,3 +298,34 @@ def test_aeris_stale_phases_deleted_when_overwrite_true(db_session: Session):
     )
     assert len(phases) == 1, f"Expected 1 phase, got {len(phases)}: {[p.mineral_name for p in phases]}"
     assert phases[0].mineral_name == "Quartz"
+
+
+def test_aeris_stale_phases_preserved_when_overwrite_false(db_session: Session):
+    """Aeris format: without overwrite, existing phases not in the new file are preserved."""
+    exp = _seed_experiment(db_session, "HPHT_AERIS002", 9904)
+
+    # Upload A — Quartz + Magnetite
+    xlsx_a = make_excel(
+        ["Sample ID", "Quartz", "Magnetite"],
+        [["20260101_HPHTAERIS002-d7_01", 55.0, 45.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+
+    # Upload B — Quartz only, overwrite=False (default)
+    xlsx_b = make_excel(
+        ["Sample ID", "Quartz"],
+        [["20260101_HPHTAERIS002-d7_01", 80.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_b, overwrite=False)
+
+    phases = (
+        db_session.query(XRDPhase)
+        .filter(
+            XRDPhase.experiment_id == "HPHT_AERIS002",
+            XRDPhase.time_post_reaction_days == 7.0,
+        )
+        .all()
+    )
+    assert len(phases) == 2
+    quartz = next(p for p in phases if p.mineral_name == "Quartz")
+    assert quartz.amount == pytest.approx(80.0)

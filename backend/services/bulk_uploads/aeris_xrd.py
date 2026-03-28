@@ -20,7 +20,7 @@ _AERIS_SAMPLE_RE = re.compile(
 )
 
 
-def _parse_aeris_sample_id(raw: str) -> Optional[Tuple[datetime, str, int]]:
+def _parse_aeris_sample_id(raw: str) -> Optional[Tuple[datetime, str, float]]:
     """
     Extract (measurement_date, experiment_id_raw, days_post_reaction) from an
     Aeris-format Sample ID like ``20260218_HPHT070-d19_02``.
@@ -35,7 +35,7 @@ def _parse_aeris_sample_id(raw: str) -> Optional[Tuple[datetime, str, int]]:
         measurement_date = datetime.strptime(date_str, "%Y%m%d")
     except ValueError:
         return None
-    return measurement_date, exp_id_raw, int(days_str)
+    return measurement_date, exp_id_raw, float(days_str)
 
 
 def _normalize_id(raw: str) -> str:
@@ -100,10 +100,9 @@ class AerisXRDUploadService:
         except Exception as e:
             return 0, 0, 0, [f"Failed to read Excel: {e}"]
 
-        if df.shape[1] < 3:
+        if df.shape[1] < 2:
             return 0, 0, 0, [
-                "Excel must contain at least Sample ID, Rwp, "
-                "and one mineral column."
+                "Excel must contain at least a 'Sample ID' column and one mineral column."
             ]
 
         cols = [str(c).strip() for c in df.columns]
