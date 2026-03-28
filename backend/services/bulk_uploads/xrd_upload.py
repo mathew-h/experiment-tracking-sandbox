@@ -266,8 +266,8 @@ class XRDAutoDetectService:
         - aeris:   Aeris instrument export (Sample ID values like 20260218_HPHT070-d19_02)
         - actlabs: ActLabs report (plain sample_id column)
 
-        The overwrite parameter is currently only applied to the experiment-timepoint format.
-        For experiment-timepoint: when overwrite=True, all existing XRDPhase rows for each
+        The overwrite parameter applies to the experiment-timepoint and aeris formats.
+        When overwrite=True, all existing XRDPhase rows for each
         (experiment_id, time_post_reaction_days) key are deleted before the new set is inserted.
 
         Returns (created, updated, skipped, errors).
@@ -279,7 +279,7 @@ class XRDAutoDetectService:
 
         if fmt == "aeris":
             from backend.services.bulk_uploads.aeris_xrd import AerisXRDUploadService  # noqa: PLC0415
-            return AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
+            return AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes, overwrite=overwrite)
 
         if fmt == "actlabs":
             from backend.services.bulk_uploads.actlabs_xrd_report import XRDUploadService  # noqa: PLC0415

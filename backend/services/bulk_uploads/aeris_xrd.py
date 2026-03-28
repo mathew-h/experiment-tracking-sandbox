@@ -78,11 +78,17 @@ class AerisXRDUploadService:
 
     @staticmethod
     def bulk_upsert_from_excel(
-        db: Session, file_bytes: bytes
+        db: Session, file_bytes: bytes, overwrite: bool = False
     ) -> Tuple[int, int, int, List[str]]:
         """
         Parse an Aeris XRD Excel file and upsert ``XRDPhase`` rows keyed by
         (experiment_id, time_post_reaction_days, mineral_name).
+
+        When overwrite=False: upserts XRDPhase rows keyed on
+        (experiment_id, time_post_reaction_days, mineral_name).
+        When overwrite=True: deletes ALL existing XRDPhase rows for each
+        (experiment_id, time_post_reaction_days) key before inserting the new
+        set, so only the uploaded phases survive.
 
         Returns (created, updated, skipped, errors).
         """
@@ -94,9 +100,9 @@ class AerisXRDUploadService:
         except Exception as e:
             return 0, 0, 0, [f"Failed to read Excel: {e}"]
 
-        if df.shape[1] < 4:
+        if df.shape[1] < 3:
             return 0, 0, 0, [
-                "Excel must contain at least Scan Number, Sample ID, Rwp, "
+                "Excel must contain at least Sample ID, Rwp, "
                 "and one mineral column."
             ]
 
@@ -123,6 +129,8 @@ class AerisXRDUploadService:
 
         # Cache experiment lookups per raw ID to avoid repeated queries
         exp_cache: dict[str, Optional[Experiment]] = {}
+        # Track (experiment_id, days) pairs already cleared in overwrite mode
+        cleared_keys: set[tuple[str, float]] = set()
 
         for idx, row in df.iterrows():
             row_num = idx + 2  # 1-indexed header + 1-indexed row
@@ -169,6 +177,23 @@ class AerisXRDUploadService:
                 except (ValueError, TypeError):
                     pass
 
+            # When overwrite=True, delete all existing phases for this
+            # (experiment, timepoint) once per unique key within this file
+            # before inserting the new set.
+            if overwrite:
+                clear_key = (exp_id_db, float(days))
+                if clear_key not in cleared_keys:
+                    (
+                        db.query(XRDPhase)
+                        .filter(
+                            XRDPhase.experiment_id == exp_id_db,
+                            XRDPhase.time_post_reaction_days == days,
+                        )
+                        .delete(synchronize_session=False)
+                    )
+                    db.flush()
+                    cleared_keys.add(clear_key)
+
             # Upsert one XRDPhase per mineral column
             for mcol in mineral_cols:
                 raw_val = row.get(mcol)
@@ -183,33 +208,43 @@ class AerisXRDUploadService:
 
                 mineral_name = _clean_mineral_name(mcol)
 
-                phase = (
-                    db.query(XRDPhase)
-                    .filter(
-                        XRDPhase.experiment_id == exp_id_db,
-                        XRDPhase.time_post_reaction_days == days,
-                        XRDPhase.mineral_name == mineral_name,
-                    )
-                    .first()
-                )
-
-                if phase:
-                    phase.amount = amount_val
-                    phase.rwp = rwp_val
-                    phase.measurement_date = measurement_date
-                    phase.experiment_fk = exp_fk
-                    updated += 1
-                else:
-                    phase = XRDPhase(
+                if overwrite:
+                    db.add(XRDPhase(
                         experiment_fk=exp_fk,
                         experiment_id=exp_id_db,
                         time_post_reaction_days=days,
-                        measurement_date=measurement_date,
-                        rwp=rwp_val,
                         mineral_name=mineral_name,
                         amount=amount_val,
-                    )
-                    db.add(phase)
+                        rwp=rwp_val,
+                        measurement_date=measurement_date,
+                    ))
                     created += 1
+                else:
+                    phase = (
+                        db.query(XRDPhase)
+                        .filter(
+                            XRDPhase.experiment_id == exp_id_db,
+                            XRDPhase.time_post_reaction_days == days,
+                            XRDPhase.mineral_name == mineral_name,
+                        )
+                        .first()
+                    )
+                    if phase:
+                        phase.amount = amount_val
+                        phase.rwp = rwp_val
+                        phase.measurement_date = measurement_date
+                        phase.experiment_fk = exp_fk
+                        updated += 1
+                    else:
+                        db.add(XRDPhase(
+                            experiment_fk=exp_fk,
+                            experiment_id=exp_id_db,
+                            time_post_reaction_days=days,
+                            measurement_date=measurement_date,
+                            rwp=rwp_val,
+                            mineral_name=mineral_name,
+                            amount=amount_val,
+                        ))
+                        created += 1
 
         return created, updated, skipped, errors
