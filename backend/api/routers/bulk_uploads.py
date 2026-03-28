@@ -239,14 +239,21 @@ async def upload_icp_oes(
 @router.post("/xrd-mineralogy", response_model=UploadResponse)
 async def upload_xrd_mineralogy(
     file: UploadFile = File(...),
+    overwrite: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Upload an XRD file — auto-detects Aeris or ActLabs format."""
+    """Upload an XRD file — auto-detects Aeris, ActLabs, or Experiment+Timepoint format.
+
+    When overwrite=True, all existing XRDPhase rows for each matching key
+    (experiment+timepoint or sample) are deleted before the new phases are inserted.
+    """
     from backend.services.bulk_uploads.xrd_upload import XRDAutoDetectService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
-        created, updated, skipped, errors = XRDAutoDetectService.upload(db, file_bytes)
+        created, updated, skipped, errors = XRDAutoDetectService.upload(
+            db, file_bytes, overwrite=overwrite
+        )
         db.commit()
     except Exception as exc:
         db.rollback()

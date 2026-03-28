@@ -185,3 +185,212 @@ def test_generate_template_returns_bytes(db_session: Session):
         data = XRDAutoDetectService.generate_template_bytes(mode=mode)
         assert isinstance(data, bytes)
         assert len(data) > 0
+
+
+# ---------------------------------------------------------------------------
+# Stale phases tests (overwrite parameter)
+# ---------------------------------------------------------------------------
+
+def test_stale_phases_deleted_when_overwrite_true(db_session: Session):
+    """Upload A (2 phases), then upload B (1 phase, same key, overwrite=True).
+    Only B's phase survives — A's absent phase is deleted."""
+    exp = _seed_experiment(db_session, "HPHT_STALE001", 9901)
+
+    # Upload A — Quartz + Calcite
+    xlsx_a = make_excel(
+        ["Experiment ID", "Time (days)", "Quartz", "Calcite"],
+        [["HPHT_STALE001", 14.0, 50.0, 50.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+    assert db_session.query(XRDPhase).filter(
+        XRDPhase.experiment_id == "HPHT_STALE001",
+        XRDPhase.time_post_reaction_days == 14.0,
+    ).count() == 2
+
+    # Upload B — Quartz only, overwrite=True
+    xlsx_b = make_excel(
+        ["Experiment ID", "Time (days)", "Quartz"],
+        [["HPHT_STALE001", 14.0, 100.0]],
+    )
+    created, updated, skipped, errors = XRDAutoDetectService.upload(
+        db_session, xlsx_b, overwrite=True
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    phases = (
+        db_session.query(XRDPhase)
+        .filter(
+            XRDPhase.experiment_id == "HPHT_STALE001",
+            XRDPhase.time_post_reaction_days == 14.0,
+        )
+        .all()
+    )
+    assert len(phases) == 1, f"Expected 1 phase, got {len(phases)}: {[p.mineral_name for p in phases]}"
+    assert phases[0].mineral_name == "Quartz"
+    assert phases[0].amount == pytest.approx(100.0)
+
+
+def test_stale_phases_preserved_when_overwrite_false(db_session: Session):
+    """Without overwrite, absent phases from the new file are left untouched."""
+    exp = _seed_experiment(db_session, "HPHT_STALE002", 9902)
+
+    # Upload A — Quartz + Calcite
+    xlsx_a = make_excel(
+        ["Experiment ID", "Time (days)", "Quartz", "Calcite"],
+        [["HPHT_STALE002", 7.0, 40.0, 60.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+
+    # Upload B — Quartz only, overwrite=False (default)
+    xlsx_b = make_excel(
+        ["Experiment ID", "Time (days)", "Quartz"],
+        [["HPHT_STALE002", 7.0, 80.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_b, overwrite=False)
+
+    # Both phases must still exist
+    phases = (
+        db_session.query(XRDPhase)
+        .filter(
+            XRDPhase.experiment_id == "HPHT_STALE002",
+            XRDPhase.time_post_reaction_days == 7.0,
+        )
+        .all()
+    )
+    assert len(phases) == 2
+    quartz = next(p for p in phases if p.mineral_name == "Quartz")
+    assert quartz.amount == pytest.approx(80.0)  # value updated
+
+
+def test_aeris_stale_phases_deleted_when_overwrite_true(db_session: Session):
+    """Aeris format: upload A (2 phases), re-upload B (1 phase, overwrite=True).
+    Only B's phase survives."""
+    exp = _seed_experiment(db_session, "HPHT_AERIS001", 9903)
+
+    # Upload A — Quartz + Magnetite via Aeris format
+    xlsx_a = make_excel(
+        ["Sample ID", "Rwp", "Quartz", "Magnetite"],
+        [["20260101_HPHTAERIS001-d14_01", 5.2, 60.0, 40.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+    assert db_session.query(XRDPhase).filter(
+        XRDPhase.experiment_id == "HPHT_AERIS001",
+        XRDPhase.time_post_reaction_days == 14.0,
+    ).count() == 2
+
+    # Upload B — Quartz only, overwrite=True
+    xlsx_b = make_excel(
+        ["Sample ID", "Rwp", "Quartz"],
+        [["20260101_HPHTAERIS001-d14_01", 4.8, 100.0]],
+    )
+    created, updated, skipped, errors = XRDAutoDetectService.upload(
+        db_session, xlsx_b, overwrite=True
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    phases = (
+        db_session.query(XRDPhase)
+        .filter(
+            XRDPhase.experiment_id == "HPHT_AERIS001",
+            XRDPhase.time_post_reaction_days == 14.0,
+        )
+        .all()
+    )
+    assert len(phases) == 1, f"Expected 1 phase, got {len(phases)}: {[p.mineral_name for p in phases]}"
+    assert phases[0].mineral_name == "Quartz"
+
+
+def test_aeris_stale_phases_preserved_when_overwrite_false(db_session: Session):
+    """Aeris format: without overwrite, existing phases not in the new file are preserved."""
+    exp = _seed_experiment(db_session, "HPHT_AERIS002", 9904)
+
+    # Upload A — Quartz + Magnetite
+    xlsx_a = make_excel(
+        ["Sample ID", "Quartz", "Magnetite"],
+        [["20260101_HPHTAERIS002-d7_01", 55.0, 45.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+
+    # Upload B — Quartz only, overwrite=False (default)
+    xlsx_b = make_excel(
+        ["Sample ID", "Quartz"],
+        [["20260101_HPHTAERIS002-d7_01", 80.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_b, overwrite=False)
+
+    phases = (
+        db_session.query(XRDPhase)
+        .filter(
+            XRDPhase.experiment_id == "HPHT_AERIS002",
+            XRDPhase.time_post_reaction_days == 7.0,
+        )
+        .all()
+    )
+    assert len(phases) == 2
+    quartz = next(p for p in phases if p.mineral_name == "Quartz")
+    assert quartz.amount == pytest.approx(80.0)
+
+
+def test_actlabs_stale_phases_deleted_when_overwrite_true(db_session: Session):
+    """ActLabs format: upload A (2 phases for a sample), re-upload B (1 phase, overwrite=True).
+    Only B's phase survives."""
+    from database.models import SampleInfo  # noqa: PLC0415
+    sample = SampleInfo(sample_id="S_STALE001")
+    db_session.add(sample)
+    db_session.flush()
+
+    # Upload A — Quartz + Calcite
+    xlsx_a = make_excel(
+        ["sample_id", "Quartz", "Calcite"],
+        [["S_STALE001", 55.0, 45.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+    assert db_session.query(XRDPhase).filter(
+        XRDPhase.sample_id == "S_STALE001"
+    ).count() == 2
+
+    # Upload B — Quartz only, overwrite=True
+    xlsx_b = make_excel(
+        ["sample_id", "Quartz"],
+        [["S_STALE001", 100.0]],
+    )
+    created, updated, skipped, errors = XRDAutoDetectService.upload(
+        db_session, xlsx_b, overwrite=True
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    phases = db_session.query(XRDPhase).filter(
+        XRDPhase.sample_id == "S_STALE001"
+    ).all()
+    assert len(phases) == 1, f"Expected 1 phase, got {len(phases)}: {[p.mineral_name for p in phases]}"
+    assert phases[0].mineral_name == "Quartz"
+    assert phases[0].amount == pytest.approx(100.0)
+
+
+def test_actlabs_stale_phases_preserved_when_overwrite_false(db_session: Session):
+    """ActLabs format: without overwrite, existing phases not in the new file are preserved."""
+    from database.models import SampleInfo  # noqa: PLC0415
+    sample = SampleInfo(sample_id="S_STALE002")
+    db_session.add(sample)
+    db_session.flush()
+
+    # Upload A — Quartz + Calcite
+    xlsx_a = make_excel(
+        ["sample_id", "Quartz", "Calcite"],
+        [["S_STALE002", 40.0, 60.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_a)
+
+    # Upload B — Quartz only, overwrite=False (default)
+    xlsx_b = make_excel(
+        ["sample_id", "Quartz"],
+        [["S_STALE002", 80.0]],
+    )
+    XRDAutoDetectService.upload(db_session, xlsx_b, overwrite=False)
+
+    phases = db_session.query(XRDPhase).filter(
+        XRDPhase.sample_id == "S_STALE002"
+    ).all()
+    assert len(phases) == 2
+    quartz = next(p for p in phases if p.mineral_name == "Quartz")
+    assert quartz.amount == pytest.approx(80.0)

@@ -86,12 +86,49 @@ function XrdModeToggle({ mode, onChange }: { mode: XrdMode; onChange: (m: XrdMod
   )
 }
 
+// ─── XRD overwrite toggle ─────────────────────────────────────────────────────
+function XrdOverwriteToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          className="w-3.5 h-3.5 rounded accent-red-500"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span className="text-xs text-ink-secondary">
+          Replace existing results for matching experiment / timepoint
+        </span>
+      </label>
+      {checked ? (
+        <p className="text-xs text-amber-400 leading-relaxed pl-5">
+          All existing mineral phases for any matching experiment and timepoint in this file
+          will be deleted and replaced with the values from this upload.
+        </p>
+      ) : (
+        <p className="text-xs text-ink-muted leading-relaxed pl-5">
+          Existing mineral phases for the same experiment and timepoint will be left
+          unchanged. Only new phases will be added.
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 /** Bulk data upload page: one row per upload type with template download and status feedback. */
 export function BulkUploadsPage() {
   const [openRow, setOpenRow] = useState<string | null>(null)
   const [elemDefaultUnit, setElemDefaultUnit] = useState('ppm')
   const [xrdMode, setXrdMode] = useState<XrdMode>('sample')
+  const [xrdOverwrite, setXrdOverwrite] = useState(false)
 
   const toggle = (id: string) => setOpenRow((prev) => (prev === id ? null : id))
   const isOpen = (id: string) => openRow === id
@@ -150,10 +187,20 @@ export function BulkUploadsPage() {
               : "Sample-based format: include a 'sample_id' column plus one column per mineral phase. Aeris instrument exports (sample IDs like '20260218_HPHT070-d19_02') are also accepted."
           }
           accept=".xlsx,.xls,.csv"
-          uploadFn={(file) => bulkUploadsApi.uploadXrdMineralogy(file)}
+          uploadFn={(file) => bulkUploadsApi.uploadXrdMineralogy(file, xrdOverwrite)}
           templateType="xrd-mineralogy"
           templateMode={xrdMode}
-          topContent={<XrdModeToggle mode={xrdMode} onChange={setXrdMode} />}
+          topContent={
+            <>
+              <XrdModeToggle mode={xrdMode} onChange={setXrdMode} />
+              <XrdOverwriteToggle checked={xrdOverwrite} onChange={setXrdOverwrite} />
+            </>
+          }
+          skippedMessage={
+            !xrdOverwrite
+              ? "Some rows were skipped because data already exists for these timepoints. Enable 'Replace existing results' to overwrite."
+              : undefined
+          }
           isOpen={isOpen('xrd-mineralogy')}
           onToggle={() => toggle('xrd-mineralogy')}
         />
