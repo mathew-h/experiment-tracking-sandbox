@@ -144,6 +144,18 @@ def test_negative_concentration_clamped_to_zero():
     fe_val = processed_data[0].get('fe')
     assert fe_val == 0.0, f"Expected 0.0 for negative concentration, got {fe_val}"
 
+    # Small positive concentrations must pass through unchanged (not clamped to 0)
+    positive_df = pd.DataFrame({
+        'Label': ['Serum_MH_011_Day5_5x'],
+        'Type': ['SAMP'],
+        'Element Label': ['Fe 238.204'],
+        'Concentration': [0.001],
+        'Intensity': [1.2],
+    })
+    pos_data, pos_errors = ICPService.process_icp_dataframe(positive_df)
+    assert not pos_errors, f"Unexpected errors: {pos_errors}"
+    assert pos_data[0].get('fe') > 0.0, "Small positive concentration must not be clamped"
+
 def main():
     """Run all tests."""
     print("🔬 ICP Service Column Reference Test")
