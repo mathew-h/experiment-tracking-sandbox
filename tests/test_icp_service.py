@@ -126,22 +126,52 @@ def test_label_parsing():
         except Exception as e:
             print(f"   {label} -> ERROR: {e}")
 
+def test_negative_concentration_clamped_to_zero():
+    """Negative ICP concentrations (instrument noise) must be stored as 0, not negative."""
+    test_data = {
+        'Label': ['Serum_MH_011_Day5_5x'],
+        'Type': ['SAMP'],
+        'Element Label': ['Fe 238.204'],
+        'Concentration': [-0.003],   # negative — below detection limit
+        'Intensity': [1.2],
+    }
+
+    df = pd.DataFrame(test_data)
+    processed_data, errors = ICPService.process_icp_dataframe(df)
+
+    assert not errors, f"Unexpected errors: {errors}"
+    assert len(processed_data) == 1
+    fe_val = processed_data[0].get('fe')
+    assert fe_val == 0.0, f"Expected 0.0 for negative concentration, got {fe_val}"
+
+    # Small positive concentrations must pass through unchanged (not clamped to 0)
+    positive_df = pd.DataFrame({
+        'Label': ['Serum_MH_011_Day5_5x'],
+        'Type': ['SAMP'],
+        'Element Label': ['Fe 238.204'],
+        'Concentration': [0.001],
+        'Intensity': [1.2],
+    })
+    pos_data, pos_errors = ICPService.process_icp_dataframe(positive_df)
+    assert not pos_errors, f"Unexpected errors: {pos_errors}"
+    assert pos_data[0].get('fe') > 0.0, "Small positive concentration must not be clamped"
+
 def main():
     """Run all tests."""
     print("🔬 ICP Service Column Reference Test")
     print("=" * 50)
-    
+
     print(f"\n📋 Expected Column Names:")
     print(f"   - Label: Sample identifiers")
     print(f"   - Element Label: Element with wavelength (e.g., 'Al 394.401')")
     print(f"   - Concentration: Raw concentration values")
     print(f"   - Intensity: Signal intensity for quality")
-    
+
     test_column_requirements()
     test_element_extraction()
     test_dilution_correction()
     test_label_parsing()
-    
+
     print("\n" + "=" * 50)
     print("🏁 Test completed!")
 

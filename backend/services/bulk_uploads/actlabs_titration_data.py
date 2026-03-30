@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -9,7 +10,28 @@ from sqlalchemy.orm import Session
 
 from database import Analyte, ElementalAnalysis, SampleInfo
 from database.models.analysis import ExternalAnalysis
-from backend.services.bulk_uploads._id_match import fuzzy_find_sample
+
+
+def _normalize_sample_id(sample_id: str) -> str:
+    """Normalize a sample ID for fuzzy matching: lowercase, remove all non-alphanumeric characters."""
+    return re.sub(r"[^a-z0-9]", "", sample_id.lower())
+
+
+def _fuzzy_find_sample(db: Session, raw_sample_id: str) -> Optional[SampleInfo]:
+    """Find a SampleInfo by normalized sample_id (case-insensitive, symbols ignored).
+
+    Tries exact match first; falls back to normalizing both sides.
+    Returns the first match or None.
+    """
+    sample = db.query(SampleInfo).filter(SampleInfo.sample_id == raw_sample_id).first()
+    if sample:
+        return sample
+    normalized_input = _normalize_sample_id(raw_sample_id)
+    all_samples = db.query(SampleInfo).all()
+    for s in all_samples:
+        if _normalize_sample_id(s.sample_id) == normalized_input:
+            return s
+    return None
 
 
 def _write_elemental_record(
@@ -168,7 +190,6 @@ class ElementalCompositionService:
             ext_analysis_cache[sample_id] = stub.id
             return stub.id
 
-        affected_sample_ids: set[str] = set()
         for idx, row in df.iterrows():
             try:
                 sample_id = str(row.get(sample_col) or '').strip()
@@ -177,7 +198,7 @@ class ElementalCompositionService:
                     continue
 
                 # Ensure sample exists (fuzzy: case-insensitive, symbols stripped)
-                sample = fuzzy_find_sample(db, sample_id)
+                sample = _fuzzy_find_sample(db, sample_id)
                 if not sample:
                     errors.append(f"Row {idx+2}: sample_id '{sample_id}' not found")
                     continue
@@ -203,16 +224,8 @@ class ElementalCompositionService:
                     )
                     created += delta_c
                     updated += delta_u
-                    if delta_c or delta_u:
-                        affected_sample_ids.add(canonical_id)
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
-
-        # Recalculate total_ferrous_iron_g for experiments linked to affected samples.
-        # Handles the case where result data was uploaded before rock characterisation.
-        if affected_sample_ids:
-            from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
-            recalculate_conditions_for_samples(db, affected_sample_ids)
 
         return created, updated, skipped, errors
 
@@ -460,11 +473,6 @@ class ActlabsRockTitrationService:
             else:
                 db.add(Analyte(analyte_symbol=sym, unit=unit or "ppm"))
 
-        # Flush newly added analytes so they have PKs before the next query.
-        # The session has autoflush=False, so without this flush the query below
-        # would not see any analytes added in the loop above.
-        db.flush()
-
         # Preload analyte ids
         all_analytes = db.query(Analyte).all()
         symbol_to_analyte = {a.analyte_symbol.lower(): a for a in all_analytes}
@@ -488,7 +496,6 @@ class ActlabsRockTitrationService:
             return stub.id
 
         # Iterate rows
-        affected_sample_ids: set[str] = set()
         for i in range(len(data)):
             sid_raw = data.iat[i, sample_id_col]
             if pd.isna(sid_raw):
@@ -497,7 +504,7 @@ class ActlabsRockTitrationService:
             if not sample_id:
                 continue
             # ensure sample exists (fuzzy: case-insensitive, symbols stripped)
-            sample = fuzzy_find_sample(db, sample_id)
+            sample = _fuzzy_find_sample(db, sample_id)
             if not sample:
                 errors.append(f"Row {i+5}: sample_id '{sample_id}' not found")
                 continue
@@ -520,14 +527,6 @@ class ActlabsRockTitrationService:
                 )
                 results_created += delta_c
                 results_updated += delta_u
-                if delta_c or delta_u:
-                    affected_sample_ids.add(canonical_id)
-
-        # Recalculate total_ferrous_iron_g for experiments linked to affected samples.
-        # Handles the case where result data was uploaded before rock characterisation.
-        if affected_sample_ids:
-            from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
-            recalculate_conditions_for_samples(db, affected_sample_ids)
 
         return results_created, results_updated, skipped, errors
 
