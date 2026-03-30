@@ -1,6 +1,15 @@
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Stub frontend.config.variable_config before any imports that depend on it
+# (icp_service, scalar_results, pxrf_data parsers all import from frontend.config)
+from unittest.mock import MagicMock
+sys.modules['frontend'] = MagicMock()
+sys.modules['frontend.config'] = MagicMock()
+sys.modules['frontend.config.variable_config'] = MagicMock(
+    ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mg', 'ca', 'cr', 'co', 'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh', 'ir', 'pd', 'ru', 'os', 'tl']
+)
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
