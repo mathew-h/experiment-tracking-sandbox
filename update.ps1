@@ -55,11 +55,14 @@ function Abort {
 # -- Step 1: Capture HEAD before pull -----------------------------------------
 Write-Step "Step 1: git pull"
 
+git -C $RepoRoot checkout main 2>&1 | ForEach-Object { Write-Host "  $_" }
+if ($LASTEXITCODE -ne 0) { Abort "git checkout main" "exit code $LASTEXITCODE" }
+
 $headBefore = git -C $RepoRoot rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) { Abort "git rev-parse" $headBefore }
 
-git -C $RepoRoot pull 2>&1 | ForEach-Object { Write-Host "  $_" }
-if ($LASTEXITCODE -ne 0) { Abort "git pull" "exit code $LASTEXITCODE - check for merge conflicts or network issues" }
+git -C $RepoRoot pull origin main 2>&1 | ForEach-Object { Write-Host "  $_" }
+if ($LASTEXITCODE -ne 0) { Abort "git pull origin main" "exit code $LASTEXITCODE - check for merge conflicts or network issues" }
 
 # -- Step 2: Detect changes ---------------------------------------------------
 Write-Step "Step 2: Detecting changes"
