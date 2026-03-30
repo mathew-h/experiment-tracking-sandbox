@@ -122,6 +122,7 @@ class ResultWithFlagsResponse(BaseModel):
     h2_grams_per_ton_yield: Optional[float] = None
     h2_micromoles: Optional[float] = None
     gross_ammonium_concentration_mM: Optional[float] = None
+    background_ammonium_concentration_mM: Optional[float] = None
     final_conductivity_mS_cm: Optional[float] = None
     final_ph: Optional[float] = None
 

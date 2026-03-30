@@ -205,6 +205,7 @@ def get_experiment_results(
             h2_grams_per_ton_yield=scalar.h2_grams_per_ton_yield if scalar else None,
             h2_micromoles=scalar.h2_micromoles if scalar else None,
             gross_ammonium_concentration_mM=scalar.gross_ammonium_concentration_mM if scalar else None,
+            background_ammonium_concentration_mM=scalar.background_ammonium_concentration_mM if scalar else None,
             final_conductivity_mS_cm=scalar.final_conductivity_mS_cm if scalar else None,
             final_ph=scalar.final_ph if scalar else None,
         ))
@@ -349,7 +350,6 @@ def set_experiment_background_ammonium(
 
     for scalar in scalars:
         scalar.background_ammonium_concentration_mM = payload.value
-        db.flush()
         recalculate(scalar, db)
 
     db.commit()

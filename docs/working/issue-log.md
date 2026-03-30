@@ -2,6 +2,17 @@
 
 Append-only entries from `/complete-task` for task types **issue** and **inline** (newest at bottom).
 
+## 2026-03-30 | inline — Fix background NH₄ "Apply to all" not reflecting in UI + extend reporting views
+- **Files changed:**
+  - `database/event_listeners.py` — `v_dim_timepoints`: added `brine_modification_description`; `v_results_scalar`: added `net_ammonium_concentration` computed column
+  - `update.ps1` — explicit `git checkout main` before pull; `pull origin main` instead of bare pull
+  - `backend/api/schemas/results.py` — added `background_ammonium_concentration_mM` to `ResultWithFlagsResponse`
+  - `backend/api/routers/experiments.py` — populated `background_ammonium_concentration_mM` in `get_experiment_results()`; removed `db.flush()` from inside the background-ammonium loop (now single `db.commit()` after all recalculations)
+  - `frontend/src/api/experiments.ts` — added `background_ammonium_concentration_mM` to `ResultWithFlags` interface
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — button text and input initialisation now derive from `storedBgValue` (first result's DB value) instead of hardcoded `DEFAULT_BACKGROUND_NH4`
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-03-24 | inline — Close GitHub issue #3 (Ferrous Iron Yield)
 - **Files changed:** none — administrative closure only
 - **Tests added:** no

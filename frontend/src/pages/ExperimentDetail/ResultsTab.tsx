@@ -98,6 +98,12 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
     queryFn: () => experimentsApi.getResults(experimentId),
   })
 
+  // Derive the current background NH4 from the first result with a scalar value,
+  // falling back to the default. This reflects what is actually stored in the DB
+  // and stays correct after page reloads and after "Apply to all" refetches.
+  const storedBgValue = results?.find((r) => r.background_ammonium_concentration_mM != null)
+    ?.background_ammonium_concentration_mM ?? DEFAULT_BACKGROUND_NH4
+
   const bgMutation = useMutation({
     mutationFn: (value: number) => experimentsApi.setBackgroundAmmonium(experimentId, value),
     onSuccess: () => {
@@ -154,10 +160,10 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             </>
           ) : (
             <button
-              onClick={() => { setBgValue(String(DEFAULT_BACKGROUND_NH4)); setBgInput(true) }}
+              onClick={() => { setBgValue(String(storedBgValue)); setBgInput(true) }}
               className="text-xs text-ink-secondary hover:text-ink-primary underline-offset-2 hover:underline"
             >
-              Background NH₄: {DEFAULT_BACKGROUND_NH4} mM
+              Background NH₄: {storedBgValue} mM
             </button>
           )}
         </div>
