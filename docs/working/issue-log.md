@@ -143,113 +143,22 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no — requires a live PostgreSQL instance; manual re-run of both uploads is the acceptance test
 - **Decision logged:** no
 
-## 2026-03-26 | issue #9 — Add result entry form to Results tab
+## 2026-03-27 | issue #10 — Sample analysis data on sample detail page
 - **Files changed:**
-  - `backend/api/schemas/results.py` — added `brine_modification_description: Optional[str] = None` to `ResultCreate`
-  - `frontend/src/api/results.ts` — added `getScalar(resultId)` calling `GET /api/results/scalar/{result_id}`; added `brine_modification_description` and `measurement_date` to `ResultCreate`; added `measurement_date` to `ScalarCreate`
-  - `frontend/src/pages/ExperimentDetail/AddResultsModal.tsx` — new: 9-field form modal; PSI→MPa conversion for gas pressure; two-step mutation (POST /api/results then POST /api/results/scalar); inline server error display; invalidates experiment-results cache on success
-  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — "Add Results" button in action bar (always visible); modal state; fixed `ExpandedRow` to use `getScalar()` instead of broken `listScalar`; added `experimentFk: number` prop
-  - `frontend/src/pages/ExperimentDetail/index.tsx` — pass `experimentFk={experiment.id}` to `ResultsTab`
+  - `backend/api/schemas/samples.py` — added `PXRFElementalData` and `XRDPhaseData` schemas; extended `ExternalAnalysisResponse` with optional `pxrf_data` and `xrd_data` fields
+  - `backend/api/routers/samples.py` — eager-load `xrd_analysis` on `external_analyses`; bulk-fetch pXRF readings and average elemental values per analysis in `get_sample()`; auto-correct `characterized` flag at read time; added `_avg_pxrf()`, `_get_xrd_data()` helpers; `_to_analysis_response()` accepts optional `pxrf_map`
+  - `frontend/src/api/samples.ts` — added `PXRFElementalData` and `XRDPhaseData` interfaces; extended `ExternalAnalysis` with `pxrf_data` and `xrd_data`
+  - `frontend/src/pages/SampleDetail/OverviewTab.tsx` — added "Elemental Composition" card rendering `elemental_results` as a table (hidden when empty)
+  - `frontend/src/pages/SampleDetail/AnalysesTab.tsx` — added `PXRFDataTable` and `XRDPhaseTable` sub-components rendered inline under each analysis entry
 - **Tests added:** no
 - **Decision logged:** no
 
-## 2026-03-26 | inline — Fuzzy sample/experiment ID matching in bulk upload services
+## 2026-03-30 | inline — Clamp negative ICP ppm values to zero
 - **Files changed:**
-  - `backend/services/bulk_uploads/_id_match.py` — new shared module: `normalize_id`, `fuzzy_find_sample`, `fuzzy_find_experiment`
-  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `ElementalCompositionService` and `ActlabsRockTitrationService` use `fuzzy_find_sample`; canonical ID used for all DB writes
-  - `backend/services/bulk_uploads/actlabs_xrd_report.py` — `XRDUploadService` uses `fuzzy_find_sample`; canonical ID used for ExternalAnalysis, XRDAnalysis, XRDPhase writes
-  - `backend/services/bulk_uploads/timepoint_modifications.py` — `TimepointModificationsService` uses `fuzzy_find_experiment`; canonical experiment ID used in audit log and feedback
-- **Tests added:** no
-- **Decision logged:** no
-
-## 2026-03-26 | inline — Docs audit: correct implementation details across three docs
-- **Files changed:**
-  - `docs/CALCULATIONS.md` — fix background ammonium default 0.3→0.2 mM (3 places + verification result 24.38%→24.61%)
-  - `docs/LOCKED_COMPONENTS.md` — remove non-existent stored field `net_ammonium_concentration_mM`; add 5 undocumented parsers (xrd_upload, experiment_additives, metric_groups, timepoint_modifications, master_bulk_upload)
-  - `docs/DIRECTORY_STRUCTURE.md` — fix calc module names; fix auth file name (firebase.py→firebase_auth.py); fix backend/core→backend/config/settings.py; fix dependencies file→dir; remove non-existent component subdirs
-- **Tests added:** no
-- **Decision logged:** no
-
-## 2026-03-26 | inline — Fix floating-point display in expanded scalar row
-- **Files changed:**
-  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `ExpandedRow` scalar values: replaced `String(val)` with `fmt(val as number, 1)` so all scalar fields render to 1 decimal place
-- **Tests added:** no
-- **Decision logged:** no
-
-## 2026-03-26 | inline — Add v_sample_xrd reporting view
-- **Files changed:**
-  - `database/event_listeners.py` — added `v_sample_xrd` entry to `_VIEWS`; joins `xrd_phases → external_analyses → sample_info`; filters to XRD analyses with `sample_id IS NOT NULL` and `time_post_reaction_days IS NULL`
-  - `docs/POWERBI_MODEL.md` — created: full catalog of all 11 Power BI views across Experiment, Result, and Sample sections with relationship map
-- **Tests added:** no — pure SQL DDL; verified against dev DB (233 rows, 6 columns, correct types)
-- **Decision logged:** no
-
-## 2026-03-27 | issue #15 — Fix '+ Add additive' button not working on new experiment Additives step
-- **Files changed:**
-  - `frontend/src/pages/NewExperiment/Step3Additives.tsx` — replaced `crypto.randomUUID()` with exported `generateId()` (Math.random-based UUID v4); safe in non-secure HTTP contexts
-  - `frontend/src/pages/NewExperiment/index.tsx` — imported `generateId` and replaced `crypto.randomUUID()` in `handleCopyFrom`
-- **Root cause:** `crypto.randomUUID()` is only available in secure contexts (HTTPS). The lab app runs on plain HTTP over LAN, so clicking the button threw a silent TypeError and added no row.
-- **Tests added:** no
-- **Decision logged:** no
-
-## 2026-03-26 | inline — Auto-recalculate total_ferrous_iron_g on elemental upload
-- **Files changed:**
-  - `backend/services/elemental_composition_service.py` — added `recalculate_conditions_for_samples(db, sample_ids)` helper
-  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `ActlabsRockTitrationService.import_excel()` and `ElementalCompositionService.bulk_upsert_wide_from_excel()` now call helper after writing rows
-  - `tests/services/bulk_uploads/test_elemental_upload_recalc.py` — 6 new tests
-- **Tests added:** yes — helper unit tests (happy path, null rock mass, multiple experiments, isolation) + integration tests for both upload paths
-- **Decision logged:** no
-
-## 2026-03-27 | issue #14 — Fuzzy matching for master result upload sync
-- **Files changed:**
-  - `backend/services/bulk_uploads/_id_match.py` — added leading-zero stripping step to `normalize_id`; updated module docstring examples
-  - `backend/services/scalar_results_service.py` — replaced `_find_experiment`'s hand-rolled SQL normalization with `fuzzy_find_experiment` from `_id_match`
-  - `tests/services/bulk_uploads/test_id_match.py` — created: 16 parametrized unit tests for `normalize_id` (force lower, strip symbols, strip leading zeros, edge cases)
-  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — added 3 integration tests for fuzzy-matched IDs in master upload
-- **Tests added:** yes
-- **Decision logged:** no
-
-## 2026-03-27 | issue #17 — Add v_dim_timepoints conformed time dimension view
-- **Files changed:**
-  - `database/event_listeners.py` — added `v_dim_timepoints` to `_VIEWS` list (before `v_results_scalar`); one row per primary timepoint per experiment
-  - `tests/views/__init__.py` — new package marker
-  - `tests/views/test_dim_timepoints.py` — 6 tests: view existence, primary-only filtering, multi-experiment rows, column correctness, result_id alignment with scalar and ICP views
-  - `docs/POWERBI_MODEL.md` — added view to Experiment Views table, updated relationship diagram (results now route through `v_dim_timepoints`), added Field Visibility Guide section, added XRD independent-time note
-- **Tests added:** yes — 6 pytest tests (PostgreSQL-backed)
-- **Decision logged:** no
-
-## 2026-03-27 | issue #13 — Sample list description column and searchable description
-- **Files changed:**
-  - `backend/api/schemas/samples.py` — added `description: Optional[str] = None` to `SampleListItem`
-  - `backend/api/routers/samples.py` — populated `description` in `list_samples` items comprehension
-  - `frontend/src/api/samples.ts` — added `description: string | null` to `SampleListItem` interface
-  - `frontend/src/pages/Samples.tsx` — added Description column (truncated with tooltip, em-dash fallback) between Classification and Location
-  - `tests/api/test_samples.py` — 2 new tests: `test_list_samples_description_in_response`, `test_list_samples_search_by_description`
-  - `frontend/e2e/journeys/11-sample-management.spec.ts` — 1 new e2e test for Description column header
-- **Tests added:** yes — 2 backend API tests, 1 Playwright e2e test
-- **Decision logged:** no
-
-## 2026-03-27 | inline — Fix missing db.commit() in bulk upload endpoints + e2e regression suite
-
-- **Root cause:** Four bulk upload endpoints (`upload_scalar_results`, `upload_new_experiments`, `upload_pxrf`, `upload_aeris_xrd`) were missing `db.commit()`. SQLAlchemy sessions use `autocommit=False` — without an explicit commit, `db.close()` in the `get_db` `finally` block silently rolls back all flushed changes. Endpoints returned correct created/updated counts from in-memory session state, making uploads appear successful while data was discarded.
-- **Files changed:**
-  - `backend/api/routers/bulk_uploads.py` — added `db.commit()` + `db.rollback()` pattern to `upload_scalar_results`, `upload_new_experiments`, `upload_pxrf`, `upload_aeris_xrd`
-  - `frontend/e2e/fixtures/auth.ts` — fixed login selector: `button[type="submit"]` instead of `getByRole('button', { name: /sign in/i })` (ambiguous after Register tab added)
-  - `frontend/e2e/journeys/13-master-bulk-upload.spec.ts` — new e2e regression suite (3 tests): master results upload + Serum_MP_032 results verification, solution chemistry commit regression, actlabs rock upload
-  - `docs/sample_data/A25-09781final.xlsx` — added actlabs sample file for e2e test
-  - `docs/sample_data/Master Reactor Sampling Tracker.xlsx` — updated with new Serum_MP experiments
-  - `alembic/versions/a1b2c3d4e5f6_background_ammonium_default_0_2.py` — fixed raw SQL to quote mixed-case column name for PostgreSQL (`"background_ammonium_concentration_mM"`)
-- **Tests added:** yes — 3 Playwright e2e tests (all passing)
-- **Decision logged:** no
-
-## 2026-03-27 | inline — Fix bulk upload row failures aborting entire batch (master results, actlabs, ICP-OES)
-- **Root causes:**
-  - `master_bulk_upload._process_bytes`: no savepoints → flush errors broke session for all subsequent rows; router's `if not errors: db.commit()` silently rolled back valid rows when any row failed
-  - `actlabs_titration_data.import_excel`: new `Analyte` rows added via `db.add()` without `db.flush()` before `db.query(Analyte).all()` (session has `autoflush=False`) → newly added analytes invisible to the query → elemental data silently skipped; router rolled back everything on any sample-not-found error
-  - `icp_service.bulk_create_icp_results`: no savepoints → `IntegrityError` from internal flush poisoned session; subsequent rows failed; final `db.commit()` raised; outer except called `db.rollback()` discarding all rows
-- **Files changed:**
-  - `backend/services/bulk_uploads/master_bulk_upload.py` — per-row `db.begin_nested()` savepoints
-  - `backend/services/bulk_uploads/actlabs_titration_data.py` — `db.flush()` after analyte upsert loop, before `all_analytes` query
-  - `backend/api/routers/bulk_uploads.py` — master-results: removed `if not errors:` guard (always commit); actlabs-rock: removed `else: db.rollback()`
-  - `backend/services/icp_service.py` — per-sample `db.begin_nested()` savepoints in `bulk_create_icp_results`
-- **Tests added:** no
+  - `backend/services/icp_service.py` — `process_icp_dataframe`: `float(concentration)` → `max(0.0, float(concentration))` to clamp instrument noise below detection limit
+  - `tests/test_icp_service.py` — added `test_negative_concentration_clamped_to_zero` (negative clamp + positive boundary assertion)
+  - `tests/conftest.py` — added `sys.modules` stub for `frontend.config.variable_config` (enables test collection; pattern per backend/CLAUDE.md)
+  - `alembic/versions/4e8b99151ab0_merge_heads_before_icp_clamp.py` — merge migration joining two open heads
+  - `alembic/versions/458f344f73d8_clamp_negative_icp_ppm_to_zero.py` — data migration: sets all existing negative ICP element ppm values to 0 (no-op downgrade)
+- **Tests added:** yes — `test_negative_concentration_clamped_to_zero` (upload-path clamping, with positive boundary assertion)
 - **Decision logged:** no
