@@ -35,7 +35,7 @@ export interface ExperimentDetail {
   created_at: string
   updated_at: string | null
   conditions: Record<string, unknown> | null
-  notes: Array<{ id: number; note_text: string; created_at: string }>
+  notes: Array<{ id: number; note_text: string; created_at: string; updated_at: string | null }>
   modifications: Array<{
     id: number
     modified_by: string | null
@@ -118,6 +118,9 @@ export const experimentsApi = {
 
   addNote: (experimentId: string, text: string) =>
     apiClient.post(`/experiments/${experimentId}/notes`, { note_text: text }).then((r) => r.data),
+
+  patchNote: (experimentId: string, noteId: number, text: string) =>
+    apiClient.patch<{ id: number; note_text: string; created_at: string; updated_at: string | null }>(`/experiments/${experimentId}/notes/${noteId}`, { note_text: text }),
 
   delete: (experimentId: string) =>
     apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),
