@@ -16,6 +16,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a note |
+| PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit note text. Body: `{"note_text": "..."}`. No-op if text unchanged. Writes ModificationsLog. Returns updated note with `updated_at`. |
 
 ## Conditions
 
@@ -25,6 +26,16 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/conditions/by-experiment/{experiment_id}` | Get conditions by experiment string ID |
 | POST | `/api/conditions` | Create conditions (triggers `water_to_rock_ratio` calc) |
 | PATCH | `/api/conditions/{id}` | Update conditions (recalculates derived fields) |
+
+## Additives
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/experiments/{experiment_id}/additives` | List chemical additives for an experiment |
+| PUT | `/api/experiments/{experiment_id}/additives/{compound_id}` | Upsert additive by compound PK. Body: `{"amount": float, "unit": string}`. Triggers recalculation. Writes ModificationsLog. |
+| DELETE | `/api/experiments/{experiment_id}/additives/{compound_id}` | Remove additive by compound PK. Writes ModificationsLog. |
+| PATCH | `/api/additives/{additive_id}` | Partial update by additive PK. Accepts `compound_id`, `amount`, `unit`, `addition_order`, `addition_method`. Triggers recalculation. Writes ModificationsLog. Returns 409 if new compound is already in the experiment. |
+| DELETE | `/api/additives/{additive_id}` | Remove additive by additive PK. Writes ModificationsLog. |
 
 ## Results
 

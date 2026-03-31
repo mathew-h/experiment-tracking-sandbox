@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { conditionsApi, type ConditionsResponse, type ConditionsPayload } from '@/api/conditions'
-import { chemicalsApi, type Compound } from '@/api/chemicals'
+import { chemicalsApi, type Compound, type ChemicalAdditive, type AdditiveUpdatePayload } from '@/api/chemicals'
 import { Button, Input, Select, Modal, useToast } from '@/components/ui'
 import { CompoundFormModal } from '@/components/CompoundFormModal'
 
@@ -97,12 +97,45 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
   })
 
   const deleteAdditiveMutation = useMutation({
-    mutationFn: (compoundId: number) => chemicalsApi.deleteAdditive(experimentId, compoundId),
+    mutationFn: (additiveId: number) => chemicalsApi.deleteAdditiveById(additiveId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['additives', experimentId] })
       success('Additive removed')
     },
     onError: (err: Error) => toastError('Failed to remove additive', err.message),
+  })
+
+  // State for edit additive modal
+  const [editAdditiveOpen, setEditAdditiveOpen] = useState(false)
+  const [editingAdditive, setEditingAdditive] = useState<ChemicalAdditive | null>(null)
+  const [editCompound, setEditCompound] = useState<{ id: number; name: string } | null>(null)
+  const [editAmount, setEditAmount] = useState('')
+  const [editUnit, setEditUnit] = useState('g')
+  const [editCompoundQuery, setEditCompoundQuery] = useState('')
+  const [editCompoundDropdownOpen, setEditCompoundDropdownOpen] = useState(false)
+
+  // Compound search for edit modal
+  const { data: editCompoundResults = [] } = useQuery({
+    queryKey: ['compounds', editCompoundQuery, 'edit'],
+    queryFn: () => chemicalsApi.listCompounds({ search: editCompoundQuery, limit: 10 }),
+    enabled: editCompoundQuery.length >= 1 && editCompoundDropdownOpen,
+  })
+
+  const patchAdditiveMutation = useMutation({
+    mutationFn: () => {
+      if (!editingAdditive) throw new Error('No additive selected')
+      const payload: AdditiveUpdatePayload = {}
+      if (editCompound) payload.compound_id = editCompound.id
+      payload.amount = parseFloat(editAmount)
+      payload.unit = editUnit
+      return chemicalsApi.patchAdditive(editingAdditive.id, payload)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['additives', experimentId] })
+      success('Additive updated')
+      closeEditModal()
+    },
+    onError: (err: Error) => toastError('Failed to update additive', err.message),
   })
 
   const saveMutation = useMutation({
@@ -154,6 +187,24 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
     setAdditiveAmount('')
     setAdditiveUnit('g')
     setCompoundQuery('')
+  }
+
+  const openEditModal = (a: ChemicalAdditive) => {
+    setEditingAdditive(a)
+    setEditCompound(a.compound ? { id: a.compound.id, name: a.compound.name } : null)
+    setEditCompoundQuery(a.compound?.name ?? '')
+    setEditAmount(String(a.amount))
+    setEditUnit(a.unit)
+    setEditAdditiveOpen(true)
+  }
+
+  const closeEditModal = () => {
+    setEditAdditiveOpen(false)
+    setEditingAdditive(null)
+    setEditCompound(null)
+    setEditCompoundQuery('')
+    setEditAmount('')
+    setEditUnit('g')
   }
 
   const set = (k: keyof ConditionsPayload) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -218,10 +269,24 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
                 {a.mass_in_grams != null && (
                   <span className="text-xs text-ink-muted">{a.mass_in_grams.toFixed(4)} g</span>
                 )}
+                {/* Edit pencil */}
                 <button
-                  onClick={() => deleteAdditiveMutation.mutate(a.compound_id)}
-                  className="ml-auto text-xs text-ink-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                  onClick={() => openEditModal(a)}
+                  className="ml-auto text-xs text-ink-muted hover:text-ink-primary opacity-0 group-hover:opacity-100 transition-opacity px-1"
                   type="button"
+                  title="Edit additive"
+                >
+                  <svg className="w-3 h-3 inline" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round"
+                      d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
+                  </svg>
+                </button>
+                {/* Delete × */}
+                <button
+                  onClick={() => deleteAdditiveMutation.mutate(a.id)}
+                  className="text-xs text-ink-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                  type="button"
+                  title="Remove additive"
                 >
                   ×
                 </button>
@@ -371,6 +436,86 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
           initialName={createCompoundName}
           minimal
         />
+      </Modal>
+
+      {/* Edit Additive Modal */}
+      <Modal open={editAdditiveOpen} onClose={closeEditModal} title="Edit Chemical Additive">
+        <div className="space-y-3 p-4">
+          {/* Compound typeahead */}
+          <div className="relative">
+            <label className="block text-xs font-medium text-ink-secondary mb-1">Compound</label>
+            {editCompound ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-ink-primary font-medium">{editCompound.name}</span>
+                <button
+                  type="button"
+                  className="text-xs text-ink-muted hover:text-ink-primary"
+                  onClick={() => { setEditCompound(null); setEditCompoundQuery('') }}
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  className="w-full bg-surface-input border border-surface-border rounded px-2 py-1.5 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+                  placeholder="Search compounds…"
+                  value={editCompoundQuery}
+                  onChange={(e) => { setEditCompoundQuery(e.target.value); setEditCompoundDropdownOpen(true) }}
+                  onFocus={() => setEditCompoundDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setEditCompoundDropdownOpen(false), 150)}
+                  autoComplete="off"
+                />
+                {editCompoundDropdownOpen && editCompoundQuery.length >= 1 && (
+                  <div className="absolute z-10 left-0 right-0 top-full mt-0.5 bg-surface-raised border border-surface-border rounded shadow-lg max-h-48 overflow-y-auto">
+                    {editCompoundResults.map((c: Compound) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-sm text-ink-primary hover:bg-surface-border/30"
+                        onMouseDown={() => {
+                          setEditCompound({ id: c.id, name: c.name })
+                          setEditCompoundQuery(c.name)
+                          setEditCompoundDropdownOpen(false)
+                        }}
+                      >
+                        {c.name}{c.formula ? ` (${c.formula})` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Amount"
+              type="number"
+              value={editAmount}
+              onChange={(e) => setEditAmount(e.target.value)}
+            />
+            <Select
+              label="Unit"
+              options={ADDITIVE_UNIT_OPTIONS}
+              placeholder="Unit…"
+              value={editUnit}
+              onChange={(e) => setEditUnit(e.target.value)}
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="ghost" onClick={closeEditModal}>Cancel</Button>
+            <Button
+              variant="primary"
+              loading={patchAdditiveMutation.isPending}
+              disabled={!editCompound || !editAmount || !editUnit}
+              onClick={() => patchAdditiveMutation.mutate()}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
       </Modal>
     </>
   )

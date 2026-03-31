@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from database.models.enums import ExperimentStatus
 
 
@@ -86,6 +86,10 @@ class NoteCreate(BaseModel):
     note_text: str
 
 
+class NoteUpdate(BaseModel):
+    note_text: str = Field(min_length=1)
+
+
 class NoteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -93,3 +97,4 @@ class NoteResponse(BaseModel):
     experiment_id: str
     note_text: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None

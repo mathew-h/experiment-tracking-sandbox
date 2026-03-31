@@ -45,6 +45,14 @@ export interface AdditiveUpsertPayload {
   addition_method?: string
 }
 
+export interface AdditiveUpdatePayload {
+  compound_id?: number
+  amount?: number
+  unit?: string
+  addition_order?: number
+  addition_method?: string
+}
+
 export type CompoundCreatePayload = Omit<Compound, 'id'>
 export type CompoundUpdatePayload = Partial<Omit<Compound, 'id'>>
 
@@ -82,4 +90,12 @@ export const chemicalsApi = {
   /** Delete an additive by experiment string ID + compound ID. */
   deleteAdditive: (experimentId: string, compoundId: number) =>
     apiClient.delete(`/experiments/${experimentId}/additives/${compoundId}`),
+
+  /** Patch an additive by its primary key. */
+  patchAdditive: (additiveId: number, payload: AdditiveUpdatePayload) =>
+    apiClient.patch<ChemicalAdditive>(`/additives/${additiveId}`, payload),
+
+  /** Delete an additive by its primary key. */
+  deleteAdditiveById: (additiveId: number) =>
+    apiClient.delete<void>(`/additives/${additiveId}`),
 }

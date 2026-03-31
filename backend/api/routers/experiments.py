@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from database.models.experiments import Experiment, ExperimentNotes
+from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.enums import ExperimentStatus
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
-    NoteCreate, NoteResponse,
+    NoteCreate, NoteResponse, NoteUpdate,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
@@ -278,10 +278,14 @@ def upsert_experiment_additive(
         .where(ChemicalAdditive.compound_id == compound_id)
     ).scalar_one_or_none()
     if existing:
+        old_vals = {"amount": existing.amount, "unit": existing.unit.value if existing.unit else None}
+        mod_type = "update"
         for k, v in payload.model_dump(exclude_unset=True).items():
             setattr(existing, k, v)
         additive = existing
     else:
+        old_vals = None
+        mod_type = "create"
         additive = ChemicalAdditive(
             experiment_id=conditions.id,
             compound_id=compound_id,
@@ -290,6 +294,18 @@ def upsert_experiment_additive(
         db.add(additive)
     db.flush()
     recalculate(additive, db)
+    exp = db.execute(select(Experiment).where(Experiment.experiment_id == experiment_id)).scalar_one_or_none()
+    new_vals = {"amount": additive.amount, "unit": additive.unit.value if additive.unit else None}
+    if exp is not None:
+        db.add(ModificationsLog(
+            experiment_id=experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type=mod_type,
+            modified_table="chemical_additives",
+            old_values=old_vals,
+            new_values=new_vals,
+        ))
     db.commit()
     db.refresh(additive)
     log.info("additive_upserted", experiment_id=experiment_id, compound_id=compound_id)
@@ -316,7 +332,25 @@ def delete_experiment_additive(
     ).scalar_one_or_none()
     if additive is None:
         raise HTTPException(status_code=404, detail="Additive not found")
+    exp = db.execute(select(Experiment).where(Experiment.experiment_id == experiment_id)).scalar_one_or_none()
+    compound = db.get(Compound, compound_id)
+    old_vals = {
+        "compound_id": compound_id,
+        "compound_name": compound.name if compound else None,
+        "amount": additive.amount,
+        "unit": additive.unit.value if additive.unit else None,
+    }
     db.delete(additive)
+    if exp is not None:
+        db.add(ModificationsLog(
+            experiment_id=experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type="delete",
+            modified_table="chemical_additives",
+            old_values=old_vals,
+            new_values=None,
+        ))
     db.commit()
     log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
     return Response(status_code=204)
@@ -496,4 +530,45 @@ def add_note(
     db.add(note)
     db.commit()
     db.refresh(note)
+    return NoteResponse.model_validate(note)
+
+
+@router.patch("/{experiment_id}/notes/{note_id}", response_model=NoteResponse)
+def patch_note(
+    experiment_id: str,
+    note_id: int,
+    payload: NoteUpdate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> NoteResponse:
+    """Edit the text of an existing note. No-op if text is unchanged. Writes ModificationsLog."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    note = db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.id == note_id)
+        .where(ExperimentNotes.experiment_fk == exp.id)
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if note.note_text == payload.note_text:
+        return NoteResponse.model_validate(note)
+    old_text = note.note_text
+    note.note_text = payload.note_text
+    db.flush()
+    db.add(ModificationsLog(
+        experiment_id=experiment_id,
+        experiment_fk=exp.id,
+        modified_by=current_user.email,
+        modification_type="update",
+        modified_table="experiment_notes",
+        old_values={"note_text": old_text},
+        new_values={"note_text": payload.note_text},
+    ))
+    db.commit()
+    db.refresh(note)
+    log.info("note_updated", experiment_id=experiment_id, note_id=note_id)
     return NoteResponse.model_validate(note)

@@ -163,6 +163,23 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — `test_negative_concentration_clamped_to_zero` (upload-path clamping, with positive boundary assertion)
 - **Decision logged:** no
 
+## 2026-03-31 | issue #22 — Experiment detail: edit/delete chemical additives and notes
+- **Files changed:**
+  - `backend/api/schemas/chemicals.py` — added `AdditiveUpdate` (partial PATCH payload)
+  - `backend/api/schemas/experiments.py` — added `NoteUpdate`; added `updated_at` to `NoteResponse`
+  - `backend/api/routers/experiments.py` — added `PATCH /{id}/notes/{note_id}`; wired `ModificationsLog` to upsert and delete additive endpoints
+  - `backend/api/routers/additives.py` — new router: `PATCH /api/additives/{id}`, `DELETE /api/additives/{id}` (by PK; audit trail to `ModificationsLog`)
+  - `backend/api/main.py` — registered `additives` router; added openapi tag
+  - `frontend/src/api/experiments.ts` — added `patchNote`; added `updated_at` to `Note` type
+  - `frontend/src/api/chemicals.ts` — added `AdditiveUpdatePayload` interface, `patchAdditive`, `deleteAdditiveById`
+  - `frontend/src/pages/ExperimentDetail/NotesTab.tsx` — inline edit per note (pencil button, textarea, Save/Cancel, `(edited)` label)
+  - `frontend/src/pages/ExperimentDetail/ConditionsTab.tsx` — edit additive modal (compound typeahead, amount/unit); delete now uses `deleteAdditiveById(a.id)`
+  - `tests/api/test_notes.py` — new: 7 tests (happy path, 404 cases, empty text 422, ModificationsLog, no-op)
+  - `tests/api/test_additives.py` — new: 11 tests (PATCH amount/unit/compound, 422, 404, ModificationsLog, recalc, 409 duplicate; DELETE by PK, 404, ModificationsLog)
+  - `docs/api/API_REFERENCE.md` — documented `PATCH /notes/{note_id}` and new Additives section (5 endpoints)
+- **Tests added:** yes — 18 new backend API tests (7 notes + 11 additives)
+- **Decision logged:** no
+
 ## 2026-03-31 | issue #21 — Fix ferrous iron yield calculations returning NULL
 - **Files changed:**
   - `backend/services/calculations/scalar_calcs.py` — fixed `getattr(conditions, 'total_ferrous_iron', None)` → `getattr(conditions, 'total_ferrous_iron_g', None)` (attribute name typo; was silently returning None in production)
