@@ -452,6 +452,7 @@ class ActlabsRockTitrationService:
         """
         errors: List[str] = []
         results_created = results_updated = skipped = 0
+        affected_sample_ids: set[str] = set()
 
         df_raw, read_err = cls._read_table(file_bytes)
         if read_err:
@@ -515,6 +516,7 @@ class ActlabsRockTitrationService:
                 errors.append(f"Row {i+5}: sample_id '{sample_id}' not found")
                 continue
             canonical_id = sample.sample_id
+            affected_sample_ids.add(canonical_id)  # recalc for all identified samples, not just rows that wrote data
 
             for sym, (col_idx, _unit) in symbol_to_col_unit.items():
                 if col_idx >= data.shape[1]:
@@ -533,6 +535,10 @@ class ActlabsRockTitrationService:
                 )
                 results_created += delta_c
                 results_updated += delta_u
+
+        if affected_sample_ids:
+            from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
+            recalculate_conditions_for_samples(db, affected_sample_ids)
 
         return results_created, results_updated, skipped, errors
 
