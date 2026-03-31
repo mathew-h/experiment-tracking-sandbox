@@ -83,7 +83,7 @@ def recalculate_scalar(instance: object, session: Session) -> None:
             if conditions is not None:
                 rock_mass = getattr(conditions, 'rock_mass_g', None)
                 liquid_volume_ml = getattr(conditions, 'water_volume_mL', None)
-                total_ferrous_iron_g = getattr(conditions, 'total_ferrous_iron', None)
+                total_ferrous_iron_g = getattr(conditions, 'total_ferrous_iron_g', None)
 
     # Prefer sampling_volume_mL when available
     sampling_vol = getattr(instance, 'sampling_volume_mL', None)
