@@ -13,7 +13,7 @@ load_dotenv()
 from backend.config.settings import get_settings
 from backend.api.routers import (
     experiments, conditions, results, samples,
-    chemicals, analysis, dashboard, admin, bulk_uploads, auth,
+    chemicals, analysis, dashboard, admin, bulk_uploads, auth, additives,
 )
 
 settings = get_settings()
@@ -41,6 +41,7 @@ app = FastAPI(
         {"name": "dashboard", "description": "Reactor status and experiment timelines"},
         {"name": "admin", "description": "Recalculation and maintenance endpoints"},
         {"name": "bulk-uploads", "description": "Bulk data upload via Excel/CSV"},
+        {"name": "additives", "description": "Per-additive edit and delete by PK"},
     ],
 )
 
@@ -63,6 +64,7 @@ app.include_router(dashboard.router)
 app.include_router(admin.router)
 app.include_router(bulk_uploads.router)
 app.include_router(auth.router)
+app.include_router(additives.router)
 
 
 @app.get("/health")
