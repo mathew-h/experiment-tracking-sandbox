@@ -277,10 +277,14 @@ def upsert_experiment_additive(
         .where(ChemicalAdditive.compound_id == compound_id)
     ).scalar_one_or_none()
     if existing:
+        old_vals = {"amount": existing.amount, "unit": existing.unit.value if existing.unit else None}
+        mod_type = "update"
         for k, v in payload.model_dump(exclude_unset=True).items():
             setattr(existing, k, v)
         additive = existing
     else:
+        old_vals = None
+        mod_type = "create"
         additive = ChemicalAdditive(
             experiment_id=conditions.id,
             compound_id=compound_id,
@@ -289,6 +293,18 @@ def upsert_experiment_additive(
         db.add(additive)
     db.flush()
     recalculate(additive, db)
+    exp = db.execute(select(Experiment).where(Experiment.experiment_id == experiment_id)).scalar_one_or_none()
+    new_vals = {"amount": additive.amount, "unit": additive.unit.value if additive.unit else None}
+    if exp is not None:
+        db.add(ModificationsLog(
+            experiment_id=experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type=mod_type,
+            modified_table="chemical_additives",
+            old_values=old_vals,
+            new_values=new_vals,
+        ))
     db.commit()
     db.refresh(additive)
     log.info("additive_upserted", experiment_id=experiment_id, compound_id=compound_id)
@@ -315,7 +331,25 @@ def delete_experiment_additive(
     ).scalar_one_or_none()
     if additive is None:
         raise HTTPException(status_code=404, detail="Additive not found")
+    exp = db.execute(select(Experiment).where(Experiment.experiment_id == experiment_id)).scalar_one_or_none()
+    compound = db.get(Compound, compound_id)
+    old_vals = {
+        "compound_id": compound_id,
+        "compound_name": compound.name if compound else None,
+        "amount": additive.amount,
+        "unit": additive.unit.value if additive.unit else None,
+    }
     db.delete(additive)
+    if exp is not None:
+        db.add(ModificationsLog(
+            experiment_id=experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type="delete",
+            modified_table="chemical_additives",
+            old_values=old_vals,
+            new_values=None,
+        ))
     db.commit()
     log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
     return Response(status_code=204)
