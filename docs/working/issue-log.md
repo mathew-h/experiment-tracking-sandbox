@@ -162,3 +162,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `alembic/versions/458f344f73d8_clamp_negative_icp_ppm_to_zero.py` — data migration: sets all existing negative ICP element ppm values to 0 (no-op downgrade)
 - **Tests added:** yes — `test_negative_concentration_clamped_to_zero` (upload-path clamping, with positive boundary assertion)
 - **Decision logged:** no
+
+## 2026-03-31 | issue #21 — Fix ferrous iron yield calculations returning NULL
+- **Files changed:**
+  - `backend/services/calculations/scalar_calcs.py` — fixed `getattr(conditions, 'total_ferrous_iron', None)` → `getattr(conditions, 'total_ferrous_iron_g', None)` (attribute name typo; was silently returning None in production)
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — wired `recalculate_conditions_for_samples` in both `ElementalCompositionService.bulk_upsert_wide_from_excel` and `ActlabsRockTitrationService.import_excel` so elemental uploads retroactively populate `total_ferrous_iron_g`
+  - `tests/services/calculations/test_scalar_calcs.py` — fixed `make_result_chain` fixture (same attribute name typo); added 2 new NH3 volume-priority tests (`test_ferrous_iron_yield_nh3_uses_sampling_volume_over_water_volume`, `test_ferrous_iron_yield_nh3_falls_back_to_water_volume_when_sampling_volume_absent`)
+  - `tests/services/calculations/test_conditions_propagation.py` — fixed `make_propagation_chain` fixture (same typo); added `unittest.mock.patch` for `get_analyte_wt_pct` in propagation tests; removed vestigial `total_ferrous_iron_g` fixture parameter
+- **Tests added:** yes — 2 new unit tests (volume priority); 4 pre-existing propagation tests and 2 pre-existing integration tests corrected and now passing
+- **Decision logged:** no
