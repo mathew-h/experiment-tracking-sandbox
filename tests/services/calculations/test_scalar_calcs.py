@@ -399,3 +399,49 @@ def test_recalculate_scalar_nh3_yield_none_when_no_total_fe():
     )
     recalculate_scalar(s, SESSION)
     assert s.ferrous_iron_yield_nh3_pct is None
+
+
+def test_ferrous_iron_yield_nh3_uses_sampling_volume_over_water_volume():
+    """sampling_volume_mL takes priority over water_volume_mL for NH3 yield.
+
+    sampling = 100 mL, water = 500 mL — result must match 100 mL path.
+    net = 10.0 - 0.2 = 9.8 mM
+    NH3_mol = (9.8/1000) * (100/1000) = 0.00098
+    Fe_g = 0.00098 * 4.5 * 55.845
+    """
+    s = make_scalar(
+        gross_ammonium_concentration_mM=10.0,
+        background_ammonium_concentration_mM=0.2,
+        sampling_volume_mL=100.0,
+        result_entry=make_result_chain(
+            rock_mass_g=5.0,
+            water_volume_mL=500.0,
+            total_ferrous_iron_g=1.0,
+        ),
+    )
+    recalculate_scalar(s, SESSION)
+    expected = (9.8 / 1000.0) * (100.0 / 1000.0) * 4.5 * 55.845 / 1.0 * 100
+    assert s.ferrous_iron_yield_nh3_pct == pytest.approx(expected, rel=1e-4)
+
+
+def test_ferrous_iron_yield_nh3_falls_back_to_water_volume_when_sampling_volume_absent():
+    """When sampling_volume_mL is None, water_volume_mL from conditions is used.
+
+    water = 500 mL — result must match 500 mL path.
+    net = 10.0 - 0.2 = 9.8 mM
+    NH3_mol = (9.8/1000) * (500/1000) = 0.0049
+    Fe_g = 0.0049 * 4.5 * 55.845
+    """
+    s = make_scalar(
+        gross_ammonium_concentration_mM=10.0,
+        background_ammonium_concentration_mM=0.2,
+        sampling_volume_mL=None,
+        result_entry=make_result_chain(
+            rock_mass_g=5.0,
+            water_volume_mL=500.0,
+            total_ferrous_iron_g=1.0,
+        ),
+    )
+    recalculate_scalar(s, SESSION)
+    expected = (9.8 / 1000.0) * (500.0 / 1000.0) * 4.5 * 55.845 / 1.0 * 100
+    assert s.ferrous_iron_yield_nh3_pct == pytest.approx(expected, rel=1e-4)
