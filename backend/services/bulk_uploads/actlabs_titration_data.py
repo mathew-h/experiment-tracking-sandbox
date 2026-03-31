@@ -204,7 +204,7 @@ class ElementalCompositionService:
                     errors.append(f"Row {idx+2}: sample_id '{sample_id}' not found")
                     continue
                 canonical_id = sample.sample_id
-                affected_sample_ids.add(canonical_id)
+                affected_sample_ids.add(canonical_id)  # recalc for all identified samples, not just rows that wrote data
 
                 ext_analysis_id = _get_or_create_ext_analysis(canonical_id)
 
@@ -230,7 +230,7 @@ class ElementalCompositionService:
                 errors.append(f"Row {idx+2}: {e}")
 
         if affected_sample_ids:
-            from backend.services.elemental_composition_service import recalculate_conditions_for_samples
+            from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
             recalculate_conditions_for_samples(db, affected_sample_ids)
 
         return created, updated, skipped, errors
