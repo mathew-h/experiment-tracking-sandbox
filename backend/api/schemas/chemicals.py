@@ -86,6 +86,17 @@ class ChemicalAdditiveUpsert(BaseModel):
     lot_number: Optional[str] = None
 
 
+class AdditiveUpdate(BaseModel):
+    """Partial update payload for PATCH /api/additives/{id}. All fields optional."""
+    compound_id: Optional[int] = None
+    amount: Optional[float] = Field(None, gt=0)
+    unit: Optional[AmountUnit] = None
+    addition_order: Optional[int] = None
+    addition_method: Optional[str] = None
+    purity: Optional[float] = None
+    lot_number: Optional[str] = None
+
+
 class AdditiveCreate(BaseModel):
     compound_id: int
     amount: float = Field(gt=0)
