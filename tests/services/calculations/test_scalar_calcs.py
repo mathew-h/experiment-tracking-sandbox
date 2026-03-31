@@ -13,12 +13,12 @@ MPa_TO_ATM = 9.86923
 H2_MOLAR_MASS = 2.01588  # g/mol
 
 
-def make_result_chain(rock_mass_g=10.0, water_volume_mL=100.0, total_ferrous_iron=None):
+def make_result_chain(rock_mass_g=10.0, water_volume_mL=100.0, total_ferrous_iron_g=None):
     """Build a minimal result → experiment → conditions chain."""
     conditions = types.SimpleNamespace(
         rock_mass_g=rock_mass_g,
         water_volume_mL=water_volume_mL,
-        total_ferrous_iron=total_ferrous_iron,
+        total_ferrous_iron_g=total_ferrous_iron_g,
     )
     experiment = types.SimpleNamespace(conditions=conditions)
     result_entry = types.SimpleNamespace(experiment=experiment)
@@ -358,7 +358,7 @@ def test_recalculate_scalar_sets_h2_yield_when_total_fe_set():
         h2_concentration=100.0,
         gas_sampling_volume_ml=10.0,
         gas_sampling_pressure_MPa=0.1,
-        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron=1.0),
+        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron_g=1.0),
     )
     recalculate_scalar(s, SESSION)
     assert s.ferrous_iron_yield_h2_pct is not None
@@ -371,7 +371,7 @@ def test_recalculate_scalar_h2_yield_none_when_no_total_fe():
         h2_concentration=100.0,
         gas_sampling_volume_ml=10.0,
         gas_sampling_pressure_MPa=0.1,
-        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron=None),
+        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron_g=None),
     )
     recalculate_scalar(s, SESSION)
     assert s.ferrous_iron_yield_h2_pct is None
@@ -383,7 +383,7 @@ def test_recalculate_scalar_sets_nh3_yield_when_total_fe_set():
         gross_ammonium_concentration_mM=10.0,
         background_ammonium_concentration_mM=0.3,
         sampling_volume_mL=100.0,
-        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron=1.0),
+        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron_g=1.0),
     )
     recalculate_scalar(s, SESSION)
     assert s.ferrous_iron_yield_nh3_pct is not None
@@ -395,7 +395,7 @@ def test_recalculate_scalar_nh3_yield_none_when_no_total_fe():
     s = make_scalar(
         gross_ammonium_concentration_mM=10.0,
         sampling_volume_mL=100.0,
-        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron=None),
+        result_entry=make_result_chain(rock_mass_g=10.0, total_ferrous_iron_g=None),
     )
     recalculate_scalar(s, SESSION)
     assert s.ferrous_iron_yield_nh3_pct is None
