@@ -9,7 +9,6 @@ SESSION = types.SimpleNamespace()
 
 
 def make_propagation_chain(
-    total_ferrous_iron_g=1.0,
     rock_mass_g=10.0,
     water_volume_mL=100.0,
     **scalar_fields,
@@ -19,6 +18,9 @@ def make_propagation_chain(
     Both the forward path (conditions → experiment → results → scalar_data)
     and the back-reference path (scalar → result_entry → experiment → conditions)
     are wired so recalculate_scalar can resolve total_ferrous_iron_g from the scalar.
+
+    Note: total_ferrous_iron_g is intentionally omitted — recalculate_conditions
+    computes and writes it during the test. Control it via the get_analyte_wt_pct mock.
     """
     scalar_defaults = {
         'h2_concentration': None,
@@ -40,7 +42,7 @@ def make_propagation_chain(
         water_volume_mL=water_volume_mL,
         rock_mass_g=rock_mass_g,
         water_to_rock_ratio=None,
-        total_ferrous_iron_g=total_ferrous_iron_g,
+        # total_ferrous_iron_g is set by recalculate_conditions during the test
     )
     experiment_ns = types.SimpleNamespace(conditions=conditions)
     conditions.experiment = experiment_ns
@@ -60,7 +62,6 @@ def test_conditions_update_propagates_to_scalar_h2_yield():
     and calls recalculate_scalar, which sets ferrous_iron_yield_h2_pct.
     """
     conditions, scalar = make_propagation_chain(
-        total_ferrous_iron_g=1.0,
         h2_concentration=100.0,
         gas_sampling_volume_ml=10.0,
         gas_sampling_pressure_MPa=0.1,
@@ -79,7 +80,6 @@ def test_conditions_update_propagates_to_scalar_h2_yield():
 def test_conditions_update_propagates_to_scalar_nh3_yield():
     """NH3 yield is also recalculated when conditions change."""
     conditions, scalar = make_propagation_chain(
-        total_ferrous_iron_g=1.0,
         gross_ammonium_concentration_mM=10.0,
         background_ammonium_concentration_mM=0.3,
         sampling_volume_mL=100.0,
