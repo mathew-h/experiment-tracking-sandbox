@@ -131,6 +131,9 @@ test.describe('Results tab column improvements (issue #23)', () => {
         expect(text).not.toBe('null')
         expect(text).not.toBe('undefined')
       }
+      // Positive assertion: Sample Date cell (index 2) must be either '—' or a YYYY-MM-DD date
+      const dateCellText = allCellTexts[2]
+      expect(dateCellText === '—' || /^\d{4}-\d{2}-\d{2}$/.test(dateCellText)).toBe(true)
     }
     // Empty results state is also acceptable
   })
