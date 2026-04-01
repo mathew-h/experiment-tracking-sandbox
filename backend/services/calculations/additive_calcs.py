@@ -69,7 +69,7 @@ def recalculate_additive(instance: object, session: Session) -> None:
         if instance.mass_in_grams is not None and molecular_weight:
             instance.moles_added = instance.mass_in_grams / molecular_weight
         instance.final_concentration = amount
-        instance.concentration_units = 'wt% of fluid'
+        instance.concentration_units = unit.value
 
     elif unit == AmountUnit.PPM:
         # ppm = mg/L; mass_g = ppm * L / 1000
