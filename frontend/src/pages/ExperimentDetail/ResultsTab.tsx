@@ -11,6 +11,13 @@ function fmt(n: number | null | undefined, decimals = 2) {
   return n != null ? n.toFixed(decimals) : '—'
 }
 
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return iso.slice(0, 10)
+}
+
+const GRID = 'grid-cols-[1.5rem_5rem_6rem_minmax(0,8rem)_5rem_5rem_5rem_4rem_6rem_4rem_1.5rem]'
+
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
     queryKey: ['scalar', result.id],
@@ -28,12 +35,6 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
 
   return (
     <div className="bg-surface-raised border-t border-surface-border px-6 py-3 space-y-3">
-      {result.brine_modification_description && (
-        <div>
-          <p className="text-xs font-semibold text-ink-secondary mb-1">Brine Modification</p>
-          <p className="text-xs text-ink-primary">{result.brine_modification_description}</p>
-        </div>
-      )}
       {scalar && (
         <div>
           <p className="text-xs font-semibold text-ink-secondary mb-1">Scalar Results</p>
@@ -180,37 +181,45 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
       {results && results.length > 0 && (
         <>
           {/* Header row */}
-          <div className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted">
+          <div className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted`}>
             <span></span>
             <span>Time (d)</span>
-            <span>NH₄ (mM)</span>
-            <span>H₂ (µmol)</span>
-            <span>Cond. (mS/cm)</span>
+            <span>Sample Date</span>
+            <span>Sampling Mod</span>
             <span>NH₄ (g/t)</span>
             <span>H₂ (g/t)</span>
+            <span>H₂ (µmol)</span>
             <span>pH</span>
-            <span>Flags</span>
+            <span>Cond. (mS/cm)</span>
+            <span>ICP</span>
             <span></span>
           </div>
           {results.map((r) => (
             <div key={r.id}>
               <div
-                className="grid grid-cols-[1.5rem_5rem_5rem_5rem_5rem_5rem_5rem_4rem_5rem_1.5rem] gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center"
+                className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center`}
                 onClick={() => toggle(r.id)}
               >
                 <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
                 <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
+                <span className="flex items-center gap-1 min-w-0">
+                  {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
+                  {r.brine_modification_description && (
+                    <span
+                      className="truncate text-xs text-ink-secondary"
+                      title={r.brine_modification_description}
+                    >
+                      {r.brine_modification_description}
+                    </span>
+                  )}
+                </span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
-                <span className="flex gap-1 flex-wrap">
-                  {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
-                  {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
-                  {!r.has_icp && !r.has_brine_modification && <span className="text-ink-muted text-xs">—</span>}
-                </span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
+                <span>{r.has_icp && <Badge variant="info" dot>ICP</Badge>}</span>
                 <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
               </div>
               {expanded.has(r.id) && <ExpandedRow result={r} />}
