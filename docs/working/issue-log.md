@@ -185,3 +185,16 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/e2e/journeys/14-dashboard-cf-slots.spec.ts` — new Playwright journey (2 tests): CF01 active slot (Core Flood + reactor_number=1), HPHT regression (reactor_number=1 → R01 not CF01)
 - **Tests added:** yes — 4 backend integration tests, 2 Playwright E2E tests
 - **Decision logged:** no
+
+## 2026-04-01 | issue #25 — Add "wt% of fluid" as a selectable additive unit
+- **Files changed:**
+  - `database/models/enums.py` — added `WT_PCT_FLUID = "wt% of fluid"` to `AmountUnit`
+  - `alembic/versions/db40dd1e6422_add_wt_pct_fluid_to_amountunit.py` — new migration: `ALTER TYPE amountunit ADD VALUE IF NOT EXISTS` for PERCENT, WEIGHT_PERCENT, WT_PCT_FLUID (PostgreSQL-guarded)
+  - `backend/services/calculations/additive_calcs.py` — new `elif unit == AmountUnit.WT_PCT_FLUID` branch; formula `(amount / 100) × water_volume_mL`
+  - `frontend/src/pages/ExperimentDetail/ConditionsTab.tsx` — added `wt% of fluid` to `ADDITIVE_UNIT_OPTIONS`
+  - `frontend/src/pages/NewExperiment/Step3Additives.tsx` — added `wt% of fluid` to `AMOUNT_UNITS`
+  - `docs/CALCULATIONS.md` — documented `wt% of fluid` formula
+  - `tests/services/calculations/test_additive_calcs.py` — 2 new unit tests
+  - `frontend/e2e/journeys/15-wt-pct-fluid-additive.spec.ts` — 2 new Playwright E2E tests
+- **Tests added:** yes — 2 backend unit tests, 2 Playwright E2E tests
+- **Decision logged:** `wt% of fluid` uses formula identical to `wt%` (assumes dilute aqueous solution ρ ≈ 1 g/mL); implemented as a distinct branch for semantic clarity
