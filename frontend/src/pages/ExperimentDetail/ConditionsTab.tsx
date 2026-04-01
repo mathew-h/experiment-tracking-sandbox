@@ -16,7 +16,7 @@ const ADDITIVE_UNIT_OPTIONS = [
   { value: 'mM', label: 'mM' }, { value: 'ppm', label: 'ppm' },
   { value: '% of Rock', label: '% of Rock' }, { value: 'mL', label: 'mL' },
   { value: 'μL', label: 'μL' }, { value: 'mol', label: 'mol' },
-  { value: 'mmol', label: 'mmol' },
+  { value: 'mmol', label: 'mmol' }, { value: 'wt% of fluid', label: 'wt% of fluid' },
 ]
 
 const EXPERIMENT_TYPE_OPTIONS = [
