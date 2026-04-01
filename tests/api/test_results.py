@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
+
 from database.models.experiments import Experiment
-from database.models.results import ExperimentalResults
+from database.models.results import ExperimentalResults, ScalarResults
 from database.models.enums import ExperimentStatus
 
 
@@ -114,3 +116,23 @@ def test_create_result_404_message_guides_caller(client):
     detail = resp.json()["detail"].lower()
     assert "experiment" in detail
     assert "888888" in resp.json()["detail"]
+
+
+def test_get_experiment_results_includes_scalar_measurement_date(client, db_session):
+    """scalar_measurement_date is exposed in the results list endpoint."""
+    exp, result = _seed(db_session)
+    sample_date = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+    scalar = ScalarResults(
+        result_id=result.id,
+        gross_ammonium_concentration_mM=1.0,
+        measurement_date=sample_date,
+    )
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["scalar_measurement_date"] is not None
+    assert "2026-03-15" in data[0]["scalar_measurement_date"]

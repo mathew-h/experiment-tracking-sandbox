@@ -66,6 +66,7 @@ export interface ResultWithFlags {
   gross_ammonium_concentration_mM: number | null
   final_conductivity_mS_cm: number | null
   final_ph: number | null
+  scalar_measurement_date: string | null
 }
 
 export interface ExperimentListParams {

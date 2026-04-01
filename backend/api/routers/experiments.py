@@ -207,6 +207,7 @@ def get_experiment_results(
             gross_ammonium_concentration_mM=scalar.gross_ammonium_concentration_mM if scalar else None,
             final_conductivity_mS_cm=scalar.final_conductivity_mS_cm if scalar else None,
             final_ph=scalar.final_ph if scalar else None,
+            scalar_measurement_date=scalar.measurement_date if scalar else None,
         ))
     return out
 

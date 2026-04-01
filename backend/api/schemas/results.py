@@ -124,6 +124,7 @@ class ResultWithFlagsResponse(BaseModel):
     gross_ammonium_concentration_mM: Optional[float] = None
     final_conductivity_mS_cm: Optional[float] = None
     final_ph: Optional[float] = None
+    scalar_measurement_date: Optional[datetime] = None
 
 
 class BackgroundAmmoniumUpdate(BaseModel):
