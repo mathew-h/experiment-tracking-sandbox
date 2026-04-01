@@ -1,4 +1,5 @@
 from __future__ import annotations
+import pytest
 from database.models.experiments import Experiment, ModificationsLog
 from database.models.conditions import ExperimentalConditions
 from database.models.chemicals import Compound, ChemicalAdditive
@@ -120,6 +121,21 @@ def test_patch_additive_duplicate_compound_returns_409(client, db_session):
     # Try to change additive_a's compound to compound_b (already in experiment)
     resp = client.patch(f"/api/additives/{additive_a.id}", json={"compound_id": compound_b.id})
     assert resp.status_code == 409
+
+
+def test_patch_additive_wt_pct_fluid_computes_mass_in_grams(client, db_session):
+    """PATCHing an additive to WT_PCT_FLUID should populate mass_in_grams via recalculation.
+
+    wt% of fluid formula: mass_in_grams = (amount / 100) × water_volume_mL
+    With amount=2.0 and water_volume_mL=500.0: expected mass_in_grams = 10.0
+    """
+    _, _, _, additive = _setup_experiment_with_additive(
+        db_session, "ADDTEST_010", 6010, compound_name="FeO_wt_pct_fluid", amount=1.0, unit=AmountUnit.GRAM
+    )
+    resp = client.patch(f"/api/additives/{additive.id}", json={"unit": "wt% of fluid", "amount": 2.0})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mass_in_grams"] == pytest.approx(10.0)
 
 
 # ── DELETE /api/additives/{additive_id} ───────────────────────────────────────

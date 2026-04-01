@@ -132,3 +132,4 @@ class AmountUnit(enum.Enum):
     PERCENT = "%"
     WEIGHT_PERCENT = "wt%"
     PERCENT_OF_ROCK = "% of Rock"
+    WT_PCT_FLUID = "wt% of fluid"

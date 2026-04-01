@@ -60,6 +60,17 @@ def recalculate_additive(instance: object, session: Session) -> None:
         instance.final_concentration = amount
         instance.concentration_units = unit.value
 
+    elif unit == AmountUnit.WT_PCT_FLUID:
+        # wt% of fluid: mass_solute = (amount / 100) × mass_fluid_g
+        # For dilute aqueous solutions (ρ_fluid ≈ 1 g/mL), mass_fluid_g ≈ water_volume_mL.
+        # Formula is numerically identical to WEIGHT_PERCENT; the unit adds semantic clarity.
+        if water_volume_ml is not None and water_volume_ml > 0:
+            instance.mass_in_grams = (amount / 100.0) * water_volume_ml
+        if instance.mass_in_grams is not None and molecular_weight:
+            instance.moles_added = instance.mass_in_grams / molecular_weight
+        instance.final_concentration = amount
+        instance.concentration_units = unit.value
+
     elif unit == AmountUnit.PPM:
         # ppm = mg/L; mass_g = ppm * L / 1000
         if volume_liters is not None:

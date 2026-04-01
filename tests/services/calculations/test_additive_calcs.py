@@ -191,3 +191,29 @@ def test_format_additives_returns_string():
 def test_format_additives_empty_returns_empty_string():
     conditions = types.SimpleNamespace(chemical_additives=[])
     assert format_additives(conditions) == ""
+
+
+def test_wt_pct_fluid_mass_computed_from_water_volume():
+    """mass_in_grams = (amount / 100) × water_volume_mL (density ≈ 1 g/mL)."""
+    compound = make_compound(molecular_weight_g_mol=40.0)
+    experiment = make_experiment(water_volume_mL=500.0, rock_mass_g=10.0)
+    additive = make_additive(amount=2.0, unit=AmountUnit.WT_PCT_FLUID,
+                              compound=compound, experiment=experiment)
+    recalculate_additive(additive, SESSION)
+    assert additive.mass_in_grams == pytest.approx(10.0)  # 2/100 × 500
+    assert additive.moles_added == pytest.approx(10.0 / 40.0)
+    assert additive.final_concentration == pytest.approx(2.0)
+    assert additive.concentration_units == 'wt% of fluid'
+
+
+def test_wt_pct_fluid_no_mass_when_water_volume_missing():
+    """mass_in_grams stays None when water_volume_mL is not set."""
+    compound = make_compound(molecular_weight_g_mol=40.0)
+    experiment = make_experiment(water_volume_mL=None, rock_mass_g=10.0)
+    additive = make_additive(amount=5.0, unit=AmountUnit.WT_PCT_FLUID,
+                              compound=compound, experiment=experiment)
+    recalculate_additive(additive, SESSION)
+    assert additive.mass_in_grams is None
+    assert additive.moles_added is None
+    assert additive.final_concentration == pytest.approx(5.0)
+    assert additive.concentration_units == 'wt% of fluid'

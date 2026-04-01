@@ -58,6 +58,7 @@ water_to_rock_ratio = water_volume_mL / rock_mass_g
 | ppm | `amount × volume_L / 1000` (ppm = mg/L) |
 | % of Rock | `(amount / 100) × rock_mass_g` |
 | %, wt% | `(amount / 100) × water_volume_mL` |
+| wt% of fluid | `(amount / 100) × water_volume_mL` — assumes fluid density ≈ 1 g/mL for dilute aqueous solutions |
 
 ### Moles (`moles_added`)
 

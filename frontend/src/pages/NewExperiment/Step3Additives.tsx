@@ -4,7 +4,7 @@ import { chemicalsApi, type Compound } from '@/api/chemicals'
 import { Input, Select, Button } from '@/components/ui'
 import { CompoundFormModal } from '@/components/CompoundFormModal'
 
-const AMOUNT_UNITS = ['g', 'mg', 'mL', 'μL', 'mM', 'M', 'ppm', 'mmol', 'mol', '% of Rock', 'wt%']
+const AMOUNT_UNITS = ['g', 'mg', 'mL', 'μL', 'mM', 'M', 'ppm', 'mmol', 'mol', '% of Rock', 'wt%', 'wt% of fluid']
   .map((u) => ({ value: u, label: u }))
 
 /** UUID v4 generator that works in non-secure (HTTP) contexts. */
