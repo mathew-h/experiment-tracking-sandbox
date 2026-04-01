@@ -177,3 +177,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/services/calculations/test_conditions_propagation.py` — fixed `make_propagation_chain` fixture (same typo); added `unittest.mock.patch` for `get_analyte_wt_pct` in propagation tests; removed vestigial `total_ferrous_iron_g` fixture parameter
 - **Tests added:** yes — 2 new unit tests (volume priority); 4 pre-existing propagation tests and 2 pre-existing integration tests corrected and now passing
 - **Decision logged:** no
+
+## 2026-04-01 | issue #26 — CF01 dashboard slot not shown as active
+- **Root cause:** `experiment_type = NULL` in `ExperimentalConditions` for the affected experiment (created before the type dropdown was added on 2026-03-26). The backend label derivation code in `dashboard.py` is correct — no code changes needed.
+- **Files changed:**
+  - `tests/api/test_dashboard.py` — 4 new backend integration tests: `test_core_flood_experiment_in_reactor_1_gets_cf01_label`, `test_core_flood_experiment_in_reactor_2_gets_cf02_label`, `test_hpht_experiment_in_reactor_1_gets_r01_not_cf01`, `test_null_experiment_type_in_reactor_1_gets_r01_not_cf01`
+  - `frontend/e2e/journeys/14-dashboard-cf-slots.spec.ts` — new Playwright journey (2 tests): CF01 active slot (Core Flood + reactor_number=1), HPHT regression (reactor_number=1 → R01 not CF01)
+- **Tests added:** yes — 4 backend integration tests, 2 Playwright E2E tests
+- **Decision logged:** no
