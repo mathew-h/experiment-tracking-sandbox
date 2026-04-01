@@ -61,6 +61,9 @@ test.describe('Results tab column improvements (issue #23)', () => {
     if (!experimentId) {
       // No experiment has results — check that the header row structure is correct in the component
       // by navigating to any experiment and confirming the empty state (structure check still valid)
+      // Selector verified against ExperimentList.tsx line 198:
+      // <span className="font-mono-data text-red-400 hover:text-red-300">
+      // Both classes are present on the experiment ID span in every table row.
       const firstExpIdSpan = page.locator('span.font-mono-data.text-red-400').first()
       await expect(firstExpIdSpan).toBeVisible({ timeout: 15_000 })
       const anyId = (await firstExpIdSpan.textContent())?.trim()
@@ -114,6 +117,7 @@ test.describe('Results tab column improvements (issue #23)', () => {
     await page.goto('/experiments')
     await page.waitForLoadState('networkidle')
 
+    // Selector verified against ExperimentList.tsx: <span className="font-mono-data text-red-400 hover:text-red-300">
     const firstExpIdSpan = page.locator('span.font-mono-data.text-red-400').first()
     await expect(firstExpIdSpan).toBeVisible({ timeout: 15_000 })
     const firstId = (await firstExpIdSpan.textContent())?.trim()
@@ -142,6 +146,7 @@ test.describe('Results tab column improvements (issue #23)', () => {
     await page.goto('/experiments')
     await page.waitForLoadState('networkidle')
 
+    // Selector verified against ExperimentList.tsx: <span className="font-mono-data text-red-400 hover:text-red-300">
     const firstExpIdSpan = page.locator('span.font-mono-data.text-red-400').first()
     await expect(firstExpIdSpan).toBeVisible({ timeout: 15_000 })
     const firstId = (await firstExpIdSpan.textContent())?.trim()
@@ -166,6 +171,7 @@ test.describe('Results tab column improvements (issue #23)', () => {
     await page.goto('/experiments')
     await page.waitForLoadState('networkidle')
 
+    // Selector verified against ExperimentList.tsx: <span className="font-mono-data text-red-400 hover:text-red-300">
     const firstExpIdSpan = page.locator('span.font-mono-data.text-red-400').first()
     await expect(firstExpIdSpan).toBeVisible({ timeout: 15_000 })
     const firstId = (await firstExpIdSpan.textContent())?.trim()
@@ -178,10 +184,14 @@ test.describe('Results tab column improvements (issue #23)', () => {
       // The description span is a sibling of the MOD badge in the same flex cell
       const modCell = modBadge.locator('..')  // parent flex container
       const descSpan = modCell.locator('span.truncate')
-      // Description span may be empty if brine_modification_description is null,
-      // but the MOD badge being visible means has_brine_modification=true.
-      // The span should exist (even if empty) — not a dropdown trigger.
-      await expect(descSpan).toHaveCount(1)
+      // ResultsTab.tsx only renders span.truncate when brine_modification_description is truthy.
+      // has_brine_modification=true may coexist with a null description, so count can be 0 or 1.
+      const count = await descSpan.count()
+      expect(count === 0 || count === 1).toBe(true)
+      if (count === 1) {
+        const text = await descSpan.textContent()
+        expect(text).toBeTruthy()  // description text must be non-empty if the span renders
+      }
     }
   })
 })
