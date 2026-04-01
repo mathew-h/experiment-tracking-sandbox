@@ -197,6 +197,17 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 4 backend integration tests, 2 Playwright E2E tests
 - **Decision logged:** no
 
+## 2026-04-01 | issue #23 — Results tab: Sample Date column, inline Sampling Mod, reorder pH/Conductivity
+- **Files changed:**
+  - `backend/api/schemas/results.py` — added `scalar_measurement_date: Optional[datetime]` to `ResultWithFlagsResponse`
+  - `backend/api/routers/experiments.py` — populated `scalar_measurement_date` from `scalar.measurement_date` in `get_experiment_results()`
+  - `frontend/src/api/experiments.ts` — added `scalar_measurement_date: string | null` to `ResultWithFlags` interface
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — new 11-column grid (`GRID` constant + `fmtDate` helper); added Sample Date and Sampling Mod columns; MOD badge moved inline to Sampling Mod cell; brine modification removed from ExpandedRow; pH and Conductivity now adjacent; NH₄ (mM) top-level column dropped (still visible in expanded detail)
+  - `tests/api/test_results.py` — added `test_get_experiment_results_includes_scalar_measurement_date` (TDD, timezone-safe noon UTC)
+  - `frontend/e2e/journeys/16-results-tab-columns.spec.ts` — new Playwright journey (5 tests): column headers, pH/Cond adjacency, null date em-dash, MOD badge no-dropdown, inline description
+- **Tests added:** yes — 1 backend API test, 5 Playwright E2E tests
+- **Decision logged:** no
+
 ## 2026-04-01 | issue #25 — Add "wt% of fluid" as a selectable additive unit
 - **Files changed:**
   - `database/models/enums.py` — added `WT_PCT_FLUID = "wt% of fluid"` to `AmountUnit`
