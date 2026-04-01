@@ -363,6 +363,143 @@ def test_reactor_card_data_schema_includes_specs():
 
 
 # ---------------------------------------------------------------------------
+# CF slot label derivation tests (issue #26)
+# ---------------------------------------------------------------------------
+
+def test_core_flood_experiment_in_reactor_1_gets_cf01_label(client, db_session):
+    """Core Flood experiment in reactor 1 must produce reactor_label = 'CF01'."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="CF_LABEL_R1_001",
+        experiment_number=91001,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="CF_LABEL_R1_001",
+        reactor_number=1,
+        experiment_type="Core Flood",
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_number"]: c for c in resp.json()["reactors"]}
+    assert 1 in cards, "reactor_number=1 not found in reactor cards"
+    assert cards[1]["reactor_label"] == "CF01", (
+        f"Expected CF01 but got {cards[1]['reactor_label']!r}. "
+        "experiment_type='Core Flood' should produce label CF01."
+    )
+    assert cards[1]["experiment_id"] == "CF_LABEL_R1_001"
+
+
+def test_core_flood_experiment_in_reactor_2_gets_cf02_label(client, db_session):
+    """Core Flood experiment in reactor 2 must produce reactor_label = 'CF02'."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="CF_LABEL_R2_001",
+        experiment_number=91002,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="CF_LABEL_R2_001",
+        reactor_number=2,
+        experiment_type="Core Flood",
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_number"]: c for c in resp.json()["reactors"]}
+    assert 2 in cards, "reactor_number=2 not found in reactor cards"
+    assert cards[2]["reactor_label"] == "CF02", (
+        f"Expected CF02 but got {cards[2]['reactor_label']!r}."
+    )
+    assert cards[2]["experiment_id"] == "CF_LABEL_R2_001"
+
+
+def test_hpht_experiment_in_reactor_1_gets_r01_not_cf01(client, db_session):
+    """HPHT experiment in reactor 1 must produce reactor_label = 'R01', not CF01."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="HPHT_LABEL_R1_001",
+        experiment_number=91003,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="HPHT_LABEL_R1_001",
+        reactor_number=1,
+        experiment_type="HPHT",
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_number"]: c for c in resp.json()["reactors"]}
+    assert 1 in cards
+    assert cards[1]["reactor_label"] == "R01", (
+        f"Expected R01 but got {cards[1]['reactor_label']!r}. "
+        "Non-Core Flood experiments must not be mapped to CF slots."
+    )
+
+
+def test_null_experiment_type_in_reactor_1_gets_r01_not_cf01(client, db_session):
+    """Experiment with no experiment_type in reactor 1 falls back to R01, not CF01."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="NULL_TYPE_R1_001",
+        experiment_number=91004,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="NULL_TYPE_R1_001",
+        reactor_number=1,
+        experiment_type=None,
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_number"]: c for c in resp.json()["reactors"]}
+    assert 1 in cards
+    assert cards[1]["reactor_label"] == "R01", (
+        f"Expected R01 but got {cards[1]['reactor_label']!r}. "
+        "NULL experiment_type should produce R-prefix label, not CF."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Performance test
 # ---------------------------------------------------------------------------
 
