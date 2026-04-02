@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { conditionsApi, type ConditionsResponse, type ConditionsPayload } from '@/api/conditions'
 import { chemicalsApi, type Compound, type ChemicalAdditive, type AdditiveUpdatePayload } from '@/api/chemicals'
-import { Button, Input, Select, Modal, useToast } from '@/components/ui'
+import { Button, Input, Select, Modal, ConfirmModal, useToast } from '@/components/ui'
 import { CompoundFormModal } from '@/components/CompoundFormModal'
 
 const FEEDSTOCK_OPTIONS = [
@@ -113,6 +113,9 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
   const [editUnit, setEditUnit] = useState('g')
   const [editCompoundQuery, setEditCompoundQuery] = useState('')
   const [editCompoundDropdownOpen, setEditCompoundDropdownOpen] = useState(false)
+
+  // Delete additive confirmation state
+  const [deleteAdditiveId, setDeleteAdditiveId] = useState<number | null>(null)
 
   // Compound search for edit modal
   const { data: editCompoundResults = [] } = useQuery({
@@ -269,27 +272,33 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
                 {a.mass_in_grams != null && (
                   <span className="text-xs text-ink-muted">{a.mass_in_grams.toFixed(4)} g</span>
                 )}
-                {/* Edit pencil */}
-                <button
-                  onClick={() => openEditModal(a)}
-                  className="ml-auto text-xs text-ink-muted hover:text-ink-primary opacity-0 group-hover:opacity-100 transition-opacity px-1"
-                  type="button"
-                  title="Edit additive"
-                >
-                  <svg className="w-3 h-3 inline" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round"
-                      d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
-                  </svg>
-                </button>
-                {/* Delete × */}
-                <button
-                  onClick={() => deleteAdditiveMutation.mutate(a.id)}
-                  className="text-xs text-ink-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
-                  type="button"
-                  title="Remove additive"
-                >
-                  ×
-                </button>
+                {/* Action group — right-aligned, hover reveal on desktop, always visible on mobile */}
+                <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity">
+                  {/* Edit */}
+                  <button
+                    type="button"
+                    aria-label="Edit additive"
+                    onClick={() => openEditModal(a)}
+                    className="p-1 rounded text-ink-secondary hover:text-ink-primary hover:bg-surface-overlay transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round"
+                        d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
+                    </svg>
+                  </button>
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    aria-label="Delete additive"
+                    onClick={() => setDeleteAdditiveId(a.id)}
+                    className="p-1 rounded text-ink-secondary hover:text-red-400 hover:bg-surface-overlay transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round"
+                        d="M3 4h10M6 4V2h4v2M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -517,6 +526,24 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
           </div>
         </div>
       </Modal>
+
+      {/* Delete additive confirmation */}
+      <ConfirmModal
+        open={deleteAdditiveId !== null}
+        onClose={() => setDeleteAdditiveId(null)}
+        onConfirm={() => {
+          if (deleteAdditiveId !== null) {
+            deleteAdditiveMutation.mutate(deleteAdditiveId, {
+              onSuccess: () => setDeleteAdditiveId(null),
+            })
+          }
+        }}
+        loading={deleteAdditiveMutation.isPending}
+        title="Remove additive?"
+        description="This will permanently remove the additive from this experiment."
+        confirmLabel="Remove"
+        danger
+      />
     </>
   )
 }
