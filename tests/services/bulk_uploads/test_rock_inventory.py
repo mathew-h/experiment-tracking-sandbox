@@ -165,7 +165,7 @@ def test_mag_susc_creates_external_analysis(db_session: Session):
         .first()
     )
     assert ea is not None
-    assert ea.magnetic_susceptibility == pytest.approx(2.5)
+    assert ea.magnetic_susceptibility == "2.5"
 
 
 def test_mag_susc_aliases_recognized(db_session: Session):
@@ -218,13 +218,13 @@ def test_mag_susc_blank_skipped(db_session: Session):
     assert ea is None
 
 
-def test_mag_susc_non_numeric_skipped(db_session: Session):
-    """Non-numeric mag susc value does not create an EA and produces no error."""
+def test_mag_susc_string_value_stored(db_session: Session):
+    """Any non-blank string value (including ranges) is stored as-is without error."""
     from database.models.analysis import ExternalAnalysis
 
     xlsx = make_excel(
         ["sample_id", "magnetic_susceptibility"],
-        [["S_NAN001", "not-a-number"]],
+        [["S_STR001", "1.2-1.5"]],
     )
     created, updated, _images, skipped, errors, warnings = (
         RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
@@ -235,12 +235,13 @@ def test_mag_susc_non_numeric_skipped(db_session: Session):
     ea = (
         db_session.query(ExternalAnalysis)
         .filter(
-            ExternalAnalysis.sample_id == "SNAN001",
+            ExternalAnalysis.sample_id == "SSTR001",
             ExternalAnalysis.analysis_type == "Magnetic Susceptibility",
         )
         .first()
     )
-    assert ea is None
+    assert ea is not None
+    assert ea.magnetic_susceptibility == "1.2-1.5"
 
 
 def test_mag_susc_skip_without_overwrite(db_session: Session):
@@ -254,7 +255,7 @@ def test_mag_susc_skip_without_overwrite(db_session: Session):
     ea = ExternalAnalysis(
         sample_id="SOVER001",
         analysis_type="Magnetic Susceptibility",
-        magnetic_susceptibility=1.0,
+        magnetic_susceptibility="1.0",  # string
     )
     db_session.add(ea)
     db_session.flush()
@@ -267,7 +268,7 @@ def test_mag_susc_skip_without_overwrite(db_session: Session):
     db_session.flush()
     db_session.refresh(ea)
 
-    assert ea.magnetic_susceptibility == pytest.approx(1.0)
+    assert ea.magnetic_susceptibility == "1.0"  # unchanged
 
 
 def test_mag_susc_update_with_overwrite(db_session: Session):
@@ -281,7 +282,7 @@ def test_mag_susc_update_with_overwrite(db_session: Session):
     ea = ExternalAnalysis(
         sample_id="SOVER002",
         analysis_type="Magnetic Susceptibility",
-        magnetic_susceptibility=1.0,
+        magnetic_susceptibility="1.0",  # string
     )
     db_session.add(ea)
     db_session.flush()
@@ -294,4 +295,4 @@ def test_mag_susc_update_with_overwrite(db_session: Session):
     db_session.flush()
     db_session.refresh(ea)
 
-    assert ea.magnetic_susceptibility == pytest.approx(99.9)
+    assert ea.magnetic_susceptibility == "99.9"  # updated, no pytest.approx

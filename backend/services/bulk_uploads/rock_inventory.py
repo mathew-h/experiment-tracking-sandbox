@@ -252,16 +252,15 @@ class RockInventoryService:
                 if _mag_susc_col is not None:
                     try:
                         mag_val_raw = row.get(_mag_susc_col)
-                        mag_float: Optional[float] = None
+                        mag_str: Optional[str] = None
                         if mag_val_raw is not None and not (
                             isinstance(mag_val_raw, float) and pd.isna(mag_val_raw)
                         ):
-                            try:
-                                mag_float = float(str(mag_val_raw).strip())
-                            except (ValueError, TypeError):
-                                mag_float = None
+                            stripped = str(mag_val_raw).strip()
+                            if stripped:
+                                mag_str = stripped
 
-                        if mag_float is not None:
+                        if mag_str is not None:
                             existing_mag = (
                                 db.query(ExternalAnalysis)
                                 .filter(
@@ -274,10 +273,10 @@ class RockInventoryService:
                                 db.add(ExternalAnalysis(
                                     sample_id=sample.sample_id,
                                     analysis_type="Magnetic Susceptibility",
-                                    magnetic_susceptibility=mag_float,
+                                    magnetic_susceptibility=mag_str,
                                 ))
                             elif overwrite_mode:
-                                existing_mag.magnetic_susceptibility = mag_float
+                                existing_mag.magnetic_susceptibility = mag_str
                     except Exception as e:
                         errors.append(
                             f"Row {idx+2} ({sample.sample_id}): failed to create mag susc record — {e}"
