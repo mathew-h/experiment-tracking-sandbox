@@ -21,15 +21,21 @@ const createdIds: string[] = []
 
 test.afterEach(async ({ page }) => {
   for (const expId of createdIds.splice(0)) {
-    await page.goto(`/experiments/${expId}`)
+    // The interactive "Change status" button only exists on dashboard reactor grid cards,
+    // not on the experiment detail page. Navigate to the dashboard and cancel from there.
+    await page.goto('/dashboard')
     await page.waitForLoadState('networkidle')
-    // Click the status badge to change to CANCELLED
-    const badge = page.locator('button[title="Change status"]').first()
-    if (await badge.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await badge.click()
-      const cancelBtn = page.getByRole('button', { name: /^CANCELLED$/i })
-      await cancelBtn.click()
-      await page.waitForLoadState('networkidle')
+    // Find the experiment ID text in the reactor grid, go up to the Card root (../..),
+    // then click the status badge within that card.
+    const expIdText = page.getByText(expId, { exact: true }).first()
+    if (await expIdText.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const card = expIdText.locator('../..')
+      const badge = card.locator('button[title="Change status"]')
+      if (await badge.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await badge.click()
+        await page.getByRole('button', { name: /^CANCELLED$/i }).click()
+        await page.waitForLoadState('networkidle')
+      }
     }
   }
 })
