@@ -132,13 +132,10 @@ def get_dashboard(
         .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
     ).all()
 
-    seen_reactors: set[int] = set()
+    seen_labels: set[str] = set()
     reactor_cards: list[ReactorCardData] = []
     for row in reactor_rows:
         rn = row.reactor_number
-        if rn in seen_reactors:
-            continue
-        seen_reactors.add(rn)
         exp_type = (
             row.experiment_type.value
             if hasattr(row.experiment_type, "value")
@@ -147,6 +144,9 @@ def get_dashboard(
         )
         is_cf = exp_type == "Core Flood" if exp_type else False
         label = f"CF{rn:02d}" if is_cf else f"R{rn:02d}"
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
         days = (now - row.created_at).days if row.created_at else None
         specs = REACTOR_SPECS.get(rn, {})
         reactor_cards.append(ReactorCardData(
@@ -266,14 +266,22 @@ def get_reactor_status(
         .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
     ).all()
 
-    # Deduplicate: keep first (most-recent) per reactor_number
-    seen: set[int] = set()
+    # Deduplicate: keep first (most-recent) per label (CF01/R01 are separate slots)
+    seen: set[str] = set()
     result: list[ReactorStatusResponse] = []
     for row in rows:
         rn = row.reactor_number
-        if rn in seen:
+        exp_type = (
+            row.experiment_type.value
+            if hasattr(row.experiment_type, "value")
+            else str(row.experiment_type)
+            if row.experiment_type else None
+        )
+        is_cf = exp_type == "Core Flood" if exp_type else False
+        label = f"CF{rn:02d}" if is_cf else f"R{rn:02d}"
+        if label in seen:
             continue
-        seen.add(rn)
+        seen.add(label)
         result.append(ReactorStatusResponse(
             reactor_number=rn,
             experiment_id=row.experiment_id,

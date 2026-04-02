@@ -499,6 +499,64 @@ def test_null_experiment_type_in_reactor_1_gets_r01_not_cf01(client, db_session)
     )
 
 
+def test_cf_and_hpht_in_same_reactor_number_each_get_own_slot(client, db_session):
+    """
+    Core Flood and HPHT experiments sharing the same reactor_number must each
+    appear in their own dashboard slot (CF01 and R01 respectively), even when
+    the HPHT experiment was created more recently.
+
+    Regression test for the prod failure where HPHT_109 (created 2026-03-31,
+    reactor_number=1) blocked CF-015 (Core Flood, reactor_number=1) from
+    appearing in CF01 because the old dedup tracked reactor_number instead of
+    reactor_label.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    older = datetime.datetime.utcnow() - datetime.timedelta(days=10)
+    newer = datetime.datetime.utcnow()
+
+    cf_exp = Experiment(
+        experiment_id="CF_SLOT_TEST_001",
+        experiment_number=91005,
+        status=ExperimentStatus.ONGOING,
+        created_at=older,
+    )
+    hpht_exp = Experiment(
+        experiment_id="HPHT_SLOT_TEST_001",
+        experiment_number=91006,
+        status=ExperimentStatus.ONGOING,
+        created_at=newer,
+    )
+    db_session.add_all([cf_exp, hpht_exp])
+    db_session.flush()
+
+    db_session.add(ExperimentalConditions(
+        experiment_fk=cf_exp.id,
+        experiment_id="CF_SLOT_TEST_001",
+        reactor_number=1,
+        experiment_type="Core Flood",
+    ))
+    db_session.add(ExperimentalConditions(
+        experiment_fk=hpht_exp.id,
+        experiment_id="HPHT_SLOT_TEST_001",
+        reactor_number=1,
+        experiment_type="HPHT",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+
+    assert "CF01" in cards, "CF01 slot must be populated by the Core Flood experiment"
+    assert cards["CF01"]["experiment_id"] == "CF_SLOT_TEST_001"
+
+    assert "R01" in cards, "R01 slot must be populated by the HPHT experiment"
+    assert cards["R01"]["experiment_id"] == "HPHT_SLOT_TEST_001"
+
+
 # ---------------------------------------------------------------------------
 # Performance test
 # ---------------------------------------------------------------------------
