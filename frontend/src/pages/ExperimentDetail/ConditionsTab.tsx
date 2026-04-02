@@ -273,7 +273,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
                   <span className="text-xs text-ink-muted">{a.mass_in_grams.toFixed(4)} g</span>
                 )}
                 {/* Action group — right-aligned, hover reveal on desktop, always visible on mobile */}
-                <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity">
+                <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100 transition-opacity">
                   {/* Edit */}
                   <button
                     type="button"
