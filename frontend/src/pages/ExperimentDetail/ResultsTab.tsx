@@ -16,7 +16,7 @@ function fmtDate(iso: string | null | undefined): string {
   return iso.slice(0, 10)
 }
 
-const GRID = 'grid-cols-[1.5rem_5rem_6rem_minmax(0,8rem)_5rem_5rem_5rem_4rem_6rem_4rem_1.5rem]'
+const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_5rem_5rem_4rem_6rem_4rem_minmax(0,1fr)_1.5rem]'
 
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
@@ -185,13 +185,14 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             <span></span>
             <span>Time (d)</span>
             <span>Sample Date</span>
-            <span>Sampling Mod</span>
+            <span>Gross NH₄ (mM)</span>
             <span>NH₄ (g/t)</span>
-            <span>H₂ (g/t)</span>
             <span>H₂ (µmol)</span>
+            <span>H₂ (g/t)</span>
             <span>pH</span>
             <span>Cond. (mS/cm)</span>
             <span>ICP</span>
+            <span>Sampling Mod</span>
             <span></span>
           </div>
           {results.map((r) => (
@@ -203,6 +204,13 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
                 <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
                 <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
+                <span>{r.has_icp && <Badge variant="info" dot>ICP</Badge>}</span>
                 <span className="flex items-center gap-1 min-w-0">
                   {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
                   {r.brine_modification_description && (
@@ -214,12 +222,6 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
                     </span>
                   )}
                 </span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
-                <span>{r.has_icp && <Badge variant="info" dot>ICP</Badge>}</span>
                 <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
               </div>
               {expanded.has(r.id) && <ExpandedRow result={r} />}
