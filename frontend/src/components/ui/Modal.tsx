@@ -37,15 +37,20 @@ export function Modal({ open, onClose, title, description, children, footer, siz
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
     >
-      <div className={[
-        'relative w-full bg-surface-overlay border border-surface-border rounded-xl shadow-panel-lg',
-        'flex flex-col max-h-[85vh] animate-slide-up',
-        sizeClasses[size],
-      ].join(' ')}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? 'modal-title' : undefined}
+        className={[
+          'relative w-full bg-surface-overlay border border-surface-border rounded-xl shadow-panel-lg',
+          'flex flex-col max-h-[85vh] animate-slide-up',
+          sizeClasses[size],
+        ].join(' ')}
+      >
         {/* Header */}
         <div className="flex items-start justify-between p-5 border-b border-surface-border shrink-0">
           <div>
-            {title && <h2 className="text-base font-semibold text-ink-primary">{title}</h2>}
+            {title && <h2 id="modal-title" className="text-base font-semibold text-ink-primary">{title}</h2>}
             {description && <p className="text-xs text-ink-muted mt-0.5">{description}</p>}
           </div>
           <button
