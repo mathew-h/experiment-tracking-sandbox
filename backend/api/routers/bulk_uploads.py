@@ -593,13 +593,68 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
     if upload_type == "rock-inventory":
-        return _simple_template(
-            headers=["sample_id", "rock_classification", "state", "country",
-                     "locality", "latitude", "longitude", "description", "characterized"],
-            required={"sample_id"},
-            example_row=["S001", "Basalt", "BC", "Canada", "Vancouver Island",
-                         49.5, -125.0, "Fresh olivine basalt", "FALSE"],
-        )
+        import openpyxl  # noqa: PLC0415
+        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
+
+        headers = [
+            "sample_id", "rock_classification", "state", "country",
+            "locality", "latitude", "longitude", "description",
+            "characterized", "pxrf_reading_no", "magnetic_susceptibility", "overwrite",
+        ]
+        required = {"sample_id"}
+        example_row = [
+            "S001", "Basalt", "BC", "Canada", "Vancouver Island",
+            49.5, -125.0, "Fresh olivine basalt", "FALSE", "", "", "FALSE",
+        ]
+        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        for col, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = Font(bold=True)
+            cell.fill = req_fill if h in required else opt_fill
+            cell.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
+        for col, val in enumerate(example_row, start=1):
+            ws.cell(row=2, column=col, value=val)
+
+        ws_inst = wb.create_sheet("INSTRUCTIONS")
+        ws_inst.column_dimensions["A"].width = 30
+        ws_inst.column_dimensions["B"].width = 70
+        instructions = [
+            ("Column", "Notes"),
+            ("sample_id", "REQUIRED. Unique sample identifier (e.g. S001, SROCK-042)."),
+            ("rock_classification", "Rock type (e.g. Basalt, Dunite, Serpentinite)."),
+            ("state", "Province or state."),
+            ("country", "Country of origin."),
+            ("locality", "Locality or formation name."),
+            ("latitude", "Decimal degrees (e.g. 49.5)."),
+            ("longitude", "Decimal degrees (e.g. -125.0)."),
+            ("description", "Free-text sample description."),
+            ("characterized", "TRUE or FALSE (default FALSE)."),
+            (
+                "pxrf_reading_no",
+                "Comma-separated pXRF reading numbers. Creates ExternalAnalysis type 'pXRF' per reading.",
+            ),
+            (
+                "magnetic_susceptibility",
+                "Magnetic susceptibility value (units: 1x10\u207b\u00b3 SI). Leave blank if not measured.",
+            ),
+            ("overwrite", "TRUE clears and rewrites all optional fields for existing samples (default FALSE)."),
+        ]
+        for r_idx, (col_name, note) in enumerate(instructions, start=1):
+            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
+            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
+            if r_idx == 1:
+                name_cell.font = Font(bold=True)
+                note_cell.font = Font(bold=True)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
     if upload_type == "chemical-inventory":
         return _simple_template(
