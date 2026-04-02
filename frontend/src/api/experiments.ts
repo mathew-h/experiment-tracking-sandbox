@@ -103,14 +103,29 @@ export const experimentsApi = {
   create: (payload: CreateExperimentPayload) =>
     apiClient.post<ExperimentDetail>('/experiments', payload).then((r) => r.data),
 
-  patch: (experimentId: string, payload: { status?: string; researcher?: string; date?: string }) =>
-    apiClient.patch<ExperimentDetail>(`/experiments/${experimentId}`, payload).then((r) => r.data),
+  patch: (
+    experimentId: string,
+    payload: {
+      status?: string
+      researcher?: string
+      date?: string
+      experiment_id?: string
+    },
+  ) =>
+    apiClient
+      .patch<ExperimentDetail>(`/experiments/${experimentId}`, payload)
+      .then((r) => r.data),
 
   patchStatus: (experimentId: string, status: string) =>
     apiClient.patch<ExperimentDetail>(`/experiments/${experimentId}/status`, { status }).then((r) => r.data),
 
   nextId: (type: string) =>
     apiClient.get<{ next_id: string }>('/experiments/next-id', { params: { type } }).then((r) => r.data),
+
+  checkExists: (experimentId: string) =>
+    apiClient
+      .get<{ exists: boolean }>(`/experiments/${encodeURIComponent(experimentId)}/exists`)
+      .then((r) => r.data),
 
   getResults: (experimentId: string) =>
     apiClient.get<ResultWithFlags[]>(`/experiments/${experimentId}/results`).then((r) => r.data),

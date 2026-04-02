@@ -220,3 +220,16 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/e2e/journeys/15-wt-pct-fluid-additive.spec.ts` — 2 new Playwright E2E tests
 - **Tests added:** yes — 2 backend unit tests, 2 Playwright E2E tests
 - **Decision logged:** `wt% of fluid` uses formula identical to `wt%` (assumes dilute aqueous solution ρ ≈ 1 g/mL); implemented as a distinct branch for semantic clarity
+
+## 2026-04-02 | issue #27 — Editable Experiment ID (new + existing experiments)
+- **Files changed:**
+  - `backend/api/schemas/experiments.py` — added `experiment_id` to `ExperimentUpdate` with max_length=100
+  - `backend/api/routers/experiments.py` — new `GET /{id}/exists` endpoint; `PATCH /{id}` rename logic (uniqueness check, whitespace strip, blank guard, conditions/notes/analysis/xrd sync, ModificationsLog, structlog)
+  - `tests/api/test_experiments.py` — 8 new tests (exists true/false, rename conflict, noop, mod log, whitespace strip, analysis sync)
+  - `frontend/src/api/experiments.ts` — added `checkExists`; expanded `patch` payload to include `experiment_id`
+  - `frontend/src/hooks/useExperimentIdValidation.ts` — new file; debounced 300ms availability hook with currentId fast-path
+  - `frontend/src/pages/NewExperiment/Step1BasicInfo.tsx` — ID field made editable; live validation feedback
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — inline rename (pencil → input → save/cancel); 409 toast; redirect on success
+  - `docs/api/API_REFERENCE.md` — documented `/exists` endpoint and updated PATCH schema
+- **Tests added:** yes — 8 backend API tests
+- **Decision logged:** no

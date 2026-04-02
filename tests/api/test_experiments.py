@@ -64,6 +64,13 @@ def test_patch_experiment(client, db_session):
     assert resp.json()["status"] == "COMPLETED"
 
 
+def test_patch_rename_success(client, db_session):
+    _make_experiment(db_session, "RENAME_SRC_001", 9010)
+    resp = client.patch("/api/experiments/RENAME_SRC_001", json={"experiment_id": "RENAME_DST_001"})
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "RENAME_DST_001"
+
+
 def test_delete_experiment(client, db_session):
     _make_experiment(db_session, "DELETE_ME_001", 8005)
     resp = client.delete("/api/experiments/DELETE_ME_001")
@@ -326,3 +333,83 @@ def test_delete_additive_not_found(client, db_session):
     _make_exp_with_conditions(db_session, "ADDTEST_005")
     resp = client.delete("/api/experiments/ADDTEST_005/additives/99999")
     assert resp.status_code == 404
+
+
+# --- #27: /exists endpoint ---
+
+def test_exists_returns_true_for_known_id(client, db_session):
+    _make_experiment(db_session, "EXISTS_001", 9020)
+    resp = client.get("/api/experiments/EXISTS_001/exists")
+    assert resp.status_code == 200
+    assert resp.json() == {"exists": True}
+
+
+def test_exists_returns_false_for_unknown_id(client):
+    resp = client.get("/api/experiments/DOES_NOT_EXIST_XYZ/exists")
+    assert resp.status_code == 200
+    assert resp.json() == {"exists": False}
+
+
+# --- #27: rename via PATCH ---
+
+def test_patch_rename_conflict(client, db_session):
+    _make_experiment(db_session, "CONFLICT_SRC_001", 9030)
+    _make_experiment(db_session, "CONFLICT_DST_001", 9031)
+    resp = client.patch(
+        "/api/experiments/CONFLICT_SRC_001",
+        json={"experiment_id": "CONFLICT_DST_001"},
+    )
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+
+def test_patch_rename_same_id_is_noop(client, db_session):
+    _make_experiment(db_session, "SAME_ID_001", 9032)
+    resp = client.patch("/api/experiments/SAME_ID_001", json={"experiment_id": "SAME_ID_001"})
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "SAME_ID_001"
+
+
+def test_patch_rename_logs_modification(client, db_session):
+    from database.models.experiments import ModificationsLog
+    from sqlalchemy import select as sa_select
+    _make_experiment(db_session, "LOG_SRC_001", 9033)
+    client.patch("/api/experiments/LOG_SRC_001", json={"experiment_id": "LOG_DST_001"})
+    log = db_session.execute(
+        sa_select(ModificationsLog)
+        .where(ModificationsLog.modified_table == "experiments")
+        .order_by(ModificationsLog.id.desc())
+    ).scalar_one_or_none()
+    assert log is not None
+    assert log.old_values == {"experiment_id": "LOG_SRC_001"}
+    assert log.new_values == {"experiment_id": "LOG_DST_001"}
+
+
+def test_patch_rename_strips_whitespace(client, db_session):
+    _make_experiment(db_session, "STRIP_SRC_001", 9034)
+    resp = client.patch("/api/experiments/STRIP_SRC_001", json={"experiment_id": "  STRIP_DST_001  "})
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "STRIP_DST_001"
+
+
+def test_patch_rename_syncs_external_analysis(client, db_session):
+    from database.models.analysis import ExternalAnalysis
+
+    exp = _make_experiment(db_session, "ANALYSIS_SYNC_SRC_001", 9040)
+    analysis = ExternalAnalysis(
+        experiment_id="ANALYSIS_SYNC_SRC_001",
+        experiment_fk=exp.id,
+        analysis_type="XRD",
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    db_session.refresh(analysis)
+
+    resp = client.patch(
+        "/api/experiments/ANALYSIS_SYNC_SRC_001",
+        json={"experiment_id": "ANALYSIS_SYNC_DST_001"},
+    )
+    assert resp.status_code == 200
+
+    db_session.refresh(analysis)
+    assert analysis.experiment_id == "ANALYSIS_SYNC_DST_001"
