@@ -172,7 +172,7 @@ def test_mag_susc_aliases_recognized(db_session: Session):
     """All four alias column names for mag susc are accepted."""
     from database.models.analysis import ExternalAnalysis
 
-    aliases = ["magnetic susceptibility", "mag_susc", "mag susc"]
+    aliases = ["magnetic_susceptibility", "magnetic susceptibility", "mag_susc", "mag susc"]
     for alias in aliases:
         safe_alias = alias.replace(" ", "X").replace("_", "Y").upper()
         xlsx = make_excel(
