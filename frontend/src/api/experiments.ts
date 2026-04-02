@@ -139,6 +139,9 @@ export const experimentsApi = {
   patchNote: (experimentId: string, noteId: number, text: string) =>
     apiClient.patch<{ id: number; note_text: string; created_at: string; updated_at: string | null }>(`/experiments/${experimentId}/notes/${noteId}`, { note_text: text }),
 
+  deleteNote: (experimentId: string, noteId: number) =>
+    apiClient.delete(`/experiments/${experimentId}/notes/${noteId}`),
+
   delete: (experimentId: string) =>
     apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),
 }

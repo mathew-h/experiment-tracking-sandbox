@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
-import { Button, useToast } from '@/components/ui'
+import { Button, ConfirmModal, useToast } from '@/components/ui'
 
 interface Note {
   id: number
@@ -11,11 +11,12 @@ interface Note {
 }
 interface Props { experimentId: string; notes: Note[] }
 
-/** Notes tab: chronological lab notes with inline add and inline edit. */
+/** Notes tab: chronological lab notes with inline add, inline edit, and delete. */
 export function NotesTab({ experimentId, notes }: Props) {
   const [text, setText] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
+  const [deleteNoteId, setDeleteNoteId] = useState<number | null>(null)
   const queryClient = useQueryClient()
   const { success, error: toastError } = useToast()
 
@@ -39,6 +40,16 @@ export function NotesTab({ experimentId, notes }: Props) {
       setEditText('')
     },
     onError: (err: Error) => toastError('Failed to update note', err.message),
+  })
+
+  const deleteNote = useMutation({
+    mutationFn: (noteId: number) => experimentsApi.deleteNote(experimentId, noteId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
+      success('Note deleted')
+      setDeleteNoteId(null)
+    },
+    onError: (err: Error) => toastError('Failed to delete note', err.message),
   })
 
   const startEdit = (note: Note) => {
@@ -91,17 +102,32 @@ export function NotesTab({ experimentId, notes }: Props) {
                 )}
               </div>
               {editingId !== n.id && (
-                <button
-                  type="button"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-muted hover:text-ink-primary p-0.5"
-                  onClick={() => startEdit(n)}
-                  title="Edit note"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round"
-                      d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100 transition-opacity shrink-0">
+                  {/* Edit */}
+                  <button
+                    type="button"
+                    aria-label="Edit note"
+                    onClick={() => startEdit(n)}
+                    className="p-1 rounded text-ink-secondary hover:text-ink-primary hover:bg-surface-overlay transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round"
+                        d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
+                    </svg>
+                  </button>
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    aria-label="Delete note"
+                    onClick={() => setDeleteNoteId(n.id)}
+                    className="p-1 rounded text-ink-secondary hover:text-red-400 hover:bg-surface-overlay transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round"
+                        d="M3 4h10M6 4V2h4v2M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" />
+                    </svg>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -140,6 +166,18 @@ export function NotesTab({ experimentId, notes }: Props) {
           </div>
         ))}
       </div>
+
+      {/* Delete note confirmation */}
+      <ConfirmModal
+        open={deleteNoteId !== null}
+        onClose={() => setDeleteNoteId(null)}
+        onConfirm={() => { if (deleteNoteId !== null) deleteNote.mutate(deleteNoteId) }}
+        loading={deleteNote.isPending}
+        title="Delete note?"
+        description="This note will be permanently deleted and cannot be recovered."
+        confirmLabel="Delete"
+        danger
+      />
     </div>
   )
 }

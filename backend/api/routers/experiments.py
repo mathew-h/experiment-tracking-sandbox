@@ -642,3 +642,38 @@ def patch_note(
     db.refresh(note)
     log.info("note_updated", experiment_id=experiment_id, note_id=note_id)
     return NoteResponse.model_validate(note)
+
+
+@router.delete("/{experiment_id}/notes/{note_id}", status_code=204)
+def delete_note(
+    experiment_id: str,
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> Response:
+    """Delete a note. Writes a ModificationsLog entry then removes the row."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    note = db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.id == note_id)
+        .where(ExperimentNotes.experiment_fk == exp.id)
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    db.add(ModificationsLog(
+        experiment_id=experiment_id,
+        experiment_fk=exp.id,
+        modified_by=current_user.email,
+        modification_type="delete",
+        modified_table="experiment_notes",
+        old_values={"note_text": note.note_text},
+        new_values=None,
+    ))
+    db.delete(note)
+    db.commit()
+    log.info("note_deleted", experiment_id=experiment_id, note_id=note_id)
+    return Response(status_code=204)

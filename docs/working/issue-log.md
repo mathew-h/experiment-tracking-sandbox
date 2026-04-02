@@ -243,3 +243,19 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_bulk_uploads.py` — 4 pXRF reverse-match tests
 - **Tests added:** yes — 10 new tests (6 service, 4 API); 158 passing
 - **Decision logged:** no
+
+## 2026-04-02 | issue #24 — fix invisible edit/delete buttons for additives and notes
+- **Files changed:**
+  - `backend/api/routers/experiments.py` — added `DELETE /{experiment_id}/notes/{note_id}` endpoint with ModificationsLog
+  - `tests/api/test_notes_delete.py` — 5 new backend tests (204, row removed, audit log, 404 cases)
+  - `frontend/src/api/experiments.ts` — added `deleteNote` service function
+  - `frontend/src/api/__tests__/experiments.deleteNote.test.ts` — 2 unit tests
+  - `frontend/src/pages/ExperimentDetail/ConditionsTab.tsx` — replaced invisible `opacity-0/text-ink-muted` additives buttons with accessible icon group; `ConfirmModal` gates delete
+  - `frontend/src/pages/ExperimentDetail/__tests__/ConditionsTab.buttons.test.tsx` — 3 unit tests
+  - `frontend/src/pages/ExperimentDetail/NotesTab.tsx` — full replacement: added `deleteNote` mutation, `ConfirmModal`, both buttons with `aria-label`, `text-ink-secondary` contrast
+  - `frontend/src/pages/ExperimentDetail/__tests__/NotesTab.buttons.test.tsx` — 3 unit tests
+  - `frontend/src/components/ui/Modal.tsx` — added `role="dialog"` and `aria-modal="true"` to inner panel
+  - `frontend/e2e/journeys/02-additives-crud.spec.ts` — 5 E2E tests (visibility, edit, delete confirm/cancel)
+  - `frontend/e2e/journeys/03-notes-crud.spec.ts` — 5 E2E tests (visibility, edit, delete confirm/cancel)
+- **Tests added:** yes — 5 backend + 8 frontend unit tests; 10 E2E tests
+- **Decision logged:** no
