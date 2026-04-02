@@ -1,7 +1,7 @@
 from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -19,6 +19,8 @@ from backend.api.schemas.results import (
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
+from database.models.analysis import ExternalAnalysis
+from database.models.xrd import XRDPhase
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
 
@@ -527,6 +529,22 @@ def update_experiment(
             ).scalar_one_or_none()
             if cond is not None:
                 cond.experiment_id = new_id
+            # Sync denormalized experiment_id across all tables that carry it
+            db.execute(
+                update(ExperimentNotes)
+                .where(ExperimentNotes.experiment_fk == exp.id)
+                .values(experiment_id=new_id)
+            )
+            db.execute(
+                update(ExternalAnalysis)
+                .where(ExternalAnalysis.experiment_fk == exp.id)
+                .values(experiment_id=new_id)
+            )
+            db.execute(
+                update(XRDPhase)
+                .where(XRDPhase.experiment_fk == exp.id)
+                .values(experiment_id=new_id)
+            )
             db.add(ModificationsLog(
                 experiment_id=new_id,
                 experiment_fk=exp.id,

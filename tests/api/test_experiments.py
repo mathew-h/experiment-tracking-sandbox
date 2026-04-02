@@ -390,3 +390,26 @@ def test_patch_rename_strips_whitespace(client, db_session):
     resp = client.patch("/api/experiments/STRIP_SRC_001", json={"experiment_id": "  STRIP_DST_001  "})
     assert resp.status_code == 200
     assert resp.json()["experiment_id"] == "STRIP_DST_001"
+
+
+def test_patch_rename_syncs_external_analysis(client, db_session):
+    from database.models.analysis import ExternalAnalysis
+
+    exp = _make_experiment(db_session, "ANALYSIS_SYNC_SRC_001", 9040)
+    analysis = ExternalAnalysis(
+        experiment_id="ANALYSIS_SYNC_SRC_001",
+        experiment_fk=exp.id,
+        analysis_type="XRD",
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    db_session.refresh(analysis)
+
+    resp = client.patch(
+        "/api/experiments/ANALYSIS_SYNC_SRC_001",
+        json={"experiment_id": "ANALYSIS_SYNC_DST_001"},
+    )
+    assert resp.status_code == 200
+
+    db_session.refresh(analysis)
+    assert analysis.experiment_id == "ANALYSIS_SYNC_DST_001"
