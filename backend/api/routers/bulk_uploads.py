@@ -127,34 +127,26 @@ async def upload_pxrf(
     _imported_reading_nos: set[str] = set()
     try:
         import openpyxl as _openpyxl  # noqa: PLC0415
+        from backend.services.samples import normalize_pxrf_reading_no as _norm  # noqa: PLC0415
         _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-        _ws = _wb.active
-        _rn_col_idx: int | None = None
-        for _row_idx, _row in enumerate(_ws.iter_rows(values_only=True)):
-            if _row_idx == 0:
-                # Find header column index for "Reading No"
-                for _ci, _hdr in enumerate(_row):
-                    if isinstance(_hdr, str) and _hdr.strip() == "Reading No":
-                        _rn_col_idx = _ci
-                        break
-                if _rn_col_idx is None:
-                    break
-                continue
-            if _rn_col_idx is not None and _rn_col_idx < len(_row):
-                _v = _row[_rn_col_idx]
-                if _v is not None:
-                    _s = str(_v).strip()
-                    if _s:
-                        _s_clean = _s.replace(".", "", 1).replace("-", "", 1)
-                        if _s_clean.isdigit():
-                            try:
-                                _s = str(int(float(_s)))
-                            except (ValueError, OverflowError):
-                                pass
-                        _imported_reading_nos.add(_s)
-        _wb.close()
+        try:
+            _ws = _wb.active
+            _header_row = next(_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            if _header_row is not None:
+                _rn_col = next(
+                    (i for i, h in enumerate(_header_row) if str(h).strip() == "Reading No"), None
+                )
+                if _rn_col is not None:
+                    for _row in _ws.iter_rows(min_row=2, values_only=True):
+                        _v = _row[_rn_col] if _rn_col < len(_row) else None
+                        if _v is not None:
+                            _s = str(_v).strip()
+                            if _s:
+                                _imported_reading_nos.add(_norm(_s))
+        finally:
+            _wb.close()
     except Exception:
-        pass  # extraction is best-effort; parser will report any real file errors
+        pass
 
     try:
         created, updated, skipped, errors = PXRFUploadService.ingest_from_bytes(db, file_bytes)
@@ -185,7 +177,7 @@ async def upload_pxrf(
                 )
 
             affected_eas = db.query(_EA).filter(
-                _EA.analysis_type == "pXRF",
+                _EA.analysis_type == "pXRF",  # AnalysisType.PXRF.value
                 _EA.sample_id.isnot(None),
                 _or(*_like_conds),
             ).all()
@@ -221,11 +213,11 @@ async def upload_pxrf(
 
     base_msg = f"pXRF: {created} created, {updated} updated"
     message = (
-        f"{base_msg}. Re-evaluated characterized status for {reevaluated_count} sample{'s' if reevaluated_count != 1 else ''}."
+        f"{base_msg}. Updated characterized status for {reevaluated_count} sample{'s' if reevaluated_count != 1 else ''}."
         if reevaluated_count > 0
         else base_msg
     )
-    log.info("pxrf_upload", created=created, updated=updated, reevaluated=reevaluated_count, user=current_user.email)
+    log.info("pxrf_upload", created=created, updated=updated, updated_characterized=reevaluated_count, user=current_user.email)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
                           message=message)
 

@@ -675,4 +675,49 @@ def test_pxrf_upload_message_includes_reevaluated_count(client, db_session):
     assert resp.status_code == 200
     body = resp.json()
     msg = body["message"].lower()
-    assert "re-evaluated" in msg or "1 sample" in msg
+    assert "updated characterized" in msg or "1 sample" in msg
+
+
+def test_pxrf_upload_no_change_when_no_matching_readings(client, db_session):
+    """No re-evaluation count in message when uploaded readings don't match any sample EA."""
+    from database import SampleInfo
+    from database.models.analysis import ExternalAnalysis, PXRFReading
+
+    # Sample has an EA for reading "55" but the upload contains reading "56" (no overlap)
+    sample = SampleInfo(sample_id="REVTEST004")
+    db_session.add(sample)
+    db_session.flush()
+    ea = ExternalAnalysis(
+        sample_id="REVTEST004",
+        analysis_type="pXRF",
+        pxrf_reading_no="55",
+    )
+    db_session.add(ea)
+    reading = PXRFReading(
+        reading_no="56",
+        fe=2.0, mg=4.0, ni=0.4, cu=0.4, si=30.0,
+        co=0.4, mo=0.04, al=5.0, ca=6.0, k=4.0, au=0.0,
+    )
+    db_session.add(reading)
+    db_session.flush()
+
+    # Upload contains reading "56" which has no matching EA pxrf_reading_no
+    file_bytes = _make_pxrf_excel_bytes(["56"])
+    fake_mod = MagicMock()
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": MagicMock(),
+        "backend.services.bulk_uploads.pxrf_data": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/pxrf",
+            files={"file": ("test.xlsx", io.BytesIO(file_bytes), "application/vnd.ms-excel")},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # No samples matched the uploaded readings, so message has no "updated characterized"
+    assert "updated characterized" not in body["message"].lower()
