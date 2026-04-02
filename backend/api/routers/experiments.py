@@ -397,6 +397,19 @@ def set_experiment_background_ammonium(
     return BackgroundAmmoniumUpdated(updated=len(scalars))
 
 
+@router.get("/{experiment_id}/exists")
+def check_experiment_id_exists(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> dict:
+    """Return whether an experiment_id string is already in use."""
+    exists = db.execute(
+        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    return {"exists": exists is not None}
+
+
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
 def get_experiment(
     experiment_id: str,
@@ -479,14 +492,49 @@ def update_experiment(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentResponse:
-    """Update mutable fields on an experiment."""
+    """Update mutable fields on an experiment. If experiment_id is provided and differs
+    from the path param, treats it as a rename: checks uniqueness, updates
+    ExperimentalConditions.experiment_id, and writes a ModificationsLog entry."""
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    data = payload.model_dump(exclude_unset=True)
+    new_id = data.pop("experiment_id", None)
+
+    for field, value in data.items():
         setattr(exp, field, value)
+
+    if new_id is not None:
+        new_id = new_id.strip()
+        if new_id != experiment_id:
+            conflict = db.execute(
+                select(Experiment.id).where(Experiment.experiment_id == new_id)
+            ).scalar_one_or_none()
+            if conflict is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Experiment ID '{new_id}' already exists",
+                )
+            exp.experiment_id = new_id
+            # Keep denormalized string in conditions in sync so additives endpoints work
+            cond = db.execute(
+                select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+            ).scalar_one_or_none()
+            if cond is not None:
+                cond.experiment_id = new_id
+            db.add(ModificationsLog(
+                experiment_id=new_id,
+                experiment_fk=exp.id,
+                modified_by=current_user.uid,
+                modification_type="update",
+                modified_table="experiments",
+                old_values={"experiment_id": experiment_id},
+                new_values={"experiment_id": new_id},
+            ))
+
     db.commit()
     db.refresh(exp)
     return ExperimentResponse.model_validate(exp)
