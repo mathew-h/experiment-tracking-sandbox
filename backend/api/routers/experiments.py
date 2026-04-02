@@ -509,6 +509,8 @@ def update_experiment(
 
     if new_id is not None:
         new_id = new_id.strip()
+        if not new_id:
+            raise HTTPException(status_code=422, detail="experiment_id cannot be blank")
         if new_id != experiment_id:
             conflict = db.execute(
                 select(Experiment.id).where(Experiment.experiment_id == new_id)
@@ -534,6 +536,7 @@ def update_experiment(
                 old_values={"experiment_id": experiment_id},
                 new_values={"experiment_id": new_id},
             ))
+            log.info("experiment_renamed", old_id=experiment_id, new_id=new_id, user=current_user.uid)
 
     db.commit()
     db.refresh(exp)
