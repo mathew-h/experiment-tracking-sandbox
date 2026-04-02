@@ -17,6 +17,7 @@ class ExperimentCreate(BaseModel):
 
 
 class ExperimentUpdate(BaseModel):
+    experiment_id: Optional[str] = Field(None, min_length=1, max_length=100)
     sample_id: Optional[str] = None
     researcher: Optional[str] = None
     date: Optional[datetime] = None

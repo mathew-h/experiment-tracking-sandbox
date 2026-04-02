@@ -1,7 +1,7 @@
 from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -19,6 +19,8 @@ from backend.api.schemas.results import (
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
+from database.models.analysis import ExternalAnalysis
+from database.models.xrd import XRDPhase
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
 
@@ -397,6 +399,19 @@ def set_experiment_background_ammonium(
     return BackgroundAmmoniumUpdated(updated=len(scalars))
 
 
+@router.get("/{experiment_id}/exists")
+def check_experiment_id_exists(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> dict:
+    """Return whether an experiment_id string is already in use."""
+    exists = db.execute(
+        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    return {"exists": exists is not None}
+
+
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
 def get_experiment(
     experiment_id: str,
@@ -479,14 +494,68 @@ def update_experiment(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentResponse:
-    """Update mutable fields on an experiment."""
+    """Update mutable fields on an experiment. If experiment_id is provided and differs
+    from the path param, treats it as a rename: checks uniqueness, updates
+    ExperimentalConditions.experiment_id, and writes a ModificationsLog entry."""
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    data = payload.model_dump(exclude_unset=True)
+    new_id = data.pop("experiment_id", None)
+
+    for field, value in data.items():
         setattr(exp, field, value)
+
+    if new_id is not None:
+        new_id = new_id.strip()
+        if not new_id:
+            raise HTTPException(status_code=422, detail="experiment_id cannot be blank")
+        if new_id != experiment_id:
+            conflict = db.execute(
+                select(Experiment.id).where(Experiment.experiment_id == new_id)
+            ).scalar_one_or_none()
+            if conflict is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Experiment ID '{new_id}' already exists",
+                )
+            exp.experiment_id = new_id
+            # Keep denormalized string in conditions in sync so additives endpoints work
+            cond = db.execute(
+                select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+            ).scalar_one_or_none()
+            if cond is not None:
+                cond.experiment_id = new_id
+            # Sync denormalized experiment_id across all tables that carry it
+            db.execute(
+                update(ExperimentNotes)
+                .where(ExperimentNotes.experiment_fk == exp.id)
+                .values(experiment_id=new_id)
+            )
+            db.execute(
+                update(ExternalAnalysis)
+                .where(ExternalAnalysis.experiment_fk == exp.id)
+                .values(experiment_id=new_id)
+            )
+            db.execute(
+                update(XRDPhase)
+                .where(XRDPhase.experiment_fk == exp.id)
+                .values(experiment_id=new_id)
+            )
+            db.add(ModificationsLog(
+                experiment_id=new_id,
+                experiment_fk=exp.id,
+                modified_by=current_user.uid,
+                modification_type="update",
+                modified_table="experiments",
+                old_values={"experiment_id": experiment_id},
+                new_values={"experiment_id": new_id},
+            ))
+            log.info("experiment_renamed", old_id=experiment_id, new_id=new_id, user=current_user.uid)
+
     db.commit()
     db.refresh(exp)
     return ExperimentResponse.model_validate(exp)
