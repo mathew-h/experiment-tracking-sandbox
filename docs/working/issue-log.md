@@ -211,3 +211,13 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/api/API_REFERENCE.md` — documented `/exists` endpoint and updated PATCH schema
 - **Tests added:** yes — 8 backend API tests
 - **Decision logged:** no
+
+## 2026-04-02 | issue #28 — mag-susc column + pXRF reverse-match characterized status
+- **Files changed:**
+  - `backend/services/bulk_uploads/rock_inventory.py` — mag-susc column detection (4 aliases), ExternalAnalysis record creation/overwrite
+  - `backend/api/routers/bulk_uploads.py` — rock-inventory template updated (pxrf_reading_no, magnetic_susceptibility, INSTRUCTIONS sheet); pXRF upload endpoint extended with reverse-match post-processing (re-evaluates `characterized` for affected samples, logs modifications)
+  - `backend/services/bulk_uploads/pxrf_data.py` — added CSV fallback (`pd.read_csv`) after `pd.read_excel` fails; verified against 740-row Niton XRF CSV
+  - `tests/services/bulk_uploads/test_rock_inventory.py` — 6 mag-susc tests
+  - `tests/api/test_bulk_uploads.py` — 4 pXRF reverse-match tests
+- **Tests added:** yes — 10 new tests (6 service, 4 API); 158 passing
+- **Decision logged:** no
