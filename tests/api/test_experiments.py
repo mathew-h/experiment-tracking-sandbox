@@ -64,6 +64,13 @@ def test_patch_experiment(client, db_session):
     assert resp.json()["status"] == "COMPLETED"
 
 
+def test_patch_rename_success(client, db_session):
+    _make_experiment(db_session, "RENAME_SRC_001", 9010)
+    resp = client.patch("/api/experiments/RENAME_SRC_001", json={"experiment_id": "RENAME_DST_001"})
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "RENAME_DST_001"
+
+
 def test_delete_experiment(client, db_session):
     _make_experiment(db_session, "DELETE_ME_001", 8005)
     resp = client.delete("/api/experiments/DELETE_ME_001")
