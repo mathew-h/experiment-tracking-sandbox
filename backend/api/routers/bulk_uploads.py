@@ -107,7 +107,7 @@ async def upload_pxrf(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Upload a pXRF CSV/Excel file."""
+    """Upload a pXRF CSV/Excel file and re-evaluate characterized status for affected samples."""
     import sys  # noqa: PLC0415
     from types import ModuleType  # noqa: PLC0415
     if "frontend.config.variable_config" not in sys.modules:
@@ -120,16 +120,106 @@ async def upload_pxrf(
         _vc.PXRF_REQUIRED_COLUMNS = {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
     from backend.services.bulk_uploads.pxrf_data import PXRFUploadService  # noqa: PLC0415
     file_bytes = await file.read()
+
+    # Lightweight extraction of reading_no values for post-upload reverse-match.
+    # Mirrors the normalization in PXRFUploadService._clean_dataframe.
+    # Uses openpyxl directly to avoid pandas/numpy version-mismatch issues.
+    _imported_reading_nos: set[str] = set()
+    try:
+        import openpyxl as _openpyxl  # noqa: PLC0415
+        from backend.services.samples import normalize_pxrf_reading_no as _norm  # noqa: PLC0415
+        _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+        try:
+            _ws = _wb.active
+            _header_row = next(_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            if _header_row is not None:
+                _rn_col = next(
+                    (i for i, h in enumerate(_header_row) if str(h).strip() == "Reading No"), None
+                )
+                if _rn_col is not None:
+                    for _row in _ws.iter_rows(min_row=2, values_only=True):
+                        _v = _row[_rn_col] if _rn_col < len(_row) else None
+                        if _v is not None:
+                            _s = str(_v).strip()
+                            if _s:
+                                _imported_reading_nos.add(_norm(_s))
+        finally:
+            _wb.close()
+    except Exception:
+        pass
+
     try:
         created, updated, skipped, errors = PXRFUploadService.ingest_from_bytes(db, file_bytes)
+
+        # Reverse-match: re-evaluate characterized for samples whose EA pxrf_reading_no
+        # overlaps with the just-ingested readings.
+        reevaluated_count = 0
+        if _imported_reading_nos:
+            from sqlalchemy import or_ as _or  # noqa: PLC0415
+            from database.models.analysis import ExternalAnalysis as _EA  # noqa: PLC0415
+            from database.models.samples import SampleInfo as _SI  # noqa: PLC0415
+            from backend.services.samples import (  # noqa: PLC0415
+                evaluate_characterized as _eval_char,
+                log_sample_modification as _log_mod,
+            )
+
+            # Build LIKE conditions matching comma-separated pxrf_reading_no field.
+            # Pattern mirrors v_pxrf_characterization view in database/event_listeners.py.
+            _like_conds = []
+            for _rno in _imported_reading_nos:
+                _like_conds.append(
+                    _or(
+                        _EA.pxrf_reading_no == _rno,
+                        _EA.pxrf_reading_no.like(_rno + ",%"),
+                        _EA.pxrf_reading_no.like("%," + _rno + ",%"),
+                        _EA.pxrf_reading_no.like("%," + _rno),
+                    )
+                )
+
+            affected_eas = db.query(_EA).filter(
+                _EA.analysis_type == "pXRF",  # AnalysisType.PXRF.value
+                _EA.sample_id.isnot(None),
+                _or(*_like_conds),
+            ).all()
+
+            for _sid in {ea.sample_id for ea in affected_eas if ea.sample_id}:
+                _sample = db.query(_SI).filter(_SI.sample_id == _sid).first()
+                if _sample is None:
+                    continue
+                _old = _sample.characterized
+                _new = _eval_char(db, _sid)
+                if _old != _new:
+                    _sample.characterized = _new
+                    _log_mod(
+                        db,
+                        sample_id=_sid,
+                        modified_by=current_user.email,
+                        modification_type="update",
+                        modified_table="sample_info",
+                        old_values={"characterized": _old},
+                        new_values={
+                            "characterized": _new,
+                            "reason": "Triggered by pXRF bulk upload reverse-match",
+                        },
+                    )
+                    reevaluated_count += 1
+
         db.commit()
     except Exception as exc:
         db.rollback()
         log.error("pxrf_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
+
+    base_msg = f"pXRF: {created} created, {updated} updated"
+    message = (
+        f"{base_msg}. Updated characterized status for {reevaluated_count} sample{'s' if reevaluated_count != 1 else ''}."
+        if reevaluated_count > 0
+        else base_msg
+    )
+    log.info("pxrf_upload", created=created, updated=updated, updated_characterized=reevaluated_count, user=current_user.email)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
-                          message=f"pXRF: {created} created, {updated} updated")
+                          message=message)
 
 
 @router.post("/aeris-xrd", response_model=UploadResponse)
@@ -593,13 +683,68 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
     if upload_type == "rock-inventory":
-        return _simple_template(
-            headers=["sample_id", "rock_classification", "state", "country",
-                     "locality", "latitude", "longitude", "description", "characterized"],
-            required={"sample_id"},
-            example_row=["S001", "Basalt", "BC", "Canada", "Vancouver Island",
-                         49.5, -125.0, "Fresh olivine basalt", "FALSE"],
-        )
+        import openpyxl  # noqa: PLC0415
+        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
+
+        headers = [
+            "sample_id", "rock_classification", "state", "country",
+            "locality", "latitude", "longitude", "description",
+            "characterized", "pxrf_reading_no", "magnetic_susceptibility", "overwrite",
+        ]
+        required = {"sample_id"}
+        example_row = [
+            "S001", "Basalt", "BC", "Canada", "Vancouver Island",
+            49.5, -125.0, "Fresh olivine basalt", "FALSE", "", "", "FALSE",
+        ]
+        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        for col, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = Font(bold=True)
+            cell.fill = req_fill if h in required else opt_fill
+            cell.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
+        for col, val in enumerate(example_row, start=1):
+            ws.cell(row=2, column=col, value=val)
+
+        ws_inst = wb.create_sheet("INSTRUCTIONS")
+        ws_inst.column_dimensions["A"].width = 30
+        ws_inst.column_dimensions["B"].width = 70
+        instructions = [
+            ("Column", "Notes"),
+            ("sample_id", "REQUIRED. Unique sample identifier (e.g. S001, SROCK-042)."),
+            ("rock_classification", "Rock type (e.g. Basalt, Dunite, Serpentinite)."),
+            ("state", "Province or state."),
+            ("country", "Country of origin."),
+            ("locality", "Locality or formation name."),
+            ("latitude", "Decimal degrees (e.g. 49.5)."),
+            ("longitude", "Decimal degrees (e.g. -125.0)."),
+            ("description", "Free-text sample description."),
+            ("characterized", "TRUE or FALSE (default FALSE)."),
+            (
+                "pxrf_reading_no",
+                "Comma-separated pXRF reading numbers. Creates ExternalAnalysis type 'pXRF' per reading.",
+            ),
+            (
+                "magnetic_susceptibility",
+                "Magnetic susceptibility value (units: 1x10\u207b\u00b3 SI). Leave blank if not measured.",
+            ),
+            ("overwrite", "TRUE clears and rewrites all optional fields for existing samples (default FALSE)."),
+        ]
+        for r_idx, (col_name, note) in enumerate(instructions, start=1):
+            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
+            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
+            if r_idx == 1:
+                name_cell.font = Font(bold=True)
+                note_cell.font = Font(bold=True)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
     if upload_type == "chemical-inventory":
         return _simple_template(
