@@ -523,3 +523,156 @@ def test_patch_master_results_config_persists_to_get(client, tmp_path):
     r = client.get("/api/bulk-uploads/master-results/config")
     assert r.status_code == 200
     assert r.json()["path"] == str(p)
+
+
+# ---------------------------------------------------------------------------
+# pXRF reverse-match tests (Issue #28)
+# ---------------------------------------------------------------------------
+
+def _make_pxrf_excel_bytes(reading_nos: list) -> bytes:
+    """Minimal pXRF Excel file with 'Reading No' column for reverse-match extraction."""
+    import openpyxl  # noqa: PLC0415
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Reading No", "Fe", "Mg", "Ni", "Cu", "Si", "Co", "Mo", "Al", "Ca", "K", "Au"])
+    for rno in reading_nos:
+        ws.append([rno, 10.0, 1.0, 0.1, 0.1, 45.0, 0.1, 0.01, 8.0, 9.0, 1.0, 0.0])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_pxrf_upload_reevaluates_characterized_status(client, db_session):
+    """After pXRF upload, a sample whose EA pxrf_reading_no matches the import becomes characterized."""
+    from database import SampleInfo
+    from database.models.analysis import ExternalAnalysis, PXRFReading
+
+    # Sample is NOT characterized; has an EA pointing to reading_no "99"
+    sample = SampleInfo(sample_id="REVTEST001", characterized=False)
+    db_session.add(sample)
+    db_session.flush()
+    ea = ExternalAnalysis(
+        sample_id="REVTEST001",
+        analysis_type="pXRF",
+        pxrf_reading_no="99",
+    )
+    db_session.add(ea)
+    # PXRFReading "99" now exists (simulates what the upload would create)
+    reading = PXRFReading(
+        reading_no="99",
+        fe=10.0, mg=1.0, ni=0.1, cu=0.1, si=45.0,
+        co=0.1, mo=0.01, al=8.0, ca=9.0, k=1.0, au=0.0,
+    )
+    db_session.add(reading)
+    db_session.flush()
+
+    file_bytes = _make_pxrf_excel_bytes(["99"])
+    fake_mod = MagicMock()
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": MagicMock(),
+        "backend.services.bulk_uploads.pxrf_data": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/pxrf",
+            files={"file": ("test.xlsx", io.BytesIO(file_bytes), "application/vnd.ms-excel")},
+        )
+
+    assert resp.status_code == 200
+    db_session.refresh(sample)
+    assert sample.characterized is True
+
+
+def test_pxrf_upload_creates_modifications_log_entry(client, db_session):
+    """ModificationsLog entry is created when characterized status changes after pXRF upload."""
+    from database import SampleInfo
+    from database.models.analysis import ExternalAnalysis, PXRFReading
+    from database.models.experiments import ModificationsLog
+
+    sample = SampleInfo(sample_id="REVTEST002", characterized=False)
+    db_session.add(sample)
+    db_session.flush()
+    ea = ExternalAnalysis(
+        sample_id="REVTEST002",
+        analysis_type="pXRF",
+        pxrf_reading_no="88",
+    )
+    db_session.add(ea)
+    reading = PXRFReading(
+        reading_no="88",
+        fe=5.0, mg=2.0, ni=0.2, cu=0.2, si=40.0,
+        co=0.2, mo=0.02, al=7.0, ca=8.0, k=2.0, au=0.0,
+    )
+    db_session.add(reading)
+    db_session.flush()
+
+    file_bytes = _make_pxrf_excel_bytes(["88"])
+    fake_mod = MagicMock()
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": MagicMock(),
+        "backend.services.bulk_uploads.pxrf_data": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/pxrf",
+            files={"file": ("test.xlsx", io.BytesIO(file_bytes), "application/vnd.ms-excel")},
+        )
+
+    assert resp.status_code == 200
+    log_entry = (
+        db_session.query(ModificationsLog)
+        .filter(ModificationsLog.sample_id == "REVTEST002")
+        .first()
+    )
+    assert log_entry is not None
+    assert log_entry.new_values.get("characterized") is True
+    assert log_entry.old_values.get("characterized") is False
+
+
+def test_pxrf_upload_message_includes_reevaluated_count(client, db_session):
+    """Upload response message includes count of re-evaluated samples when > 0."""
+    from database import SampleInfo
+    from database.models.analysis import ExternalAnalysis, PXRFReading
+
+    sample = SampleInfo(sample_id="REVTEST003", characterized=False)
+    db_session.add(sample)
+    db_session.flush()
+    ea = ExternalAnalysis(
+        sample_id="REVTEST003",
+        analysis_type="pXRF",
+        pxrf_reading_no="77",
+    )
+    db_session.add(ea)
+    reading = PXRFReading(
+        reading_no="77",
+        fe=3.0, mg=3.0, ni=0.3, cu=0.3, si=35.0,
+        co=0.3, mo=0.03, al=6.0, ca=7.0, k=3.0, au=0.0,
+    )
+    db_session.add(reading)
+    db_session.flush()
+
+    file_bytes = _make_pxrf_excel_bytes(["77"])
+    fake_mod = MagicMock()
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": MagicMock(),
+        "backend.services.bulk_uploads.pxrf_data": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/pxrf",
+            files={"file": ("test.xlsx", io.BytesIO(file_bytes), "application/vnd.ms-excel")},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    msg = body["message"].lower()
+    assert "re-evaluated" in msg or "1 sample" in msg

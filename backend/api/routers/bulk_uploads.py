@@ -107,7 +107,7 @@ async def upload_pxrf(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Upload a pXRF CSV/Excel file."""
+    """Upload a pXRF CSV/Excel file and re-evaluate characterized status for affected samples."""
     import sys  # noqa: PLC0415
     from types import ModuleType  # noqa: PLC0415
     if "frontend.config.variable_config" not in sys.modules:
@@ -120,16 +120,114 @@ async def upload_pxrf(
         _vc.PXRF_REQUIRED_COLUMNS = {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
     from backend.services.bulk_uploads.pxrf_data import PXRFUploadService  # noqa: PLC0415
     file_bytes = await file.read()
+
+    # Lightweight extraction of reading_no values for post-upload reverse-match.
+    # Mirrors the normalization in PXRFUploadService._clean_dataframe.
+    # Uses openpyxl directly to avoid pandas/numpy version-mismatch issues.
+    _imported_reading_nos: set[str] = set()
+    try:
+        import openpyxl as _openpyxl  # noqa: PLC0415
+        _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+        _ws = _wb.active
+        _rn_col_idx: int | None = None
+        for _row_idx, _row in enumerate(_ws.iter_rows(values_only=True)):
+            if _row_idx == 0:
+                # Find header column index for "Reading No"
+                for _ci, _hdr in enumerate(_row):
+                    if isinstance(_hdr, str) and _hdr.strip() == "Reading No":
+                        _rn_col_idx = _ci
+                        break
+                if _rn_col_idx is None:
+                    break
+                continue
+            if _rn_col_idx is not None and _rn_col_idx < len(_row):
+                _v = _row[_rn_col_idx]
+                if _v is not None:
+                    _s = str(_v).strip()
+                    if _s:
+                        _s_clean = _s.replace(".", "", 1).replace("-", "", 1)
+                        if _s_clean.isdigit():
+                            try:
+                                _s = str(int(float(_s)))
+                            except (ValueError, OverflowError):
+                                pass
+                        _imported_reading_nos.add(_s)
+        _wb.close()
+    except Exception:
+        pass  # extraction is best-effort; parser will report any real file errors
+
     try:
         created, updated, skipped, errors = PXRFUploadService.ingest_from_bytes(db, file_bytes)
+
+        # Reverse-match: re-evaluate characterized for samples whose EA pxrf_reading_no
+        # overlaps with the just-ingested readings.
+        reevaluated_count = 0
+        if _imported_reading_nos:
+            from sqlalchemy import or_ as _or  # noqa: PLC0415
+            from database.models.analysis import ExternalAnalysis as _EA  # noqa: PLC0415
+            from database.models.samples import SampleInfo as _SI  # noqa: PLC0415
+            from backend.services.samples import (  # noqa: PLC0415
+                evaluate_characterized as _eval_char,
+                log_sample_modification as _log_mod,
+            )
+
+            # Build LIKE conditions matching comma-separated pxrf_reading_no field.
+            # Pattern mirrors v_pxrf_characterization view in database/event_listeners.py.
+            _like_conds = []
+            for _rno in _imported_reading_nos:
+                _like_conds.append(
+                    _or(
+                        _EA.pxrf_reading_no == _rno,
+                        _EA.pxrf_reading_no.like(_rno + ",%"),
+                        _EA.pxrf_reading_no.like("%," + _rno + ",%"),
+                        _EA.pxrf_reading_no.like("%," + _rno),
+                    )
+                )
+
+            affected_eas = db.query(_EA).filter(
+                _EA.analysis_type == "pXRF",
+                _EA.sample_id.isnot(None),
+                _or(*_like_conds),
+            ).all()
+
+            for _sid in {ea.sample_id for ea in affected_eas if ea.sample_id}:
+                _sample = db.query(_SI).filter(_SI.sample_id == _sid).first()
+                if _sample is None:
+                    continue
+                _old = _sample.characterized
+                _new = _eval_char(db, _sid)
+                if _old != _new:
+                    _sample.characterized = _new
+                    _log_mod(
+                        db,
+                        sample_id=_sid,
+                        modified_by=current_user.email,
+                        modification_type="update",
+                        modified_table="sample_info",
+                        old_values={"characterized": _old},
+                        new_values={
+                            "characterized": _new,
+                            "reason": "Triggered by pXRF bulk upload reverse-match",
+                        },
+                    )
+                    reevaluated_count += 1
+
         db.commit()
     except Exception as exc:
         db.rollback()
         log.error("pxrf_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
+
+    base_msg = f"pXRF: {created} created, {updated} updated"
+    message = (
+        f"{base_msg}. Re-evaluated characterized status for {reevaluated_count} sample{'s' if reevaluated_count != 1 else ''}."
+        if reevaluated_count > 0
+        else base_msg
+    )
+    log.info("pxrf_upload", created=created, updated=updated, reevaluated=reevaluated_count, user=current_user.email)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
-                          message=f"pXRF: {created} created, {updated} updated")
+                          message=message)
 
 
 @router.post("/aeris-xrd", response_model=UploadResponse)
