@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { Input, Select, Button, SampleSelector } from '@/components/ui'
+import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import type { ExperimentType } from './fieldVisibility'
 
 export interface Step1Data {
@@ -44,7 +45,20 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextIdData])
 
-  const canProceed = Boolean(data.experimentType && data.experimentId)
+  const idValidation = useExperimentIdValidation(data.experimentId)
+
+  const idRightElement =
+    idValidation.status === 'checking' ? (
+      <span className="text-xs text-ink-muted animate-pulse">…</span>
+    ) : idValidation.status === 'available' ? (
+      <span className="text-xs text-status-success">✓</span>
+    ) : null
+
+  const canProceed =
+    Boolean(data.experimentType) &&
+    Boolean(data.experimentId.trim()) &&
+    idValidation.status !== 'taken' &&
+    idValidation.status !== 'checking'
 
   return (
     <div className="space-y-4">
@@ -53,18 +67,25 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
         options={TYPE_OPTIONS}
         placeholder="Select type…"
         value={data.experimentType}
-        onChange={(e) => onChange({ experimentType: e.target.value as ExperimentType, experimentId: '' })}
+        onChange={(e) =>
+          onChange({ experimentType: e.target.value as ExperimentType, experimentId: '' })
+        }
       />
       <Input
-        label="Experiment ID (auto-assigned)"
-        value={loadingId ? 'Loading…' : data.experimentId}
-        readOnly
-        hint="Assigned from the next available ID for this type"
+        label="Experiment ID *"
+        value={loadingId ? '' : data.experimentId}
+        placeholder={loadingId ? 'Loading…' : undefined}
+        onChange={(e) => onChange({ experimentId: e.target.value })}
+        error={idValidation.status === 'taken' ? idValidation.message : undefined}
+        hint={
+          idValidation.status !== 'taken'
+            ? 'Auto-generated. Edit to use a custom ID (e.g., HPHT_100-2, HPHT_100_Desorption).'
+            : undefined
+        }
+        rightElement={idRightElement}
+        disabled={loadingId}
       />
-      <SampleSelector
-        value={data.sampleId}
-        onChange={(id) => onChange({ sampleId: id })}
-      />
+      <SampleSelector value={data.sampleId} onChange={(id) => onChange({ sampleId: id })} />
       <div className="grid grid-cols-2 gap-3">
         <Input
           label="Date"
