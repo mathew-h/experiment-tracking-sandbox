@@ -75,6 +75,10 @@ class RockInventoryService:
             "overwrite": "overwrite",  # Special flag for full replacement mode
         }
 
+        # Resolve magnetic_susceptibility column from accepted aliases (all lowercased by header normalization)
+        _MAG_SUSC_ALIASES = {"magnetic_susceptibility", "magnetic susceptibility", "mag_susc", "mag susc"}
+        _mag_susc_col = next((c for c in df.columns if c in _MAG_SUSC_ALIASES), None)
+
         # Track samples in this batch by normalized ID to prevent duplicates
         seen_samples = {}
 
@@ -243,6 +247,41 @@ class RockInventoryService:
                                     )
                     except Exception as e:
                         errors.append(f"Row {idx+2} ({sample.sample_id}): failed to create pXRF link — {e}")
+
+                # Create/update ExternalAnalysis for magnetic_susceptibility if column present
+                if _mag_susc_col is not None:
+                    try:
+                        mag_val_raw = row.get(_mag_susc_col)
+                        mag_float: Optional[float] = None
+                        if mag_val_raw is not None and not (
+                            isinstance(mag_val_raw, float) and pd.isna(mag_val_raw)
+                        ):
+                            try:
+                                mag_float = float(str(mag_val_raw).strip())
+                            except (ValueError, TypeError):
+                                mag_float = None
+
+                        if mag_float is not None:
+                            existing_mag = (
+                                db.query(ExternalAnalysis)
+                                .filter(
+                                    ExternalAnalysis.sample_id == sample.sample_id,
+                                    ExternalAnalysis.analysis_type == "Magnetic Susceptibility",
+                                )
+                                .first()
+                            )
+                            if existing_mag is None:
+                                db.add(ExternalAnalysis(
+                                    sample_id=sample.sample_id,
+                                    analysis_type="Magnetic Susceptibility",
+                                    magnetic_susceptibility=mag_float,
+                                ))
+                            elif overwrite_mode:
+                                existing_mag.magnetic_susceptibility = mag_float
+                    except Exception as e:
+                        errors.append(
+                            f"Row {idx+2} ({sample.sample_id}): failed to create mag susc record — {e}"
+                        )
 
                 if is_new:
                     created += 1

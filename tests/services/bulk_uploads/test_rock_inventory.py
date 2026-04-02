@@ -133,3 +133,165 @@ def test_invalid_file_bytes_returns_error(db_session: Session):
     )
     assert created == 0
     assert len(errors) > 0
+
+
+# ---------------------------------------------------------------------------
+# magnetic_susceptibility tests (Issue #28)
+# ---------------------------------------------------------------------------
+
+def test_mag_susc_creates_external_analysis(db_session: Session):
+    """magnetic_susceptibility column creates ExternalAnalysis of type 'Magnetic Susceptibility'."""
+    from database.models.analysis import ExternalAnalysis
+
+    xlsx = make_excel(
+        ["sample_id", "magnetic_susceptibility"],
+        [["S_MAG001", 2.5]],
+    )
+    created, updated, _images, skipped, errors, warnings = (
+        RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    )
+
+    assert errors == [], errors
+    assert created == 1
+    db_session.flush()
+
+    # Service normalizes "S_MAG001" → "SMAG001"
+    ea = (
+        db_session.query(ExternalAnalysis)
+        .filter(
+            ExternalAnalysis.sample_id == "SMAG001",
+            ExternalAnalysis.analysis_type == "Magnetic Susceptibility",
+        )
+        .first()
+    )
+    assert ea is not None
+    assert ea.magnetic_susceptibility == pytest.approx(2.5)
+
+
+def test_mag_susc_aliases_recognized(db_session: Session):
+    """All four alias column names for mag susc are accepted."""
+    from database.models.analysis import ExternalAnalysis
+
+    aliases = ["magnetic susceptibility", "mag_susc", "mag susc"]
+    for alias in aliases:
+        safe_alias = alias.replace(" ", "X").replace("_", "Y").upper()
+        xlsx = make_excel(
+            ["sample_id", alias],
+            [[f"S_{safe_alias}", 3.7]],
+        )
+        created, updated, _images, skipped, errors, warnings = (
+            RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+        )
+        assert errors == [], f"Alias '{alias}' produced errors: {errors}"
+        db_session.flush()
+        expected_sid = f"S{safe_alias}"
+        ea = (
+            db_session.query(ExternalAnalysis)
+            .filter(
+                ExternalAnalysis.sample_id == expected_sid,
+                ExternalAnalysis.analysis_type == "Magnetic Susceptibility",
+            )
+            .first()
+        )
+        assert ea is not None, f"No EA created for alias '{alias}'"
+
+
+def test_mag_susc_blank_skipped(db_session: Session):
+    """Blank magnetic_susceptibility cell does not create an ExternalAnalysis."""
+    from database.models.analysis import ExternalAnalysis
+
+    xlsx = make_excel(
+        ["sample_id", "magnetic_susceptibility"],
+        [["S_BLANK001", ""]],
+    )
+    RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    db_session.flush()
+
+    ea = (
+        db_session.query(ExternalAnalysis)
+        .filter(
+            ExternalAnalysis.sample_id == "SBLANK001",
+            ExternalAnalysis.analysis_type == "Magnetic Susceptibility",
+        )
+        .first()
+    )
+    assert ea is None
+
+
+def test_mag_susc_non_numeric_skipped(db_session: Session):
+    """Non-numeric mag susc value does not create an EA and produces no error."""
+    from database.models.analysis import ExternalAnalysis
+
+    xlsx = make_excel(
+        ["sample_id", "magnetic_susceptibility"],
+        [["S_NAN001", "not-a-number"]],
+    )
+    created, updated, _images, skipped, errors, warnings = (
+        RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    )
+    assert errors == [], errors
+    db_session.flush()
+
+    ea = (
+        db_session.query(ExternalAnalysis)
+        .filter(
+            ExternalAnalysis.sample_id == "SNAN001",
+            ExternalAnalysis.analysis_type == "Magnetic Susceptibility",
+        )
+        .first()
+    )
+    assert ea is None
+
+
+def test_mag_susc_skip_without_overwrite(db_session: Session):
+    """Re-upload with a different value and no overwrite flag leaves the existing EA unchanged."""
+    from database.models.analysis import ExternalAnalysis
+    from database.models.samples import SampleInfo
+
+    sample = SampleInfo(sample_id="SOVER001")
+    db_session.add(sample)
+    db_session.flush()
+    ea = ExternalAnalysis(
+        sample_id="SOVER001",
+        analysis_type="Magnetic Susceptibility",
+        magnetic_susceptibility=1.0,
+    )
+    db_session.add(ea)
+    db_session.flush()
+
+    xlsx = make_excel(
+        ["sample_id", "magnetic_susceptibility"],
+        [["SOVER001", 99.9]],
+    )
+    RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    db_session.flush()
+    db_session.refresh(ea)
+
+    assert ea.magnetic_susceptibility == pytest.approx(1.0)
+
+
+def test_mag_susc_update_with_overwrite(db_session: Session):
+    """Re-upload with overwrite=TRUE updates the existing EA's magnetic_susceptibility value."""
+    from database.models.analysis import ExternalAnalysis
+    from database.models.samples import SampleInfo
+
+    sample = SampleInfo(sample_id="SOVER002")
+    db_session.add(sample)
+    db_session.flush()
+    ea = ExternalAnalysis(
+        sample_id="SOVER002",
+        analysis_type="Magnetic Susceptibility",
+        magnetic_susceptibility=1.0,
+    )
+    db_session.add(ea)
+    db_session.flush()
+
+    xlsx = make_excel(
+        ["sample_id", "magnetic_susceptibility", "overwrite"],
+        [["SOVER002", 99.9, "TRUE"]],
+    )
+    RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    db_session.flush()
+    db_session.refresh(ea)
+
+    assert ea.magnetic_susceptibility == pytest.approx(99.9)

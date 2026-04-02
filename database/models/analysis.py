@@ -36,7 +36,7 @@ class ExternalAnalysis(Base):
     description = Column(Text)
     analysis_metadata = Column(JSONB)  # For storing additional analysis-specific data
     # Add magnetic susceptibility field
-    magnetic_susceptibility = Column(String, nullable=True)  # Store as string to maintain flexibility
+    magnetic_susceptibility = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
