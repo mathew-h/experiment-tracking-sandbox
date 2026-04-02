@@ -20,8 +20,11 @@ class PXRFUploadService:
         errors: List[str] = []
         try:
             df = pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
-        except Exception as e:
-            return pd.DataFrame(), [f"Failed to read Excel: {e}"]
+        except Exception:
+            try:
+                df = pd.read_csv(io.BytesIO(file_bytes))
+            except Exception as e:
+                return pd.DataFrame(), [f"Failed to read file: {e}"]
 
         missing = PXRF_REQUIRED_COLUMNS - set(df.columns)
         if missing:
