@@ -14,7 +14,7 @@ vi.mock('../client', () => ({
 import { apiClient } from '../client'
 
 describe('experimentsApi.deleteNote', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => { vi.clearAllMocks() })
 
   it('calls DELETE /experiments/{id}/notes/{noteId}', async () => {
     vi.mocked(apiClient.delete).mockResolvedValueOnce({ data: undefined, status: 204 } as never)

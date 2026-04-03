@@ -80,7 +80,7 @@ describe('ConditionsTab additives action buttons', () => {
 
   it('clicking delete opens confirm modal without firing mutation', async () => {
     const user = userEvent.setup()
-    const deleteFn = vi.fn(() => Promise.resolve())
+    const deleteFn = vi.fn(() => Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config: {} } as any))
     vi.mocked(chemicalsApi.chemicalsApi.deleteAdditiveById).mockImplementation(deleteFn)
 
     wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
