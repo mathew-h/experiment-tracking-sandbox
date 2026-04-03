@@ -38,10 +38,14 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
     queryKey: ['next-id', data.experimentType],
     queryFn: () => experimentsApi.nextId(data.experimentType),
     enabled: Boolean(data.experimentType),
+    refetchOnWindowFocus: false,
   })
 
   useEffect(() => {
-    if (nextIdData?.next_id) onChange({ experimentId: nextIdData.next_id })
+    // Only auto-populate if the field is still empty — don't overwrite user's custom edits
+    if (nextIdData?.next_id && !data.experimentId) {
+      onChange({ experimentId: nextIdData.next_id })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextIdData])
 
