@@ -26,7 +26,14 @@
       "Bash(git fetch:*)",
       "Bash(.venv/Scripts/python -m alembic upgrade head 2>&1)",
       "Bash(.venv/Scripts/python -c \"\nfrom database.database import engine, Base\nfrom database.models import experiments, conditions, results, samples, chemicals, analysis, xrd, characterization\nBase.metadata.create_all\\(bind=engine\\)\nprint\\('All tables created successfully'\\)\n\" 2>&1)",
-      "Bash(.venv/Scripts/python -m alembic stamp head 2>&1)"
+      "Bash(.venv/Scripts/python -m alembic stamp head 2>&1)",
+      "Bash(powershell -Command \"Get-ScheduledTask | Where-Object { $_.TaskName -like '*xperiment*' -or $_.TaskName -like '*update*' -or $_.TaskName -like '*tracker*' } | Format-List TaskName, State, TaskPath\" 2>&1)",
+      "Bash(powershell -Command 'Get-ScheduledTask | Where-Object { $_.TaskName -like \"*xperiment*\" -or $_.TaskName -like \"*update*\" -or $_.TaskName -like \"*tracker*\" } | Format-List TaskName, State, TaskPath' 2>&1)",
+      "Bash(powershell -Command 'Get-ScheduledTask -TaskName \"ExperimentTrackerUpdate\" | Get-ScheduledTaskInfo | Format-List' 2>&1)",
+      "Bash(powershell -Command 'Get-ScheduledTask -TaskName \"ExperimentTrackerUpdate\" | Select-Object -ExpandProperty Triggers | Format-List' 2>&1)",
+      "Bash(powershell -Command 'Get-ScheduledTask -TaskName \"ExperimentTrackerUpdate\" | Select-Object -ExpandProperty Actions | Format-List' 2>&1)",
+      "Bash(powershell -Command 'Get-ScheduledTask -TaskName \"ExperimentTracker_Updater\" | Get-ScheduledTaskInfo | Format-List' 2>&1)",
+      "Bash(powershell -Command 'if \\(Test-Path \"C:\\\\Logs\\\\experiment-tracker\\\\updates.log\"\\) { Get-Content \"C:\\\\Logs\\\\experiment-tracker\\\\updates.log\" -Tail 20 } else { \"Log file not found\" }' 2>&1)"
     ]
   },
   "enabledMcpjsonServers": [
