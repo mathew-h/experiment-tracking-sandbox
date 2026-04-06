@@ -85,5 +85,5 @@ uvicorn[standard]==0.34.2
 pydantic==2.10.4
 pydantic-settings==2.6.1
 python-multipart==0.0.9
-notion-client>=2.2.1
+notion-client>=2.2.1,<2.3
 
