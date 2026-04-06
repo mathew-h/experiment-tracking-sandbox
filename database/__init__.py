@@ -17,6 +17,8 @@ from .models import (
 )
 # Import chemicals after other models to avoid circular imports
 from .models import Compound, ChemicalAdditive
+# Notion sync models
+from .models import ReactorChangeRequest
 
 # Configure all mappers after all models are imported
 # This resolves string references in relationships
@@ -47,6 +49,8 @@ __all__ = [
     'AnalysisFiles', 'ExternalAnalysis', 'XRDAnalysis', 'XRDPhase', 'PXRFReading', 'Analyte', 'ElementalAnalysis',
     # Chemicals
     'Compound', 'ChemicalAdditive',
+    # Notion sync
+    'ReactorChangeRequest',
     # Enums
     'ExperimentStatus', 'ExperimentType', 'FeedstockType', 'ComponentType',
     'AnalysisType', 'AmmoniumQuantMethod', 'TitrationType', 'CharacterizationStatus',
