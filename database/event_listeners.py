@@ -457,6 +457,7 @@ _VIEWS = [
             er.id                                    AS result_id,
             e.experiment_id,
             er.experiment_fk,
+            er.description                           AS sampling_description,
             er.time_post_reaction_days,
             er.time_post_reaction_bucket_days,
             er.cumulative_time_post_reaction_days,
