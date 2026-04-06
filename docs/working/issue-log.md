@@ -296,3 +296,25 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Files changed:** `update.ps1` — self-elevation block now skips `-Verb RunAs` in non-interactive sessions (Task Scheduler); logs warning instead of silently exiting
 - **Tests added:** no — PowerShell infrastructure script
 - **Decision logged:** no
+
+## 2026-04-06 | issue #33 — Add QUEUED as a valid ExperimentStatus value
+- **Files changed:**
+  - `database/models/enums.py` — added `QUEUED = "QUEUED"` to `ExperimentStatus`
+  - `alembic/versions/ad32def91adc_add_queued_experiment_status.py` — manual migration
+  - `frontend/src/assets/brand.ts` — `statusQueued` color + `statusColorMap` entry
+  - `frontend/tailwind.config.ts` — `queued: '#f59e0b'` status token
+  - `frontend/src/components/ui/Badge.tsx` — `queued` variant in BadgeVariant, variantClasses, dotClasses, StatusBadge validVariants
+  - `frontend/src/pages/ReactorGrid.tsx` — STATUS_OPTIONS, statusColors, static amber dot
+  - `frontend/src/pages/ExperimentTimeline.tsx` — QUEUED bar color
+  - `frontend/src/pages/DashboardFilters.tsx` — QUEUED filter chip
+  - `frontend/src/pages/ExperimentList.tsx` — STATUS_OPTIONS, STATUS_TEXT_CLASS
+  - `frontend/src/pages/NewExperiment/Step1BasicInfo.tsx` — QUEUED in dropdown
+  - `docs/POWERBI_MODEL.md` — status values table
+  - `.claude/rules/MODELS.md` — ExperimentStatus enum list
+- **Tests added:** yes — 4 pytest (enum value, dashboard active count excludes QUEUED, dashboard pending results excludes QUEUED, bulk upload does not auto-complete QUEUED), 3 vitest (StatusBadge QUEUED/ONGOING/unknown)
+- **Decision logged:** no
+
+## 2026-04-06 | inline — Add sampling_description to v_results_scalar view
+- **Files changed:** `database/event_listeners.py` — added `er.description AS sampling_description` to `v_results_scalar`
+- **Tests added:** no
+- **Decision logged:** no
