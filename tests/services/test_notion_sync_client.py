@@ -98,3 +98,17 @@ def test_client_write_experiment_info() -> None:
             "Date Started": {"date": {"start": "2026-03-15"}},
         },
     )
+
+
+def test_client_set_status_pending() -> None:
+    mock_notion = MagicMock()
+    with patch("backend.services.notion_sync.client.Client", return_value=mock_notion):
+        client = NotionSyncClient(token="secret_test", database_id="dbid")
+        client.set_status_pending("page-id-789")
+
+    mock_notion.pages.update.assert_called_once_with(
+        page_id="page-id-789",
+        properties={
+            "Change Request Status": {"select": {"name": "Pending"}},
+        },
+    )

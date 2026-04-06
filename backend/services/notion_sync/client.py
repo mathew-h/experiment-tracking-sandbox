@@ -32,7 +32,12 @@ class NotionSyncClient:
         self._database_id = database_id
 
     def query_all_rows(self) -> list[dict]:
-        """Fetch all pages from the reactor dashboard database in a single API call."""
+        """Fetch all pages from the reactor dashboard database in a single API call.
+
+        Note: The Notion API returns at most 100 results per call. The reactor
+        dashboard has 18 rows, well within this limit. If the database grows
+        beyond 100 rows, implement cursor-based pagination here.
+        """
         response = self._client.databases.query(database_id=self._database_id)
         return response["results"]
 
