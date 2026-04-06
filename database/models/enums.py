@@ -5,8 +5,9 @@ import enum
 class ExperimentStatus(enum.Enum):
     """Status of an experiment"""
     ONGOING = "ONGOING"
-    COMPLETED = "COMPLETED" 
+    COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+    QUEUED = "QUEUED"
 
 class ExperimentType(enum.Enum):
     """Type of experimental setup"""
