@@ -8,7 +8,7 @@ from __future__ import annotations
 import structlog
 from dataclasses import dataclass, field
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
@@ -28,9 +28,16 @@ class ExportResult:
 
 
 def _reactor_label_for(reactor_number: int, experiment_type: str | None) -> str:
-    """Map DB reactor_number + experiment_type to Notion label e.g. 'R05' or 'CF01'."""
-    is_cf = (experiment_type == "Core Flood") if experiment_type else False
-    return f"CF{reactor_number:02d}" if is_cf else f"R{reactor_number:02d}"
+    """Map DB reactor_number + experiment_type to Notion label e.g. 'R05' or 'CF01'.
+
+    Handles both string values and enum instances for experiment_type,
+    matching the same defensive pattern used in the dashboard router.
+    """
+    if experiment_type is None:
+        return f"R{reactor_number:02d}"
+    # Defensive: handle both plain string and enum instance
+    etype = experiment_type.value if hasattr(experiment_type, "value") else str(experiment_type)
+    return f"CF{reactor_number:02d}" if etype == "Core Flood" else f"R{reactor_number:02d}"
 
 
 def run_export(
@@ -59,11 +66,8 @@ def run_export(
     # Note: Experiment.description is a @property, not a column — fetch the
     # full Experiment object so we can access it after the query.
     rows = (
-        db.query(
-            Experiment,
-            ExperimentalConditions.reactor_number,
-            ExperimentalConditions.experiment_type,
-        )
+        db.query(Experiment, ExperimentalConditions)
+        .options(joinedload(Experiment.notes))
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
         .filter(
             Experiment.status == ExperimentStatus.ONGOING,
@@ -72,14 +76,14 @@ def run_export(
         .all()
     )
 
-    for exp, reactor_number, experiment_type in rows:
-        label = _reactor_label_for(reactor_number, experiment_type)
+    for exp, cond in rows:
+        label = _reactor_label_for(cond.reactor_number, cond.experiment_type)
         page_id = notion_rows.get(label)
         if page_id is None:
             log.warning("notion_export_no_page_for_reactor", reactor=label)
             continue
 
-        date_started = exp.date.strftime("%Y-%m-%d") if exp.date else ""
+        date_started = exp.date.strftime("%Y-%m-%d") if exp.date else None
 
         try:
             client.write_experiment_info(
@@ -93,7 +97,7 @@ def run_export(
                 client.set_status_pending(page_id)
             result.exported += 1
         except Exception as exc:
-            result.errors.append(f"{label}: export error \u2014 {exc}")
+            result.errors.append(f"{label}: export error — {exc}")
             log.error("notion_export_error", reactor=label, error=str(exc))
 
     log.info("notion_export_done", exported=result.exported, errors=result.errors)

@@ -174,3 +174,17 @@ def test_export_no_description_writes_empty_string(db_session: Session) -> None:
 
     call_kwargs = client.write_experiment_info.call_args[1]
     assert call_kwargs["description"] == ""
+
+
+def test_export_captures_write_error(db_session: Session) -> None:
+    """If write_experiment_info raises, error is captured and processing continues."""
+    client = MagicMock()
+    client.write_experiment_info.side_effect = Exception("Notion API down")
+    pages = [_notion_page("jjj", "R10")]
+    _seed_experiment(db_session, "SERUM_007", 1009, reactor_number=10)
+
+    result = run_export(client, db_session, pages, cleared_page_ids=set())
+
+    assert result.exported == 0
+    assert len(result.errors) == 1
+    assert "R10" in result.errors[0]

@@ -57,7 +57,7 @@ class NotionSyncClient:
         page_id: str,
         experiment_id: str,
         description: str,
-        date_started: str,
+        date_started: str | None,
     ) -> None:
         """Write experiment details to a Notion reactor row.
 
@@ -65,13 +65,15 @@ class NotionSyncClient:
             page_id: Notion page ID (with or without hyphens).
             experiment_id: User-defined experiment identifier e.g. "SERUM_MH_101".
             description: Experiment description text (first note).
-            date_started: ISO date string e.g. "2026-03-15".
+            date_started: ISO date string e.g. "2026-03-15", or None if unknown.
         """
-        self.update_page(page_id, {
+        properties: dict = {
             PROP_EXPERIMENT_ID: {"rich_text": [{"text": {"content": experiment_id}}]},
             PROP_EXPERIMENT_DESC: {"rich_text": [{"text": {"content": description}}]},
-            PROP_DATE_STARTED: {"date": {"start": date_started}},
-        })
+        }
+        if date_started:
+            properties[PROP_DATE_STARTED] = {"date": {"start": date_started}}
+        self.update_page(page_id, properties)
 
     def set_status_pending(self, page_id: str) -> None:
         """Set Change Request Status to Pending."""
