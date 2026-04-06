@@ -81,6 +81,14 @@ class NotionSyncClient:
             PROP_CHANGE_STATUS: {"select": {"name": STATUS_PENDING}},
         })
 
+    def clear_experiment_info(self, page_id: str) -> None:
+        """Clear experiment fields for an idle reactor slot."""
+        self.update_page(page_id, {
+            PROP_EXPERIMENT_ID: {"rich_text": []},
+            PROP_EXPERIMENT_DESC: {"rich_text": []},
+            PROP_DATE_STARTED: {"date": None},
+        })
+
 
 def extract_reactor_label(page: dict) -> str:
     """Extract reactor label from the Notion page title property."""
