@@ -34,7 +34,7 @@ def test_reactor_change_request_create(mem_db) -> None:
         requested_change="Sample and clean",
         notion_status="Pending",
         carried_forward=False,
-        date=date(2026, 4, 1),
+        sync_date=date(2026, 4, 1),
         notion_page_id="abc12345123412341234abc123456789",
     )
     mem_db.add(row)
@@ -57,7 +57,7 @@ def test_unique_constraint_reactor_date(mem_db) -> None:
             requested_change="Test",
             notion_status="Pending",
             carried_forward=False,
-            date=date(2026, 4, 1),
+            sync_date=date(2026, 4, 1),
             notion_page_id="aaaabbbbccccddddaaaabbbbccccdddd",
         )
 
