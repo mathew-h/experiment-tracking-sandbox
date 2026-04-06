@@ -30,7 +30,7 @@ def _page(
         "properties": {
             "Name": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {
-                "rich_text": [{"plain_text": change_request}] if change_request.strip() else []
+                "rich_text": [{"plain_text": change_request}] if change_request else []
             },
             "Change Request Status": {"select": {"name": status}},
         },

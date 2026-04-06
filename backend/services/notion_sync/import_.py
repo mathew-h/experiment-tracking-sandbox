@@ -109,13 +109,13 @@ def run_import(
         return result
 
     # Now clear Notion rows safely; DB is already committed.
-    for page_id_raw in pages_to_clear:
+    for page_id in pages_to_clear:
         try:
-            client.clear_change_request(page_id_raw)
-            result.cleared_page_ids.add(page_id_raw)
+            client.clear_change_request(page_id)
+            result.cleared_page_ids.add(page_id)
         except Exception as exc:
-            result.errors.append(f"Notion clear failed for {page_id_raw}: {exc}")
-            log.warning("notion_clear_failed", page_id=page_id_raw, error=str(exc))
+            result.errors.append(f"Notion clear failed for {page_id}: {exc}")
+            log.warning("notion_clear_failed", page_id=page_id, error=str(exc))
 
     log.info(
         "notion_import_done",
