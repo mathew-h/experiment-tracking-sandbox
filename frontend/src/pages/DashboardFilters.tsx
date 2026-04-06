@@ -7,7 +7,7 @@ export interface DashboardFilterState {
   dateTo: string
 }
 
-const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED']
+const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED']
 const TYPE_OPTIONS = ['HPHT', 'Serum', 'Core Flood', 'Autoclave', 'Other']
 
 function Chip({

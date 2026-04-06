@@ -11,12 +11,14 @@ const STATUS_OPTIONS = [
   { value: 'ONGOING', label: 'Ongoing' },
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'QUEUED', label: 'Queued' },
 ]
 
 const STATUS_TEXT_CLASS: Record<string, string> = {
   ONGOING:   'text-status-ongoing',
   COMPLETED: 'text-status-completed',
   CANCELLED: 'text-status-cancelled',
+  QUEUED:    'text-status-queued',
 }
 const TYPE_OPTIONS = [
   { value: 'Serum', label: 'Serum' },

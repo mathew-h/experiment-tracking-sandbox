@@ -46,6 +46,7 @@ export default {
           ongoing: '#22c55e',
           completed: '#38bdf8',
           cancelled: '#6b7280',
+          queued: '#f59e0b',
         },
       },
       fontFamily: {

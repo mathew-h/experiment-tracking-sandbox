@@ -125,3 +125,18 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
   `v_experiments` via `experiment_id` — it is intentionally **not** routed through
   `v_dim_timepoints`. XRD measurements follow a different schedule than scalar/H2/ICP
   results and may not align with primary result timepoints.
+
+---
+
+## Status Values
+
+The `status` column in experiment views uses the `ExperimentStatus` enum. Valid values:
+
+| Value | Meaning |
+|-------|---------|
+| `ONGOING` | Experiment is actively running |
+| `COMPLETED` | Experiment has finished |
+| `CANCELLED` | Experiment was cancelled |
+| `QUEUED` | Experiment is registered and configured but not yet started (added 2026-04-06, issue #33) |
+
+**Power BI note:** Existing measures that filter on `status = "ONGOING"` for active experiment counts will continue to work correctly — `QUEUED` is a distinct value and will not inflate active counts. Update any visuals that show a status legend or slicer to include `QUEUED` with an amber color (`#f59e0b`).
