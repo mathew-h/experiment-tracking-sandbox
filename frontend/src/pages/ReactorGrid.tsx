@@ -9,7 +9,7 @@ import { experimentsApi } from '@/api/experiments'
 const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(2, '0')}`)
 const CF_SLOTS = ['CF01', 'CF02']
 
-const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED'] as const
+const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
 type _ExperimentStatus = typeof STATUS_OPTIONS[number]
 
 // Static hardware specs — used for both occupied and empty slots.
@@ -41,6 +41,8 @@ function statusColors(status: string | null) {
       return 'text-status-completed bg-status-completed/10 border-status-completed/20'
     case 'CANCELLED':
       return 'text-status-cancelled bg-status-cancelled/10 border-status-cancelled/20'
+    case 'QUEUED':
+      return 'text-status-queued bg-status-queued/10 border-status-queued/20'
     default:
       return 'text-ink-muted bg-surface-overlay border-surface-border'
   }
@@ -88,7 +90,11 @@ function StatusBadge({
         <span
           className={[
             'w-1.5 h-1.5 rounded-full',
-            card.status === 'ONGOING' ? 'bg-status-ongoing animate-pulse-slow' : 'bg-surface-border',
+            card.status === 'ONGOING'
+              ? 'bg-status-ongoing animate-pulse-slow'
+              : card.status === 'QUEUED'
+                ? 'bg-status-queued'
+                : 'bg-surface-border',
           ].join(' ')}
         />
         {card.status ?? 'Active'}

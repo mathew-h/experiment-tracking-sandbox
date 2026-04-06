@@ -5,6 +5,7 @@ const STATUS_BAR: Record<string, string> = {
   ONGOING: 'bg-status-ongoing',
   COMPLETED: 'bg-status-completed',
   CANCELLED: 'bg-surface-border opacity-60',
+  QUEUED: 'bg-status-queued',
 }
 
 /** Gantt-style timeline bar chart showing experiment active periods. */

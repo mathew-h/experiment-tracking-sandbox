@@ -26,6 +26,7 @@ export const colors = {
   statusOngoing:   '#22c55e',
   statusCompleted: '#38bdf8',
   statusCancelled: '#6b7280',
+  statusQueued:    '#f59e0b',
   statusWarning:   '#f59e0b',
   statusError:     '#FD4437',
 } as const
@@ -55,4 +56,5 @@ export const statusColorMap = {
   ONGOING:   { text: 'text-status-ongoing',   bg: 'bg-status-ongoing/10',   dot: 'bg-status-ongoing' },
   COMPLETED: { text: 'text-status-completed', bg: 'bg-status-completed/10', dot: 'bg-status-completed' },
   CANCELLED: { text: 'text-status-cancelled', bg: 'bg-status-cancelled/10', dot: 'bg-status-cancelled' },
+  QUEUED:    { text: 'text-status-queued',    bg: 'bg-status-queued/10',    dot: 'bg-status-queued' },
 } as const

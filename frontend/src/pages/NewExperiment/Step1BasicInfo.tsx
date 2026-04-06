@@ -30,6 +30,7 @@ const STATUS_OPTIONS = [
   { value: 'ONGOING', label: 'Ongoing' },
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'QUEUED', label: 'Queued' },
 ]
 
 /** Step 1 of new experiment wizard: experiment ID, type, researcher, sample, and notes. */

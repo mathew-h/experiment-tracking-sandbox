@@ -155,7 +155,7 @@ Raw data from portable XRF scans.
 
 ## Enumerations
 Defined in `database/models/enums.py`.
-- **ExperimentStatus**: ONGOING, COMPLETED, CANCELLED.
+- **ExperimentStatus**: ONGOING, COMPLETED, CANCELLED, QUEUED.
 - **ExperimentType**: Serum, Autoclave, HPHT, Core Flood, Other.
 - **FeedstockType**: Nitrogen, Nitrate, Blank.
 - **ComponentType**: catalyst, promoter, support, additive, inhibitor.
