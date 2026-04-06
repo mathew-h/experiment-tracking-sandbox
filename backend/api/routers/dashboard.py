@@ -261,6 +261,7 @@ def get_reactor_status(
             Experiment.experiment_id,
             Experiment.status,
             Experiment.created_at,
+            Experiment.date,                          # ← use date (with created_at fallback) for started_at
             ExperimentalConditions.temperature_c,
             ExperimentalConditions.experiment_type,
         )
@@ -278,12 +279,13 @@ def get_reactor_status(
         if rn in seen:
             continue
         seen.add(rn)
+        start = row.date or row.created_at
         result.append(ReactorStatusResponse(
             reactor_number=rn,
             experiment_id=row.experiment_id,
             status=row.status,
             experiment_db_id=row.id,
-            started_at=row.created_at,
+            started_at=start,
             temperature_c=row.temperature_c,
             experiment_type=row.experiment_type,
         ))
