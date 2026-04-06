@@ -237,3 +237,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/e2e/journeys/03-notes-crud.spec.ts` — 5 E2E tests (visibility, edit, delete confirm/cancel)
 - **Tests added:** yes — 5 backend + 8 frontend unit tests; 10 E2E tests
 - **Decision logged:** no
+
+## 2026-04-05 | issue #29 — Silent failure when unknown compound name submitted in Step 3 additives
+- **Files changed:**
+  - `frontend/src/pages/NewExperiment/Step3Additives.tsx` — added `rowErrors` state, `handleNext` validator (blocks navigation + fires `toast.error` when `compound_name` set but `compound_id` null), inline error display on compound input (`border-red-500` + `<p>` message), `patchRow` error-clearing on compound resolve or input clear, `removeRow` stale-key cleanup; added `useToast` import
+  - `frontend/src/pages/NewExperiment/__tests__/Step3Additives.test.tsx` — new: 6 unit tests covering valid rows pass, empty rows pass, unresolved name blocks navigation, inline error shown, toast fires, empty name passes
+- **Tests added:** yes — 6 unit tests (Vitest + Testing Library)
+- **Decision logged:** no
