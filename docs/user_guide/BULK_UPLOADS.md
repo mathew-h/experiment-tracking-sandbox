@@ -48,6 +48,7 @@ Two modes:
 | Gas Pressure (psi) | | Converted to MPa automatically |
 | Sample pH | | |
 | Sample Conductivity (mS/cm) | | |
+| Sampled Solution Volume (mL) | | Volume of production fluid collected at this timepoint (mL) |
 | Modification | | Brine modification note |
 | Overwrite | | `TRUE` / `FALSE` — overwrite existing result row at same timepoint |
 
