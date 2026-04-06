@@ -182,6 +182,7 @@ export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
       setRowErrors((prev) => ({ ...prev, [rowId]: null }))
     }
     const updated = rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r))
+    // Upsert semantics: if the patched compound_id already exists in another row, remove the duplicate
     if (patch.compound_id != null) {
       const newCompoundId = patch.compound_id
       const deduped = updated.filter((r, idx) => idx === i || r.compound_id !== newCompoundId)
