@@ -57,7 +57,7 @@ Sub-agent skills (load when relevant):
 
 ## 5. Active Milestone
 
-**Current: M4 — React Shell** (`feature/m4-react-shell`)
+**Current: M9 — Sample Management** (`feature/m9-sample-management`)
 
 Read `docs/milestones/MILESTONE_INDEX.md` to find the current active milestone.
 Read the corresponding milestone file before starting any work.

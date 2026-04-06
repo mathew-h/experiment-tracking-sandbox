@@ -37,11 +37,11 @@ pytest tests/api/ -v
 All formula modules live in `backend/services/calculations/`.
 Read `docs/CALCULATIONS.md` before touching any derived field logic.
 
-## M3 Firebase Rule
+## Firebase Rule (Permanent)
 `backend/auth/firebase_auth.py` initializes Firebase Admin SDK directly.
 Never import `auth.firebase_config` from backend code — it imports `streamlit` at load time and crashes the API.
 
-## M3 Bulk Upload Constraint (Learned)
+## Bulk Upload Constraint (Permanent)
 `backend/services/bulk_uploads/scalar_results.py` and `pxrf_data.py` import `frontend.config.variable_config`
 at module load time. This module does not exist until M4 (React frontend build).
 **Always use lazy imports** (inside endpoint functions) when wrapping these parsers in the API.
