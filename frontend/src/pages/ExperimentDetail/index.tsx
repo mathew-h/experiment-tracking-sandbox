@@ -65,7 +65,7 @@ export function ExperimentDetailPage() {
   const dateMutation = useMutation({
     mutationFn: (newDate: string) => experimentsApi.patch(id!, { date: newDate }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['experiment', id] })
+      queryClient.invalidateQueries({ queryKey: ['experiment'] })
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
       success('Start date updated')
       setEditingDate(false)
@@ -136,7 +136,6 @@ export function ExperimentDetailPage() {
               error={renameValidation.status === 'taken' ? renameValidation.message : undefined}
               rightElement={idRightElement}
               className="font-mono-data"
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
             />
             <Button
@@ -197,6 +196,7 @@ export function ExperimentDetailPage() {
                 disabled={dateMutation.isPending}
                 className="ml-1 text-status-success hover:opacity-80"
                 title="Save date"
+                aria-label="Save date"
               >
                 ✓
               </button>
@@ -204,6 +204,7 @@ export function ExperimentDetailPage() {
                 onClick={() => setEditingDate(false)}
                 className="ml-1 text-ink-muted hover:text-ink-secondary"
                 title="Cancel"
+                aria-label="Cancel date edit"
               >
                 ✗
               </button>
