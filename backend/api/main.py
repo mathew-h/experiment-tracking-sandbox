@@ -14,7 +14,7 @@ load_dotenv()
 from backend.config.settings import get_settings
 from backend.api.routers import (
     experiments, conditions, results, samples,
-    chemicals, analysis, dashboard, admin, bulk_uploads, auth, additives,
+    chemicals, analysis, dashboard, admin, bulk_uploads, auth, additives, notion_sync,
 )
 
 settings = get_settings()
@@ -88,6 +88,7 @@ app.include_router(admin.router)
 app.include_router(bulk_uploads.router)
 app.include_router(auth.router)
 app.include_router(additives.router)
+app.include_router(notion_sync.router)
 
 
 @app.get("/health")
