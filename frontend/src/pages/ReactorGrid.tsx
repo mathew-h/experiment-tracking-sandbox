@@ -244,9 +244,10 @@ function ReactorDetailModal({
 
   const dateMutation = useMutation({
     mutationFn: (newDate: string) =>
-      experimentsApi.patch(card.experiment_id!, { date: newDate }),
+      experimentsApi.patch(card.experiment_id as string, { date: newDate }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
       success('Start date updated')
       setEditingDate(false)
     },
@@ -262,6 +263,7 @@ function ReactorDetailModal({
   }
 
   function confirmDate() {
+    if (!card.experiment_id) return
     const trimmed = dateDraft.trim()
     if (trimmed) {
       dateMutation.mutate(`${trimmed}T00:00:00`)
