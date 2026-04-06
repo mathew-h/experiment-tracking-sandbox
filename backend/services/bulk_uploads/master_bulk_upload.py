@@ -4,7 +4,8 @@ Master Results bulk upload — reads from fixed SharePoint path or uploaded byte
 Dashboard sheet column spec:
   Experiment ID | Duration (Days) | Description | Sample Date | NMR Run Date |
   ICP Run Date  | GC Run Date     | NH4 (mM)    | H2 (ppm)    | Gas Volume (mL) |
-  Gas Pressure (psi) | Sample pH | Sample Conductivity (mS/cm) | Modification | Overwrite
+  Gas Pressure (psi) | Sample pH | Sample Conductivity (mS/cm) |
+  Sampled Solution Volume (mL) | Modification | Overwrite
 """
 from __future__ import annotations
 
@@ -92,6 +93,11 @@ def _process_bytes(
         return 0, 0, 0, [f"Failed to parse sheet '{sheet_name}': {exc}"], []
 
     df.columns = [str(c).strip() for c in df.columns]
+    # Normalise the optional volume column header to canonical casing.
+    df.columns = [
+        "Sampled Solution Volume (mL)" if c.lower() == "sampled solution volume (ml)" else c
+        for c in df.columns
+    ]
 
     # Validate required columns
     required = {"Experiment ID", "Duration (Days)"}
@@ -132,6 +138,7 @@ def _process_bytes(
         gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None
         ph = _parse_float(row.get("Sample pH"))
         conductivity = _parse_float(row.get("Sample Conductivity (mS/cm)"))
+        sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
         modification = str(row.get("Modification") or "").strip() or None
         overwrite = _parse_bool(row.get("Overwrite"))
 
@@ -149,6 +156,7 @@ def _process_bytes(
             "gas_sampling_pressure_MPa": gas_mpa,
             "final_ph": ph,
             "final_conductivity_mS_cm": conductivity,
+            "sampling_volume_mL": sampling_vol_ml,
             "_overwrite": overwrite,
         }
         # Remove None-valued optional fields so the service skips them

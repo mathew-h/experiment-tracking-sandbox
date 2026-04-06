@@ -209,3 +209,126 @@ def test_from_bytes_matches_experiment_with_leading_zeros_and_symbols(db_session
     assert errors == [], f"Unexpected errors: {errors}"
     assert created == 1
     assert feedbacks[0]["action"] == "created"
+
+
+# ---------------------------------------------------------------------------
+# Sampled Solution Volume tests (Issue #31)
+# ---------------------------------------------------------------------------
+
+def test_sampled_solution_volume_parsed(db_session: Session):
+    """Sampled Solution Volume (mL) cell with a value is saved to sampling_volume_mL."""
+    _seed_experiment(db_session, "HPHT_VOL001", 8001)
+
+    headers = [
+        "Experiment ID", "Duration (Days)", "Description", "Sample Date",
+        "NMR Run Date", "ICP Run Date", "GC Run Date",
+        "NH4 (mM)", "H2 (ppm)", "Gas Volume (mL)", "Gas Pressure (psi)",
+        "Sample pH", "Sample Conductivity (mS/cm)",
+        "Sampled Solution Volume (mL)",
+        "Modification", "Overwrite",
+    ]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [
+        ["HPHT_VOL001", 7.0, "Day 7", None, None, None, None,
+         None, None, None, None, 7.0, None, 15.5, None, "FALSE"],
+    ])})
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_VOL001")
+        .first()
+    )
+    assert result is not None
+    assert result.scalar_data is not None
+    assert result.scalar_data.sampling_volume_mL == pytest.approx(15.5)
+
+
+def test_sampled_solution_volume_blank(db_session: Session):
+    """Blank Sampled Solution Volume cell → sampling_volume_mL is None; row not skipped."""
+    _seed_experiment(db_session, "HPHT_VOL002", 8002)
+
+    headers = [
+        "Experiment ID", "Duration (Days)", "Description", "Sample Date",
+        "NMR Run Date", "ICP Run Date", "GC Run Date",
+        "NH4 (mM)", "H2 (ppm)", "Gas Volume (mL)", "Gas Pressure (psi)",
+        "Sample pH", "Sample Conductivity (mS/cm)",
+        "Sampled Solution Volume (mL)",
+        "Modification", "Overwrite",
+    ]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [
+        ["HPHT_VOL002", 7.0, "Day 7", None, None, None, None,
+         None, None, None, None, 7.0, None, None, None, "FALSE"],
+    ])})
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1, "Row must not be skipped when volume cell is blank"
+
+    result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_VOL002")
+        .first()
+    )
+    assert result is not None
+    assert result.scalar_data is not None
+    assert result.scalar_data.sampling_volume_mL is None
+
+
+def test_sampled_solution_volume_column_absent(db_session: Session):
+    """Legacy file without Sampled Solution Volume column processes without KeyError."""
+    _seed_experiment(db_session, "HPHT_VOL003", 8003)
+
+    # _master_excel() does NOT include the new column — simulates an older Dashboard file
+    xlsx = _master_excel([
+        ["HPHT_VOL003", 7.0, "Day 7", None, None, None, None,
+         None, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+
+def test_sampled_solution_volume_case_insensitive(db_session: Session):
+    """Lowercase header 'sampled solution volume (ml)' is normalised and parsed correctly."""
+    _seed_experiment(db_session, "HPHT_VOL004", 8004)
+
+    headers = [
+        "Experiment ID", "Duration (Days)", "Description", "Sample Date",
+        "NMR Run Date", "ICP Run Date", "GC Run Date",
+        "NH4 (mM)", "H2 (ppm)", "Gas Volume (mL)", "Gas Pressure (psi)",
+        "Sample pH", "Sample Conductivity (mS/cm)",
+        "sampled solution volume (ml)",  # intentionally lowercase
+        "Modification", "Overwrite",
+    ]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [
+        ["HPHT_VOL004", 7.0, "Day 7", None, None, None, None,
+         None, None, None, None, 7.0, None, 20.0, None, "FALSE"],
+    ])})
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_VOL004")
+        .first()
+    )
+    assert result is not None
+    assert result.scalar_data is not None
+    assert result.scalar_data.sampling_volume_mL == pytest.approx(20.0)
