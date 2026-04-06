@@ -78,6 +78,8 @@ def test_export_skips_idle_slots(db_session: Session) -> None:
     assert result.exported == 1
     client.write_experiment_info.assert_called_once()
     assert client.write_experiment_info.call_args[1]["page_id"] == "aaa"
+    # Idle slot R02 should have experiment info cleared
+    client.clear_experiment_info.assert_called_once_with("bbb")
 
 
 def test_export_writes_correct_properties(db_session: Session) -> None:
@@ -150,7 +152,7 @@ def test_export_cf_slots_mapped_correctly(db_session: Session) -> None:
 
 
 def test_export_skips_completed_experiments(db_session: Session) -> None:
-    """COMPLETED experiments are not exported (only ONGOING)."""
+    """COMPLETED experiments are not exported (only ONGOING); slot is cleared."""
     client = MagicMock()
     pages = [_notion_page("hhh", "R08")]
     _seed_experiment(
@@ -162,6 +164,8 @@ def test_export_skips_completed_experiments(db_session: Session) -> None:
 
     assert result.exported == 0
     client.write_experiment_info.assert_not_called()
+    # Slot with COMPLETED experiment is idle — experiment info should be cleared
+    client.clear_experiment_info.assert_called_once_with("hhh")
 
 
 def test_export_no_description_writes_empty_string(db_session: Session) -> None:
@@ -188,3 +192,17 @@ def test_export_captures_write_error(db_session: Session) -> None:
     assert result.exported == 0
     assert len(result.errors) == 1
     assert "R10" in result.errors[0]
+
+
+def test_export_captures_clear_idle_error(db_session: Session) -> None:
+    """If clear_experiment_info raises on an idle slot, error is captured."""
+    client = MagicMock()
+    client.clear_experiment_info.side_effect = Exception("Network timeout")
+    pages = [_notion_page("kkk", "R11")]
+    # No experiment seeded — R11 is idle
+
+    result = run_export(client, db_session, pages, cleared_page_ids=set())
+
+    assert result.exported == 0
+    assert len(result.errors) == 1
+    assert "R11" in result.errors[0]

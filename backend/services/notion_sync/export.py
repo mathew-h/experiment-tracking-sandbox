@@ -76,6 +76,8 @@ def run_export(
         .all()
     )
 
+    occupied_page_ids: set[str] = set()
+
     for exp, cond in rows:
         label = _reactor_label_for(cond.reactor_number, cond.experiment_type)
         page_id = notion_rows.get(label)
@@ -83,6 +85,7 @@ def run_export(
             log.warning("notion_export_no_page_for_reactor", reactor=label)
             continue
 
+        occupied_page_ids.add(page_id)
         date_started = exp.date.strftime("%Y-%m-%d") if exp.date else None
 
         try:
@@ -99,6 +102,16 @@ def run_export(
         except Exception as exc:
             result.errors.append(f"{label}: export error — {exc}")
             log.error("notion_export_error", reactor=label, error=str(exc))
+
+    # Clear experiment info from idle reactor slots so stale data doesn't persist
+    for label, page_id in notion_rows.items():
+        if page_id in occupied_page_ids:
+            continue
+        try:
+            client.clear_experiment_info(page_id)
+        except Exception as exc:
+            result.errors.append(f"{label}: clear idle error — {exc}")
+            log.error("notion_clear_idle_error", reactor=label, error=str(exc))
 
     log.info("notion_export_done", exported=result.exported, errors=result.errors)
     return result
