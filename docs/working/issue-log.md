@@ -266,3 +266,28 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/user_guide/BULK_UPLOADS.md` — new column row added to Master Results Sync table
 - **Tests added:** yes — 4 unit tests + 2 integration tests (pytest)
 - **Decision logged:** no
+
+## 2026-04-06 | issue #32 — Notion Reactor Sync bidirectional daily sync
+- **Files changed:**
+  - `database/models/notion_sync.py` — new `ReactorChangeRequest` ORM model
+  - `database/models/__init__.py`, `database/__init__.py` — export `ReactorChangeRequest`
+  - `alembic/versions/9c358174ea54_add_reactor_change_requests.py` — additive migration; upgrade/downgrade both tested
+  - `backend/services/notion_sync/__init__.py` — package marker
+  - `backend/services/notion_sync/client.py` — Notion SDK wrapper; all SDK calls isolated here
+  - `backend/services/notion_sync/import_.py` — import step (Notion → DB upsert → Notion clear post-commit)
+  - `backend/services/notion_sync/export.py` — export step (ONGOING experiments → Notion)
+  - `backend/services/notion_sync/sync.py` — orchestrator + APScheduler `make_scheduler()`
+  - `backend/api/routers/notion_sync.py` — `POST /api/admin/notion-sync/trigger`
+  - `backend/api/main.py` — lifespan registers APScheduler; router registered
+  - `backend/config/settings.py` — 4 Notion fields added
+  - `.env.example` — NOTION_TOKEN, NOTION_DATABASE_ID, NOTION_DATA_SOURCE_ID, NOTION_SYNC_HOUR
+  - `requirements.txt` — notion-client>=2.2.1
+  - `docs/notion_sync/NOTION_SYNC.md` — new; field mapping, sync sequence, env vars, DB model, API reference
+  - `tests/models/test_notion_sync_model.py` — 2 model tests
+  - `tests/services/test_notion_sync_client.py` — 9 client tests
+  - `tests/services/test_notion_sync_import.py` — 9 import tests (incl. commit-before-clear invariant)
+  - `tests/services/test_notion_sync_export.py` — 9 export tests
+  - `tests/services/test_notion_sync_integration.py` — 3 end-to-end tests
+  - `tests/api/test_notion_sync.py` — 4 API tests
+- **Tests added:** yes — 36 tests (pytest); all pass
+- **Decision logged:** no

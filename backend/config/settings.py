@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
 
+    # Notion sync — reactor dashboard
+    notion_token: str = ""
+    notion_database_id: str = ""
+    notion_data_source_id: str = ""
+    notion_sync_hour: int = 6  # Hour of day (24h) in America/New_York to run daily sync
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
