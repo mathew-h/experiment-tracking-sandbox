@@ -299,6 +299,16 @@ def test_sampled_solution_volume_column_absent(db_session: Session):
     assert errors == [], f"Unexpected errors: {errors}"
     assert created == 1
 
+    result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_VOL003")
+        .first()
+    )
+    assert result is not None
+    assert result.scalar_data is not None
+    assert result.scalar_data.sampling_volume_mL is None
+
 
 def test_sampled_solution_volume_case_insensitive(db_session: Session):
     """Lowercase header 'sampled solution volume (ml)' is normalised and parsed correctly."""
