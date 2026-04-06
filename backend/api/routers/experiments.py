@@ -505,9 +505,22 @@ def update_experiment(
 
     data = payload.model_dump(exclude_unset=True)
     new_id = data.pop("experiment_id", None)
+    old_date = exp.date  # capture before mutation
 
     for field, value in data.items():
         setattr(exp, field, value)
+
+    if "date" in data:
+        db.add(ModificationsLog(
+            experiment_id=exp.experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type="update",
+            modified_table="experiments",
+            old_values={"date": old_date.isoformat() if old_date else None},
+            new_values={"date": data["date"].isoformat() if data["date"] else None},
+        ))
+        log.info("experiment_date_updated", experiment_id=exp.experiment_id, user=current_user.uid)
 
     if new_id is not None:
         new_id = new_id.strip()
