@@ -173,7 +173,11 @@ export function Step3Additives({ rows, onChange, onBack, onNext }: Props) {
   const addRow = () =>
     onChange([...rows, { id: generateId(), compound_id: null, compound_name: '', amount: '', unit: 'g' }])
 
-  const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i))
+  const removeRow = (i: number) => {
+    const rowId = rows[i].id
+    setRowErrors((prev) => { const next = { ...prev }; delete next[rowId]; return next })
+    onChange(rows.filter((_, idx) => idx !== i))
+  }
 
   const patchRow = (i: number, patch: Partial<AdditiveRow>) => {
     const rowId = rows[i].id
