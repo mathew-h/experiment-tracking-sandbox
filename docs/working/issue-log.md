@@ -244,6 +244,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 10 new tests (6 service, 4 API); 158 passing
 - **Decision logged:** no
 
+## 2026-04-05 | inline — Fix Experiment ID field not editable on New Experiment form
+- **Files changed:**
+  - `frontend/src/pages/NewExperiment/Step1BasicInfo.tsx` — added `refetchOnWindowFocus: false` to next-id query (prevents window focus from re-disabling field); guarded `useEffect` with `!data.experimentId` so auto-populate only fires when field is empty (prevents overwriting user edits on background refetch)
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-04-02 | issue #24 — fix invisible edit/delete buttons for additives and notes
 - **Files changed:**
   - `backend/api/routers/experiments.py` — added `DELETE /{experiment_id}/notes/{note_id}` endpoint with ModificationsLog
