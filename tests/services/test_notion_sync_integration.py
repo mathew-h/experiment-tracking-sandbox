@@ -86,6 +86,8 @@ def test_sync_survives_notion_outage(db_session: Session) -> None:
     assert "connection refused" in result.errors[0]
     assert result.imported == 0
     assert result.exported == 0
+    # No DB rows should have been written
+    assert db_session.query(ReactorChangeRequest).count() == 0
 
 
 def test_sync_result_to_dict(db_session: Session) -> None:

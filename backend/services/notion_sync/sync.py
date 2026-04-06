@@ -11,6 +11,7 @@ from datetime import date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+from sqlalchemy.orm import Session
 
 from .client import NotionSyncClient
 from .import_ import run_import
@@ -35,11 +36,17 @@ class SyncResult:
         }
 
 
-def run_sync(client: NotionSyncClient, db) -> SyncResult:
+def run_sync(
+    client: NotionSyncClient,
+    db: Session,
+    sync_date: date | None = None,
+) -> SyncResult:
     """Run one full sync cycle: import then export.
 
-    The DB session is shared across both steps. Import commits after upserts.
-    Export performs read-only queries.
+    Args:
+        client: Notion client wrapper.
+        db: SQLAlchemy session. Import step commits; export step is read-only.
+        sync_date: Date for this sync cycle. Defaults to today.
     """
     try:
         pages = client.query_all_rows()
@@ -47,7 +54,7 @@ def run_sync(client: NotionSyncClient, db) -> SyncResult:
         log.error("notion_sync_query_failed", error=str(exc))
         return SyncResult(errors=[f"Notion API error: {exc}"])
 
-    import_result = run_import(client, db, pages, date.today())
+    import_result = run_import(client, db, pages, sync_date or date.today())
     export_result = run_export(client, db, pages, import_result.cleared_page_ids)
 
     result = SyncResult(
