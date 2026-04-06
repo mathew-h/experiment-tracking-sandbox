@@ -413,3 +413,55 @@ def test_patch_rename_syncs_external_analysis(client, db_session):
 
     db_session.refresh(analysis)
     assert analysis.experiment_id == "ANALYSIS_SYNC_DST_001"
+
+
+def test_patch_experiment_date(client, db_session):
+    """PATCH with a valid ISO date string updates the experiment's date field."""
+    _make_experiment(db_session, "DATE_PATCH_001", 9020)
+    resp = client.patch(
+        "/api/experiments/DATE_PATCH_001",
+        json={"date": "2026-03-15T00:00:00"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["date"] is not None
+    assert "2026-03-15" in resp.json()["date"]
+
+
+def test_patch_experiment_date_invalid(client, db_session):
+    """PATCH with a non-datetime string returns 422."""
+    _make_experiment(db_session, "DATE_INVALID_001", 9021)
+    resp = client.patch(
+        "/api/experiments/DATE_INVALID_001",
+        json={"date": "not-a-date"},
+    )
+    assert resp.status_code == 422
+
+
+def test_patch_date_logs_modification(client, db_session):
+    """Patching date writes a ModificationsLog row with old and new values."""
+    from database.models.experiments import ModificationsLog
+    exp = _make_experiment(db_session, "DATE_LOG_001", 9022)
+    old_date = "2026-01-01T00:00:00"
+    new_date = "2026-03-15T00:00:00"
+
+    # Set an initial date so old_values is non-null
+    client.patch(f"/api/experiments/{exp.experiment_id}", json={"date": old_date})
+    db_session.expire_all()
+
+    client.patch(f"/api/experiments/{exp.experiment_id}", json={"date": new_date})
+    db_session.expire_all()
+
+    log_entry = (
+        db_session.query(ModificationsLog)
+        .filter(
+            ModificationsLog.experiment_id == "DATE_LOG_001",
+            ModificationsLog.modified_table == "experiments",
+        )
+        .order_by(ModificationsLog.id.desc())
+        .first()
+    )
+    assert log_entry is not None
+    assert log_entry.modification_type == "update"
+    assert log_entry.new_values is not None
+    assert "date" in log_entry.new_values
+    assert "2026-03-15" in log_entry.new_values["date"]

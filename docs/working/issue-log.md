@@ -244,3 +244,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/NewExperiment/__tests__/Step3Additives.test.tsx` — new: 6 unit tests covering valid rows pass, empty rows pass, unresolved name blocks navigation, inline error shown, toast fires, empty name passes
 - **Tests added:** yes — 6 unit tests (Vitest + Testing Library)
 - **Decision logged:** no
+
+## 2026-04-06 | issue #30 — Editable experiment start date (detail page + dashboard modal)
+- **Files changed:**
+  - `backend/api/routers/experiments.py` — add `ModificationsLog` entry when `date` is patched via `PATCH /api/experiments/{id}`
+  - `backend/api/routers/dashboard.py` — all three `started_at` sites (reactor cards, Gantt, legacy `/reactor-status`) now use `Experiment.date or Experiment.created_at` instead of `created_at` alone
+  - `tests/api/test_experiments.py` — 3 new tests: valid date PATCH, invalid date 422, ModificationsLog row verified
+  - `tests/api/test_dashboard.py` — 1 new test: dashboard `started_at` reflects patched date
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — inline click-to-edit date field in metadata header; `dateMutation`, `startDateEdit()`, `confirmDate()`
+  - `frontend/src/pages/ReactorGrid.tsx` — inline click-to-edit date in `ReactorDetailModal` "Started" row; null guard on `card.experiment_id`; `useToast` added
+- **Tests added:** yes — 4 backend (pytest); no frontend unit tests
+- **Decision logged:** no
