@@ -265,3 +265,62 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/e2e/journeys/03-notes-crud.spec.ts` — 5 E2E tests (visibility, edit, delete confirm/cancel)
 - **Tests added:** yes — 5 backend + 8 frontend unit tests; 10 E2E tests
 - **Decision logged:** no
+
+## 2026-04-05 | issue #29 — Silent failure when unknown compound name submitted in Step 3 additives
+- **Files changed:**
+  - `frontend/src/pages/NewExperiment/Step3Additives.tsx` — added `rowErrors` state, `handleNext` validator (blocks navigation + fires `toast.error` when `compound_name` set but `compound_id` null), inline error display on compound input (`border-red-500` + `<p>` message), `patchRow` error-clearing on compound resolve or input clear, `removeRow` stale-key cleanup; added `useToast` import
+  - `frontend/src/pages/NewExperiment/__tests__/Step3Additives.test.tsx` — new: 6 unit tests covering valid rows pass, empty rows pass, unresolved name blocks navigation, inline error shown, toast fires, empty name passes
+- **Tests added:** yes — 6 unit tests (Vitest + Testing Library)
+- **Decision logged:** no
+
+## 2026-04-06 | issue #30 — Editable experiment start date (detail page + dashboard modal)
+- **Files changed:**
+  - `backend/api/routers/experiments.py` — add `ModificationsLog` entry when `date` is patched via `PATCH /api/experiments/{id}`
+  - `backend/api/routers/dashboard.py` — all three `started_at` sites (reactor cards, Gantt, legacy `/reactor-status`) now use `Experiment.date or Experiment.created_at` instead of `created_at` alone
+  - `tests/api/test_experiments.py` — 3 new tests: valid date PATCH, invalid date 422, ModificationsLog row verified
+  - `tests/api/test_dashboard.py` — 1 new test: dashboard `started_at` reflects patched date
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — inline click-to-edit date field in metadata header; `dateMutation`, `startDateEdit()`, `confirmDate()`
+  - `frontend/src/pages/ReactorGrid.tsx` — inline click-to-edit date in `ReactorDetailModal` "Started" row; null guard on `card.experiment_id`; `useToast` added
+- **Tests added:** yes — 4 backend (pytest); no frontend unit tests
+- **Decision logged:** no
+
+## 2026-04-06 | issue #31 — map Sampled Solution Volume (mL) in Master Results Sync parser
+- **Files changed:**
+  - `backend/services/bulk_uploads/master_bulk_upload.py` — case-normalisation step for `Sampled Solution Volume (mL)` header; `sampling_vol_ml = _parse_float(row.get(...))` in per-row loop; `"sampling_volume_mL": sampling_vol_ml` added to `result_data`; module docstring updated
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 4 new unit tests (value parsed, blank→None, absent column→no KeyError, case-insensitive header); strengthened `test_sampled_solution_volume_column_absent` with DB-state assertions
+  - `tests/integration/conftest.py` — new file; Postgres `db_session` fixture with transaction-rollback isolation
+  - `tests/integration/test_master_results_sync_endpoint.py` — new file; 2 integration tests verifying `ScalarResults.sampling_volume_mL` persisted/None
+  - `docs/specs/master_results_sync.md` — new column row added to table
+  - `docs/user_guide/BULK_UPLOADS.md` — new column row added to Master Results Sync table
+- **Tests added:** yes — 4 unit tests + 2 integration tests (pytest)
+- **Decision logged:** no
+
+## 2026-04-06 | issue #32 — Notion Reactor Sync bidirectional daily sync
+- **Files changed:**
+  - `database/models/notion_sync.py` — new `ReactorChangeRequest` ORM model
+  - `database/models/__init__.py`, `database/__init__.py` — export `ReactorChangeRequest`
+  - `alembic/versions/9c358174ea54_add_reactor_change_requests.py` — additive migration; upgrade/downgrade both tested
+  - `backend/services/notion_sync/__init__.py` — package marker
+  - `backend/services/notion_sync/client.py` — Notion SDK wrapper; all SDK calls isolated here
+  - `backend/services/notion_sync/import_.py` — import step (Notion → DB upsert → Notion clear post-commit)
+  - `backend/services/notion_sync/export.py` — export step (ONGOING experiments → Notion)
+  - `backend/services/notion_sync/sync.py` — orchestrator + APScheduler `make_scheduler()`
+  - `backend/api/routers/notion_sync.py` — `POST /api/admin/notion-sync/trigger`
+  - `backend/api/main.py` — lifespan registers APScheduler; router registered
+  - `backend/config/settings.py` — 4 Notion fields added
+  - `.env.example` — NOTION_TOKEN, NOTION_DATABASE_ID, NOTION_DATA_SOURCE_ID, NOTION_SYNC_HOUR
+  - `requirements.txt` — notion-client>=2.2.1
+  - `docs/notion_sync/NOTION_SYNC.md` — new; field mapping, sync sequence, env vars, DB model, API reference
+  - `tests/models/test_notion_sync_model.py` — 2 model tests
+  - `tests/services/test_notion_sync_client.py` — 9 client tests
+  - `tests/services/test_notion_sync_import.py` — 9 import tests (incl. commit-before-clear invariant)
+  - `tests/services/test_notion_sync_export.py` — 9 export tests
+  - `tests/services/test_notion_sync_integration.py` — 3 end-to-end tests
+  - `tests/api/test_notion_sync.py` — 4 API tests
+- **Tests added:** yes — 36 tests (pytest); all pass
+- **Decision logged:** no
+
+## 2026-04-06 | inline — Fix auto-updater silent failure in Task Scheduler
+- **Files changed:** `update.ps1` — self-elevation block now skips `-Verb RunAs` in non-interactive sessions (Task Scheduler); logs warning instead of silently exiting
+- **Tests added:** no — PowerShell infrastructure script
+- **Decision logged:** no

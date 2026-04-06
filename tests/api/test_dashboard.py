@@ -599,3 +599,45 @@ def test_dashboard_performance_500_experiments(client, db_session):
 
     assert resp.status_code == 200
     assert elapsed_ms < 1500, f"Dashboard took {elapsed_ms:.0f}ms — exceeds 1500ms threshold"
+
+
+def test_dashboard_started_at_reflects_patched_date(client, db_session):
+    """After PATCHing Experiment.date, dashboard reactor card started_at reflects the new value."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    # Create experiment with reactor_number so it appears on dashboard
+    exp = Experiment(
+        experiment_id="DASH_DATE_001",
+        experiment_number=7001,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="DASH_DATE_001",
+        reactor_number=99,
+        experiment_type="Serum",
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    # Patch experiment date
+    new_date = "2026-01-10T00:00:00"
+    patch_resp = client.patch(
+        "/api/experiments/DASH_DATE_001",
+        json={"date": new_date},
+    )
+    assert patch_resp.status_code == 200
+
+    # Dashboard should reflect Experiment.date in started_at, not created_at
+    dash_resp = client.get("/api/dashboard/")
+    assert dash_resp.status_code == 200
+    reactors = dash_resp.json()["reactors"]
+    card = next((r for r in reactors if r["experiment_id"] == "DASH_DATE_001"), None)
+    assert card is not None
+    assert card["started_at"] is not None
+    assert "2026-01-10" in card["started_at"]

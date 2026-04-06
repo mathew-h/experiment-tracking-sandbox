@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card } from '@/components/ui'
+import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
 import { experimentsApi } from '@/api/experiments'
 
@@ -10,7 +10,7 @@ const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(
 const CF_SLOTS = ['CF01', 'CF02']
 
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED'] as const
-type ExperimentStatus = typeof STATUS_OPTIONS[number]
+type _ExperimentStatus = typeof STATUS_OPTIONS[number]
 
 // Static hardware specs — used for both occupied and empty slots.
 // Source: lab hardware inventory (issue #2).
@@ -237,6 +237,40 @@ function ReactorDetailModal({
   onClose: () => void
 }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const { success, error: toastError } = useToast()
+  const [editingDate, setEditingDate] = useState(false)
+  const [dateDraft, setDateDraft] = useState('')
+
+  const dateMutation = useMutation({
+    mutationFn: (newDate: string) =>
+      experimentsApi.patch(card.experiment_id as string, { date: newDate }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      success('Start date updated')
+      setEditingDate(false)
+    },
+    onError: () => {
+      toastError('Update failed', 'Could not save start date')
+      setEditingDate(false)
+    },
+  })
+
+  function startDateEdit() {
+    setDateDraft(card.started_at?.slice(0, 10) ?? '')
+    setEditingDate(true)
+  }
+
+  function confirmDate() {
+    if (!card.experiment_id) return
+    const trimmed = dateDraft.trim()
+    if (trimmed) {
+      dateMutation.mutate(`${trimmed}T00:00:00`)
+    } else {
+      setEditingDate(false)
+    }
+  }
 
   return (
     <div
@@ -296,14 +330,55 @@ function ReactorDetailModal({
               <dd className="font-mono-data text-ink-secondary">Day {card.days_running}</dd>
             </div>
           )}
-          {card.started_at && (
-            <div className="flex gap-2">
-              <dt className="text-ink-muted w-28 shrink-0">Started</dt>
-              <dd className="font-mono-data text-ink-secondary">
-                {card.started_at.slice(0, 10)}
-              </dd>
-            </div>
-          )}
+          <div className="flex gap-2 items-center">
+            <dt className="text-ink-muted w-28 shrink-0">Started</dt>
+            <dd className="font-mono-data text-ink-secondary flex items-center gap-1">
+              {editingDate ? (
+                <>
+                  <input
+                    type="date"
+                    value={dateDraft}
+                    onChange={(e) => setDateDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmDate()
+                      if (e.key === 'Escape') setEditingDate(false)
+                    }}
+                    className="font-mono-data border border-surface-border rounded px-1 bg-surface-raised text-ink-primary text-sm"
+                    autoFocus
+                  />
+                  <button
+                    onClick={confirmDate}
+                    disabled={dateMutation.isPending}
+                    className="text-status-success hover:opacity-80 text-sm"
+                    title="Save date"
+                    aria-label="Save date"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={() => setEditingDate(false)}
+                    className="text-ink-muted hover:text-ink-secondary text-sm"
+                    title="Cancel"
+                    aria-label="Cancel date edit"
+                  >
+                    ✗
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>{card.started_at ? card.started_at.slice(0, 10) : '—'}</span>
+                  <button
+                    onClick={startDateEdit}
+                    className="text-ink-muted hover:text-ink-secondary transition-colors text-sm leading-none cursor-pointer"
+                    title="Edit start date"
+                    aria-label="Edit start date"
+                  >
+                    ✎
+                  </button>
+                </>
+              )}
+            </dd>
+          </div>
           {(card.volume_mL != null || card.material || card.vendor) && (
             <div className="pt-2 border-t border-surface-border">
               <p className="text-ink-muted text-2xs uppercase tracking-wider mb-1.5">
