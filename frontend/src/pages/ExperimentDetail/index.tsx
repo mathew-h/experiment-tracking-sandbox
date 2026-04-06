@@ -23,6 +23,8 @@ export function ExperimentDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>('Conditions')
   const [editingId, setEditingId] = useState(false)
   const [idDraft, setIdDraft] = useState('')
+  const [editingDate, setEditingDate] = useState(false)
+  const [dateDraft, setDateDraft] = useState('')
 
   const { data: experiment, isLoading, error } = useQuery({
     queryKey: ['experiment', id],
@@ -59,6 +61,34 @@ export function ExperimentDetailPage() {
       setEditingId(false)
     },
   })
+
+  const dateMutation = useMutation({
+    mutationFn: (newDate: string) => experimentsApi.patch(id!, { date: newDate }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['experiment', id] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      success('Start date updated')
+      setEditingDate(false)
+    },
+    onError: () => {
+      toastError('Update failed', 'Could not save start date')
+      setEditingDate(false)
+    },
+  })
+
+  function startDateEdit() {
+    setDateDraft(experiment!.date?.slice(0, 10) ?? '')
+    setEditingDate(true)
+  }
+
+  function confirmDate() {
+    const trimmed = dateDraft.trim()
+    if (trimmed) {
+      dateMutation.mutate(`${trimmed}T00:00:00`)
+    } else {
+      setEditingDate(false)
+    }
+  }
 
   function startEdit() {
     setIdDraft(experiment!.experiment_id)
@@ -148,7 +178,47 @@ export function ExperimentDetailPage() {
         <p className="text-xs text-ink-muted mt-0.5">
           #{experiment.experiment_number}
           {experiment.researcher && ` · ${experiment.researcher}`}
-          {experiment.date && ` · ${experiment.date.slice(0, 10)}`}
+          {editingDate ? (
+            <>
+              {' · '}
+              <input
+                type="date"
+                value={dateDraft}
+                onChange={(e) => setDateDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') confirmDate()
+                  if (e.key === 'Escape') setEditingDate(false)
+                }}
+                className="font-mono-data border border-surface-border rounded px-1 bg-surface-raised text-ink-primary"
+                autoFocus
+              />
+              <button
+                onClick={confirmDate}
+                disabled={dateMutation.isPending}
+                className="ml-1 text-status-success hover:opacity-80"
+                title="Save date"
+              >
+                ✓
+              </button>
+              <button
+                onClick={() => setEditingDate(false)}
+                className="ml-1 text-ink-muted hover:text-ink-secondary"
+                title="Cancel"
+              >
+                ✗
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={startDateEdit}
+              className="text-ink-muted hover:text-ink-secondary transition-colors"
+              title="Edit start date"
+            >
+              {experiment.date
+                ? ` · ${experiment.date.slice(0, 10)}`
+                : ' · Set start date'}
+            </button>
+          )}
           {experiment.sample_id && ` · Sample: ${experiment.sample_id}`}
           {conditions?.reactor_number != null && ` · Reactor ${conditions.reactor_number}`}
         </p>
