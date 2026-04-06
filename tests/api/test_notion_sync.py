@@ -1,7 +1,7 @@
 """API tests for POST /api/admin/notion-sync/trigger."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.api.dependencies.db import get_db
-from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
+from backend.auth.firebase_auth import verify_firebase_token
 
 
 @pytest.fixture()
@@ -36,7 +36,6 @@ def test_trigger_requires_auth(unauth_client) -> None:
 def test_trigger_notion_token_not_configured(client: TestClient) -> None:
     """Returns 503 when NOTION_TOKEN is not set."""
     from backend.config.settings import get_settings, Settings
-    from unittest.mock import patch
 
     no_token_settings = Settings(notion_token="", notion_database_id="")
 
@@ -51,7 +50,6 @@ def test_trigger_success(client: TestClient) -> None:
     """With valid auth and mocked sync, returns 200 with summary payload."""
     from backend.config.settings import Settings
     from backend.services.notion_sync.sync import SyncResult
-    from unittest.mock import patch
 
     configured_settings = Settings(
         notion_token="secret_test_token",
