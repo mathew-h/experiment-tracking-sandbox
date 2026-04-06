@@ -291,3 +291,8 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_notion_sync.py` — 4 API tests
 - **Tests added:** yes — 36 tests (pytest); all pass
 - **Decision logged:** no
+
+## 2026-04-06 | inline — Fix auto-updater silent failure in Task Scheduler
+- **Files changed:** `update.ps1` — self-elevation block now skips `-Verb RunAs` in non-interactive sessions (Task Scheduler); logs warning instead of silently exiting
+- **Tests added:** no — PowerShell infrastructure script
+- **Decision logged:** no

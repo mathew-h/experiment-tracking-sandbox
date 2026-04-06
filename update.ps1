@@ -12,11 +12,15 @@ $ServiceName = "ExperimentTracker"
 $LogDir      = "C:\Logs\experiment-tracker"
 $UpdateLog   = Join-Path $LogDir "updates.log"
 
-# -- Self-elevation ------------------------------------------------------------
+# -- Self-elevation (skip in non-interactive / Task Scheduler sessions) --------
 $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Start-Process powershell.exe "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-    exit
+    if ([Environment]::UserInteractive) {
+        Start-Process powershell.exe "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit
+    } else {
+        Log "WARNING -- running non-elevated in non-interactive session; some steps may fail"
+    }
 }
 
 # -- Paths --------------------------------------------------------------------
