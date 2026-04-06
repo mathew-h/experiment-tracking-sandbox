@@ -255,3 +255,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/ReactorGrid.tsx` — inline click-to-edit date in `ReactorDetailModal` "Started" row; null guard on `card.experiment_id`; `useToast` added
 - **Tests added:** yes — 4 backend (pytest); no frontend unit tests
 - **Decision logged:** no
+
+## 2026-04-06 | issue #31 — map Sampled Solution Volume (mL) in Master Results Sync parser
+- **Files changed:**
+  - `backend/services/bulk_uploads/master_bulk_upload.py` — case-normalisation step for `Sampled Solution Volume (mL)` header; `sampling_vol_ml = _parse_float(row.get(...))` in per-row loop; `"sampling_volume_mL": sampling_vol_ml` added to `result_data`; module docstring updated
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 4 new unit tests (value parsed, blank→None, absent column→no KeyError, case-insensitive header); strengthened `test_sampled_solution_volume_column_absent` with DB-state assertions
+  - `tests/integration/conftest.py` — new file; Postgres `db_session` fixture with transaction-rollback isolation
+  - `tests/integration/test_master_results_sync_endpoint.py` — new file; 2 integration tests verifying `ScalarResults.sampling_volume_mL` persisted/None
+  - `docs/specs/master_results_sync.md` — new column row added to table
+  - `docs/user_guide/BULK_UPLOADS.md` — new column row added to Master Results Sync table
+- **Tests added:** yes — 4 unit tests + 2 integration tests (pytest)
+- **Decision logged:** no
