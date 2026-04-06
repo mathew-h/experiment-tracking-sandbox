@@ -1,4 +1,4 @@
-type BadgeVariant = 'default' | 'success' | 'warning' | 'error' | 'info' | 'ongoing' | 'completed' | 'cancelled'
+type BadgeVariant = 'default' | 'success' | 'warning' | 'error' | 'info' | 'ongoing' | 'completed' | 'cancelled' | 'queued'
 
 interface BadgeProps {
   children: React.ReactNode
@@ -16,6 +16,7 @@ const variantClasses: Record<BadgeVariant, string> = {
   ongoing:   'bg-status-ongoing/10 text-status-ongoing border-status-ongoing/20',
   completed: 'bg-status-completed/10 text-status-completed border-status-completed/20',
   cancelled: 'bg-status-cancelled/10 text-status-cancelled border-status-cancelled/20',
+  queued:    'bg-status-queued/10 text-status-queued border-status-queued/20',
 }
 
 const dotClasses: Record<BadgeVariant, string> = {
@@ -27,6 +28,7 @@ const dotClasses: Record<BadgeVariant, string> = {
   ongoing:   'bg-status-ongoing',
   completed: 'bg-status-completed',
   cancelled: 'bg-status-cancelled',
+  queued:    'bg-status-queued',
 }
 
 /** Pill-shaped label with semantic color variants and optional status dot. */
@@ -46,7 +48,7 @@ export function Badge({ children, variant = 'default', dot = false, className = 
 /** Convenience badge that maps an experiment status string to the correct variant. */
 export function StatusBadge({ status }: { status: string }) {
   const variant = (status.toLowerCase() as BadgeVariant)
-  const validVariants: BadgeVariant[] = ['ongoing', 'completed', 'cancelled']
+  const validVariants: BadgeVariant[] = ['ongoing', 'completed', 'cancelled', 'queued']
   return (
     <Badge variant={validVariants.includes(variant) ? variant : 'default'} dot>
       {status}
