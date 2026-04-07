@@ -19,7 +19,8 @@ from .client import (
     extract_change_status,
     extract_reactor_label,
     STATUS_IN_PROGRESS,
-    STATUS_CARRIED_FORWARD,
+    STATUS_COMPLETED,
+    STATUS_PENDING,
 )
 
 log = structlog.get_logger(__name__)
@@ -44,8 +45,9 @@ def run_import(
 
     For each page:
     - Empty Change Request → skip
-    - In Progress / Carried Forward → upsert DB, do NOT clear Notion
-    - Completed / Pending with content → upsert DB, THEN clear Notion after commit
+    - In Progress → upsert DB with carried_forward=True; do NOT clear Notion
+    - Completed / Pending with content → upsert DB; THEN clear Notion after commit
+    - Unknown status → log warning and skip
 
     Returns ImportResult with counts and the set of page IDs that were cleared.
     """
@@ -62,8 +64,15 @@ def run_import(
             result.skipped += 1
             continue
 
-        carried_forward = status == STATUS_CARRIED_FORWARD
-        should_clear = status not in (STATUS_IN_PROGRESS, STATUS_CARRIED_FORWARD)
+        # Unknown/legacy statuses (e.g. removed "Carried Forward") are skipped
+        known_statuses = (STATUS_IN_PROGRESS, STATUS_COMPLETED, STATUS_PENDING)
+        if status not in known_statuses:
+            log.warning("notion_import_unknown_status", reactor=reactor_label, status=status)
+            result.skipped += 1
+            continue
+
+        carried_forward = status == STATUS_IN_PROGRESS
+        should_clear = status != STATUS_IN_PROGRESS
 
         try:
             stmt = (

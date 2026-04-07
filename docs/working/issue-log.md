@@ -353,3 +353,13 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/api/experiments.ts` — added `'QUEUED'` to `ExperimentListItem` and `ExperimentDetail` status union types
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-04-07 | inline — Remove Carried Forward status from Notion sync
+- **Files changed:**
+  - `backend/services/notion_sync/client.py` — removed `STATUS_CARRIED_FORWARD` constant, updated status comment
+  - `backend/services/notion_sync/import_.py` — `In Progress` now sets `carried_forward=True`; unknown statuses logged and skipped
+  - `docs/notion_sync/NOTION_SYNC.md` — updated to two-status model (Pending/In Progress/Completed)
+  - `tests/services/test_notion_sync_import.py` — replaced old tests with 3 new ones: `test_in_progress_sets_carried_forward_true`, `test_completed_clears_notion`, `test_carried_forward_status_no_longer_handled`; updated accumulation test
+  - `tests/services/test_notion_sync_export.py` — removed Carried Forward reference from export test
+- **Tests added:** yes — 3 new import tests, 2 updated tests (35 total notion sync tests pass)
+- **Decision logged:** no

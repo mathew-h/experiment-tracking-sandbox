@@ -13,14 +13,13 @@ log = structlog.get_logger(__name__)
 # Notion property names for the Reactor Dashboard database
 PROP_REACTOR_LABEL = "Name"                # Title property — reactor label e.g. "R05"
 PROP_CHANGE_REQUEST = "Change Request"     # rich_text
-PROP_CHANGE_STATUS = "Change Request Status"  # select: Pending | In Progress | Carried Forward | Completed
+PROP_CHANGE_STATUS = "Change Request Status"  # select: Pending | In Progress | Completed
 PROP_EXPERIMENT_ID = "Experiment ID"       # rich_text (written by export)
 PROP_EXPERIMENT_DESC = "Experiment Description"  # rich_text (written by export)
 PROP_DATE_STARTED = "Date Started"         # date (written by export)
 
 STATUS_PENDING = "Pending"
 STATUS_IN_PROGRESS = "In Progress"
-STATUS_CARRIED_FORWARD = "Carried Forward"
 STATUS_COMPLETED = "Completed"
 
 
