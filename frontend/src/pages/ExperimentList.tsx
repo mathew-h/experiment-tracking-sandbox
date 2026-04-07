@@ -219,6 +219,8 @@ export function ExperimentListPage() {
                             STATUS_TEXT_CLASS[exp.status ?? ''] ?? 'text-ink-secondary',
                           ].join(' ')}
                           value={exp.status ?? ''}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                           onChange={(e) =>
                             statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value })
                           }
