@@ -421,6 +421,11 @@ def list_change_requests(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ChangeRequestResponse]:
     """List change request entries linked to this experiment. Returns [] if none."""
+    exp = db.execute(
+        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
     rows = db.execute(
         select(ReactorChangeRequest)
         .where(ReactorChangeRequest.experiment_id == experiment_id)

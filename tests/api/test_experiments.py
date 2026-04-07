@@ -526,3 +526,9 @@ def test_get_change_requests_requires_auth(db_session):
         resp = unauthed.get("/api/experiments/ANY_001/change-requests")
     assert resp.status_code == 401
     _app.dependency_overrides.clear()
+
+
+def test_get_change_requests_experiment_not_found(client):
+    """Nonexistent experiment returns 404, not 200 []."""
+    resp = client.get("/api/experiments/NONEXISTENT_999/change-requests")
+    assert resp.status_code == 404
