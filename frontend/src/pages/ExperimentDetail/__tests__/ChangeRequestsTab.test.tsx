@@ -17,7 +17,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe('ChangeRequestsTab', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => { vi.clearAllMocks() })
 
   it('renders empty state when API returns []', async () => {
     vi.mocked(experimentsApi.getChangeRequests).mockResolvedValue([])
