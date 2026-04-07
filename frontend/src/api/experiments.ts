@@ -4,7 +4,7 @@ export interface ExperimentListItem {
   id: number
   experiment_id: string
   experiment_number: number
-  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED'
+  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
   researcher: string | null
   date: string | null
   sample_id: string | null
@@ -26,7 +26,7 @@ export interface ExperimentDetail {
   id: number
   experiment_id: string
   experiment_number: number
-  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED'
+  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
   researcher: string | null
   date: string | null
   sample_id: string | null

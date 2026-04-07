@@ -318,3 +318,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Files changed:** `database/event_listeners.py` — added `er.description AS sampling_description` to `v_results_scalar`
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-04-06 | inline — Fix inline status dropdown not selecting QUEUED in Edge
+- **Files changed:**
+  - `frontend/src/pages/ExperimentList.tsx` — added `onMouseDown`/`onPointerDown` stopPropagation on inline status `<select>` to prevent Edge native popup event leakage to row click handler
+  - `frontend/src/api/experiments.ts` — added `'QUEUED'` to `ExperimentListItem` and `ExperimentDetail` status union types
+- **Tests added:** no
+- **Decision logged:** no
