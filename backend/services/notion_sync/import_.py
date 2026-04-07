@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from database.models.conditions import ExperimentalConditions
+from database.models.enums import ExperimentStatus
 from database.models.experiments import Experiment
 from database.models.notion_sync import ReactorChangeRequest
 from .client import (
@@ -41,20 +42,23 @@ class ImportResult:
 def _resolve_experiment_id(db: Session, reactor_label: str) -> str | None:
     """Find the ONGOING experiment occupying a reactor slot, if any."""
     label_upper = reactor_label.upper()
-    if label_upper.startswith("CF"):
-        reactor_number = int(label_upper[2:])
-        type_filter = ExperimentalConditions.experiment_type == "Core Flood"
-    elif label_upper.startswith("R"):
-        reactor_number = int(label_upper[1:])
-        type_filter = ExperimentalConditions.experiment_type != "Core Flood"
-    else:
+    try:
+        if label_upper.startswith("CF"):
+            reactor_number = int(label_upper[2:])
+            type_filter = ExperimentalConditions.experiment_type == "Core Flood"
+        elif label_upper.startswith("R"):
+            reactor_number = int(label_upper[1:])
+            type_filter = ExperimentalConditions.experiment_type != "Core Flood"
+        else:
+            return None
+    except ValueError:
         return None
 
     row = db.execute(
         select(Experiment.experiment_id)
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
         .where(
-            Experiment.status == "ONGOING",
+            Experiment.status == ExperimentStatus.ONGOING,
             ExperimentalConditions.reactor_number == reactor_number,
             type_filter,
         )
@@ -103,11 +107,12 @@ def run_import(
         should_clear = status != STATUS_IN_PROGRESS
 
         try:
+            resolved_exp_id = _resolve_experiment_id(db, reactor_label)
             stmt = (
                 pg_insert(ReactorChangeRequest)
                 .values(
                     reactor_label=reactor_label,
-                    experiment_id=_resolve_experiment_id(db, reactor_label),
+                    experiment_id=resolved_exp_id,
                     requested_change=change_request,
                     notion_status=status,
                     carried_forward=carried_forward,
@@ -117,7 +122,7 @@ def run_import(
                 .on_conflict_do_update(
                     index_elements=["reactor_label", "sync_date"],
                     set_=dict(
-                        experiment_id=_resolve_experiment_id(db, reactor_label),
+                        experiment_id=resolved_exp_id,
                         requested_change=change_request,
                         notion_status=status,
                         carried_forward=carried_forward,
