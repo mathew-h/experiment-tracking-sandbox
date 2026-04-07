@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
-import { experimentsApi } from '@/api/experiments'
+import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 
 // Fixed reactor layout: R01-R16 and CF01-CF02
 const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(2, '0')}`)
@@ -58,7 +58,7 @@ function StatusBadge({
   const queryClient = useQueryClient()
 
   const { mutate, isPending } = useMutation({
-    mutationFn: (newStatus: string) =>
+    mutationFn: (newStatus: ExperimentStatus) =>
       experimentsApi.patchStatus(card.experiment_id!, newStatus),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })

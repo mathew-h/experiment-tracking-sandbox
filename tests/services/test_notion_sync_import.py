@@ -72,28 +72,10 @@ def test_import_skips_whitespace_only_change_request(db_session: Session) -> Non
     assert result.imported == 0
 
 
-def test_import_preserves_in_progress(db_session: Session) -> None:
-    """In Progress row is written to DB; Notion clear is NOT called."""
+def test_in_progress_sets_carried_forward_true(db_session: Session) -> None:
+    """In Progress row is written to DB with carried_forward=True; Notion clear is NOT called."""
     client = MagicMock()
     pages = [_page(_PAGE_ID, "R05", "Run test today", "In Progress")]
-
-    result = run_import(client, db_session, pages, SYNC_DATE)
-
-    assert result.imported == 1
-    assert result.carried_forward == 0
-    client.clear_change_request.assert_not_called()
-
-    row = db_session.query(ReactorChangeRequest).filter_by(
-        reactor_label="R05", sync_date=SYNC_DATE
-    ).one()
-    assert row.carried_forward is False
-    assert row.notion_status == "In Progress"
-
-
-def test_import_preserves_carried_forward(db_session: Session) -> None:
-    """Carried Forward row is written with carried_forward=True; Notion clear NOT called."""
-    client = MagicMock()
-    pages = [_page(_PAGE_ID, "R07", "Continue reaction", "Carried Forward")]
 
     result = run_import(client, db_session, pages, SYNC_DATE)
 
@@ -102,25 +84,46 @@ def test_import_preserves_carried_forward(db_session: Session) -> None:
     client.clear_change_request.assert_not_called()
 
     row = db_session.query(ReactorChangeRequest).filter_by(
-        reactor_label="R07", sync_date=SYNC_DATE
+        reactor_label="R05", sync_date=SYNC_DATE
     ).one()
     assert row.carried_forward is True
-    assert row.notion_status == "Carried Forward"
+    assert row.notion_status == "In Progress"
 
 
-def test_import_clears_completed_after_write(db_session: Session) -> None:
-    """Completed row: DB upsert first, THEN Notion clear."""
+def test_completed_clears_notion(db_session: Session) -> None:
+    """Completed row triggers the Notion clear call after DB write."""
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R03", "Sample and clean", "Completed")]
+    pages = [_page(_PAGE_ID, "R07", "Sample and clean", "Completed")]
 
     result = run_import(client, db_session, pages, SYNC_DATE)
 
     assert result.imported == 1
-    assert _PAGE_ID in result.cleared_page_ids
+    assert result.carried_forward == 0
     client.clear_change_request.assert_called_once_with(_PAGE_ID)
+    assert _PAGE_ID in result.cleared_page_ids
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="R07", sync_date=SYNC_DATE
+    ).one()
+    assert row.carried_forward is False
+    assert row.notion_status == "Completed"
+
+
+def test_carried_forward_status_no_longer_handled(db_session: Session) -> None:
+    """Legacy 'Carried Forward' status is skipped gracefully (no exception, no DB write)."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R07", "Continue reaction", "Carried Forward")]
+
+    result = run_import(client, db_session, pages, SYNC_DATE)
+
+    assert result.imported == 0
+    assert result.skipped == 1
+    assert result.carried_forward == 0
+    client.clear_change_request.assert_not_called()
     assert db_session.query(ReactorChangeRequest).filter_by(
-        reactor_label="R03", sync_date=SYNC_DATE
-    ).count() == 1
+        reactor_label="R07", sync_date=SYNC_DATE
+    ).count() == 0
+
 
 
 def test_import_clears_pending_with_content(db_session: Session) -> None:
@@ -166,10 +169,10 @@ def test_import_upsert_idempotent(db_session: Session) -> None:
     assert result.imported == 1
 
 
-def test_carried_forward_accumulates_across_dates(db_session: Session) -> None:
-    """Same Carried Forward row on two different sync dates produces two DB rows."""
+def test_in_progress_accumulates_across_dates(db_session: Session) -> None:
+    """Same In Progress row on two different sync dates produces two DB rows."""
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R04", "Ongoing reaction", "Carried Forward")]
+    pages = [_page(_PAGE_ID, "R04", "Ongoing reaction", "In Progress")]
     date1 = date(2026, 4, 1)
     date2 = date(2026, 4, 2)
 
@@ -179,3 +182,80 @@ def test_carried_forward_accumulates_across_dates(db_session: Session) -> None:
     assert db_session.query(ReactorChangeRequest).filter_by(
         reactor_label="R04"
     ).count() == 2
+
+
+def test_import_populates_experiment_id_for_occupied_slot(db_session: Session) -> None:
+    """When an ONGOING experiment occupies R05, the upserted row gets its experiment_id."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+
+    exp = Experiment(experiment_id="HPHT_TEST_001", experiment_number=9901, status="ONGOING")
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="HPHT_TEST_001",
+        reactor_number=5,
+        experiment_type="HPHT",
+    )
+    db_session.add(cond)
+    db_session.flush()
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Check pressure", "Pending")]
+    run_import(client, db_session, pages, SYNC_DATE)
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="R05", sync_date=SYNC_DATE
+    ).one()
+    assert row.experiment_id == "HPHT_TEST_001"
+
+
+def test_import_leaves_experiment_id_null_for_idle_slot(db_session: Session) -> None:
+    """When no ONGOING experiment is on R05, experiment_id stays NULL."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Check gauge", "Pending")]
+    run_import(client, db_session, pages, SYNC_DATE)
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="R05", sync_date=SYNC_DATE
+    ).one()
+    assert row.experiment_id is None
+
+
+def test_import_core_flood_label_resolves_correctly(db_session: Session) -> None:
+    """CF01 resolves to a Core Flood experiment, not a regular one on reactor 1."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+
+    exp_cf = Experiment(experiment_id="CF_TEST_001", experiment_number=9902, status="ONGOING")
+    db_session.add(exp_cf)
+    db_session.flush()
+    cond_cf = ExperimentalConditions(
+        experiment_fk=exp_cf.id,
+        experiment_id="CF_TEST_001",
+        reactor_number=1,
+        experiment_type="Core Flood",
+    )
+    db_session.add(cond_cf)
+
+    exp_r = Experiment(experiment_id="HPHT_TEST_002", experiment_number=9903, status="ONGOING")
+    db_session.add(exp_r)
+    db_session.flush()
+    cond_r = ExperimentalConditions(
+        experiment_fk=exp_r.id,
+        experiment_id="HPHT_TEST_002",
+        reactor_number=1,
+        experiment_type="HPHT",
+    )
+    db_session.add(cond_r)
+    db_session.flush()
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "CF01", "Flow rate check", "Pending")]
+    run_import(client, db_session, pages, SYNC_DATE)
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="CF01", sync_date=SYNC_DATE
+    ).one()
+    assert row.experiment_id == "CF_TEST_001"

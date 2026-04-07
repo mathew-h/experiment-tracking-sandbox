@@ -353,3 +353,26 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/api/experiments.ts` — added `'QUEUED'` to `ExperimentListItem` and `ExperimentDetail` status union types
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-04-07 | inline — Remove Carried Forward status from Notion sync
+- **Files changed:**
+  - `backend/services/notion_sync/client.py` — removed `STATUS_CARRIED_FORWARD` constant, updated status comment
+  - `backend/services/notion_sync/import_.py` — `In Progress` now sets `carried_forward=True`; unknown statuses logged and skipped
+  - `docs/notion_sync/NOTION_SYNC.md` — updated to two-status model (Pending/In Progress/Completed)
+  - `tests/services/test_notion_sync_import.py` — replaced old tests with 3 new ones: `test_in_progress_sets_carried_forward_true`, `test_completed_clears_notion`, `test_carried_forward_status_no_longer_handled`; updated accumulation test
+  - `tests/services/test_notion_sync_export.py` — removed Carried Forward reference from export test
+- **Tests added:** yes — 3 new import tests, 2 updated tests (35 total notion sync tests pass)
+- **Decision logged:** no
+
+## 2026-04-07 | issue #37 — Add Change Requests tab to Experiment Detail view
+- **Files changed:**
+  - `backend/services/notion_sync/import_.py` — added `_resolve_experiment_id()` helper; populates experiment_id on upsert from ONGOING experiment on reactor slot
+  - `backend/api/schemas/notion_sync.py` — new file: `ChangeRequestResponse` Pydantic schema
+  - `backend/api/routers/experiments.py` — added `GET /{experiment_id}/change-requests` endpoint with 404 guard
+  - `frontend/src/api/experiments.ts` — added `ChangeRequestEntry` type and `getChangeRequests` API method
+  - `frontend/src/pages/ExperimentDetail/ChangeRequestsTab.tsx` — new tab component with status badges and empty state
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — wired Change Requests tab at position 4 (between Notes and Analysis)
+  - `docs/notion_sync/NOTION_SYNC.md` — updated experiment_id column documentation
+  - `docs/api/API_REFERENCE.md` — registered new endpoint
+- **Tests added:** yes — 3 backend import tests, 4 backend API tests, 3 frontend component tests
+- **Decision logged:** no

@@ -125,10 +125,10 @@ def test_export_preserves_in_progress_status(db_session: Session) -> None:
     client.set_status_pending.assert_not_called()
 
 
-def test_export_preserves_carried_forward_status(db_session: Session) -> None:
-    """set_status_pending is NOT called for a Carried Forward page that was not cleared."""
+def test_export_preserves_non_cleared_status(db_session: Session) -> None:
+    """set_status_pending is NOT called for a page that was not cleared (any non-Pending status)."""
     client = MagicMock()
-    pages = [_notion_page("fff", "R07", status="Carried Forward")]
+    pages = [_notion_page("fff", "R07", status="Completed")]
     _seed_experiment(db_session, "SERUM_004", 1005, reactor_number=7)
 
     run_export(client, db_session, pages, cleared_page_ids=set())

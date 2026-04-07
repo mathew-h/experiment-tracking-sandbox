@@ -39,6 +39,7 @@ they press "Sync Now" and the backend reads the file from that path.
 | `Gas Pressure (psi)` | No | `ScalarResults.gas_sampling_pressure_MPa` | Converted: × 0.00689476 |
 | `Sample pH` | No | `ScalarResults.final_ph` | Float |
 | `Sample Conductivity (mS/cm)` | No | `ScalarResults.final_conductivity_mS_cm` | Float |
+| `Sampled Solution Volume (mL)` | No | `ScalarResults.sampling_volume_mL` | Float; mL; optional; absent column treated as blank |
 | `Modification` | No | `ExperimentalResults.brine_modification_description` | Free text |
 | `NMR Run Date` | No | Stored as metadata on result | Date |
 | `ICP Run Date` | No | Stored as metadata on result | Date |

@@ -1,10 +1,12 @@
 import { apiClient } from './client'
 
+export type ExperimentStatus = 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
+
 export interface ExperimentListItem {
   id: number
   experiment_id: string
   experiment_number: number
-  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
+  status: ExperimentStatus
   researcher: string | null
   date: string | null
   sample_id: string | null
@@ -26,7 +28,7 @@ export interface ExperimentDetail {
   id: number
   experiment_id: string
   experiment_number: number
-  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
+  status: ExperimentStatus
   researcher: string | null
   date: string | null
   sample_id: string | null
@@ -93,6 +95,16 @@ export interface CreateExperimentPayload {
   note?: string
 }
 
+export interface ChangeRequestEntry {
+  id: number
+  reactor_label: string
+  requested_change: string
+  notion_status: string
+  carried_forward: boolean
+  sync_date: string
+  created_at: string
+}
+
 export const experimentsApi = {
   list: (params?: ExperimentListParams) =>
     apiClient.get<ExperimentListResponse>('/experiments', { params }).then((r) => r.data),
@@ -116,7 +128,7 @@ export const experimentsApi = {
       .patch<ExperimentDetail>(`/experiments/${experimentId}`, payload)
       .then((r) => r.data),
 
-  patchStatus: (experimentId: string, status: string) =>
+  patchStatus: (experimentId: string, status: ExperimentStatus) =>
     apiClient.patch<ExperimentDetail>(`/experiments/${experimentId}/status`, { status }).then((r) => r.data),
 
   nextId: (type: string) =>
@@ -141,6 +153,11 @@ export const experimentsApi = {
 
   deleteNote: (experimentId: string, noteId: number) =>
     apiClient.delete(`/experiments/${experimentId}/notes/${noteId}`),
+
+  getChangeRequests: (experimentId: string) =>
+    apiClient.get<ChangeRequestEntry[]>(
+      `/experiments/${experimentId}/change-requests`
+    ).then((r) => r.data),
 
   delete: (experimentId: string) =>
     apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),

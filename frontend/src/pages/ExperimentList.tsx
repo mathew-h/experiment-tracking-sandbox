@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { experimentsApi } from '@/api/experiments'
+import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
   Button, Input, Select, PageSpinner,
 } from '@/components/ui'
 
 const STATUS_OPTIONS = [
+  { value: 'QUEUED', label: 'Queued' },
   { value: 'ONGOING', label: 'Ongoing' },
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
-  { value: 'QUEUED', label: 'Queued' },
 ]
 
 const STATUS_TEXT_CLASS: Record<string, string> = {
@@ -60,7 +60,7 @@ export function ExperimentListPage() {
   })
 
   const statusMutation = useMutation({
-    mutationFn: ({ experimentId, status }: { experimentId: string; status: string }) =>
+    mutationFn: ({ experimentId, status }: { experimentId: string; status: ExperimentStatus }) =>
       experimentsApi.patchStatus(experimentId, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['experiments'] }),
   })
@@ -222,7 +222,7 @@ export function ExperimentListPage() {
                           onMouseDown={(e) => e.stopPropagation()}
                           onPointerDown={(e) => e.stopPropagation()}
                           onChange={(e) =>
-                            statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value })
+                            statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value as ExperimentStatus })
                           }
                         >
                           {STATUS_OPTIONS.map((o) => (
