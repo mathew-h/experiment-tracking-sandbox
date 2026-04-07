@@ -32,6 +32,8 @@ All property names are defined as constants in `backend/services/notion_sync/cli
 | `PROP_EXPERIMENT_ID` | `Experiment ID` | rich_text | Write (export) |
 | `PROP_EXPERIMENT_DESC` | `Experiment Description` | rich_text | Write (export) |
 | `PROP_DATE_STARTED` | `Date Started` | date | Write (export) |
+| `PROP_WORKING_DATE` | `Working Date` | date | Write (sync metadata) |
+| `PROP_LAST_SYNCED` | `Last Synced` | date+time | Write (sync metadata) |
 
 ### Change Request Status values
 
@@ -80,7 +82,16 @@ and can be triggered on demand via `POST /api/admin/notion-sync/trigger`.
 4. If status is `In Progress` and the page was NOT cleared, the status column is not touched.
 5. Idle reactor slots (no ONGOING experiment) have their experiment info cleared so stale data does not persist.
 
-### Step 3 — Log
+### Step 3 — Sync Metadata Stamp
+
+After import and export, the orchestrator stamps every Notion page with sync metadata:
+
+- **Last Synced** — current UTC datetime, written to all 18 pages. Acts as a heartbeat so users can confirm the sync is running. If this timestamp is stale, something is wrong.
+- **Working Date** — the sync cycle date (`sync_date`), written only to pages that had an active Change Request imported (including carried-forward In Progress rows). Pages without an active CR have Working Date cleared so stale dates don't persist.
+
+This runs as a separate pass after import+export and does not affect the existing sync logic.
+
+### Step 4 — Log
 
 ```
 structlog.info("notion_sync_complete",

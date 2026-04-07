@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import structlog
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -54,14 +54,33 @@ def run_sync(
         log.error("notion_sync_query_failed", error=str(exc))
         return SyncResult(errors=[f"Notion API error: {exc}"])
 
-    import_result = run_import(client, db, pages, sync_date or date.today())
+    effective_sync_date = sync_date or date.today()
+    import_result = run_import(client, db, pages, effective_sync_date)
     export_result = run_export(client, db, pages, import_result.cleared_page_ids)
+
+    # Stamp sync metadata on all pages: Last Synced (heartbeat) on every page,
+    # Working Date on pages with active change requests (cleared on others).
+    last_synced_iso = datetime.now(timezone.utc).isoformat()
+    working_date_iso = effective_sync_date.isoformat()
+    metadata_errors: list[str] = []
+    for page in pages:
+        page_id = page["id"]
+        has_active_cr = page_id in import_result.active_cr_page_ids
+        try:
+            client.stamp_sync_metadata(
+                page_id=page_id,
+                last_synced_iso=last_synced_iso,
+                working_date_iso=working_date_iso if has_active_cr else None,
+            )
+        except Exception as exc:
+            metadata_errors.append(f"sync metadata stamp failed for {page_id}: {exc}")
+            log.warning("notion_stamp_metadata_error", page_id=page_id, error=str(exc))
 
     result = SyncResult(
         imported=import_result.imported,
         exported=export_result.exported,
         carried_forward=import_result.carried_forward,
-        errors=import_result.errors + export_result.errors,
+        errors=import_result.errors + export_result.errors + metadata_errors,
     )
     log.info(
         "notion_sync_complete",
