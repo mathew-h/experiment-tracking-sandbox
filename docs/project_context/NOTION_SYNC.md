@@ -110,7 +110,7 @@ The same formula is used in `backend/api/routers/dashboard.py` (`REACTOR_SPECS`)
 |--------|------|-------|
 | `id` | Integer PK | Auto |
 | `reactor_label` | String(10) | "R05", "CF01" |
-| `experiment_id` | String, nullable FK | Ref to `experiments.experiment_id`; NULL on import |
+| `experiment_id` | String, nullable FK | Ref to `experiments.experiment_id`; resolved from ONGOING experiment on the reactor slot at import time; NULL if slot is idle |
 | `requested_change` | String | Change Request text at import time |
 | `notion_status` | String(50) | Status value at import time |
 | `carried_forward` | Boolean | True if In Progress at import (persisted overnight) |

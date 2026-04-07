@@ -182,3 +182,80 @@ def test_in_progress_accumulates_across_dates(db_session: Session) -> None:
     assert db_session.query(ReactorChangeRequest).filter_by(
         reactor_label="R04"
     ).count() == 2
+
+
+def test_import_populates_experiment_id_for_occupied_slot(db_session: Session) -> None:
+    """When an ONGOING experiment occupies R05, the upserted row gets its experiment_id."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+
+    exp = Experiment(experiment_id="HPHT_TEST_001", experiment_number=9901, status="ONGOING")
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="HPHT_TEST_001",
+        reactor_number=5,
+        experiment_type="HPHT",
+    )
+    db_session.add(cond)
+    db_session.flush()
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Check pressure", "Pending")]
+    run_import(client, db_session, pages, SYNC_DATE)
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="R05", sync_date=SYNC_DATE
+    ).one()
+    assert row.experiment_id == "HPHT_TEST_001"
+
+
+def test_import_leaves_experiment_id_null_for_idle_slot(db_session: Session) -> None:
+    """When no ONGOING experiment is on R05, experiment_id stays NULL."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Check gauge", "Pending")]
+    run_import(client, db_session, pages, SYNC_DATE)
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="R05", sync_date=SYNC_DATE
+    ).one()
+    assert row.experiment_id is None
+
+
+def test_import_core_flood_label_resolves_correctly(db_session: Session) -> None:
+    """CF01 resolves to a Core Flood experiment, not a regular one on reactor 1."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+
+    exp_cf = Experiment(experiment_id="CF_TEST_001", experiment_number=9902, status="ONGOING")
+    db_session.add(exp_cf)
+    db_session.flush()
+    cond_cf = ExperimentalConditions(
+        experiment_fk=exp_cf.id,
+        experiment_id="CF_TEST_001",
+        reactor_number=1,
+        experiment_type="Core Flood",
+    )
+    db_session.add(cond_cf)
+
+    exp_r = Experiment(experiment_id="HPHT_TEST_002", experiment_number=9903, status="ONGOING")
+    db_session.add(exp_r)
+    db_session.flush()
+    cond_r = ExperimentalConditions(
+        experiment_fk=exp_r.id,
+        experiment_id="HPHT_TEST_002",
+        reactor_number=1,
+        experiment_type="HPHT",
+    )
+    db_session.add(cond_r)
+    db_session.flush()
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "CF01", "Flow rate check", "Pending")]
+    run_import(client, db_session, pages, SYNC_DATE)
+
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="CF01", sync_date=SYNC_DATE
+    ).one()
+    assert row.experiment_id == "CF_TEST_001"
