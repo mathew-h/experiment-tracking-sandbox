@@ -348,3 +348,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/api/API_REFERENCE.md` — registered new endpoint
 - **Tests added:** yes — 3 backend import tests, 4 backend API tests, 3 frontend component tests
 - **Decision logged:** no
+
+## 2026-04-07 | inline — Add Working Date and Last Synced to Notion sync
+- **Files changed:**
+  - `backend/services/notion_sync/client.py` — added PROP_WORKING_DATE, PROP_LAST_SYNCED constants + stamp_sync_metadata() method
+  - `backend/services/notion_sync/import_.py` — added active_cr_page_ids tracking to ImportResult
+  - `backend/services/notion_sync/sync.py` — metadata stamp pass after import+export (Last Synced on all pages, Working Date on active CR pages)
+  - `docs/notion_sync/NOTION_SYNC.md` — added properties to map table + new Step 3 section
+- **Tests added:** no — existing 34 tests pass; stamp method uses existing update_page path
+- **Decision logged:** no

@@ -37,6 +37,7 @@ class ImportResult:
     carried_forward: int = 0
     errors: list[str] = field(default_factory=list)
     cleared_page_ids: set[str] = field(default_factory=set)
+    active_cr_page_ids: set[str] = field(default_factory=set)
 
 
 def _resolve_experiment_id(db: Session, reactor_label: str) -> str | None:
@@ -139,6 +140,7 @@ def run_import(
         if carried_forward:
             result.carried_forward += 1
         result.imported += 1
+        result.active_cr_page_ids.add(page_id_raw)
 
         if should_clear:
             pages_to_clear.append(page_id_raw)
