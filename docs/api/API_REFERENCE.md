@@ -17,6 +17,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a note |
 | PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit note text. Body: `{"note_text": "..."}`. No-op if text unchanged. Writes ModificationsLog. Returns updated note with `updated_at`. |
+| GET | `/api/experiments/{experiment_id}/change-requests` | List change request entries linked to this experiment. Returns `[]` if none. |
 
 ## Conditions
 

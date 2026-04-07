@@ -21,6 +21,8 @@ from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
 from database.models.analysis import ExternalAnalysis
 from database.models.xrd import XRDPhase
+from database.models.notion_sync import ReactorChangeRequest
+from backend.api.schemas.notion_sync import ChangeRequestResponse
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
 
@@ -410,6 +412,21 @@ def check_experiment_id_exists(
         select(Experiment.id).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     return {"exists": exists is not None}
+
+
+@router.get("/{experiment_id}/change-requests", response_model=list[ChangeRequestResponse])
+def list_change_requests(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[ChangeRequestResponse]:
+    """List change request entries linked to this experiment. Returns [] if none."""
+    rows = db.execute(
+        select(ReactorChangeRequest)
+        .where(ReactorChangeRequest.experiment_id == experiment_id)
+        .order_by(ReactorChangeRequest.sync_date.desc())
+    ).scalars().all()
+    return [ChangeRequestResponse.model_validate(r) for r in rows]
 
 
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)

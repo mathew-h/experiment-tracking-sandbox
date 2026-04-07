@@ -465,3 +465,64 @@ def test_patch_date_logs_modification(client, db_session):
     assert log_entry.new_values is not None
     assert "date" in log_entry.new_values
     assert "2026-03-15" in log_entry.new_values["date"]
+
+
+# --- Change Requests endpoint tests ---
+
+def _make_change_request(db_session, experiment_id, reactor_label, sync_date, notion_status="Pending", carried_forward=False):
+    from database.models.notion_sync import ReactorChangeRequest
+    row = ReactorChangeRequest(
+        reactor_label=reactor_label,
+        experiment_id=experiment_id,
+        requested_change=f"Check {reactor_label}",
+        notion_status=notion_status,
+        carried_forward=carried_forward,
+        sync_date=sync_date,
+        notion_page_id="a" * 32,
+    )
+    db_session.add(row)
+    db_session.flush()
+    return row
+
+
+def test_get_change_requests_returns_list(client, db_session):
+    from datetime import date
+    _make_experiment(db_session, "CR_TEST_001", 9801)
+    _make_change_request(db_session, "CR_TEST_001", "R05", date(2026, 4, 1))
+    _make_change_request(db_session, "CR_TEST_001", "R05", date(2026, 4, 2))
+    db_session.commit()
+
+    resp = client.get("/api/experiments/CR_TEST_001/change-requests")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    assert data[0]["sync_date"] == "2026-04-02"
+    assert data[1]["sync_date"] == "2026-04-01"
+    assert "reactor_label" in data[0]
+    assert "requested_change" in data[0]
+    assert "notion_status" in data[0]
+    assert "carried_forward" in data[0]
+    assert "notion_page_id" not in data[0]
+
+
+def test_get_change_requests_returns_empty_list(client, db_session):
+    _make_experiment(db_session, "CR_EMPTY_001", 9802)
+    db_session.commit()
+    resp = client.get("/api/experiments/CR_EMPTY_001/change-requests")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_get_change_requests_requires_auth(db_session):
+    """Unauthenticated request returns 401."""
+    from fastapi.testclient import TestClient
+    from backend.api.main import app as _app
+    from backend.api.dependencies.db import get_db
+    _app.dependency_overrides.clear()
+    def override_get_db():
+        yield db_session
+    _app.dependency_overrides[get_db] = override_get_db
+    with TestClient(_app) as unauthed:
+        resp = unauthed.get("/api/experiments/ANY_001/change-requests")
+    assert resp.status_code == 401
+    _app.dependency_overrides.clear()
