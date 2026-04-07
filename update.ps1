@@ -12,18 +12,6 @@ $ServiceName = "ExperimentTracker"
 $LogDir      = "C:\Logs\experiment-tracker"
 $UpdateLog   = Join-Path $LogDir "updates.log"
 
-# -- Self-elevation (skip in non-interactive / Task Scheduler sessions) --------
-$currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    if ([Environment]::UserInteractive) {
-        Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
-        Start-Process powershell.exe "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -Wait
-        exit
-    } else {
-        Log "WARNING -- running non-elevated in non-interactive session; some steps may fail"
-    }
-}
-
 # -- Paths --------------------------------------------------------------------
 $RepoRoot    = Split-Path -Parent $PSCommandPath
 $VenvPip     = Join-Path $RepoRoot ".venv\Scripts\pip.exe"
@@ -57,22 +45,41 @@ function Abort {
     exit 1
 }
 
+# -- Self-elevation (skip in non-interactive / Task Scheduler sessions) --------
+$currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    if ([Environment]::UserInteractive) {
+        Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
+        Start-Process powershell.exe "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -Wait
+        Pause-IfInteractive
+        exit
+    } else {
+        Log "WARNING -- running non-elevated in non-interactive session; some steps may fail"
+    }
+}
+
 # -- Step 1: Capture HEAD before pull -----------------------------------------
 Write-Step "Step 1: git pull"
 
+$ErrorActionPreference = 'Continue'
 git -C $RepoRoot checkout main 2>&1 | ForEach-Object { Write-Host "  $_" }
-if ($LASTEXITCODE -ne 0) { Abort "git checkout main" "exit code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = 'Stop'; Abort "git checkout main" "exit code $LASTEXITCODE" }
 
-$headBefore = git -C $RepoRoot rev-parse HEAD 2>&1
-if ($LASTEXITCODE -ne 0) { Abort "git rev-parse" $headBefore }
+$headBefore = (git -C $RepoRoot rev-parse HEAD 2>&1) | Out-String
+$headBefore = $headBefore.Trim()
+if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = 'Stop'; Abort "git rev-parse" $headBefore }
 
 git -C $RepoRoot pull origin main 2>&1 | ForEach-Object { Write-Host "  $_" }
-if ($LASTEXITCODE -ne 0) { Abort "git pull origin main" "exit code $LASTEXITCODE - check for merge conflicts or network issues" }
+if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = 'Stop'; Abort "git pull origin main" "exit code $LASTEXITCODE - check for merge conflicts or network issues" }
+$ErrorActionPreference = 'Stop'
 
 # -- Step 2: Detect changes ---------------------------------------------------
 Write-Step "Step 2: Detecting changes"
 
-$headAfter = git -C $RepoRoot rev-parse HEAD 2>&1
+$ErrorActionPreference = 'Continue'
+$headAfter = (git -C $RepoRoot rev-parse HEAD 2>&1) | Out-String
+$headAfter = $headAfter.Trim()
+$ErrorActionPreference = 'Stop'
 
 if ($headBefore -eq $headAfter) {
     Log "SKIPPED -- already up to date"
@@ -81,7 +88,9 @@ if ($headBefore -eq $headAfter) {
 }
 
 # @() forces an array so -match tests elements individually
+$ErrorActionPreference = 'Continue'
 $changedFiles    = @(git -C $RepoRoot diff $headBefore $headAfter --name-only 2>&1)
+$ErrorActionPreference = 'Stop'
 $reinstallDeps   = [bool]($changedFiles -match '^requirements\.txt$')
 $runMigrations   = [bool]($changedFiles -match '^alembic/')
 $rebuildFrontend = [bool]($changedFiles -match '^frontend/(src/|package\.json)')
