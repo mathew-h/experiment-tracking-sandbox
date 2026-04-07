@@ -16,7 +16,8 @@ $UpdateLog   = Join-Path $LogDir "updates.log"
 $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     if ([Environment]::UserInteractive) {
-        Start-Process powershell.exe "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
+        Start-Process powershell.exe "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -Wait
         exit
     } else {
         Log "WARNING -- running non-elevated in non-interactive session; some steps may fail"
