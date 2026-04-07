@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime
 
+import pytest
+
 from database.models.experiments import Experiment
 from database.models.enums import ExperimentStatus
 
@@ -61,3 +63,26 @@ def test_dashboard_pending_results_excludes_queued(client, db_session):
     resp = client.get("/api/dashboard/")
     assert resp.status_code == 200
     assert resp.json()["summary"]["pending_results"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# PATCH /experiments/{id}/status — all enum values accepted
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("status", ["ONGOING", "COMPLETED", "CANCELLED", "QUEUED"])
+def test_patch_experiment_status_all_values(client, db_session, status):
+    """PATCH /experiments/{id}/status accepts every ExperimentStatus member."""
+    exp = Experiment(
+        experiment_id=f"PATCH_STATUS_{status}",
+        experiment_number=33100 + list(ExperimentStatus).index(ExperimentStatus(status)),
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/experiments/{exp.experiment_id}/status",
+        json={"status": status},
+    )
+    assert response.status_code == 200, f"status={status} was rejected: {response.text}"
+    assert response.json()["status"] == status

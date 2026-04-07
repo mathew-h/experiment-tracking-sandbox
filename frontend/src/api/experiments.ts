@@ -1,10 +1,12 @@
 import { apiClient } from './client'
 
+export type ExperimentStatus = 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
+
 export interface ExperimentListItem {
   id: number
   experiment_id: string
   experiment_number: number
-  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
+  status: ExperimentStatus
   researcher: string | null
   date: string | null
   sample_id: string | null
@@ -26,7 +28,7 @@ export interface ExperimentDetail {
   id: number
   experiment_id: string
   experiment_number: number
-  status: 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
+  status: ExperimentStatus
   researcher: string | null
   date: string | null
   sample_id: string | null
@@ -115,7 +117,7 @@ export const experimentsApi = {
       .patch<ExperimentDetail>(`/experiments/${experimentId}`, payload)
       .then((r) => r.data),
 
-  patchStatus: (experimentId: string, status: string) =>
+  patchStatus: (experimentId: string, status: ExperimentStatus) =>
     apiClient.patch<ExperimentDetail>(`/experiments/${experimentId}/status`, { status }).then((r) => r.data),
 
   nextId: (type: string) =>
