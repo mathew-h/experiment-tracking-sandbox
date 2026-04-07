@@ -17,6 +17,8 @@ PROP_CHANGE_STATUS = "Change Request Status"  # select: Pending | In Progress | 
 PROP_EXPERIMENT_ID = "Experiment ID"       # rich_text (written by export)
 PROP_EXPERIMENT_DESC = "Experiment Description"  # rich_text (written by export)
 PROP_DATE_STARTED = "Date Started"         # date (written by export)
+PROP_WORKING_DATE = "Working Date"         # date (sync metadata — day of active CR)
+PROP_LAST_SYNCED = "Last Synced"           # date+time (sync metadata — heartbeat)
 
 STATUS_PENDING = "Pending"
 STATUS_IN_PROGRESS = "In Progress"
@@ -87,6 +89,28 @@ class NotionSyncClient:
             PROP_EXPERIMENT_DESC: {"rich_text": []},
             PROP_DATE_STARTED: {"date": None},
         })
+
+    def stamp_sync_metadata(
+        self,
+        page_id: str,
+        last_synced_iso: str,
+        working_date_iso: str | None = None,
+    ) -> None:
+        """Write sync heartbeat and optional working date to a Notion page.
+
+        Args:
+            page_id: Notion page ID.
+            last_synced_iso: ISO datetime string for Last Synced (always written).
+            working_date_iso: ISO date string for Working Date, or None to clear it.
+        """
+        properties: dict = {
+            PROP_LAST_SYNCED: {"date": {"start": last_synced_iso}},
+            PROP_WORKING_DATE: (
+                {"date": {"start": working_date_iso}} if working_date_iso
+                else {"date": None}
+            ),
+        }
+        self.update_page(page_id, properties)
 
 
 def extract_reactor_label(page: dict) -> str:
