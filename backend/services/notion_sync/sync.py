@@ -124,5 +124,6 @@ def make_scheduler(notion_sync_hour: int) -> AsyncIOScheduler:
         CronTrigger(hour=notion_sync_hour, timezone=tz),
         id="notion_sync",
         replace_existing=True,
+        misfire_grace_time=300,
     )
     return scheduler
