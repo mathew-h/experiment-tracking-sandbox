@@ -13,6 +13,17 @@ from backend.api.schemas.conditions import ConditionsCreate, ConditionsUpdate, C
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/conditions", tags=["conditions"])
 
+_REACTOR_ALLOWED_TYPES = {"HPHT", "Core Flood"}
+
+
+def _validate_reactor_number(reactor_number: int | None, experiment_type: str | None) -> None:
+    """Raise 422 if reactor_number is set for a non-HPHT, non-Core Flood experiment."""
+    if reactor_number is not None and experiment_type not in _REACTOR_ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail="reactor_number may only be set for HPHT or Core Flood experiments",
+        )
+
 
 @router.get("/{conditions_id}", response_model=ConditionsResponse)
 def get_conditions(
@@ -49,6 +60,7 @@ def create_conditions(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ConditionsResponse:
     """Create conditions and compute derived fields (water_to_rock_ratio)."""
+    _validate_reactor_number(payload.reactor_number, payload.experiment_type)
     cond = ExperimentalConditions(**payload.model_dump())
     db.add(cond)
     db.flush()
@@ -72,6 +84,7 @@ def update_conditions(
         raise HTTPException(status_code=404, detail="Conditions not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(cond, field, value)
+    _validate_reactor_number(cond.reactor_number, cond.experiment_type)
     db.flush()
     recalculate(cond, db)
     db.commit()

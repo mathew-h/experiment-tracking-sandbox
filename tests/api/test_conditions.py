@@ -129,3 +129,87 @@ def test_total_ferrous_iron_g_recalculated_on_patch(client, db_session):
     assert patched.status_code == 200
     # Double the rock_mass → double the iron
     assert patched.json()["total_ferrous_iron_g"] == pytest.approx(0.77731, rel=1e-3)
+
+
+# --- reactor_number validation tests (POST) ---
+
+
+def test_create_conditions_rejects_reactor_number_for_serum(client, db_session):
+    """POST /conditions: reactor_number with experiment_type='Serum' returns 422."""
+    exp = _make_experiment(db_session, eid="REACTOR_VAL_001", num=38101)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "reactor_number": 5,
+        "experiment_type": "Serum",
+    })
+    assert resp.status_code == 422
+    assert "reactor_number" in resp.json()["detail"].lower()
+
+
+def test_create_conditions_rejects_reactor_number_with_no_type(client, db_session):
+    """POST /conditions: reactor_number with no experiment_type returns 422."""
+    exp = _make_experiment(db_session, eid="REACTOR_VAL_002", num=38102)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "reactor_number": 3,
+    })
+    assert resp.status_code == 422
+    assert "reactor_number" in resp.json()["detail"].lower()
+
+
+def test_create_conditions_allows_reactor_number_for_hpht(client, db_session):
+    """POST /conditions: reactor_number with experiment_type='HPHT' succeeds."""
+    exp = _make_experiment(db_session, eid="REACTOR_VAL_003", num=38103)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "reactor_number": 7,
+        "experiment_type": "HPHT",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["reactor_number"] == 7
+
+
+def test_create_conditions_allows_reactor_number_for_core_flood(client, db_session):
+    """POST /conditions: reactor_number with experiment_type='Core Flood' succeeds."""
+    exp = _make_experiment(db_session, eid="REACTOR_VAL_004", num=38104)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "reactor_number": 1,
+        "experiment_type": "Core Flood",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["reactor_number"] == 1
+
+
+# --- reactor_number validation tests (PATCH) ---
+
+
+def test_patch_conditions_rejects_adding_reactor_number_to_serum(client, db_session):
+    """PATCH /conditions: adding reactor_number to a Serum experiment returns 422."""
+    exp = _make_experiment(db_session, eid="REACTOR_PATCH_001", num=38201)
+    created = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Serum",
+    }).json()
+    resp = client.patch(f"/api/conditions/{created['id']}", json={"reactor_number": 5})
+    assert resp.status_code == 422
+    assert "reactor_number" in resp.json()["detail"].lower()
+
+
+def test_patch_conditions_rejects_changing_type_away_from_hpht_with_reactor(client, db_session):
+    """PATCH /conditions: changing experiment_type from HPHT to Serum while reactor_number is set returns 422."""
+    exp = _make_experiment(db_session, eid="REACTOR_PATCH_002", num=38202)
+    created = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "HPHT",
+        "reactor_number": 3,
+    }).json()
+    resp = client.patch(f"/api/conditions/{created['id']}", json={"experiment_type": "Serum"})
+    assert resp.status_code == 422
+    assert "reactor_number" in resp.json()["detail"].lower()
