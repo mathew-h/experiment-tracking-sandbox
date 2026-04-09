@@ -130,6 +130,7 @@ def get_dashboard(
         .outerjoin(note_sq, note_sq.c.experiment_fk == Experiment.id)
         .where(Experiment.status == ExperimentStatus.ONGOING)
         .where(ExperimentalConditions.reactor_number.isnot(None))
+        .where(ExperimentalConditions.experiment_type.in_(["HPHT", "Core Flood"]))
         .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
     ).all()
 
@@ -268,6 +269,7 @@ def get_reactor_status(
         .join(Experiment, Experiment.id == ExperimentalConditions.experiment_fk)
         .where(Experiment.status == ExperimentStatus.ONGOING)
         .where(ExperimentalConditions.reactor_number.isnot(None))
+        .where(ExperimentalConditions.experiment_type.in_(["HPHT", "Core Flood"]))
         .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
     ).all()
 

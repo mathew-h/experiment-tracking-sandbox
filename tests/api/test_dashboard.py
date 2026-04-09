@@ -159,6 +159,7 @@ def test_get_dashboard_reactor_cards_have_label(client, db_session):
         experiment_fk=exp.id,
         experiment_id="DASH_LABEL_001",
         reactor_number=3,
+        experiment_type="HPHT",
     )
     db_session.add(cond)
     db_session.commit()
@@ -205,6 +206,7 @@ def test_get_dashboard_with_ongoing_experiment(client, db_session):
         experiment_id="DASH_FULL_001",
         reactor_number=9,
         temperature_c=150.0,
+        experiment_type="HPHT",
     )
     db_session.add(cond)
     db_session.commit()
@@ -336,6 +338,7 @@ def test_reactor_card_includes_specs(client, db_session):
         experiment_fk=exp.id,
         experiment_id="SPECS_TEST_001",
         reactor_number=5,  # R05: 500 mL, Titanium, Yushen
+        experiment_type="HPHT",
     )
     db_session.add(cond)
     db_session.commit()
@@ -466,8 +469,8 @@ def test_hpht_experiment_in_reactor_1_gets_r01_not_cf01(client, db_session):
     )
 
 
-def test_null_experiment_type_in_reactor_1_gets_r01_not_cf01(client, db_session):
-    """Experiment with no experiment_type in reactor 1 falls back to R01, not CF01."""
+def test_null_experiment_type_in_reactor_1_excluded_from_grid(client, db_session):
+    """Experiment with no experiment_type is excluded from the reactor grid (issue #38)."""
     from database.models.experiments import Experiment
     from database.models.conditions import ExperimentalConditions
     from database.models.enums import ExperimentStatus
@@ -491,11 +494,10 @@ def test_null_experiment_type_in_reactor_1_gets_r01_not_cf01(client, db_session)
 
     resp = client.get("/api/dashboard/")
     assert resp.status_code == 200
-    cards = {c["reactor_number"]: c for c in resp.json()["reactors"]}
-    assert 1 in cards
-    assert cards[1]["reactor_label"] == "R01", (
-        f"Expected R01 but got {cards[1]['reactor_label']!r}. "
-        "NULL experiment_type should produce R-prefix label, not CF."
+    all_exp_ids = [c["experiment_id"] for c in resp.json()["reactors"]]
+    assert "NULL_TYPE_R1_001" not in all_exp_ids, (
+        "NULL experiment_type should be excluded from reactor grid; "
+        "only HPHT and Core Flood experiments appear."
     )
 
 
@@ -588,6 +590,7 @@ def test_dashboard_performance_500_experiments(client, db_session):
             experiment_fk=exp.id,
             experiment_id=exp.experiment_id,
             reactor_number=(i % 16) + 1,
+            experiment_type="HPHT",
         )
         conds.append(cond)
     db_session.add_all(conds)
@@ -619,8 +622,8 @@ def test_dashboard_started_at_reflects_patched_date(client, db_session):
     cond = ExperimentalConditions(
         experiment_fk=exp.id,
         experiment_id="DASH_DATE_001",
-        reactor_number=99,
-        experiment_type="Serum",
+        reactor_number=15,
+        experiment_type="HPHT",
     )
     db_session.add(cond)
     db_session.commit()
@@ -641,3 +644,101 @@ def test_dashboard_started_at_reflects_patched_date(client, db_session):
     assert card is not None
     assert card["started_at"] is not None
     assert "2026-01-10" in card["started_at"]
+
+
+def test_serum_experiment_does_not_overwrite_hpht_reactor_slot(client, db_session):
+    """
+    Issue #38: If both an HPHT and a Serum experiment share the same
+    reactor_number and both are ONGOING, only the HPHT experiment must
+    appear in the reactor grid. The Serum experiment is silently excluded.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    older = datetime.datetime.utcnow() - datetime.timedelta(days=10)
+    newer = datetime.datetime.utcnow()
+
+    hpht_exp = Experiment(
+        experiment_id="HPHT_SLOT38_001",
+        experiment_number=38001,
+        status=ExperimentStatus.ONGOING,
+        created_at=older,
+    )
+    serum_exp = Experiment(
+        experiment_id="SERUM_SLOT38_001",
+        experiment_number=38002,
+        status=ExperimentStatus.ONGOING,
+        created_at=newer,  # higher id / newer — would win old tiebreak
+    )
+    db_session.add_all([hpht_exp, serum_exp])
+    db_session.flush()
+
+    db_session.add(ExperimentalConditions(
+        experiment_fk=hpht_exp.id,
+        experiment_id="HPHT_SLOT38_001",
+        reactor_number=5,
+        experiment_type="HPHT",
+    ))
+    db_session.add(ExperimentalConditions(
+        experiment_fk=serum_exp.id,
+        experiment_id="SERUM_SLOT38_001",
+        reactor_number=5,
+        experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+
+    assert "R05" in cards, "R05 slot must be populated by the HPHT experiment"
+    assert cards["R05"]["experiment_id"] == "HPHT_SLOT38_001"
+    # Serum experiment must NOT appear anywhere in reactors
+    all_exp_ids = [c["experiment_id"] for c in resp.json()["reactors"]]
+    assert "SERUM_SLOT38_001" not in all_exp_ids
+
+
+def test_reactor_status_excludes_non_hpht_experiments(client, db_session):
+    """
+    Issue #38: GET /api/dashboard/reactor-status must also filter by
+    experiment_type, matching the main dashboard endpoint behaviour.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    hpht_exp = Experiment(
+        experiment_id="RS_HPHT_001",
+        experiment_number=38010,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow() - datetime.timedelta(days=5),
+    )
+    serum_exp = Experiment(
+        experiment_id="RS_SERUM_001",
+        experiment_number=38011,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add_all([hpht_exp, serum_exp])
+    db_session.flush()
+
+    db_session.add(ExperimentalConditions(
+        experiment_fk=hpht_exp.id,
+        experiment_id="RS_HPHT_001",
+        reactor_number=7,
+        experiment_type="HPHT",
+    ))
+    db_session.add(ExperimentalConditions(
+        experiment_fk=serum_exp.id,
+        experiment_id="RS_SERUM_001",
+        reactor_number=7,
+        experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/reactor-status")
+    assert resp.status_code == 200
+    exp_ids = [r["experiment_id"] for r in resp.json()]
+    assert "RS_HPHT_001" in exp_ids
+    assert "RS_SERUM_001" not in exp_ids
