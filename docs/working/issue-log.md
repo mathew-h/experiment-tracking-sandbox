@@ -385,3 +385,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/notion_sync/NOTION_SYNC.md` — added properties to map table + new Step 3 section
 - **Tests added:** no — existing 34 tests pass; stamp method uses existing update_page path
 - **Decision logged:** no
+
+## 2026-04-09 | issue #38 — Reactor grid overwrites HPHT slot for non-HPHT experiments
+- **Files changed:**
+  - `backend/api/routers/dashboard.py` — added experiment_type filter to get_dashboard() and get_reactor_status() reactor queries
+  - `backend/api/routers/conditions.py` — added _validate_reactor_number() 422 validation on POST and PATCH
+  - `tests/api/test_dashboard.py` — 2 new regression tests, 6 existing tests updated for filter
+  - `tests/api/test_conditions.py` — 6 new validation tests
+- **Tests added:** yes — 8 new API integration tests (dashboard + conditions)
+- **Decision logged:** no
