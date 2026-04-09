@@ -250,6 +250,30 @@ Write-OK "Task '$TaskName' registered (daily at $UpdateTime)"
 Write-Host "  NOTE: If you change your Windows password, update this task's credentials:" -ForegroundColor Gray
 Write-Host "        Task Scheduler -> Task Scheduler Library -> $TaskName -> Properties -> enter new password" -ForegroundColor Gray
 
+# -- Step 9b: Register nightly backup task -------------------------------------
+Write-Step "Step 9b: Register nightly backup task (01:00 daily)"
+
+$BackupScript = Join-Path $RepoRoot "backup.ps1"
+$BackupAction   = New-ScheduledTaskAction `
+                    -Execute  "powershell.exe" `
+                    -Argument "-ExecutionPolicy Bypass -File `"$BackupScript`""
+$BackupTrigger  = New-ScheduledTaskTrigger -Daily -At "01:00"
+$BackupSettings = New-ScheduledTaskSettingsSet `
+                    -RestartCount    1 `
+                    -RestartInterval (New-TimeSpan -Minutes 5)
+
+Register-ScheduledTask `
+    -TaskName  "ExperimentTrackerBackup" `
+    -Action    $BackupAction `
+    -Trigger   $BackupTrigger `
+    -Settings  $BackupSettings `
+    -User      $Cred.UserName `
+    -Password  $Cred.GetNetworkCredential().Password `
+    -RunLevel  Highest `
+    -Force | Out-Null
+
+Write-OK "Task 'ExperimentTrackerBackup' registered (daily at 01:00)"
+
 # -- Step 10: Start service ----------------------------------------------------
 Write-Step "Step 10: Start service"
 
