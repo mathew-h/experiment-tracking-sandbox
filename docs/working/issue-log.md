@@ -394,3 +394,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_conditions.py` — 6 new validation tests
 - **Tests added:** yes — 8 new API integration tests (dashboard + conditions)
 - **Decision logged:** no
+
+## 2026-04-10 | issue #39 — Skip calibration-standard rows in master bulk upload
+- **Files changed:**
+  - `backend/services/bulk_uploads/master_bulk_upload.py` — added guard clause to skip rows where Experiment ID contains "standard" (case-insensitive)
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 3 new tests (standard skipped, NMR standard skipped, real experiment unaffected)
+- **Tests added:** yes — 3 unit tests for standard-row skipping
+- **Decision logged:** no
