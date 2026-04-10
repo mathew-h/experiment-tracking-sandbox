@@ -115,6 +115,11 @@ def _process_bytes(
             skipped += 1
             continue
 
+        # Skip calibration-standard rows (Issue #39)
+        if "standard" in exp_id.lower():
+            skipped += 1
+            continue
+
         duration_raw = row.get("Duration (Days)")
         if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
             skipped += 1

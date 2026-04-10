@@ -215,6 +215,63 @@ def test_from_bytes_matches_experiment_with_leading_zeros_and_symbols(db_session
 # Sampled Solution Volume tests (Issue #31)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Standard-row skipping tests (Issue #39)
+# ---------------------------------------------------------------------------
+
+def test_standard_row_skipped_silently(db_session: Session):
+    """Rows where Experiment ID contains 'Standard' are skipped, not errored."""
+    xlsx = _master_excel([
+        ["150uL NMR Standard", 7.0, "Day 7", None, None, None, None,
+         5.0, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Standard rows must not produce errors: {errors}"
+    assert skipped == 1
+    assert created == 0
+    assert feedbacks == []
+
+
+def test_nmr_standard_row_skipped(db_session: Session):
+    """'NMR Standard' (no volume prefix) is also skipped."""
+    xlsx = _master_excel([
+        ["NMR Standard", 7.0, "Day 7", None, None, None, None,
+         None, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == []
+    assert skipped == 1
+    assert created == 0
+
+
+def test_real_experiment_not_affected_by_standard_filter(db_session: Session):
+    """A real experiment ID like 'CF-015-GC-01' is looked up normally, not skipped."""
+    _seed_experiment(db_session, "CF-015-GC-01", 9001)
+
+    xlsx = _master_excel([
+        ["CF-015-GC-01", 7.0, "Day 7", None, None, None, None,
+         5.0, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+    assert skipped == 0
+    assert feedbacks[0]["action"] == "created"
+
+
+# ---------------------------------------------------------------------------
+# Sampled Solution Volume tests (Issue #31)
+# ---------------------------------------------------------------------------
+
 def test_sampled_solution_volume_parsed(db_session: Session):
     """Sampled Solution Volume (mL) cell with a value is saved to sampling_volume_mL."""
     _seed_experiment(db_session, "HPHT_VOL001", 8001)
