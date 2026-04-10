@@ -82,7 +82,10 @@ $headAfter = $headAfter.Trim()
 $ErrorActionPreference = 'Stop'
 
 if ($headBefore -eq $headAfter) {
-    Log "SKIPPED -- already up to date"
+    Log "No new commits -- skipping deps/migrations/frontend, restarting service"
+    & nssm restart $ServiceName 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Abort "nssm restart" "exit code $LASTEXITCODE -- check $LogDir\stderr.log" }
+    Log "SUCCESS -- restart only (no changes)"
     Pause-IfInteractive
     exit 0
 }
