@@ -89,3 +89,103 @@ def test_approve_firebase_error():
         result = runner.invoke(cli, ["approve", "req_abc"])
     assert result.exit_code != 0
     assert "Firebase unavailable" in result.output
+
+
+def test_list_users():
+    cli = _import_cli()
+    runner = CliRunner()
+    users_data = [
+        {"uid": "uid1", "email": "alice@addisenergy.com", "display_name": "Alice", "disabled": False},
+        {"uid": "uid2", "email": "bob@addisenergy.com", "display_name": "Bob", "disabled": True},
+    ]
+    with patch("scripts.manage_users.list_users", return_value=users_data):
+        result = runner.invoke(cli, ["list"])
+    assert result.exit_code == 0
+    assert "uid1" in result.output
+    assert "alice@addisenergy.com" in result.output
+    assert "uid2" in result.output
+    assert "disabled" in result.output
+
+
+def test_list_users_empty():
+    cli = _import_cli()
+    runner = CliRunner()
+    with patch("scripts.manage_users.list_users", return_value=[]):
+        result = runner.invoke(cli, ["list"])
+    assert result.exit_code == 0
+    assert "No users" in result.output
+
+
+def test_create_user():
+    cli = _import_cli()
+    runner = CliRunner()
+    new_user = {"uid": "uid_new", "email": "carol@addisenergy.com"}
+    with patch("scripts.manage_users.create_user", return_value=new_user):
+        result = runner.invoke(cli, ["create", "carol@addisenergy.com", "pass123", "Carol"])
+    assert result.exit_code == 0
+    assert "carol@addisenergy.com" in result.output
+
+
+def test_create_user_domain_error():
+    cli = _import_cli()
+    runner = CliRunner(mix_stderr=True)
+    with patch("scripts.manage_users.create_user", side_effect=ValueError("Email must end with @addisenergy.com")):
+        result = runner.invoke(cli, ["create", "carol@gmail.com", "pass123", "Carol"])
+    assert result.exit_code != 0
+    assert "addisenergy.com" in result.output
+
+
+def test_delete_user():
+    cli = _import_cli()
+    runner = CliRunner()
+    with patch("scripts.manage_users.delete_user", return_value=True):
+        result = runner.invoke(cli, ["delete", "uid_abc"])
+    assert result.exit_code == 0
+    assert "uid_abc" in result.output
+
+
+def test_update_user_name():
+    cli = _import_cli()
+    runner = CliRunner()
+    updated = {"uid": "uid1", "email": "alice@addisenergy.com"}
+    with patch("scripts.manage_users.update_user", return_value=updated):
+        result = runner.invoke(cli, ["update", "uid1", "--name", "Alicia"])
+    assert result.exit_code == 0
+    assert "alice@addisenergy.com" in result.output
+
+
+def test_set_claims():
+    cli = _import_cli()
+    runner = CliRunner()
+    claimed = {"uid": "uid1", "email": "alice@addisenergy.com", "custom_claims": {"approved": True, "role": "admin"}}
+    with patch("scripts.manage_users.set_user_claims", return_value=claimed):
+        result = runner.invoke(cli, ["set-claims", "uid1", "admin"])
+    assert result.exit_code == 0
+    assert "admin" in result.output
+
+
+def test_reset_password():
+    cli = _import_cli()
+    runner = CliRunner()
+    with patch("scripts.manage_users.reset_user_password", return_value="https://reset.link/token"):
+        result = runner.invoke(cli, ["reset-password", "alice@addisenergy.com"])
+    assert result.exit_code == 0
+    assert "https://reset.link/token" in result.output
+
+
+def test_delete_request_found():
+    cli = _import_cli()
+    runner = CliRunner()
+    with patch("scripts.manage_users.delete_request_by_email", return_value=True):
+        result = runner.invoke(cli, ["delete-request", "alice@addisenergy.com"])
+    assert result.exit_code == 0
+    assert "Deleted" in result.output
+
+
+def test_delete_request_not_found():
+    cli = _import_cli()
+    runner = CliRunner()
+    with patch("scripts.manage_users.delete_request_by_email", return_value=False):
+        result = runner.invoke(cli, ["delete-request", "nobody@addisenergy.com"])
+    assert result.exit_code == 0
+    assert "No pending request" in result.output

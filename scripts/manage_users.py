@@ -100,5 +100,93 @@ def reject(request_id: str) -> None:
     click.echo(f"Request {request_id} rejected and removed.")
 
 
+@cli.command("list")
+def list_cmd() -> None:
+    """List all Firebase Auth users."""
+    users = list_users()
+    if not users:
+        click.echo("No users found.")
+        return
+    for u in users:
+        status = "disabled" if u.get("disabled") else "active"
+        click.echo(f"{u['uid']}  {u['email']}  {u.get('display_name', '')}  [{status}]")
+
+
+@cli.command()
+@click.argument("email")
+@click.argument("password")
+@click.argument("display_name")
+def create(email: str, password: str, display_name: str) -> None:
+    """Create a new Firebase Auth user directly (bypasses approval flow)."""
+    try:
+        user = create_user(email, password, display_name)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Created: {user['email']} (uid: {user['uid']})")
+
+
+@cli.command()
+@click.argument("uid")
+def delete(uid: str) -> None:
+    """Delete a Firebase Auth user by UID."""
+    try:
+        delete_user(uid)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Deleted user {uid}.")
+
+
+@cli.command()
+@click.argument("uid")
+@click.option("--name", default=None, help="New display name")
+@click.option("--email", default=None, help="New email (must be @addisenergy.com)")
+def update(uid: str, name: str, email: str) -> None:
+    """Update a user's display name or email."""
+    try:
+        user = update_user(uid, display_name=name, email=email)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Updated: {user['email']} (uid: {user['uid']})")
+
+
+@cli.command("set-claims")
+@click.argument("uid")
+@click.argument("role")
+def set_claims(uid: str, role: str) -> None:
+    """Set approved=True and role claim for an existing Firebase user."""
+    try:
+        user = set_user_claims(uid, role=role)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Claims set: uid={user['uid']} claims={user['custom_claims']}")
+
+
+@cli.command("reset-password")
+@click.argument("email")
+def reset_password(email: str) -> None:
+    """Generate a password reset link for a user."""
+    try:
+        link = reset_user_password(email)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Reset link: {link}")
+
+
+@cli.command("delete-request")
+@click.argument("email")
+def delete_request(email: str) -> None:
+    """Delete any pending Firestore registration requests for an email."""
+    deleted = delete_request_by_email(email)
+    if deleted:
+        click.echo(f"Deleted pending request(s) for {email}.")
+    else:
+        click.echo(f"No pending request found for {email}.")
+
+
 if __name__ == "__main__":
     cli()
