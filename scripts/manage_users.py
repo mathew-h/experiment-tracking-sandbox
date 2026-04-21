@@ -181,7 +181,11 @@ def reset_password(email: str) -> None:
 @click.argument("email")
 def delete_request(email: str) -> None:
     """Delete any pending Firestore registration requests for an email."""
-    deleted = delete_request_by_email(email)
+    try:
+        deleted = delete_request_by_email(email)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
     if deleted:
         click.echo(f"Deleted pending request(s) for {email}.")
     else:

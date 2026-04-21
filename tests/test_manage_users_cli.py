@@ -189,3 +189,12 @@ def test_delete_request_not_found():
         result = runner.invoke(cli, ["delete-request", "nobody@addisenergy.com"])
     assert result.exit_code == 0
     assert "No pending request" in result.output
+
+
+def test_delete_request_firestore_error():
+    cli = _import_cli()
+    runner = CliRunner(mix_stderr=True)
+    with patch("scripts.manage_users.delete_request_by_email", side_effect=RuntimeError("Firestore unavailable")):
+        result = runner.invoke(cli, ["delete-request", "alice@addisenergy.com"])
+    assert result.exit_code != 0
+    assert "Firestore unavailable" in result.output
