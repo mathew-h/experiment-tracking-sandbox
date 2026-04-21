@@ -76,5 +76,29 @@ def pending() -> None:
         )
 
 
+@cli.command()
+@click.argument("request_id")
+def approve(request_id: str) -> None:
+    """Approve a pending user request and create their Firebase account."""
+    try:
+        user = approve_user(request_id)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Approved: {user['email']} (uid: {user['uid']})")
+
+
+@cli.command()
+@click.argument("request_id")
+def reject(request_id: str) -> None:
+    """Reject and remove a pending user request."""
+    try:
+        reject_user(request_id)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Request {request_id} rejected and removed.")
+
+
 if __name__ == "__main__":
     cli()
