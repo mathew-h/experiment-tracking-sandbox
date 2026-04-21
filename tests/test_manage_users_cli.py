@@ -57,7 +57,7 @@ def test_approve_request():
 
 def test_approve_not_found():
     cli = _import_cli()
-    runner = CliRunner()
+    runner = CliRunner(mix_stderr=True)
     with patch("scripts.manage_users.approve_user", side_effect=ValueError("Request not found.")):
         result = runner.invoke(cli, ["approve", "bad_id"])
     assert result.exit_code != 0
@@ -75,8 +75,17 @@ def test_reject_request():
 
 def test_reject_not_found():
     cli = _import_cli()
-    runner = CliRunner()
+    runner = CliRunner(mix_stderr=True)
     with patch("scripts.manage_users.reject_user", side_effect=ValueError("Request not found.")):
         result = runner.invoke(cli, ["reject", "bad_id"])
     assert result.exit_code != 0
     assert "Request not found" in result.output
+
+
+def test_approve_firebase_error():
+    cli = _import_cli()
+    runner = CliRunner(mix_stderr=True)
+    with patch("scripts.manage_users.approve_user", side_effect=RuntimeError("Firebase unavailable")):
+        result = runner.invoke(cli, ["approve", "req_abc"])
+    assert result.exit_code != 0
+    assert "Firebase unavailable" in result.output
