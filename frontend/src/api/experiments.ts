@@ -70,6 +70,9 @@ export interface ResultWithFlags {
   final_conductivity_mS_cm: number | null
   final_ph: number | null
   scalar_measurement_date: string | null
+  ferrous_iron_yield_h2_pct: number | null
+  ferrous_iron_yield_nh3_pct: number | null
+  xrd_run_date: string | null
 }
 
 export interface ExperimentListParams {
