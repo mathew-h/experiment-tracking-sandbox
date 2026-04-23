@@ -34,6 +34,8 @@ def _parse_float(val: Any) -> Optional[float]:
 def _parse_date(val: Any) -> Optional[dt.datetime]:
     if val is None:
         return None
+    if pd.isna(val):  # catches NaN and NaT — NaT spoofs isinstance(dt.datetime) so must check first
+        return None
     if isinstance(val, dt.datetime):
         return val
     if isinstance(val, dt.date):
