@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timezone
 
 from database.models.experiments import Experiment
@@ -143,8 +144,6 @@ def test_scalar_results_has_xrd_run_date_field():
     from database.models.results import ScalarResults
     assert hasattr(ScalarResults, 'xrd_run_date'), "xrd_run_date column missing from ScalarResults"
 
-
-import pytest
 
 
 def test_results_endpoint_includes_ferrous_yield_columns(client, db_session):
