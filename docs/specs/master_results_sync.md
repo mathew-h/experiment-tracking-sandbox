@@ -43,7 +43,8 @@ they press "Sync Now" and the backend reads the file from that path.
 | `Modification` | No | `ExperimentalResults.brine_modification_description` | Free text |
 | `NMR Run Date` | No | Stored as metadata on result | Date |
 | `ICP Run Date` | No | Stored as metadata on result | Date |
-| `GC Run Date` | No | Stored as metadata on result | Date |
+| `GC Run Date`  | No | Stored as metadata on result | Date |
+| `XRD Run Date` | No | Stored as metadata on result | Date |
 | `OVERWRITE` | No | Per-row overwrite flag | `TRUE`/`FALSE`; default `FALSE` |
 | `Standard` | No | Ignored by parser | Informational column for lab use only |
 

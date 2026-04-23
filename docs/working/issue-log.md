@@ -401,3 +401,20 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 3 new tests (standard skipped, NMR standard skipped, real experiment unaffected)
 - **Tests added:** yes — 3 unit tests for standard-row skipping
 - **Decision logged:** no
+
+## 2026-04-23 | issue #46 — Add Fe²⁺ yield columns to results table and XRD run date tag
+- **Files changed:**
+  - `database/models/results.py` — added `xrd_run_date` (nullable DateTime) to `ScalarResults`
+  - `alembic/versions/a72dbd3dec55_add_xrd_run_date_to_scalar_results.py` — additive migration (upgrade + downgrade)
+  - `backend/services/bulk_uploads/master_bulk_upload.py` — parse `XRD Run Date` column; updated module docstring
+  - `backend/services/scalar_results_service.py` — fixed pre-existing silent bug: `nmr_run_date`, `icp_run_date`, `gc_run_date`, `xrd_run_date` added to `SCALAR_UPDATABLE_FIELDS` and `ScalarResults()` constructor (were silently dropped before)
+  - `docs/specs/master_results_sync.md` — added XRD Run Date row to column definitions table
+  - `backend/api/schemas/results.py` — added `ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `xrd_run_date` to `ResultWithFlagsResponse`
+  - `backend/api/routers/experiments.py` — populated three new fields in `get_experiment_results` serializer
+  - `frontend/src/api/experiments.ts` — extended `ResultWithFlags` with three new fields
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — added `fmtPct`, expanded GRID 12→14 cols, inserted Fe²⁺ NH₃/H₂ columns, added XRD badge
+  - `frontend/src/pages/ExperimentDetail/__tests__/ResultsTab.columns.test.tsx` — new test file (6 vitest tests)
+  - `tests/api/test_results.py` — 4 new tests (model field, ferrous yield pct, xrd_run_date present/absent)
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 1 new test for XRD Run Date parsing
+- **Tests added:** yes — 4 backend API tests, 1 bulk upload integration test, 6 frontend vitest tests
+- **Decision logged:** no

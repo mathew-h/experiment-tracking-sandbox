@@ -399,3 +399,50 @@ def test_sampled_solution_volume_case_insensitive(db_session: Session):
     assert result is not None
     assert result.scalar_data is not None
     assert result.scalar_data.sampling_volume_mL == pytest.approx(20.0)
+
+
+# ---------------------------------------------------------------------------
+# XRD Run Date tests (Issue #46)
+# ---------------------------------------------------------------------------
+
+def test_xrd_run_date_parsed_and_stored(db_session: Session):
+    """Master upload stores xrd_run_date when 'XRD Run Date' column is present."""
+    from database.models.experiments import Experiment
+    from database.models.results import ExperimentalResults, ScalarResults
+    from sqlalchemy import select
+
+    _seed_experiment(db_session, "HPHT_XRD001", 7780)
+
+    xrd_headers = [
+        "Experiment ID", "Duration (Days)", "Description", "Sample Date",
+        "NMR Run Date", "ICP Run Date", "GC Run Date", "XRD Run Date",
+        "NH4 (mM)", "H2 (ppm)", "Gas Volume (mL)", "Gas Pressure (psi)",
+        "Sample pH", "Sample Conductivity (mS/cm)",
+        "Sampled Solution Volume (mL)", "Modification", "Overwrite",
+    ]
+    xlsx = make_excel_multisheet({"Dashboard": (xrd_headers, [
+        ["HPHT_XRD001", 7.0, "Day 7 XRD", None, None, None, None, "2026-04-15",
+         5.0, None, None, None, 7.1, None, None, None, "FALSE"],
+    ])})
+
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    exp = db_session.execute(
+        select(Experiment).where(Experiment.experiment_id == "HPHT_XRD001")
+    ).scalar_one()
+    er = db_session.execute(
+        select(ExperimentalResults).where(ExperimentalResults.experiment_fk == exp.id)
+    ).scalar_one()
+    scalar = db_session.execute(
+        select(ScalarResults).where(ScalarResults.result_id == er.id)
+    ).scalar_one()
+
+    assert scalar.xrd_run_date is not None
+    assert scalar.xrd_run_date.year == 2026
+    assert scalar.xrd_run_date.month == 4
+    assert scalar.xrd_run_date.day == 15

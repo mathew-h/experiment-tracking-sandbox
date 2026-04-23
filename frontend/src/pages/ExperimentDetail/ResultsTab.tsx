@@ -16,7 +16,11 @@ function fmtDate(iso: string | null | undefined): string {
   return iso.slice(0, 10)
 }
 
-const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_5rem_5rem_4rem_6rem_4rem_minmax(0,1fr)_1.5rem]'
+function fmtPct(n: number | null | undefined, decimals = 1) {
+  return n != null ? `${n.toFixed(decimals)}%` : '—'
+}
+
+const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_4.5rem_5rem_5rem_4.5rem_4rem_6rem_5rem_minmax(0,1fr)_1.5rem]'
 
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
@@ -187,11 +191,13 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             <span>Sample Date</span>
             <span>Gross NH₄ (mM)</span>
             <span>NH₄ (g/t)</span>
+            <span>Fe²⁺ NH₃ (%)</span>
             <span>H₂ (µmol)</span>
             <span>H₂ (g/t)</span>
+            <span>Fe²⁺ H₂ (%)</span>
             <span>pH</span>
             <span>Cond. (mS/cm)</span>
-            <span>ICP</span>
+            <span>ICP / XRD</span>
             <span>Sampling Mod</span>
             <span></span>
           </div>
@@ -206,11 +212,16 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
                 <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_nh3_pct)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
+                <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_h2_pct)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
                 <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
-                <span>{r.has_icp && <Badge variant="info" dot>ICP</Badge>}</span>
+                <span className="flex items-center gap-1">
+                  {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
+                  {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
+                </span>
                 <span className="flex items-center gap-1 min-w-0">
                   {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
                   {r.brine_modification_description && (
