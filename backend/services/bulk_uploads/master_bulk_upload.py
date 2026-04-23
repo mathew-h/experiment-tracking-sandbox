@@ -3,7 +3,7 @@ Master Results bulk upload — reads from fixed SharePoint path or uploaded byte
 
 Dashboard sheet column spec:
   Experiment ID | Duration (Days) | Description | Sample Date | NMR Run Date |
-  ICP Run Date  | GC Run Date     | NH4 (mM)    | H2 (ppm)    | Gas Volume (mL) |
+  ICP Run Date  | GC Run Date     | XRD Run Date | NH4 (mM)   | H2 (ppm)    | Gas Volume (mL) |
   Gas Pressure (psi) | Sample pH | Sample Conductivity (mS/cm) |
   Sampled Solution Volume (mL) | Modification | Overwrite
 """
