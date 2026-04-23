@@ -126,6 +126,9 @@ class ResultWithFlagsResponse(BaseModel):
     final_conductivity_mS_cm: Optional[float] = None
     final_ph: Optional[float] = None
     scalar_measurement_date: Optional[datetime] = None
+    ferrous_iron_yield_h2_pct: Optional[float] = None
+    ferrous_iron_yield_nh3_pct: Optional[float] = None
+    xrd_run_date: Optional[datetime] = None
 
 
 class BackgroundAmmoniumUpdate(BaseModel):

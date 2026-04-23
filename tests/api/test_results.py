@@ -142,3 +142,56 @@ def test_scalar_results_has_xrd_run_date_field():
     """ScalarResults model must have an xrd_run_date column."""
     from database.models.results import ScalarResults
     assert hasattr(ScalarResults, 'xrd_run_date'), "xrd_run_date column missing from ScalarResults"
+
+
+import pytest
+
+
+def test_results_endpoint_includes_ferrous_yield_columns(client, db_session):
+    """GET /experiments/{id}/results returns ferrous_iron_yield_h2_pct and _nh3_pct."""
+    exp, result = _seed(db_session)
+    scalar = ScalarResults(
+        result_id=result.id,
+        ferrous_iron_yield_h2_pct=16.8,
+        ferrous_iron_yield_nh3_pct=24.6,
+    )
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["ferrous_iron_yield_h2_pct"] == pytest.approx(16.8)
+    assert data[0]["ferrous_iron_yield_nh3_pct"] == pytest.approx(24.6)
+
+
+def test_results_endpoint_includes_xrd_run_date(client, db_session):
+    """GET /experiments/{id}/results returns xrd_run_date per row."""
+    exp, result = _seed(db_session)
+    scalar = ScalarResults(
+        result_id=result.id,
+        xrd_run_date=datetime(2026, 4, 15, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["xrd_run_date"] is not None
+    assert "2026-04-15" in data[0]["xrd_run_date"]
+
+
+def test_results_endpoint_xrd_run_date_null_when_absent(client, db_session):
+    """xrd_run_date is null in the response when not set on the scalar row."""
+    exp, result = _seed(db_session)
+    scalar = ScalarResults(result_id=result.id, gross_ammonium_concentration_mM=1.0)
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["xrd_run_date"] is None
