@@ -8,7 +8,7 @@ import * as experimentsApiModule from '@/api/experiments'
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     getResults: vi.fn(),
-    updateBackgroundAmmonium: vi.fn(),
+    setBackgroundAmmonium: vi.fn(),
   },
 }))
 

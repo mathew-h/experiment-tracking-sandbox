@@ -197,7 +197,7 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             <span>Fe²⁺ H₂ (%)</span>
             <span>pH</span>
             <span>Cond. (mS/cm)</span>
-            <span>ICP</span>
+            <span>ICP / XRD</span>
             <span>Sampling Mod</span>
             <span></span>
           </div>
