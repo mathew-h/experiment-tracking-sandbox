@@ -85,6 +85,7 @@ class ScalarResults(Base):
     nmr_run_date = Column(DateTime(timezone=True), nullable=True)
     icp_run_date = Column(DateTime(timezone=True), nullable=True)
     gc_run_date = Column(DateTime(timezone=True), nullable=True)
+    xrd_run_date = Column(DateTime(timezone=True), nullable=True)
 
     # Hydrogen tracking inputs
     h2_concentration = Column(Float, nullable=True)  # ppm (vol/vol)

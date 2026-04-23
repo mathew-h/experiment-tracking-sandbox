@@ -136,3 +136,9 @@ def test_get_experiment_results_includes_scalar_measurement_date(client, db_sess
     assert len(data) == 1
     assert data[0]["scalar_measurement_date"] is not None
     assert "2026-03-15" in data[0]["scalar_measurement_date"]
+
+
+def test_scalar_results_has_xrd_run_date_field():
+    """ScalarResults model must have an xrd_run_date column."""
+    from database.models.results import ScalarResults
+    assert hasattr(ScalarResults, 'xrd_run_date'), "xrd_run_date column missing from ScalarResults"
