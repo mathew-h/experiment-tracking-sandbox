@@ -16,6 +16,7 @@ SCALAR_UPDATABLE_FIELDS = [
     'h2_concentration', 'h2_concentration_unit', 'gas_sampling_volume_ml', 'gas_sampling_pressure_MPa',
     'final_ph', 'final_nitrate_concentration_mM', 'final_dissolved_oxygen_mg_L', 'co2_partial_pressure_MPa',
     'final_conductivity_mS_cm', 'final_alkalinity_mg_L', 'sampling_volume_mL', 'measurement_date',
+    'nmr_run_date', 'icp_run_date', 'gc_run_date', 'xrd_run_date',
 ]
 
 
@@ -157,6 +158,10 @@ class ScalarResultsService:
                 final_alkalinity_mg_L=result_data.get('final_alkalinity_mg_L'),
                 sampling_volume_mL=result_data.get('sampling_volume_mL'),
                 measurement_date=result_data.get('measurement_date'),
+                nmr_run_date=result_data.get('nmr_run_date'),
+                icp_run_date=result_data.get('icp_run_date'),
+                gc_run_date=result_data.get('gc_run_date'),
+                xrd_run_date=result_data.get('xrd_run_date'),
                 result_entry=experimental_result,
             )
             db.add(scalar_data)

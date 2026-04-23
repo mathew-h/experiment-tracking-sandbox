@@ -135,6 +135,7 @@ def _process_bytes(
         nmr_run_date = _parse_date(row.get("NMR Run Date"))
         icp_run_date = _parse_date(row.get("ICP Run Date"))
         gc_run_date = _parse_date(row.get("GC Run Date"))
+        xrd_run_date = _parse_date(row.get("XRD Run Date"))
 
         nh4_mm = _parse_float(row.get("NH4 (mM)"))
         h2_ppm = _parse_float(row.get("H2 (ppm)"))
@@ -154,6 +155,7 @@ def _process_bytes(
             "nmr_run_date": nmr_run_date,
             "icp_run_date": icp_run_date,
             "gc_run_date": gc_run_date,
+            "xrd_run_date": xrd_run_date,
             "gross_ammonium_concentration_mM": nh4_mm,
             "h2_concentration": h2_ppm,
             "h2_concentration_unit": "ppm" if h2_ppm is not None else None,
