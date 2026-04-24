@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, Text, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
@@ -31,6 +31,12 @@ class SampleInfo(Base):
     characterized = Column(Boolean, default=False, server_default='false', nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Core loan tracking
+    well_name = Column(String, nullable=True)
+    core_lender = Column(String, nullable=True)
+    core_interval_ft = Column(String, nullable=True)  # stored as string, e.g. "895'"
+    on_loan_return_date = Column(Date, nullable=True)
 
     # Relationships
     experiments = relationship("Experiment", back_populates="sample_info", foreign_keys="[Experiment.sample_id]")

@@ -1,6 +1,7 @@
 """Tests for RockInventoryService."""
 from __future__ import annotations
 
+import datetime as dt
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock
@@ -296,3 +297,22 @@ def test_mag_susc_update_with_overwrite(db_session: Session):
     db_session.refresh(ea)
 
     assert ea.magnetic_susceptibility == "99.9"  # updated, no pytest.approx
+
+
+def test_sample_info_has_core_loan_fields(db_session: Session):
+    """SampleInfo accepts and persists the 4 new fields."""
+    sample = SampleInfo(
+        sample_id="TESTCORE001",
+        well_name="Tuscarora Project CT-3",
+        core_lender="Geologica",
+        core_interval_ft="895'",
+        on_loan_return_date=dt.date(2026, 7, 9),
+    )
+    db_session.add(sample)
+    db_session.flush()
+
+    found = db_session.query(SampleInfo).filter_by(sample_id="TESTCORE001").first()
+    assert found.well_name == "Tuscarora Project CT-3"
+    assert found.core_lender == "Geologica"
+    assert found.core_interval_ft == "895'"
+    assert found.on_loan_return_date == dt.date(2026, 7, 9)
