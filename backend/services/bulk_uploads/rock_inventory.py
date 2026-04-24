@@ -32,8 +32,13 @@ class RockInventoryService:
         """Parse a date-like value to datetime.date. Returns None if unparseable."""
         if val is None:
             return None
-        if isinstance(val, float) and pd.isna(val):
-            return None
+        # Guard pd.NaT and float NaN — pd.NaT subclasses datetime.datetime so must be
+        # checked before the isinstance dispatch below.
+        try:
+            if pd.isna(val):
+                return None
+        except (TypeError, ValueError):
+            pass  # pd.isna raises TypeError on some non-scalar types
         if isinstance(val, datetime.datetime):
             return val.date()
         if isinstance(val, datetime.date):

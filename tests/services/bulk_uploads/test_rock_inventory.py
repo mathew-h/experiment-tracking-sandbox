@@ -409,3 +409,24 @@ def test_sample_info_has_core_loan_fields(db_session: Session):
     assert found.core_lender == "Geologica"
     assert found.core_interval_ft == "895'"
     assert found.on_loan_return_date == dt.date(2026, 7, 9)
+
+
+def test_mag_susc_short_alias_recognized(db_session):
+    """'Mag. Suscept.' short-form column header creates a Magnetic Susceptibility record."""
+    from database.models.analysis import ExternalAnalysis as _EA
+
+    xlsx = make_excel(
+        ["sample_id", "Mag. Suscept."],
+        [["TESTALIAS-MAG2", "15-30"]],
+    )
+    created, updated, _imgs, skipped, errors, warnings = (
+        RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    ea = (
+        db_session.query(_EA)
+        .filter_by(sample_id="TESTALIAS-MAG2", analysis_type="Magnetic Susceptibility")
+        .first()
+    )
+    assert ea is not None, "Expected Magnetic Susceptibility ExternalAnalysis record"
+    assert ea.magnetic_susceptibility == "15-30"
