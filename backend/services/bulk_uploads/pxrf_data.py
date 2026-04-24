@@ -110,8 +110,8 @@ class PXRFUploadService:
                 if reading_no in existing_reading_nos:
                     if update_existing:
                         existing = db.execute(
-                        select(PXRFReading).where(PXRFReading.reading_no == reading_no)
-                    ).scalar_one_or_none()
+                            select(PXRFReading).where(PXRFReading.reading_no == reading_no)
+                        ).scalar_one_or_none()
                         for k, v in reading_data.items():
                             if k != 'reading_no':
                                 setattr(existing, k, v)
