@@ -418,3 +418,18 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 1 new test for XRD Run Date parsing
 - **Tests added:** yes — 4 backend API tests, 1 bulk upload integration test, 6 frontend vitest tests
 - **Decision logged:** no
+
+## 2026-04-24 | inline — Master Sample Tracking schema + bulk upload compatibility
+- **Files changed:**
+  - `database/models/samples.py` — added `well_name`, `core_lender`, `core_interval_ft` (String), `on_loan_return_date` (Date) to `SampleInfo`
+  - `alembic/versions/fad70818aaf6_add_core_loan_fields_to_sample_info.py` — additive migration (4 nullable columns)
+  - `backend/services/bulk_uploads/rock_inventory.py` — column alias normalization (`pXRF Reading No` → `pxrf_reading_no`, `Mag. Suscept. [SI*1e3]` → mag susc EA); new field_map entries for 4 new fields; `_parse_date` static method with `pd.NaT` guard; overwrite clearing extended
+  - `backend/api/schemas/samples.py` — 4 new fields on `SampleCreate`, `SampleUpdate`, `SampleResponse`, `SampleDetail`
+  - `backend/api/routers/samples.py` — `get_sample` handler now passes 4 new fields to `SampleDetail` constructor
+  - `backend/api/routers/bulk_uploads.py` — rock-inventory download template updated (16 columns, new INSTRUCTIONS rows)
+  - `.claude/rules/MODELS.md` — SampleInfo section updated with 4 new fields
+  - `tests/services/bulk_uploads/test_rock_inventory.py` — 5 new tests (pXRF alias, mag susc alias, short mag susc alias, new fields persistence, overwrite clearing)
+  - `tests/api/test_samples.py` — 1 new API roundtrip test for core/loan fields in GET detail response
+  - `docs/superpowers/plans/2026-04-24-master-sample-tracking-schema.md` — implementation plan
+- **Tests added:** yes — 5 service tests, 1 API test (46 total passing)
+- **Decision logged:** no
