@@ -433,3 +433,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/superpowers/plans/2026-04-24-master-sample-tracking-schema.md` — implementation plan
 - **Tests added:** yes — 5 service tests, 1 API test (46 total passing)
 - **Decision logged:** no
+
+## 2026-04-24 | inline — pXRF upload audit: fix mixed units, Zn import, CSV reverse-match, stale tests
+- **Files changed:**
+  - `backend/services/bulk_uploads/pxrf_data.py` — `_clean_dataframe()` converts weight-% rows to ppm (× 10,000) when `Units` column present; optionally cleans and maps `Zn` column; returns 3-tuple `(df, errors, warnings)`; `_upsert_dataframe()` optionally writes `zn` field; `ingest_from_bytes()` returns 5-tuple `(inserted, updated, skipped, errors, warnings)`; migrated `Session.query()` to `select()` + `execute()`; fixed pandas 3.x warnings (`.copy()` after filter, `replace(None)` + `to_numeric` pattern)
+  - `backend/api/routers/bulk_uploads.py` — unpacks 5-tuple from `ingest_from_bytes`; passes `warnings` to `UploadResponse`; adds pandas CSV fallback in reading-no extraction block so reverse-match runs for CSV uploads (openpyxl fails silently on CSV)
+  - `tests/api/test_bulk_uploads.py` — updated 5 `ingest_from_bytes` mock return values from 4-tuple to 5-tuple
+  - `tests/test_ingest_pxrf.py` — full rewrite: removed legacy `database.ingest_pxrf` imports; 13 tests targeting `PXRFUploadService.ingest_from_bytes()` covering null equivalents, reading-no normalisation, skip/update logic, % → ppm conversion, optional Zn import
+  - `tests/conftest.py` — `test_db` commit calls added for service isolation
+  - `docs/superpowers/plans/2026-04-24-pxrf-upload-audit-fixes.md` — implementation plan
+- **Tests added:** yes — 13 unit tests in `test_ingest_pxrf.py` (all passing); 76 pXRF-related tests passing total
+- **Decision logged:** no
