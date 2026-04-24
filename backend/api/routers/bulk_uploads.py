@@ -149,7 +149,7 @@ async def upload_pxrf(
         pass
 
     try:
-        created, updated, skipped, errors = PXRFUploadService.ingest_from_bytes(db, file_bytes)
+        created, updated, skipped, errors, svc_warnings = PXRFUploadService.ingest_from_bytes(db, file_bytes)
 
         # Reverse-match: re-evaluate characterized for samples whose EA pxrf_reading_no
         # overlaps with the just-ingested readings.
@@ -219,7 +219,7 @@ async def upload_pxrf(
     )
     log.info("pxrf_upload", created=created, updated=updated, updated_characterized=reevaluated_count, user=current_user.email)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
-                          message=message)
+                          message=message, warnings=svc_warnings)
 
 
 @router.post("/aeris-xrd", response_model=UploadResponse)

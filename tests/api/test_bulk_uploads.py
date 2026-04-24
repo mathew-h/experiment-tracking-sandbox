@@ -123,7 +123,7 @@ def test_new_experiments_returns_upload_response_shape(client):
 def test_pxrf_returns_upload_response_shape(client):
     mock_vc = MagicMock()
     mock_pxrf = MagicMock()
-    mock_pxrf.ingest_from_bytes.return_value = (3, 0, 0, [])
+    mock_pxrf.ingest_from_bytes.return_value = (3, 0, 0, [], [])
     fake_mod = MagicMock()
     fake_mod.PXRFUploadService = mock_pxrf
 
@@ -568,7 +568,7 @@ def test_pxrf_upload_reevaluates_characterized_status(client, db_session):
 
     file_bytes = _make_pxrf_excel_bytes(["99"])
     fake_mod = MagicMock()
-    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [], [])
 
     with patch.dict(sys.modules, {
         "frontend": MagicMock(),
@@ -611,7 +611,7 @@ def test_pxrf_upload_creates_modifications_log_entry(client, db_session):
 
     file_bytes = _make_pxrf_excel_bytes(["88"])
     fake_mod = MagicMock()
-    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [], [])
 
     with patch.dict(sys.modules, {
         "frontend": MagicMock(),
@@ -659,7 +659,7 @@ def test_pxrf_upload_message_includes_reevaluated_count(client, db_session):
 
     file_bytes = _make_pxrf_excel_bytes(["77"])
     fake_mod = MagicMock()
-    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [], [])
 
     with patch.dict(sys.modules, {
         "frontend": MagicMock(),
@@ -704,7 +704,7 @@ def test_pxrf_upload_no_change_when_no_matching_readings(client, db_session):
     # Upload contains reading "56" which has no matching EA pxrf_reading_no
     file_bytes = _make_pxrf_excel_bytes(["56"])
     fake_mod = MagicMock()
-    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [])
+    fake_mod.PXRFUploadService.ingest_from_bytes.return_value = (1, 0, 0, [], [])
 
     with patch.dict(sys.modules, {
         "frontend": MagicMock(),
