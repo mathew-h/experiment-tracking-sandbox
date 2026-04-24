@@ -125,8 +125,8 @@ if ($rebuildFrontend) {
     Write-Step "Step 5: Rebuilding frontend"
     Push-Location $FrontendDir
     try {
-        & npm install --silent
-        if ($LASTEXITCODE -ne 0) { Abort "npm install" "exit code $LASTEXITCODE" }
+        & npm ci --silent
+        if ($LASTEXITCODE -ne 0) { Abort "npm ci" "exit code $LASTEXITCODE -- package.json/package-lock.json out of sync, or install failed" }
         & npm run build
         if ($LASTEXITCODE -ne 0) { Abort "npm run build" "exit code $LASTEXITCODE" }
     } finally { Pop-Location }
