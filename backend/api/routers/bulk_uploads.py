@@ -689,12 +689,16 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         headers = [
             "sample_id", "rock_classification", "state", "country",
             "locality", "latitude", "longitude", "description",
-            "characterized", "pxrf_reading_no", "magnetic_susceptibility", "overwrite",
+            "characterized", "pxrf_reading_no", "magnetic_susceptibility",
+            "well_name", "core_lender", "core_interval_ft", "on_loan_return_date",
+            "overwrite",
         ]
         required = {"sample_id"}
         example_row = [
             "S001", "Basalt", "BC", "Canada", "Vancouver Island",
-            49.5, -125.0, "Fresh olivine basalt", "FALSE", "", "", "FALSE",
+            49.5, -125.0, "Fresh olivine basalt", "FALSE", "", "",
+            "", "", "", "",
+            "FALSE",
         ]
         req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
         opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
@@ -732,6 +736,22 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             (
                 "magnetic_susceptibility",
                 "Magnetic susceptibility value (units: 1x10\u207b\u00b3 SI). Leave blank if not measured.",
+            ),
+            (
+                "well_name",
+                "Well or borehole name (e.g. Tuscarora Project CT-3). Applies to core samples only.",
+            ),
+            (
+                "core_lender",
+                "Organization lending the core (e.g. Geologica). Applies to core samples only.",
+            ),
+            (
+                "core_interval_ft",
+                "Depth interval in feet as a string (e.g. 895'). Applies to core samples only.",
+            ),
+            (
+                "on_loan_return_date",
+                "Date core must be returned to lender (YYYY-MM-DD). Applies to core samples only.",
             ),
             ("overwrite", "TRUE clears and rewrites all optional fields for existing samples (default FALSE)."),
         ]
