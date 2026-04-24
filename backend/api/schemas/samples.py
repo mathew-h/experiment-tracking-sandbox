@@ -1,6 +1,6 @@
 # backend/api/schemas/samples.py
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict
 
@@ -16,6 +16,10 @@ class SampleCreate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     description: Optional[str] = None
+    well_name: Optional[str] = None
+    core_lender: Optional[str] = None
+    core_interval_ft: Optional[str] = None
+    on_loan_return_date: Optional[date] = None
 
 
 class SampleUpdate(BaseModel):
@@ -27,6 +31,10 @@ class SampleUpdate(BaseModel):
     longitude: Optional[float] = None
     description: Optional[str] = None
     characterized: Optional[bool] = None
+    well_name: Optional[str] = None
+    core_lender: Optional[str] = None
+    core_interval_ft: Optional[str] = None
+    on_loan_return_date: Optional[date] = None
 
 
 class SampleResponse(BaseModel):
@@ -41,6 +49,10 @@ class SampleResponse(BaseModel):
     longitude: Optional[float] = None
     description: Optional[str] = None
     characterized: bool
+    well_name: Optional[str] = None
+    core_lender: Optional[str] = None
+    core_interval_ft: Optional[str] = None
+    on_loan_return_date: Optional[date] = None
     created_at: datetime
 
 
@@ -200,6 +212,10 @@ class SampleDetail(BaseModel):
     longitude: Optional[float] = None
     description: Optional[str] = None
     characterized: bool
+    well_name: Optional[str] = None
+    core_lender: Optional[str] = None
+    core_interval_ft: Optional[str] = None
+    on_loan_return_date: Optional[date] = None
     created_at: datetime
     photos: list[SamplePhotoResponse] = []
     analyses: list[ExternalAnalysisResponse] = []
