@@ -117,10 +117,8 @@ class PXRFUploadService:
                 else:
                     db.add(PXRFReading(**reading_data))
                     inserted += 1
-            db.commit()
         except Exception as e:
             errors.append(f"Error during database upsert: {e}")
-            db.rollback()
         return inserted, updated, skipped, errors
 
     @classmethod

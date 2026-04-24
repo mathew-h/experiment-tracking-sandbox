@@ -37,6 +37,7 @@ def test_ingest_new_reading(test_db):
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
         test_db, _csv_bytes(data)
     )
+    test_db.commit()
     assert errors == []
     assert inserted == 1
     r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
@@ -54,6 +55,7 @@ def test_null_equivalents_become_zero(test_db):
         "Mo": ["n/a"], "Al": [None], "Ca": [0.0], "K": [0.0], "Au": [0.0],
     }
     PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    test_db.commit()
     r = test_db.query(PXRFReading).filter_by(reading_no="5").first()
     assert r.fe == pytest.approx(0.0)
     assert r.ni == pytest.approx(0.0)
@@ -67,6 +69,7 @@ def test_reading_no_float_normalized(test_db):
     data = _row(Fe=5.0)
     data["Reading No"] = ["1.0"]
     PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    test_db.commit()
     assert test_db.query(PXRFReading).filter_by(reading_no="1").first() is not None
 
 
@@ -75,6 +78,7 @@ def test_empty_reading_no_rows_dropped(test_db):
     data["Reading No"] = ["1", "", None, "4"]
     data["Fe"] = [10.0, 20.0, 30.0, 40.0]
     inserted, *_ = PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    test_db.commit()
     assert inserted == 2
     assert test_db.query(PXRFReading).filter_by(reading_no="1").first() is not None
     assert test_db.query(PXRFReading).filter_by(reading_no="4").first() is not None
@@ -143,6 +147,7 @@ def test_percent_rows_converted_to_ppm(test_db):
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
         test_db, _csv_bytes(data)
     )
+    test_db.commit()
     assert inserted == 2
     assert errors == []
     assert len(warnings) == 1
@@ -180,6 +185,7 @@ def test_zn_imported_when_column_present(test_db):
     data = _row(Fe=10.0)
     data["Zn"] = [42.5]
     PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    test_db.commit()
     r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r.zn == pytest.approx(42.5)
 
@@ -188,6 +194,7 @@ def test_zn_lod_becomes_zero(test_db):
     data = _row(Fe=10.0)
     data["Zn"] = ["<LOD"]
     PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    test_db.commit()
     r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r.zn == pytest.approx(0.0)
 
@@ -197,6 +204,7 @@ def test_zn_not_required_upload_succeeds_without_it(test_db):
     data = _row(Fe=10.0)
     assert "Zn" not in data
     inserted, *_ = PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    test_db.commit()
     assert inserted == 1
     r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r.zn is None
