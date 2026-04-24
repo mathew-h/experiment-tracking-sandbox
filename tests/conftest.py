@@ -7,34 +7,44 @@ from unittest.mock import MagicMock
 sys.modules['frontend'] = MagicMock()
 sys.modules['frontend.config'] = MagicMock()
 sys.modules['frontend.config.variable_config'] = MagicMock(
-    ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mg', 'ca', 'cr', 'co', 'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh', 'ir', 'pd', 'ru', 'os', 'tl']
+    ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mg', 'ca', 'cr', 'co', 'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh', 'ir', 'pd', 'ru', 'os', 'tl'],
+    PXRF_REQUIRED_COLUMNS={"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
 )
 
+# Stub utils.storage before any imports that depend on it
+sys.modules['utils'] = MagicMock()
+sys.modules['utils.storage'] = MagicMock()
+
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.dialects.postgresql import JSONB
 from azure.storage.blob import BlobServiceClient, BlobClient
 import datetime
 
 from database import Base, PXRFReading, Experiment, ExperimentalConditions, ExperimentalResults, ScalarResults, ICPResults
 
+# Patch JSONB to use JSON for SQLite compatibility
+def adapt_jsonb_for_sqlite(ddl, event_name, schema, connection, **kw):
+    """Replace JSONB columns with JSON for SQLite."""
+    if 'sqlite' in str(connection.engine.url):
+        ddl = ddl.replace('JSONB', 'JSON')
+    return ddl
+
 @pytest.fixture
 def test_db() -> Session:
     """Create a test database session for use in tests."""
-    # Create an in-memory SQLite database for testing
-    engine = create_engine(
-        'sqlite:///:memory:',
-        connect_args={'check_same_thread': False},
-        poolclass=StaticPool
-    )
-    
+    # Use PostgreSQL for test compatibility with JSONB columns
+    TEST_DB_URL = "postgresql://experiments_user:password@localhost:5432/experiments_test"
+    engine = create_engine(TEST_DB_URL, pool_pre_ping=True)
+
     # Create all tables in the test database
     Base.metadata.create_all(engine)
-    
+
     # Create a session factory
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
+
     # Create a new session for the test
     db = TestingSessionLocal()
     try:
