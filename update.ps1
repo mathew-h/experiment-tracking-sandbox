@@ -95,13 +95,11 @@ $ErrorActionPreference = 'Continue'
 $changedFiles    = @(git -C $RepoRoot diff $headBefore $headAfter --name-only 2>&1)
 $ErrorActionPreference = 'Stop'
 $reinstallDeps   = [bool]($changedFiles -match '^requirements\.txt$')
-$runMigrations   = [bool]($changedFiles -match '^alembic/')
 $rebuildFrontend = [bool]($changedFiles -match '^frontend/(src/|package\.json)')
 
 $depsStr  = if ($reinstallDeps)   { "yes" } else { "no" }
-$migrStr  = if ($runMigrations)   { "yes" } else { "no" }
 $frontStr = if ($rebuildFrontend) { "yes" } else { "no" }
-Write-Host "  deps:$depsStr  migrations:$migrStr  frontend:$frontStr"
+Write-Host "  deps:$depsStr  migrations:always  frontend:$frontStr"
 
 # -- Step 3: Reinstall Python dependencies (conditional) ----------------------
 if ($reinstallDeps) {
@@ -110,15 +108,13 @@ if ($reinstallDeps) {
     if ($LASTEXITCODE -ne 0) { Abort "pip install" "exit code $LASTEXITCODE" }
 }
 
-# -- Step 4: Run migrations (conditional) -------------------------------------
-if ($runMigrations) {
-    Write-Step "Step 4: Running database migrations"
-    Push-Location $RepoRoot
-    try {
-        & $VenvAlembic upgrade head
-        if ($LASTEXITCODE -ne 0) { Abort "alembic upgrade head" "exit code $LASTEXITCODE" }
-    } finally { Pop-Location }
-}
+# -- Step 4: Run migrations (always -- idempotent, exits cleanly at head) -----
+Write-Step "Step 4: Running database migrations"
+Push-Location $RepoRoot
+try {
+    & $VenvAlembic upgrade head
+    if ($LASTEXITCODE -ne 0) { Abort "alembic upgrade head" "exit code $LASTEXITCODE" }
+} finally { Pop-Location }
 
 # -- Step 5: Rebuild frontend (conditional) -----------------------------------
 if ($rebuildFrontend) {
@@ -139,6 +135,6 @@ Write-Step "Step 6: Restarting service"
 if ($LASTEXITCODE -ne 0) { Abort "nssm restart" "exit code $LASTEXITCODE -- check $LogDir\stderr.log" }
 
 # -- Step 7: Log success ------------------------------------------------------
-Log "SUCCESS -- deps:$depsStr migrations:$migrStr frontend:$frontStr"
+Log "SUCCESS -- deps:$depsStr migrations:always frontend:$frontStr"
 Pause-IfInteractive
 exit 0
