@@ -116,7 +116,13 @@ Defined in `database/models/samples.py`.
 ### `SampleInfo`
 Geological sample metadata.
 - **Primary Key**: `sample_id` (String).
-- **Fields**: `rock_classification`, `state`, `country`, `locality`, `latitude`, `longitude`, `description`, `characterized` (Boolean), `created_at`, `updated_at`.
+- **Fields**:
+  - `rock_classification`, `state`, `country`, `locality`, `latitude`, `longitude`, `description`.
+  - `well_name` (String, nullable): Well or borehole name for core samples (e.g. "Tuscarora Project CT-3").
+  - `core_lender` (String, nullable): Organization lending the core sample (e.g. "Geologica").
+  - `core_interval_ft` (String, nullable): Depth interval stored as a string (e.g. "895'").
+  - `on_loan_return_date` (Date, nullable): Date the core must be returned to the lender.
+  - `characterized` (Boolean), `created_at`, `updated_at`.
 - **Relationships**: `experiments`, `external_analyses`, `photos` (`SamplePhotos`), `elemental_results` (`ElementalAnalysis`).
 
 ### `SamplePhotos`
