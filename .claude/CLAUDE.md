@@ -75,6 +75,26 @@ Full details in `docs/LOCKED_COMPONENTS.md`. Summary:
 - Firebase auth — do not modify without explicit instruction
 - All enums in `enums.py` — changing these breaks existing data
 
+### Frontend dependency rule (deployment-critical)
+
+`frontend/package.json` and `frontend/package-lock.json` **must always be committed together in the same commit** and must always be in sync.
+
+The lab PC's `update.ps1` runs `npm ci` (not `npm install`) on every nightly update. `npm ci` refuses to mutate either file and hard-fails if they disagree — this breaks the entire deploy pipeline until manually resolved on the lab PC.
+
+**To add or bump a frontend dependency:**
+```bash
+cd frontend
+npm install <package>        # or edit package.json then run npm install
+# verify both package.json AND package-lock.json changed
+git add package.json package-lock.json
+git commit -m "chore: ..."   # both files in the same commit
+```
+
+**Never:**
+- Edit version strings in `package.json` directly without running `npm install` in `frontend/` immediately after
+- Move deps between `dependencies` and `devDependencies` without running `npm install` after
+- Commit `package.json` without `package-lock.json` (or vice versa)
+
 ---
 
 ## 7. Working Memory
