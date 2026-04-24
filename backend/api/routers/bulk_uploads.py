@@ -126,25 +126,34 @@ async def upload_pxrf(
     # Uses openpyxl directly to avoid pandas/numpy version-mismatch issues.
     _imported_reading_nos: set[str] = set()
     try:
-        import openpyxl as _openpyxl  # noqa: PLC0415
         from backend.services.samples import normalize_pxrf_reading_no as _norm  # noqa: PLC0415
-        _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
         try:
-            _ws = _wb.active
-            _header_row = next(_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
-            if _header_row is not None:
-                _rn_col = next(
-                    (i for i, h in enumerate(_header_row) if str(h).strip() == "Reading No"), None
-                )
-                if _rn_col is not None:
-                    for _row in _ws.iter_rows(min_row=2, values_only=True):
-                        _v = _row[_rn_col] if _rn_col < len(_row) else None
-                        if _v is not None:
-                            _s = str(_v).strip()
-                            if _s:
-                                _imported_reading_nos.add(_norm(_s))
-        finally:
-            _wb.close()
+            import openpyxl as _openpyxl  # noqa: PLC0415
+            _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+            try:
+                _ws = _wb.active
+                _header_row = next(_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                if _header_row is not None:
+                    _rn_col = next(
+                        (i for i, h in enumerate(_header_row) if str(h).strip() == "Reading No"), None
+                    )
+                    if _rn_col is not None:
+                        for _row in _ws.iter_rows(min_row=2, values_only=True):
+                            _v = _row[_rn_col] if _rn_col < len(_row) else None
+                            if _v is not None:
+                                _s = str(_v).strip()
+                                if _s:
+                                    _imported_reading_nos.add(_norm(_s))
+            finally:
+                _wb.close()
+        except Exception:
+            # openpyxl failed (CSV file) — fall back to pandas
+            import pandas as _pd  # noqa: PLC0415
+            _df_rn = _pd.read_csv(io.BytesIO(file_bytes), usecols=["Reading No"], dtype=str)
+            for _v in _df_rn["Reading No"].dropna():
+                _s = str(_v).strip()
+                if _s:
+                    _imported_reading_nos.add(_norm(_s))
     except Exception:
         pass
 
