@@ -29,111 +29,98 @@ def _row(**overrides) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def db():
-    engine = create_engine("postgresql://experiments_user:password@localhost:5432/experiments_test", pool_pre_ping=True)
-    Base.metadata.create_all(engine)
-    Sess = sessionmaker(bind=engine)
-    s = Sess()
-    yield s
-    s.close()
-    Base.metadata.drop_all(engine)
-
-
-# ---------------------------------------------------------------------------
 # Basic insert
 # ---------------------------------------------------------------------------
 
-def test_ingest_new_reading(db):
+def test_ingest_new_reading(test_db):
     data = _row(Fe=10.0, Ca=1.5, Au=0.005)
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data)
+        test_db, _csv_bytes(data)
     )
     assert errors == []
     assert inserted == 1
-    r = db.query(PXRFReading).filter_by(reading_no="1").first()
+    r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r is not None
     assert r.fe == pytest.approx(10.0)
     assert r.ca == pytest.approx(1.5)
     assert r.au == pytest.approx(0.005)
 
 
-def test_null_equivalents_become_zero(db):
+def test_null_equivalents_become_zero(test_db):
     data = {
         "Reading No": ["5"],
         "Fe": ["<LOD"], "Mg": ["ND"], "Ni": ["N/A"],
         "Cu": [""], "Si": ["LOD"], "Co": ["n.d."],
         "Mo": ["n/a"], "Al": [None], "Ca": [0.0], "K": [0.0], "Au": [0.0],
     }
-    PXRFUploadService.ingest_from_bytes(db, _csv_bytes(data))
-    r = db.query(PXRFReading).filter_by(reading_no="5").first()
+    PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    r = test_db.query(PXRFReading).filter_by(reading_no="5").first()
     assert r.fe == pytest.approx(0.0)
     assert r.ni == pytest.approx(0.0)
     assert r.co == pytest.approx(0.0)
+    assert r.mg == pytest.approx(0.0)    # 'ND' became 0
+    assert r.cu == pytest.approx(0.0)    # '' became 0
 
 
-def test_reading_no_float_normalized(db):
+def test_reading_no_float_normalized(test_db):
     """Excel stores ints as floats; '1.0' should become reading_no='1'."""
     data = _row(Fe=5.0)
     data["Reading No"] = ["1.0"]
-    PXRFUploadService.ingest_from_bytes(db, _csv_bytes(data))
-    assert db.query(PXRFReading).filter_by(reading_no="1").first() is not None
+    PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    assert test_db.query(PXRFReading).filter_by(reading_no="1").first() is not None
 
 
-def test_empty_reading_no_rows_dropped(db):
+def test_empty_reading_no_rows_dropped(test_db):
     data = {col: [0.0, 0.0, 0.0, 0.0] for col in _REQUIRED}
     data["Reading No"] = ["1", "", None, "4"]
     data["Fe"] = [10.0, 20.0, 30.0, 40.0]
-    inserted, *_ = PXRFUploadService.ingest_from_bytes(db, _csv_bytes(data))
+    inserted, *_ = PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
     assert inserted == 2
-    assert db.query(PXRFReading).filter_by(reading_no="1").first() is not None
-    assert db.query(PXRFReading).filter_by(reading_no="4").first() is not None
+    assert test_db.query(PXRFReading).filter_by(reading_no="1").first() is not None
+    assert test_db.query(PXRFReading).filter_by(reading_no="4").first() is not None
 
 
 # ---------------------------------------------------------------------------
 # Skip / update logic
 # ---------------------------------------------------------------------------
 
-def _seed_reading(db, reading_no: str = "10", fe: float = 1.0) -> PXRFReading:
+def _seed_reading(session, reading_no: str = "10", fe: float = 1.0) -> PXRFReading:
     r = PXRFReading(reading_no=reading_no, fe=fe, mg=0.0, ni=0.0, cu=0.0,
                     si=0.0, co=0.0, mo=0.0, al=0.0, ca=0.0, k=0.0, au=0.0)
-    db.add(r)
-    db.commit()
+    session.add(r)
+    session.commit()
     return r
 
 
-def test_skip_existing_when_update_false(db):
-    _seed_reading(db, "10", fe=1.0)
+def test_skip_existing_when_update_false(test_db):
+    _seed_reading(test_db, "10", fe=1.0)
     data = {col: [0.0, 0.0] for col in _REQUIRED}
     data["Reading No"] = ["10", "11"]
     data["Fe"] = [99.0, 5.0]
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data), update_existing=False
+        test_db, _csv_bytes(data), update_existing=False
     )
     assert inserted == 1
     assert skipped == 1
-    assert db.query(PXRFReading).filter_by(reading_no="10").first().fe == pytest.approx(1.0)
+    assert test_db.query(PXRFReading).filter_by(reading_no="10").first().fe == pytest.approx(1.0)
 
 
-def test_update_existing_when_flag_true(db):
-    _seed_reading(db, "20", fe=1.0)
+def test_update_existing_when_flag_true(test_db):
+    _seed_reading(test_db, "20", fe=1.0)
     data = _row(Fe=99.9)
     data["Reading No"] = ["20"]
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data), update_existing=True
+        test_db, _csv_bytes(data), update_existing=True
     )
     assert updated == 1
     assert inserted == 0
-    assert db.query(PXRFReading).filter_by(reading_no="20").first().fe == pytest.approx(99.9)
+    assert test_db.query(PXRFReading).filter_by(reading_no="20").first().fe == pytest.approx(99.9)
 
 
-def test_missing_required_column_returns_error(db):
+def test_missing_required_column_returns_error(test_db):
     data = {"Reading No": ["1"], "Fe": [10.0]}  # missing Mg, Ni, Cu, Si, Co, Mo, Al, Ca, K, Au
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data)
+        test_db, _csv_bytes(data)
     )
     assert inserted == 0
     assert any("Missing required columns" in e for e in errors)
@@ -143,7 +130,7 @@ def test_missing_required_column_returns_error(db):
 # Bug 1: % → ppm normalization
 # ---------------------------------------------------------------------------
 
-def test_percent_rows_converted_to_ppm(db):
+def test_percent_rows_converted_to_ppm(test_db):
     """Niton exports in weight-% for some scan modes; parser must × 10,000."""
     data = {
         "Reading No": ["20", "21"],
@@ -154,33 +141,33 @@ def test_percent_rows_converted_to_ppm(db):
         "Al": [0.0, 0.0], "Ca": [0.0, 0.0], "K": [0.0, 0.0], "Au": [0.0, 0.0],
     }
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data)
+        test_db, _csv_bytes(data)
     )
     assert inserted == 2
     assert errors == []
     assert len(warnings) == 1
     assert "converted" in warnings[0].lower()
-    r20 = db.query(PXRFReading).filter_by(reading_no="20").first()
+    r20 = test_db.query(PXRFReading).filter_by(reading_no="20").first()
     assert r20.fe == pytest.approx(300_000.0)   # 30.0 × 10,000
-    r21 = db.query(PXRFReading).filter_by(reading_no="21").first()
+    r21 = test_db.query(PXRFReading).filter_by(reading_no="21").first()
     assert r21.fe == pytest.approx(300_000.0)   # already ppm, unchanged
 
 
-def test_no_warning_when_all_ppm(db):
+def test_no_warning_when_all_ppm(test_db):
     data = _row(Fe=5000.0)
     data["Units"] = ["ppm"]
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data)
+        test_db, _csv_bytes(data)
     )
     assert warnings == []
 
 
-def test_no_warning_when_no_units_column(db):
+def test_no_warning_when_no_units_column(test_db):
     """Older exports omit the Units column entirely; no warning expected."""
     data = _row(Fe=5000.0)
     # No "Units" key in data
     inserted, updated, skipped, errors, warnings = PXRFUploadService.ingest_from_bytes(
-        db, _csv_bytes(data)
+        test_db, _csv_bytes(data)
     )
     assert warnings == []
 
@@ -189,27 +176,27 @@ def test_no_warning_when_no_units_column(db):
 # Bug 2: Zn optional import
 # ---------------------------------------------------------------------------
 
-def test_zn_imported_when_column_present(db):
+def test_zn_imported_when_column_present(test_db):
     data = _row(Fe=10.0)
     data["Zn"] = [42.5]
-    PXRFUploadService.ingest_from_bytes(db, _csv_bytes(data))
-    r = db.query(PXRFReading).filter_by(reading_no="1").first()
+    PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r.zn == pytest.approx(42.5)
 
 
-def test_zn_lod_becomes_zero(db):
+def test_zn_lod_becomes_zero(test_db):
     data = _row(Fe=10.0)
     data["Zn"] = ["<LOD"]
-    PXRFUploadService.ingest_from_bytes(db, _csv_bytes(data))
-    r = db.query(PXRFReading).filter_by(reading_no="1").first()
+    PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
+    r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r.zn == pytest.approx(0.0)
 
 
-def test_zn_not_required_upload_succeeds_without_it(db):
+def test_zn_not_required_upload_succeeds_without_it(test_db):
     """Upload without Zn column must succeed; zn field stays None."""
     data = _row(Fe=10.0)
     assert "Zn" not in data
-    inserted, *_ = PXRFUploadService.ingest_from_bytes(db, _csv_bytes(data))
+    inserted, *_ = PXRFUploadService.ingest_from_bytes(test_db, _csv_bytes(data))
     assert inserted == 1
-    r = db.query(PXRFReading).filter_by(reading_no="1").first()
+    r = test_db.query(PXRFReading).filter_by(reading_no="1").first()
     assert r.zn is None
