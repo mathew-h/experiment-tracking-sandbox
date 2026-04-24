@@ -358,3 +358,26 @@ def test_create_analysis_response_includes_pxrf_data(client, db_session):
     analysis = resp.json()["analysis"]
     assert analysis["pxrf_data"] is not None, "pxrf_data must not be null in POST response"
     assert analysis["pxrf_data"]["fe"] == pytest.approx(18.0)
+
+
+def test_get_sample_detail_includes_core_loan_fields(client, db_session):
+    """GET /api/samples/{sample_id} must return the 4 core/loan fields from the DB."""
+    import datetime
+    s = SampleInfo(
+        sample_id="CORE_L01",
+        rock_classification="Sandstone",
+        well_name="CT-3",
+        core_lender="Geologica",
+        core_interval_ft="895'",
+        on_loan_return_date=datetime.date(2026, 7, 9),
+    )
+    db_session.add(s)
+    db_session.commit()
+
+    resp = client.get("/api/samples/CORE_L01")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["well_name"] == "CT-3"
+    assert data["core_lender"] == "Geologica"
+    assert data["core_interval_ft"] == "895'"
+    assert data["on_loan_return_date"] == "2026-07-09"

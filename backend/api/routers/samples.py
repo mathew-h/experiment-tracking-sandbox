@@ -207,6 +207,10 @@ def get_sample(
         description=sample.description,
         characterized=sample.characterized,
         created_at=sample.created_at,
+        well_name=sample.well_name,
+        core_lender=sample.core_lender,
+        core_interval_ft=sample.core_interval_ft,
+        on_loan_return_date=sample.on_loan_return_date,
         photos=[SamplePhotoResponse.model_validate(p) for p in sample.photos],
         analyses=[_to_analysis_response(a, pxrf_map) for a in sample.external_analyses],
         elemental_results=[
