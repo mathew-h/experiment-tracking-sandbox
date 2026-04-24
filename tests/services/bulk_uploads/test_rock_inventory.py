@@ -299,6 +299,99 @@ def test_mag_susc_update_with_overwrite(db_session: Session):
     assert ea.magnetic_susceptibility == "99.9"  # updated, no pytest.approx
 
 
+def test_pxrf_reading_no_alias_recognized(db_session):
+    """'pXRF Reading No' column header creates a pXRF ExternalAnalysis record."""
+    from database.models.analysis import ExternalAnalysis as _EA
+
+    xlsx = make_excel(
+        ["sample_id", "pXRF Reading No"],
+        [["TESTALIAS-PXRF1", "708"]],
+    )
+    created, updated, _imgs, skipped, errors, warnings = (
+        RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    # canonical: uppercase + strip underscores/spaces, keep hyphens → "TESTALIAS-PXRF1"
+    ea = (
+        db_session.query(_EA)
+        .filter_by(sample_id="TESTALIAS-PXRF1", analysis_type="pXRF")
+        .first()
+    )
+    assert ea is not None, "Expected pXRF ExternalAnalysis record"
+    assert ea.pxrf_reading_no == "708"
+
+
+def test_mag_susc_alias_recognized(db_session):
+    """'Mag. Suscept. [SI*1e3]' column header creates a Magnetic Susceptibility record."""
+    from database.models.analysis import ExternalAnalysis as _EA
+
+    xlsx = make_excel(
+        ["sample_id", "Mag. Suscept. [SI*1e3]"],
+        [["TESTALIAS-MAG1", "23-41"]],
+    )
+    created, updated, _imgs, skipped, errors, warnings = (
+        RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    # canonical: uppercase + strip underscores/spaces, keep hyphens → "TESTALIAS-MAG1"
+    ea = (
+        db_session.query(_EA)
+        .filter_by(sample_id="TESTALIAS-MAG1", analysis_type="Magnetic Susceptibility")
+        .first()
+    )
+    assert ea is not None, "Expected Magnetic Susceptibility ExternalAnalysis record"
+    assert ea.magnetic_susceptibility == "23-41"
+
+
+def test_master_sample_tracking_new_fields(db_session):
+    """Well Name, Core Lender, Core Interval (ft), On Loan Return Date are persisted."""
+    xlsx = make_excel(
+        ["sample_id", "Well Name", "Core Lender", "Core Interval (ft)", "On Loan Return Date"],
+        [["TESTCORE-NEW1", "Tuscarora CT-3", "Geologica", "895'", dt.datetime(2026, 7, 9)]],
+    )
+    created, updated, _imgs, skipped, errors, warnings = (
+        RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    from database import SampleInfo as _SI
+    # canonical: uppercase + strip underscores/spaces, keep hyphens → "TESTCORE-NEW1"
+    sample = db_session.query(_SI).filter_by(sample_id="TESTCORE-NEW1").first()
+    assert sample is not None
+    assert sample.well_name == "Tuscarora CT-3"
+    assert sample.core_lender == "Geologica"
+    assert sample.core_interval_ft == "895'"
+    assert sample.on_loan_return_date == dt.date(2026, 7, 9)
+
+
+def test_overwrite_clears_core_loan_fields(db_session):
+    """overwrite=TRUE clears all 4 new fields when no replacement value is given."""
+    from database import SampleInfo as _SI
+    existing = _SI(
+        sample_id="TESTOVERWRITECL1",
+        well_name="Old Well",
+        core_lender="Old Lender",
+        core_interval_ft="100'",
+        on_loan_return_date=dt.date(2025, 1, 1),
+    )
+    db_session.add(existing)
+    db_session.flush()
+
+    xlsx = make_excel(
+        ["sample_id", "overwrite"],
+        [["TESTOVERWRITECL1", "TRUE"]],
+    )
+    RockInventoryService.bulk_upsert_samples(db_session, xlsx, [])
+    db_session.flush()
+    db_session.refresh(existing)
+
+    assert existing.well_name is None
+    assert existing.core_lender is None
+    assert existing.core_interval_ft is None
+    assert existing.on_loan_return_date is None
+
+
 def test_sample_info_has_core_loan_fields(db_session: Session):
     """SampleInfo accepts and persists the 4 new fields."""
     sample = SampleInfo(

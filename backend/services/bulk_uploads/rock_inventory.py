@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import io
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
@@ -24,6 +25,30 @@ class RockInventoryService:
             return True
         if s in {"false", "no", "0"}:
             return False
+        return None
+
+    @staticmethod
+    def _parse_date(val) -> Optional[datetime.date]:
+        """Parse a date-like value to datetime.date. Returns None if unparseable."""
+        if val is None:
+            return None
+        if isinstance(val, float) and pd.isna(val):
+            return None
+        if isinstance(val, datetime.datetime):
+            return val.date()
+        if isinstance(val, datetime.date):
+            return val
+        if hasattr(val, "date") and callable(val.date):
+            try:
+                return val.date()
+            except Exception:
+                pass
+        if isinstance(val, str):
+            stripped = val.strip()
+            if not stripped:
+                return None
+            parsed = pd.to_datetime(stripped, errors="coerce")
+            return None if pd.isna(parsed) else parsed.date()
         return None
 
     @staticmethod
@@ -58,6 +83,12 @@ class RockInventoryService:
         # Normalize headers
         df.columns = [str(c).strip().lower() for c in df.columns]
 
+        # Normalize pXRF column alias to canonical name
+        _PXRF_ALIASES = {"pxrf reading no", "pxrf reading no."}
+        _pxrf_raw = next((c for c in df.columns if c in _PXRF_ALIASES), None)
+        if _pxrf_raw:
+            df = df.rename(columns={_pxrf_raw: "pxrf_reading_no"})
+
         required = {"sample_id"}
         if not required.issubset(set(df.columns)):
             return 0, 0, 0, 0, ["Missing required column: sample_id"], []
@@ -73,10 +104,25 @@ class RockInventoryService:
             "description": "description",
             "characterized": "characterized",
             "overwrite": "overwrite",  # Special flag for full replacement mode
+            "well name": "well_name",
+            "well_name": "well_name",
+            "core lender": "core_lender",
+            "core_lender": "core_lender",
+            "core interval (ft)": "core_interval_ft",
+            "core_interval_ft": "core_interval_ft",
+            "on loan return date": "on_loan_return_date",
+            "on_loan_return_date": "on_loan_return_date",
         }
 
         # Resolve magnetic_susceptibility column from accepted aliases (all lowercased by header normalization)
-        _MAG_SUSC_ALIASES = {"magnetic_susceptibility", "magnetic susceptibility", "mag_susc", "mag susc"}
+        _MAG_SUSC_ALIASES = {
+            "magnetic_susceptibility",
+            "magnetic susceptibility",
+            "mag_susc",
+            "mag susc",
+            "mag. suscept. [si*1e3]",
+            "mag. suscept.",
+        }
         _mag_susc_col = next((c for c in df.columns if c in _MAG_SUSC_ALIASES), None)
 
         # Track samples in this batch by normalized ID to prevent duplicates
@@ -147,6 +193,10 @@ class RockInventoryService:
                         "longitude",
                         "description",
                         "characterized",
+                        "well_name",
+                        "core_lender",
+                        "core_interval_ft",
+                        "on_loan_return_date",
                     ]:
                         if attr == "characterized":
                             setattr(sample, attr, False)
@@ -181,6 +231,8 @@ class RockInventoryService:
                                 # default to False when value missing
                                 current = getattr(sample, attr)
                                 val = current if current is not None else False
+                        elif attr == "on_loan_return_date":
+                            val = RockInventoryService._parse_date(val)
 
                         # Allow None to clear only for non-PK. For characterized, ensure boolean.
                         if attr == "characterized" and val is None:
