@@ -4,6 +4,7 @@ import io
 from typing import List, Tuple
 
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database import PXRFReading
@@ -39,6 +40,7 @@ class PXRFUploadService:
         Returns (df, errors, warnings).
         errors: non-empty means processing should halt.
         warnings: informational messages to surface in the upload response.
+                  Currently populated when Units-column rows in weight-% are converted to ppm.
         """
         errors: List[str] = []
         warnings: List[str] = []
@@ -50,17 +52,15 @@ class PXRFUploadService:
             ).str.strip()
 
             # Drop empty Reading No rows
-            df = df[df['Reading No'] != '']
+            df = df[df['Reading No'] != ''].copy()
 
             # Clean required numeric columns
             for col in PXRF_REQUIRED_COLUMNS - {'Reading No'}:
-                df[col] = df[col].replace(NULL_EQUIVALENTS, 0)
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                df[col] = pd.to_numeric(df[col].replace(NULL_EQUIVALENTS, None), errors='coerce').fillna(0)
 
             # Optional: clean Zn if present (model supports it; not required in all Niton exports)
             if 'Zn' in df.columns:
-                df['Zn'] = df['Zn'].replace(NULL_EQUIVALENTS, 0)
-                df['Zn'] = pd.to_numeric(df['Zn'], errors='coerce').fillna(0)
+                df['Zn'] = pd.to_numeric(df['Zn'].replace(NULL_EQUIVALENTS, None), errors='coerce').fillna(0)
 
             # Unit normalisation: Niton XRF can export in weight-percent mode.
             # Convert % -> ppm (x 10,000) so all readings share the same unit before storage.
@@ -85,7 +85,9 @@ class PXRFUploadService:
         errors: List[str] = []
         has_zn = 'Zn' in df.columns
         try:
-            existing_reading_nos = set(row[0] for row in db.query(PXRFReading.reading_no).all())
+            existing_reading_nos = set(
+                row[0] for row in db.execute(select(PXRFReading.reading_no)).all()
+            )
             for _, row in df.iterrows():
                 reading_no = row['Reading No']
                 reading_data = {
@@ -107,7 +109,9 @@ class PXRFUploadService:
 
                 if reading_no in existing_reading_nos:
                     if update_existing:
-                        existing = db.query(PXRFReading).filter(PXRFReading.reading_no == reading_no).first()
+                        existing = db.execute(
+                        select(PXRFReading).where(PXRFReading.reading_no == reading_no)
+                    ).scalar_one_or_none()
                         for k, v in reading_data.items():
                             if k != 'reading_no':
                                 setattr(existing, k, v)
