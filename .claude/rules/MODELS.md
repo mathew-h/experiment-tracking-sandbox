@@ -187,6 +187,14 @@ One row per experiment: concatenated chemical additives for reporting.
 - **Definition:** `chemical_additives` → `experimental_conditions` → `experiments`, joined to `compounds`; `GROUP BY e.experiment_id` with `GROUP_CONCAT(c.name || ' ' || amount || ' ' || unit, '; ')` as `additives_summary`.
 - **Key column:** `experiment_id`, `additives_summary`.
 
+### `v_experiment_additive_names_summary`
+
+One row per experiment: compound names only, comma-separated and alphabetically sorted.
+
+- **Purpose:** Power BI slicers and text-label columns that need only the additive names (not amounts/units). Avoids fragile string-parsing of `additives_summary` from `v_experiment_additives_summary`.
+- **Definition:** `experiments` LEFT JOIN `experimental_conditions` → LEFT JOIN `chemical_additives` → LEFT JOIN `compounds`; `STRING_AGG(c.name, ', ' ORDER BY c.name)` grouped by `e.experiment_id`. `LEFT JOIN` chain ensures experiments with no additives still appear.
+- **Key columns:** `experiment_id`, `additive_names` (NULL when experiment has no additives).
+
 ### `v_primary_experiment_results`
 
 One row per **primary** result timepoint per experiment, with scalar and ICP data resolved by experiment + time bucket.
