@@ -444,3 +444,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/superpowers/plans/2026-04-24-pxrf-upload-audit-fixes.md` — implementation plan
 - **Tests added:** yes — 13 unit tests in `test_ingest_pxrf.py` (all passing); 76 pXRF-related tests passing total
 - **Decision logged:** no
+
+## 2026-04-28 | issue #52 — Add v_experiment_additive_names_summary view
+- **Files changed:**
+  - `database/event_listeners.py` — added `v_experiment_additive_names_summary` to `_VIEWS` immediately after `v_experiment_additives_summary`
+  - `tests/views/test_additive_names_summary.py` — new file: 6 tests covering queryable, null for no additives, single additive, alphabetical sort, one-row-per-experiment, count match
+- **Tests added:** yes — 6 view integration tests
+- **Decision logged:** no

@@ -216,6 +216,25 @@ _VIEWS = [
     """),
 
     # ------------------------------------------------------------------
+    # v_experiment_additive_names_summary
+    # One row per experiment — compound names only, comma-separated and
+    # alphabetically sorted.  additive_names is NULL for experiments with
+    # no additives.  Use COALESCE(additive_names, '') at the consumer if
+    # an empty string is preferred.
+    # ------------------------------------------------------------------
+    ("v_experiment_additive_names_summary", """
+        CREATE VIEW v_experiment_additive_names_summary AS
+        SELECT
+            e.experiment_id,
+            STRING_AGG(c.name, ', ' ORDER BY c.name) AS additive_names
+        FROM experiments e
+        LEFT JOIN experimental_conditions ec ON ec.experiment_fk = e.id
+        LEFT JOIN chemical_additives ca      ON ca.experiment_id = ec.id
+        LEFT JOIN compounds c                ON c.id = ca.compound_id
+        GROUP BY e.experiment_id
+    """),
+
+    # ------------------------------------------------------------------
     # v_sample_info
     # One row per sample — core geological metadata.
     # ------------------------------------------------------------------
