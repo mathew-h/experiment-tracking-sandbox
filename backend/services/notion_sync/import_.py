@@ -72,6 +72,7 @@ def _is_text_unchanged(db: Session, reactor_label: str, incoming_text: str) -> b
     """Return True if the most recent CR row for this reactor has identical text.
 
     Used to prevent duplicate rows when a carried-forward request hasn't changed.
+    The ORDER BY sync_date DESC uses the implicit index from uq_change_request_reactor_date.
     """
     existing = (
         db.execute(

@@ -6,7 +6,6 @@ All Notion API calls are mocked via MagicMock — no real Notion calls are made.
 from __future__ import annotations
 
 from datetime import date
-from datetime import date as date_type
 from unittest.mock import MagicMock
 
 import pytest
@@ -283,10 +282,14 @@ def _make_prior_row(
     db: Session,
     reactor_label: str,
     text: str,
-    sync_date: date_type = SYNC_DATE,
+    sync_date: date = SYNC_DATE,
     status: str = "In Progress",
 ) -> ReactorChangeRequest:
-    """Insert a ReactorChangeRequest row directly into the test DB."""
+    """Insert a ReactorChangeRequest row directly into the test DB.
+
+    notion_page_id uses a fixed 32-char hex string (not a real Notion UUID) —
+    sufficient for the String(32) column; not used in any dedup assertions.
+    """
     row = ReactorChangeRequest(
         reactor_label=reactor_label,
         requested_change=text,
