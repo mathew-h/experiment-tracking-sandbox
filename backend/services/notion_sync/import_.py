@@ -124,9 +124,10 @@ def run_import(
             result.skipped += 1
             continue
 
-        # Dedup: skip if this reactor's latest row already has identical text.
+        # Dedup: skip only Ongoing rows whose text hasn't changed.
+        # Completed/No Change must always write through so Notion gets cleared.
         # Still add to active_cr_page_ids so Working Date is preserved in Notion.
-        if _is_text_unchanged(db, reactor_label, change_request):
+        if status == STATUS_ONGOING and _is_text_unchanged(db, reactor_label, change_request):
             log.info("notion_sync_skip_unchanged", reactor=reactor_label)
             result.skipped += 1
             result.active_cr_page_ids.add(page_id_raw)

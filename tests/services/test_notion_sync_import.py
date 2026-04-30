@@ -157,13 +157,13 @@ def test_import_db_committed_before_notion_clear(db_session: Session) -> None:
 
 
 def test_import_upsert_idempotent(db_session: Session) -> None:
-    """Two runs with same reactor_label + sync_date produce exactly one DB row.
+    """Two Ongoing runs with the same text on the same day produce exactly one DB row.
 
-    The second run is deduped (same text) so imported=0, skipped=1 on the second call,
+    The second run is deduped (same text, Ongoing status) so imported=0, skipped=1,
     but the DB row count remains 1.
     """
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R01", "Sample reactor", "No Change")]
+    pages = [_page(_PAGE_ID, "R01", "Sample reactor", "Ongoing")]
 
     first = run_import(client, db_session, pages, SYNC_DATE)
     second = run_import(client, db_session, pages, SYNC_DATE)
@@ -361,6 +361,19 @@ def test_dedup_first_occurrence_always_imported(db_session: Session) -> None:
 
     assert result.imported == 1
     assert db_session.query(ReactorChangeRequest).count() == 1
+
+
+def test_dedup_does_not_fire_for_completed_with_identical_text(db_session: Session) -> None:
+    """Completed rows always write through and clear Notion, even if text is identical to prior row."""
+    _make_prior_row(db_session, "R05", "Sample and clean")
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Sample and clean", "Completed")]
+    result = run_import(client, db_session, pages, SYNC_DATE_2)
+
+    assert result.imported == 1
+    assert db_session.query(ReactorChangeRequest).count() == 2
+    client.clear_change_request.assert_called_once_with(_PAGE_ID)
 
 
 # ---------------------------------------------------------------------------
