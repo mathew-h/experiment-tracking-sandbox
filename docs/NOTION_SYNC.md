@@ -81,7 +81,7 @@ skip all `"In Progress"` / `"Pending"` rows as unknown statuses until Notion is 
 Admins can trigger a manual sync via the API:
 
 ```
-POST /api/notion-sync/trigger
+POST /api/admin/notion-sync/trigger
 ```
 
 See `docs/api/API_REFERENCE.md` for authentication requirements.
