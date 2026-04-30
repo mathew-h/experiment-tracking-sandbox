@@ -10,6 +10,7 @@ Supports hybrid delimiter system:
 - Hyphen-NUMBER for sequential lineage (e.g., -2, -3)
 - Underscore-TEXT for treatment variants (e.g., _Desorption)
 """
+import re
 from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -21,86 +22,71 @@ if TYPE_CHECKING:
 def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int], Optional[str]]:
     """
     Parse an experiment ID to extract the base ID, derivation number, and treatment variant.
-    
+
     Uses hybrid delimiter system:
-    - Hyphen-NUMBER for sequential lineage (e.g., -2, -3)
-    - Underscore-TEXT for treatment variants (e.g., _Desorption)
-    
-    Supports both 2-part (TYPE_INDEX) and 3-part (TYPE_INITIALS_INDEX) formats.
-    
+    - Hyphen-NUMBER for sequential lineage (e.g., -2, -3), but ONLY when the prefix
+      itself ends in a numeric segment (_NNN or -NNN).
+    - Underscore-TEXT for treatment variants (e.g., _Desorption).
+
+    TYPE-NNN IDs (e.g., CF-015, CF-04) are treated as standalone base experiments
+    because their prefix ("CF") does not end in digits.
+
     Args:
-        experiment_id: The experiment ID to parse (e.g., "HPHT_MH_001-2_Desorption" or "HPHT_001-2_Desorption")
-        
+        experiment_id: The experiment ID to parse
+
     Returns:
         A tuple of (base_experiment_id, derivation_number, treatment_variant)
-        - For "HPHT_MH_001-2": returns ("HPHT_MH_001", 2, None)
-        - For "HPHT_001-2": returns ("HPHT_001", 2, None)
-        - For "HPHT_MH_001": returns ("HPHT_MH_001", None, None)
-        - For "HPHT_001": returns ("HPHT_001", None, None)
-        - For "HPHT_MH_001_Desorption": returns ("HPHT_MH_001", None, "Desorption")
-        - For "HPHT_001_Desorption": returns ("HPHT_001", None, "Desorption")
-        - For "HPHT_MH_001-2_Desorption": returns ("HPHT_MH_001", 2, "Desorption")
-        - For "HPHT_001-2_Desorption": returns ("HPHT_001", 2, "Desorption")
-        
+
     Examples:
+        >>> parse_experiment_id("CF-015")
+        ("CF-015", None, None)
+        >>> parse_experiment_id("CF-015-2")
+        ("CF-015", 2, None)
         >>> parse_experiment_id("HPHT_MH_001-2")
         ("HPHT_MH_001", 2, None)
-        >>> parse_experiment_id("HPHT_001-2")
-        ("HPHT_001", 2, None)
-        >>> parse_experiment_id("HPHT_MH_001")
-        ("HPHT_MH_001", None, None)
-        >>> parse_experiment_id("HPHT_001")
-        ("HPHT_001", None, None)
-        >>> parse_experiment_id("HPHT_MH_001_Desorption")
-        ("HPHT_MH_001", None, "Desorption")
-        >>> parse_experiment_id("HPHT_001_Desorption")
-        ("HPHT_001", None, "Desorption")
         >>> parse_experiment_id("HPHT_MH_001-2_Desorption")
         ("HPHT_MH_001", 2, "Desorption")
-        >>> parse_experiment_id("HPHT_001-2_Desorption")
-        ("HPHT_001", 2, "Desorption")
+        >>> parse_experiment_id("HPHT_MH_001")
+        ("HPHT_MH_001", None, None)
+        >>> parse_experiment_id("HPHT_MH_001_Desorption")
+        ("HPHT_MH_001", None, "Desorption")
     """
     if not experiment_id or not isinstance(experiment_id, str):
         return None, None, None
-    
+
     experiment_id = experiment_id.strip()
     if not experiment_id:
         return None, None, None
-    
+
     treatment_variant = None
     derivation_num = None
     base_id = experiment_id
-    
-    # First, extract sequential number (hyphen-NUMBER pattern from the end)
-    # This must be done before treatment detection to avoid confusion
-    if '-' in experiment_id:
-        hyphen_parts = experiment_id.rsplit('-', 1)
-        if len(hyphen_parts) == 2 and hyphen_parts[-1].isdigit():
-            derivation_num = int(hyphen_parts[-1])
-            base_id = hyphen_parts[0]
-    
-    # Now check for treatment variant in the remaining base_id
-    # Split by underscore to detect if last part is a treatment
-    parts = base_id.split('_')
-    
-    # Determine expected base format by checking part count
-    # After removing sequential, we should have:
-    # - 2 parts for TYPE_INDEX format (e.g., HPHT_001)
-    # - 3 parts for TYPE_INITIALS_INDEX format (e.g., Serum_MH_101)
-    # If we have more parts than expected, the last part is likely a treatment
-    
-    if len(parts) > 2:
-        # Could be 2-part format with treatment, or 3-part format (with or without treatment)
-        potential_treatment = parts[-1]
-        
-        # Check if last part looks like a treatment (not all numeric)
-        if not potential_treatment.isdigit():
-            # Last part is not numeric, likely a treatment
-            # If we have 3+ parts and last is non-numeric, it's a treatment
-            if len(parts) >= 3:
-                treatment_variant = potential_treatment
-                base_id = '_'.join(parts[:-1])
-    
+
+    # Step 1: Extract treatment variant (trailing _TEXT segment).
+    # A trailing underscore segment is a treatment only when:
+    #   - it contains no hyphens (so "001-2" is not mistaken for a treatment)
+    #   - it is not all digits (so "001" index segments are left alone)
+    #   - removing it still leaves a structured ID with >= 2 underscore-segments
+    #     (prevents "CF_Desorption" from stripping "Desorption" off a 1-part base)
+    parts = experiment_id.split('_')
+    if len(parts) >= 2:
+        last = parts[-1]
+        if not last.isdigit() and '-' not in last:  # hyphen means it contains index info, not a treatment name
+            remaining = '_'.join(parts[:-1])
+            if len(remaining.split('_')) >= 2:
+                treatment_variant = last
+                base_id = remaining
+
+    # Step 2: Extract sequential derivation number (trailing -N).
+    # Only treat -N as a derivation when the prefix already ends in _NNN or -NNN,
+    # confirming it carries a numeric index (e.g. HPHT_MH_001, CF-015).
+    # This prevents TYPE-NNN IDs like CF-015 from being parsed as deriv=15 of "CF".
+    if '-' in base_id:
+        prefix, _, suffix = base_id.rpartition('-')
+        if suffix.isdigit() and re.search(r'[_-]\d+$', prefix):
+            derivation_num = int(suffix)
+            base_id = prefix
+
     return base_id, derivation_num, treatment_variant
 
 

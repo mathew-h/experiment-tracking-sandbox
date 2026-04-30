@@ -120,31 +120,42 @@ class TestExperimentLineageMigration:
     
     def test_parse_experiment_id(self):
         """Test parsing of experiment IDs to identify derivations and treatments."""
-        # Test base experiments (returns 3-tuple: base_id, derivation_num, treatment_variant)
+        # Base experiments — underscore-index format
         assert parse_experiment_id("HPHT_MH_001") == ("HPHT_MH_001", None, None)
         assert parse_experiment_id("LEACH_TEST") == ("LEACH_TEST", None, None)
-        
-        # Test derivations (sequential runs)
+
+        # Sequential derivations — prefix must end in _digits or -digits
         assert parse_experiment_id("HPHT_MH_001-2") == ("HPHT_MH_001", 2, None)
         assert parse_experiment_id("HPHT_MH_001-10") == ("HPHT_MH_001", 10, None)
-        assert parse_experiment_id("COMPLEX-ID-TEST-3") == ("COMPLEX-ID-TEST", 3, None)
-        
-        # Test IDs that end with numbers (these ARE derivations by design)
-        assert parse_experiment_id("TEST-SAMPLE-001") == ("TEST-SAMPLE", 1, None)
-        
-        # Test non-derivations with hyphens (last part is NOT numeric)
+        assert parse_experiment_id("HPHT_001-2") == ("HPHT_001", 2, None)
+
+        # CF-style IDs: TYPE-NNN — the prefix ("CF") does NOT end in digits,
+        # so these are standalone base experiments, not derivations.
+        assert parse_experiment_id("CF-015") == ("CF-015", None, None)
+        assert parse_experiment_id("CF-12") == ("CF-12", None, None)
+        assert parse_experiment_id("CF-04") == ("CF-04", None, None)
+
+        # CF-015-2 IS a derivation because its prefix "CF-015" ends in -015 (digits)
+        assert parse_experiment_id("CF-015-2") == ("CF-015", 2, None)
+
+        # Former synthetic test cases — now recognised as base experiments
+        # (their prefixes don't end in digits, so trailing -N is not a derivation)
+        assert parse_experiment_id("COMPLEX-ID-TEST-3") == ("COMPLEX-ID-TEST-3", None, None)
+        assert parse_experiment_id("TEST-SAMPLE-001") == ("TEST-SAMPLE-001", None, None)
+
+        # Non-derivations with hyphens (last part is NOT numeric)
         assert parse_experiment_id("TEST-SAMPLE-ABC") == ("TEST-SAMPLE-ABC", None, None)
         assert parse_experiment_id("HPHT-HIGH-TEMP") == ("HPHT-HIGH-TEMP", None, None)
-        
-        # Test treatment variants (underscore-TEXT suffix)
+
+        # Treatment variants (underscore-TEXT suffix)
         assert parse_experiment_id("HPHT_MH_001_Desorption") == ("HPHT_MH_001", None, "Desorption")
         assert parse_experiment_id("Serum_MH_101_Annealing") == ("Serum_MH_101", None, "Annealing")
-        
-        # Test combined sequential + treatment
+
+        # Combined sequential + treatment — treatment stripped first, then sequential detected
         assert parse_experiment_id("HPHT_MH_001-2_Desorption") == ("HPHT_MH_001", 2, "Desorption")
         assert parse_experiment_id("Serum_MH_101-3_Annealing") == ("Serum_MH_101", 3, "Annealing")
-        
-        # Test edge cases
+
+        # Edge cases
         assert parse_experiment_id("") == (None, None, None)
         assert parse_experiment_id(None) == (None, None, None)
         assert parse_experiment_id("   ") == (None, None, None)
