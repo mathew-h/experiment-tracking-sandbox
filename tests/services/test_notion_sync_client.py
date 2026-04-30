@@ -17,7 +17,7 @@ def _page(reactor_label: str, change_request: str, status: str) -> dict:
     return {
         "id": "abc12345-1234-1234-1234-abc123456789",
         "properties": {
-            "Name": {"title": [{"plain_text": reactor_label}]},
+            "Reactor #": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {
                 "rich_text": [{"plain_text": change_request}] if change_request else []
             },
@@ -42,14 +42,14 @@ def test_extract_change_request_empty() -> None:
 
 
 def test_extract_change_status_set() -> None:
-    page = _page("R03", "x", "In Progress")
-    assert extract_change_status(page) == "In Progress"
+    page = _page("R03", "x", "Ongoing")
+    assert extract_change_status(page) == "Ongoing"
 
 
 def test_extract_change_status_none_select() -> None:
     page = _page("R03", "x", "")
     page["properties"]["Change Request Status"]["select"] = None
-    assert extract_change_status(page) == "Pending"
+    assert extract_change_status(page) == "No Change"
 
 
 def test_client_query_all_rows() -> None:
@@ -74,7 +74,7 @@ def test_client_clear_change_request() -> None:
         page_id="page-id-123",
         properties={
             "Change Request": {"rich_text": []},
-            "Change Request Status": {"select": {"name": "Pending"}},
+            "Change Request Status": {"select": {"name": "No Change"}},
         },
     )
 
@@ -100,15 +100,15 @@ def test_client_write_experiment_info() -> None:
     )
 
 
-def test_client_set_status_pending() -> None:
+def test_client_set_status_no_change() -> None:
     mock_notion = MagicMock()
     with patch("backend.services.notion_sync.client.Client", return_value=mock_notion):
         client = NotionSyncClient(token="secret_test", database_id="dbid")
-        client.set_status_pending("page-id-789")
+        client.set_status_no_change("page-id-789")
 
     mock_notion.pages.update.assert_called_once_with(
         page_id="page-id-789",
         properties={
-            "Change Request Status": {"select": {"name": "Pending"}},
+            "Change Request Status": {"select": {"name": "No Change"}},
         },
     )

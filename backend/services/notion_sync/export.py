@@ -95,9 +95,9 @@ def run_export(
                 description=exp.description or "",
                 date_started=date_started,
             )
-            # Re-confirm Pending status only for rows cleared in this cycle
+            # Re-confirm No Change status only for rows cleared in this cycle
             if page_id in cleared_page_ids:
-                client.set_status_pending(page_id)
+                client.set_status_no_change(page_id)
             result.exported += 1
         except Exception as exc:
             result.errors.append(f"{label}: export error — {exc}")

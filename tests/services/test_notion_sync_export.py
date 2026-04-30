@@ -16,11 +16,11 @@ from database.models.enums import ExperimentStatus
 from database.models.experiments import Experiment, ExperimentNotes
 
 
-def _notion_page(page_id: str, reactor_label: str, status: str = "Pending") -> dict:
+def _notion_page(page_id: str, reactor_label: str, status: str = "No Change") -> dict:
     return {
         "id": page_id,
         "properties": {
-            "Name": {"title": [{"plain_text": reactor_label}]},
+            "Reactor #": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {"rich_text": []},
             "Change Request Status": {"select": {"name": status}},
         },
@@ -103,37 +103,37 @@ def test_export_writes_correct_properties(db_session: Session) -> None:
     )
 
 
-def test_export_sets_pending_after_clear(db_session: Session) -> None:
-    """set_status_pending is called for a page that was cleared in this cycle."""
+def test_export_sets_no_change_after_clear(db_session: Session) -> None:
+    """set_status_no_change is called for a page that was cleared in this cycle."""
     client = MagicMock()
     pages = [_notion_page("ddd", "R05")]
     _seed_experiment(db_session, "SERUM_002", 1003, reactor_number=5)
 
     run_export(client, db_session, pages, cleared_page_ids={"ddd"})
 
-    client.set_status_pending.assert_called_once_with("ddd")
+    client.set_status_no_change.assert_called_once_with("ddd")
 
 
-def test_export_preserves_in_progress_status(db_session: Session) -> None:
-    """set_status_pending is NOT called for a page that was not cleared (In Progress)."""
+def test_export_preserves_ongoing_status(db_session: Session) -> None:
+    """set_status_no_change is NOT called for a page that was not cleared (Ongoing)."""
     client = MagicMock()
-    pages = [_notion_page("eee", "R06", status="In Progress")]
+    pages = [_notion_page("eee", "R06", status="Ongoing")]
     _seed_experiment(db_session, "SERUM_003", 1004, reactor_number=6)
 
     run_export(client, db_session, pages, cleared_page_ids=set())
 
-    client.set_status_pending.assert_not_called()
+    client.set_status_no_change.assert_not_called()
 
 
 def test_export_preserves_non_cleared_status(db_session: Session) -> None:
-    """set_status_pending is NOT called for a page that was not cleared (any non-Pending status)."""
+    """set_status_no_change is NOT called for a page that was not cleared (any non-No Change status)."""
     client = MagicMock()
     pages = [_notion_page("fff", "R07", status="Completed")]
     _seed_experiment(db_session, "SERUM_004", 1005, reactor_number=7)
 
     run_export(client, db_session, pages, cleared_page_ids=set())
 
-    client.set_status_pending.assert_not_called()
+    client.set_status_no_change.assert_not_called()
 
 
 def test_export_cf_slots_mapped_correctly(db_session: Session) -> None:

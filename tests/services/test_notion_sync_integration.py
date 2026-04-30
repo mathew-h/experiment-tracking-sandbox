@@ -18,11 +18,11 @@ from database.models.experiments import Experiment
 from database.models.notion_sync import ReactorChangeRequest
 
 
-def _notion_page(page_id: str, reactor_label: str, change_request: str = "", status: str = "Pending") -> dict:
+def _notion_page(page_id: str, reactor_label: str, change_request: str = "", status: str = "No Change") -> dict:
     return {
         "id": page_id,
         "properties": {
-            "Name": {"title": [{"plain_text": reactor_label}]},
+            "Reactor #": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {
                 "rich_text": [{"plain_text": change_request}] if change_request.strip() else []
             },
@@ -49,8 +49,8 @@ def test_full_sync_cycle(db_session: Session) -> None:
     """Full sync: 2 ONGOING experiments, 1 non-empty Change Request → 1 import + 2 exports."""
     client = MagicMock(spec=NotionSyncClient)
     client.query_all_rows.return_value = [
-        _notion_page("page-r01-0000-0000-0000-000000000000", "R01", "Sample today", "Pending"),
-        _notion_page("page-r03-0000-0000-0000-000000000000", "R03", "", "Pending"),
+        _notion_page("page-r01-0000-0000-0000-000000000000", "R01", "Sample today", "No Change"),
+        _notion_page("page-r03-0000-0000-0000-000000000000", "R03", "", "No Change"),
     ]
 
     _seed(db_session, "SERUM_A", 2001, reactor=1)
@@ -68,8 +68,8 @@ def test_full_sync_cycle(db_session: Session) -> None:
     assert db_session.query(ReactorChangeRequest).count() == 1
     # Notion write calls: one per occupied slot
     assert client.write_experiment_info.call_count == 2
-    # R01 had its Change Request cleared → status was reset to Pending in export
-    client.set_status_pending.assert_called_once_with(
+    # R01 had its Change Request cleared → status was reset to No Change in export
+    client.set_status_no_change.assert_called_once_with(
         "page-r01-0000-0000-0000-000000000000"
     )
 

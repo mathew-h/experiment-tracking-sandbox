@@ -13,15 +13,15 @@ log = structlog.get_logger(__name__)
 # Notion property names for the Reactor Dashboard database
 PROP_REACTOR_LABEL = "Reactor #"           # Title property — reactor label e.g. "R05"
 PROP_CHANGE_REQUEST = "Change Request"     # rich_text
-PROP_CHANGE_STATUS = "Change Request Status"  # select: Pending | In Progress | Completed
+PROP_CHANGE_STATUS = "Change Request Status"  # select: No Change | Ongoing | Completed
 PROP_EXPERIMENT_ID = "Experiment ID"       # rich_text (written by export)
 PROP_EXPERIMENT_DESC = "Experiment Description"  # rich_text (written by export)
 PROP_DATE_STARTED = "Date Started"         # date (written by export)
 PROP_WORKING_DATE = "Working Date"         # date (sync metadata — day of active CR)
 PROP_LAST_SYNCED = "Last Synced"           # date+time (sync metadata — heartbeat)
 
-STATUS_PENDING = "Pending"
-STATUS_IN_PROGRESS = "In Progress"
+STATUS_NO_CHANGE = "No Change"
+STATUS_ONGOING = "Ongoing"
 STATUS_COMPLETED = "Completed"
 
 
@@ -47,10 +47,10 @@ class NotionSyncClient:
         self._client.pages.update(page_id=page_id, properties=properties)
 
     def clear_change_request(self, page_id: str) -> None:
-        """Clear the Change Request text and reset status to Pending."""
+        """Clear the Change Request text and reset status to No Change."""
         self.update_page(page_id, {
             PROP_CHANGE_REQUEST: {"rich_text": []},
-            PROP_CHANGE_STATUS: {"select": {"name": STATUS_PENDING}},
+            PROP_CHANGE_STATUS: {"select": {"name": STATUS_NO_CHANGE}},
         })
 
     def write_experiment_info(
@@ -76,10 +76,10 @@ class NotionSyncClient:
             properties[PROP_DATE_STARTED] = {"date": {"start": date_started}}
         self.update_page(page_id, properties)
 
-    def set_status_pending(self, page_id: str) -> None:
-        """Set Change Request Status to Pending."""
+    def set_status_no_change(self, page_id: str) -> None:
+        """Set Change Request Status to No Change."""
         self.update_page(page_id, {
-            PROP_CHANGE_STATUS: {"select": {"name": STATUS_PENDING}},
+            PROP_CHANGE_STATUS: {"select": {"name": STATUS_NO_CHANGE}},
         })
 
     def clear_experiment_info(self, page_id: str) -> None:
@@ -126,6 +126,6 @@ def extract_change_request(page: dict) -> str:
 
 
 def extract_change_status(page: dict) -> str:
-    """Extract Change Request Status select value; returns 'Pending' if unset."""
+    """Extract Change Request Status select value; returns STATUS_NO_CHANGE if unset."""
     select = page["properties"][PROP_CHANGE_STATUS]["select"]
-    return select["name"] if select else STATUS_PENDING
+    return select["name"] if select else STATUS_NO_CHANGE

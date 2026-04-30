@@ -22,9 +22,9 @@ from .client import (
     extract_change_request,
     extract_change_status,
     extract_reactor_label,
-    STATUS_IN_PROGRESS,
+    STATUS_ONGOING,
     STATUS_COMPLETED,
-    STATUS_PENDING,
+    STATUS_NO_CHANGE,
 )
 
 log = structlog.get_logger(__name__)
@@ -98,8 +98,8 @@ def run_import(
 
     For each page:
     - Empty Change Request → skip
-    - In Progress → upsert DB with carried_forward=True; do NOT clear Notion
-    - Completed / Pending with content → upsert DB; THEN clear Notion after commit
+    - Ongoing → upsert DB with carried_forward=True; do NOT clear Notion
+    - Completed / No Change with content → upsert DB; THEN clear Notion after commit
     - Unknown status → log warning and skip
 
     Returns ImportResult with counts and the set of page IDs that were cleared.
@@ -117,8 +117,8 @@ def run_import(
             result.skipped += 1
             continue
 
-        # Unknown/legacy statuses (e.g. removed "Carried Forward") are skipped
-        known_statuses = (STATUS_IN_PROGRESS, STATUS_COMPLETED, STATUS_PENDING)
+        # Unknown/legacy statuses (e.g. removed "Carried Forward", old "In Progress") are skipped
+        known_statuses = (STATUS_ONGOING, STATUS_COMPLETED, STATUS_NO_CHANGE)
         if status not in known_statuses:
             log.warning("notion_import_unknown_status", reactor=reactor_label, status=status)
             result.skipped += 1
@@ -132,8 +132,8 @@ def run_import(
             result.active_cr_page_ids.add(page_id_raw)
             continue
 
-        carried_forward = status == STATUS_IN_PROGRESS
-        should_clear = status != STATUS_IN_PROGRESS
+        carried_forward = status == STATUS_ONGOING
+        should_clear = status != STATUS_ONGOING
 
         try:
             resolved_exp_id = _resolve_experiment_id(db, reactor_label)

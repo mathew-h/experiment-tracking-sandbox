@@ -23,7 +23,7 @@ def _page(
     page_id: str,
     reactor_label: str,
     change_request: str,
-    status: str = "Pending",
+    status: str = "No Change",
 ) -> dict:
     """Build a minimal mock Notion page matching the extract_* function expectations."""
     return {
@@ -44,7 +44,7 @@ def _empty_page(page_id: str, reactor_label: str) -> dict:
         "properties": {
             "Reactor #": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {"rich_text": []},
-            "Change Request Status": {"select": {"name": "Pending"}},
+            "Change Request Status": {"select": {"name": "No Change"}},
         },
     }
 
@@ -65,7 +65,7 @@ def test_import_skips_empty_rows(db_session: Session) -> None:
 def test_import_skips_whitespace_only_change_request(db_session: Session) -> None:
     """Change Request with only whitespace is treated as empty."""
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R02", "   ", "Pending")]
+    pages = [_page(_PAGE_ID, "R02", "   ", "No Change")]
 
     result = run_import(client, db_session, pages, SYNC_DATE)
 
@@ -73,10 +73,10 @@ def test_import_skips_whitespace_only_change_request(db_session: Session) -> Non
     assert result.imported == 0
 
 
-def test_in_progress_sets_carried_forward_true(db_session: Session) -> None:
-    """In Progress row is written to DB with carried_forward=True; Notion clear is NOT called."""
+def test_ongoing_sets_carried_forward_true(db_session: Session) -> None:
+    """Ongoing row is written to DB with carried_forward=True; Notion clear is NOT called."""
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Run test today", "In Progress")]
+    pages = [_page(_PAGE_ID, "R05", "Run test today", "Ongoing")]
 
     result = run_import(client, db_session, pages, SYNC_DATE)
 
@@ -88,7 +88,7 @@ def test_in_progress_sets_carried_forward_true(db_session: Session) -> None:
         reactor_label="R05", sync_date=SYNC_DATE
     ).one()
     assert row.carried_forward is True
-    assert row.notion_status == "In Progress"
+    assert row.notion_status == "Ongoing"
 
 
 def test_completed_clears_notion(db_session: Session) -> None:
@@ -127,11 +127,11 @@ def test_carried_forward_status_no_longer_handled(db_session: Session) -> None:
 
 
 
-def test_import_clears_pending_with_content(db_session: Session) -> None:
-    """Pending row with non-empty content is imported and cleared."""
+def test_import_clears_no_change_with_content(db_session: Session) -> None:
+    """No Change row with non-empty content is imported and cleared."""
     client = MagicMock()
     page_id = "deadbeef-dead-beef-dead-beefdeadbeef"
-    pages = [_page(page_id, "R02", "Check pH and repressurize", "Pending")]
+    pages = [_page(page_id, "R02", "Check pH and repressurize", "No Change")]
 
     result = run_import(client, db_session, pages, SYNC_DATE)
 
@@ -163,7 +163,7 @@ def test_import_upsert_idempotent(db_session: Session) -> None:
     but the DB row count remains 1.
     """
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R01", "Sample reactor", "Pending")]
+    pages = [_page(_PAGE_ID, "R01", "Sample reactor", "No Change")]
 
     first = run_import(client, db_session, pages, SYNC_DATE)
     second = run_import(client, db_session, pages, SYNC_DATE)
@@ -176,8 +176,8 @@ def test_import_upsert_idempotent(db_session: Session) -> None:
     assert second.imported == 0
 
 
-def test_in_progress_accumulates_across_dates(db_session: Session) -> None:
-    """Same In Progress row with CHANGED text on day 2 still produces two DB rows.
+def test_ongoing_accumulates_across_dates(db_session: Session) -> None:
+    """Same Ongoing row with CHANGED text on day 2 still produces two DB rows.
 
     The dedup check only skips identical text; different text always imports.
     """
@@ -185,8 +185,8 @@ def test_in_progress_accumulates_across_dates(db_session: Session) -> None:
     date1 = date(2026, 4, 1)
     date2 = date(2026, 4, 2)
 
-    pages_day1 = [_page(_PAGE_ID, "R04", "Ongoing reaction day 1", "In Progress")]
-    pages_day2 = [_page(_PAGE_ID, "R04", "Ongoing reaction day 2", "In Progress")]
+    pages_day1 = [_page(_PAGE_ID, "R04", "Ongoing reaction day 1", "Ongoing")]
+    pages_day2 = [_page(_PAGE_ID, "R04", "Ongoing reaction day 2", "Ongoing")]
 
     run_import(client, db_session, pages_day1, date1)
     run_import(client, db_session, pages_day2, date2)
@@ -214,7 +214,7 @@ def test_import_populates_experiment_id_for_occupied_slot(db_session: Session) -
     db_session.flush()
 
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Check pressure", "Pending")]
+    pages = [_page(_PAGE_ID, "R05", "Check pressure", "No Change")]
     run_import(client, db_session, pages, SYNC_DATE)
 
     row = db_session.query(ReactorChangeRequest).filter_by(
@@ -226,7 +226,7 @@ def test_import_populates_experiment_id_for_occupied_slot(db_session: Session) -
 def test_import_leaves_experiment_id_null_for_idle_slot(db_session: Session) -> None:
     """When no ONGOING experiment is on R05, experiment_id stays NULL."""
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Check gauge", "Pending")]
+    pages = [_page(_PAGE_ID, "R05", "Check gauge", "No Change")]
     run_import(client, db_session, pages, SYNC_DATE)
 
     row = db_session.query(ReactorChangeRequest).filter_by(
@@ -264,7 +264,7 @@ def test_import_core_flood_label_resolves_correctly(db_session: Session) -> None
     db_session.flush()
 
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "CF01", "Flow rate check", "Pending")]
+    pages = [_page(_PAGE_ID, "CF01", "Flow rate check", "No Change")]
     run_import(client, db_session, pages, SYNC_DATE)
 
     row = db_session.query(ReactorChangeRequest).filter_by(
@@ -283,7 +283,7 @@ def _make_prior_row(
     reactor_label: str,
     text: str,
     sync_date: date = SYNC_DATE,
-    status: str = "In Progress",
+    status: str = "Ongoing",
 ) -> ReactorChangeRequest:
     """Insert a ReactorChangeRequest row directly into the test DB.
 
@@ -308,7 +308,7 @@ def test_dedup_skips_unchanged_text_across_days(db_session: Session) -> None:
     _make_prior_row(db_session, "R05", "Run test today")
 
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Run test today", "In Progress")]
+    pages = [_page(_PAGE_ID, "R05", "Run test today", "Ongoing")]
     result = run_import(client, db_session, pages, SYNC_DATE_2)
 
     assert result.skipped == 1
@@ -322,7 +322,7 @@ def test_dedup_preserves_active_cr_page_id(db_session: Session) -> None:
     _make_prior_row(db_session, "R05", "Run test today")
 
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Run test today", "In Progress")]
+    pages = [_page(_PAGE_ID, "R05", "Run test today", "Ongoing")]
     result = run_import(client, db_session, pages, SYNC_DATE_2)
 
     assert _PAGE_ID in result.active_cr_page_ids
@@ -333,7 +333,7 @@ def test_dedup_allows_changed_text(db_session: Session) -> None:
     _make_prior_row(db_session, "R05", "Run test today")
 
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Changed the task description", "In Progress")]
+    pages = [_page(_PAGE_ID, "R05", "Changed the task description", "Ongoing")]
     result = run_import(client, db_session, pages, SYNC_DATE_2)
 
     assert result.imported == 1
@@ -345,7 +345,7 @@ def test_dedup_is_case_and_whitespace_sensitive_only_on_strip(db_session: Sessio
     _make_prior_row(db_session, "R05", "Run test today")
 
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "  Run test today  ", "In Progress")]
+    pages = [_page(_PAGE_ID, "R05", "  Run test today  ", "Ongoing")]
     result = run_import(client, db_session, pages, SYNC_DATE_2)
 
     # Stripped text matches — should be deduped
@@ -356,8 +356,54 @@ def test_dedup_is_case_and_whitespace_sensitive_only_on_strip(db_session: Sessio
 def test_dedup_first_occurrence_always_imported(db_session: Session) -> None:
     """A reactor with no prior rows always gets imported regardless of text."""
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R05", "Brand new request", "In Progress")]
+    pages = [_page(_PAGE_ID, "R05", "Brand new request", "Ongoing")]
     result = run_import(client, db_session, pages, SYNC_DATE)
 
     assert result.imported == 1
     assert db_session.query(ReactorChangeRequest).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Status rename tests — Ongoing / No Change
+# ---------------------------------------------------------------------------
+
+
+def test_ongoing_status_sets_carried_forward_true(db_session: Session) -> None:
+    """'Ongoing' status writes carried_forward=True and does NOT clear Notion."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Run test today", "Ongoing")]
+
+    result = run_import(client, db_session, pages, SYNC_DATE)
+
+    assert result.imported == 1
+    assert result.carried_forward == 1
+    client.clear_change_request.assert_not_called()
+    row = db_session.query(ReactorChangeRequest).filter_by(
+        reactor_label="R05", sync_date=SYNC_DATE
+    ).one()
+    assert row.carried_forward is True
+    assert row.notion_status == "Ongoing"
+
+
+def test_no_change_status_with_text_skips(db_session: Session) -> None:
+    """'No Change' with text behaves like old Pending — import and clear."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Something to do", "No Change")]
+
+    result = run_import(client, db_session, pages, SYNC_DATE)
+
+    assert result.imported == 1
+    assert result.carried_forward == 0
+    client.clear_change_request.assert_called_once_with(_PAGE_ID)
+
+
+def test_old_in_progress_is_now_unknown_status(db_session: Session) -> None:
+    """After rename, 'In Progress' is an unknown status and is logged + skipped."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Something", "In Progress")]
+
+    result = run_import(client, db_session, pages, SYNC_DATE)
+
+    assert result.skipped == 1
+    assert result.imported == 0
+    assert db_session.query(ReactorChangeRequest).count() == 0
