@@ -27,17 +27,17 @@ def _page(reactor_label: str, change_request: str, status: str) -> dict:
 
 
 def test_extract_reactor_label() -> None:
-    page = _page("R05", "Do something", "Pending")
+    page = _page("R05", "Do something", "No Change")
     assert extract_reactor_label(page) == "R05"
 
 
 def test_extract_change_request_nonempty() -> None:
-    page = _page("R01", "Sample reactor", "Pending")
+    page = _page("R01", "Sample reactor", "No Change")
     assert extract_change_request(page) == "Sample reactor"
 
 
 def test_extract_change_request_empty() -> None:
-    page = _page("R02", "", "Pending")
+    page = _page("R02", "", "No Change")
     assert extract_change_request(page) == ""
 
 

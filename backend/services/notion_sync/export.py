@@ -53,7 +53,7 @@ def run_export(
         db: SQLAlchemy session (read-only in this step).
         pages: All 18 Notion reactor pages (already fetched by orchestrator).
         cleared_page_ids: Page IDs whose Change Request was cleared in the import step.
-            Only these pages get their status reset to Pending.
+            Only these pages get their status reset to No Change.
     """
     result = ExportResult()
 
