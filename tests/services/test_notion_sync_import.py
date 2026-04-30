@@ -6,6 +6,7 @@ All Notion API calls are mocked via MagicMock — no real Notion calls are made.
 from __future__ import annotations
 
 from datetime import date
+from datetime import date as date_type
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from backend.services.notion_sync.import_ import run_import
 from database.models.notion_sync import ReactorChangeRequest
 
 SYNC_DATE = date(2026, 4, 1)
+SYNC_DATE_2 = date(2026, 4, 2)  # one day after SYNC_DATE
 _PAGE_ID = "abc12345-1234-1234-1234-abc123456789"
 
 
@@ -28,7 +30,7 @@ def _page(
     return {
         "id": page_id,
         "properties": {
-            "Name": {"title": [{"plain_text": reactor_label}]},
+            "Reactor #": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {
                 "rich_text": [{"plain_text": change_request}] if change_request else []
             },
@@ -41,7 +43,7 @@ def _empty_page(page_id: str, reactor_label: str) -> dict:
     return {
         "id": page_id,
         "properties": {
-            "Name": {"title": [{"plain_text": reactor_label}]},
+            "Reactor #": {"title": [{"plain_text": reactor_label}]},
             "Change Request": {"rich_text": []},
             "Change Request Status": {"select": {"name": "Pending"}},
         },
@@ -156,28 +158,39 @@ def test_import_db_committed_before_notion_clear(db_session: Session) -> None:
 
 
 def test_import_upsert_idempotent(db_session: Session) -> None:
-    """Two runs with same reactor_label + sync_date produce exactly one DB row."""
+    """Two runs with same reactor_label + sync_date produce exactly one DB row.
+
+    The second run is deduped (same text) so imported=0, skipped=1 on the second call,
+    but the DB row count remains 1.
+    """
     client = MagicMock()
     pages = [_page(_PAGE_ID, "R01", "Sample reactor", "Pending")]
 
-    run_import(client, db_session, pages, SYNC_DATE)
-    result = run_import(client, db_session, pages, SYNC_DATE)
+    first = run_import(client, db_session, pages, SYNC_DATE)
+    second = run_import(client, db_session, pages, SYNC_DATE)
 
+    assert first.imported == 1
     assert db_session.query(ReactorChangeRequest).filter_by(
         reactor_label="R01", sync_date=SYNC_DATE
     ).count() == 1
-    assert result.imported == 1
+    assert second.skipped == 1
+    assert second.imported == 0
 
 
 def test_in_progress_accumulates_across_dates(db_session: Session) -> None:
-    """Same In Progress row on two different sync dates produces two DB rows."""
+    """Same In Progress row with CHANGED text on day 2 still produces two DB rows.
+
+    The dedup check only skips identical text; different text always imports.
+    """
     client = MagicMock()
-    pages = [_page(_PAGE_ID, "R04", "Ongoing reaction", "In Progress")]
     date1 = date(2026, 4, 1)
     date2 = date(2026, 4, 2)
 
-    run_import(client, db_session, pages, date1)
-    run_import(client, db_session, pages, date2)
+    pages_day1 = [_page(_PAGE_ID, "R04", "Ongoing reaction day 1", "In Progress")]
+    pages_day2 = [_page(_PAGE_ID, "R04", "Ongoing reaction day 2", "In Progress")]
+
+    run_import(client, db_session, pages_day1, date1)
+    run_import(client, db_session, pages_day2, date2)
 
     assert db_session.query(ReactorChangeRequest).filter_by(
         reactor_label="R04"
@@ -259,3 +272,89 @@ def test_import_core_flood_label_resolves_correctly(db_session: Session) -> None
         reactor_label="CF01", sync_date=SYNC_DATE
     ).one()
     assert row.experiment_id == "CF_TEST_001"
+
+
+# ---------------------------------------------------------------------------
+# Dedup tests — skip unchanged carried-forward requests
+# ---------------------------------------------------------------------------
+
+
+def _make_prior_row(
+    db: Session,
+    reactor_label: str,
+    text: str,
+    sync_date: date_type = SYNC_DATE,
+    status: str = "In Progress",
+) -> ReactorChangeRequest:
+    """Insert a ReactorChangeRequest row directly into the test DB."""
+    row = ReactorChangeRequest(
+        reactor_label=reactor_label,
+        requested_change=text,
+        notion_status=status,
+        carried_forward=True,
+        sync_date=sync_date,
+        notion_page_id="aabbccdd" * 4,
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def test_dedup_skips_unchanged_text_across_days(db_session: Session) -> None:
+    """Second-day import with identical text does not create a new DB row."""
+    _make_prior_row(db_session, "R05", "Run test today")
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Run test today", "In Progress")]
+    result = run_import(client, db_session, pages, SYNC_DATE_2)
+
+    assert result.skipped == 1
+    assert result.imported == 0
+    assert db_session.query(ReactorChangeRequest).count() == 1
+    client.clear_change_request.assert_not_called()
+
+
+def test_dedup_preserves_active_cr_page_id(db_session: Session) -> None:
+    """Dedup skip still tracks page_id so Working Date is preserved in Notion."""
+    _make_prior_row(db_session, "R05", "Run test today")
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Run test today", "In Progress")]
+    result = run_import(client, db_session, pages, SYNC_DATE_2)
+
+    assert _PAGE_ID in result.active_cr_page_ids
+
+
+def test_dedup_allows_changed_text(db_session: Session) -> None:
+    """Changed text on day 2 IS imported normally — creates a new row."""
+    _make_prior_row(db_session, "R05", "Run test today")
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Changed the task description", "In Progress")]
+    result = run_import(client, db_session, pages, SYNC_DATE_2)
+
+    assert result.imported == 1
+    assert db_session.query(ReactorChangeRequest).count() == 2
+
+
+def test_dedup_is_case_and_whitespace_sensitive_only_on_strip(db_session: Session) -> None:
+    """Text with leading/trailing whitespace is matched after strip; internal whitespace is literal."""
+    _make_prior_row(db_session, "R05", "Run test today")
+
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "  Run test today  ", "In Progress")]
+    result = run_import(client, db_session, pages, SYNC_DATE_2)
+
+    # Stripped text matches — should be deduped
+    assert result.skipped == 1
+    assert db_session.query(ReactorChangeRequest).count() == 1
+
+
+def test_dedup_first_occurrence_always_imported(db_session: Session) -> None:
+    """A reactor with no prior rows always gets imported regardless of text."""
+    client = MagicMock()
+    pages = [_page(_PAGE_ID, "R05", "Brand new request", "In Progress")]
+    result = run_import(client, db_session, pages, SYNC_DATE)
+
+    assert result.imported == 1
+    assert db_session.query(ReactorChangeRequest).count() == 1

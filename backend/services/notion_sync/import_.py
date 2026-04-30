@@ -68,6 +68,25 @@ def _resolve_experiment_id(db: Session, reactor_label: str) -> str | None:
     return row
 
 
+def _is_text_unchanged(db: Session, reactor_label: str, incoming_text: str) -> bool:
+    """Return True if the most recent CR row for this reactor has identical text.
+
+    Used to prevent duplicate rows when a carried-forward request hasn't changed.
+    """
+    existing = (
+        db.execute(
+            select(ReactorChangeRequest.requested_change)
+            .where(ReactorChangeRequest.reactor_label == reactor_label)
+            .order_by(ReactorChangeRequest.sync_date.desc())
+            .limit(1)
+        )
+        .scalar_one_or_none()
+    )
+    if existing is None:
+        return False
+    return (existing or "").strip() == (incoming_text or "").strip()
+
+
 def run_import(
     client: NotionSyncClient,
     db: Session,
@@ -102,6 +121,14 @@ def run_import(
         if status not in known_statuses:
             log.warning("notion_import_unknown_status", reactor=reactor_label, status=status)
             result.skipped += 1
+            continue
+
+        # Dedup: skip if this reactor's latest row already has identical text.
+        # Still add to active_cr_page_ids so Working Date is preserved in Notion.
+        if _is_text_unchanged(db, reactor_label, change_request):
+            log.info("notion_sync_skip_unchanged", reactor=reactor_label)
+            result.skipped += 1
+            result.active_cr_page_ids.add(page_id_raw)
             continue
 
         carried_forward = status == STATUS_IN_PROGRESS
