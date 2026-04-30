@@ -451,3 +451,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/views/test_additive_names_summary.py` — new file: 6 tests covering queryable, null for no additives, single additive, alphabetical sort, one-row-per-experiment, count match
 - **Tests added:** yes — 6 view integration tests
 - **Decision logged:** no
+
+## 2026-04-30 | issue #54 — Fix parse_experiment_id misclassification of TYPE-NNN IDs
+- **Files changed:**
+  - `database/lineage_utils.py` — restructured `parse_experiment_id`: treatment extracted before sequential check; sequential gate now requires prefix to end in `[_-]\d+`; `import re` added
+  - `tests/test_lineage_migration.py` — updated 2 stale assertions (COMPLEX-ID-TEST-3, TEST-SAMPLE-001); added 5 new assertions (CF-015, CF-12, CF-04, CF-015-2, HPHT_001-2); fixed pre-existing failure for HPHT_MH_001-2_Desorption
+- **Tests added:** yes — 5 new assertions in test_parse_experiment_id
+- **Decision logged:** no
+- **⚠ Data migration required:** Re-run `establish_experiment_lineage_006.py` on the live database to correct corrupted parent-child links for CF-015, CF-04, CF-12 and any other TYPE-NNN experiments. See plan: `docs/superpowers/plans/2026-04-30-issue-54-parse-experiment-id-fix.md` Task 4.
