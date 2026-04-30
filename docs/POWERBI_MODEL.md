@@ -17,6 +17,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_experiment_conditions` | `experiment_id`, `experiment_type`, `temperature_c`, `particle_size`, `initial_ph`, `rock_mass_g`, `water_volume_mL`, `water_to_rock_ratio`, `reactor_number`, `feedstock`, `stir_speed_rpm`, `room_temp_pressure_psi`, `rxn_temp_pressure_psi`, `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`, `initial_conductivity_mS_cm`, `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`, `total_ferrous_iron_g`, `total_ferrous_iron` |
 | `public.v_chemical_additives` | `experiment_id`, `compound_name`, `formula`, `amount`, `unit`, `addition_order`, `addition_method`, `purity`, `mass_in_grams`, `moles_added`, `final_concentration`, `concentration_units`, `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm` |
 | `public.v_experiment_additives_summary` | `experiment_id`, `additives_summary` |
+| `public.v_experiment_additive_names_summary` | `experiment_id`, `additive_names` |
 | `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `brine_modification_description` |
 | `public.v_experiment_xrd` | `experiment_id`, `time_post_reaction_days`, `mineral_name`, `amount_pct`, `rwp`, `measurement_date` |
 
@@ -26,7 +27,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 
 | View | Key columns |
 |---|---|
-| `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
+| `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `sampling_description`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
 | `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `tl_ppm` (27 element columns) |
 
@@ -50,6 +51,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 v_experiments (experiment_id)    1 ──── 1 v_experiment_conditions (experiment_id)
 v_experiments (experiment_id)    1 ──── * v_chemical_additives (experiment_id)
 v_experiments (experiment_id)    1 ──── 1 v_experiment_additives_summary (experiment_id)
+v_experiments (experiment_id)    1 ──── 1 v_experiment_additive_names_summary (experiment_id)
 v_experiments (experiment_id)    1 ──── * v_experiment_xrd (experiment_id)
 v_experiments (experiment_id)    1 ──── * v_dim_timepoints (experiment_id)
 
@@ -121,8 +123,7 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
   `time_post_reaction_days IS NULL` and the phase is linked to a sample rather than an experiment.
 - All ICP element columns in `v_results_icp` use `_ppm` suffix to avoid name collisions in
   Power BI when joining with `v_sample_elemental_comp` (which uses oxide symbols).
-- `v_experiment_additives_summary` is a convenience view; `v_chemical_additives` is the
-  normalised long-format alternative for per-additive analysis.
+- `v_experiment_additives_summary` and `v_experiment_additive_names_summary` are convenience views; `v_chemical_additives` is the normalised long-format alternative for per-additive analysis. Use `additive_names` (names only, alphabetical) for slicers and text labels; use `additives_summary` (name + amount + unit) for display columns where quantities matter. `additive_names` is NULL for experiments with no additives — use `COALESCE(additive_names, '')` in Power BI if a blank string is preferred.
 - `v_experiment_xrd` retains its own `time_post_reaction_days` and connects directly to
   `v_experiments` via `experiment_id` — it is intentionally **not** routed through
   `v_dim_timepoints`. XRD measurements follow a different schedule than scalar/H2/ICP

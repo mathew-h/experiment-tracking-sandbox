@@ -459,3 +459,9 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 5 new assertions in test_parse_experiment_id
 - **Decision logged:** no
 - **⚠ Data migration required:** Re-run `establish_experiment_lineage_006.py` on the live database to correct corrupted parent-child links for CF-015, CF-04, CF-12 and any other TYPE-NNN experiments. See plan: `docs/superpowers/plans/2026-04-30-issue-54-parse-experiment-id-fix.md` Task 4.
+
+## 2026-04-30 | inline — Update POWERBI_MODEL.md for recent view changes
+- **Files changed:**
+  - `docs/POWERBI_MODEL.md` — added `v_experiment_additive_names_summary` (issue #52) to views table, relationships diagram, and notes; added `sampling_description` to `v_results_scalar` key columns; expanded convenience-view note with usage guidance
+- **Tests added:** no
+- **Decision logged:** no
