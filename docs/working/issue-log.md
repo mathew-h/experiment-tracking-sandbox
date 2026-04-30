@@ -465,3 +465,18 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `docs/POWERBI_MODEL.md` — added `v_experiment_additive_names_summary` (issue #52) to views table, relationships diagram, and notes; added `sampling_description` to `v_results_scalar` key columns; expanded convenience-view note with usage guidance
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-04-30 | issue #55 — Notion sync: prevent duplicate change requests and clarify status workflow
+- **Files changed:**
+  - `backend/services/notion_sync/import_.py` — added `_is_text_unchanged` helper; dedup block in `run_import` skips insert for `Ongoing` rows with unchanged text while preserving `active_cr_page_ids` for Working Date stamping
+  - `backend/services/notion_sync/client.py` — renamed `STATUS_PENDING → STATUS_NO_CHANGE ("No Change")`, `STATUS_IN_PROGRESS → STATUS_ONGOING ("Ongoing")`; renamed `set_status_pending → set_status_no_change`; updated `clear_change_request` and `extract_change_status` fallback
+  - `backend/services/notion_sync/export.py` — updated `set_status_pending` call to `set_status_no_change`; fixed stale docstring
+  - `tests/services/test_notion_sync_import.py` — 6 new dedup tests + 3 status-rename tests; fixed pre-existing `"Name"` → `"Reactor #"` key bug in page-builder helpers; updated 2 existing tests for new behavior (49 total)
+  - `tests/services/test_notion_sync_client.py` — updated to new status constant names; fixed `"Name"` → `"Reactor #"` bug
+  - `tests/services/test_notion_sync_export.py` — fixed `"Name"` → `"Reactor #"` bug
+  - `tests/services/test_notion_sync_integration.py` — fixed `"Name"` → `"Reactor #"` bug
+  - `docs/NOTION_SYNC.md` — created: status table, dedup explanation, sync sequence, constants reference, deployment gate note, trigger endpoint path
+  - `migrate_deduplicate_change_requests.py` — one-time cleanup script for pre-existing duplicate DB rows (dry-run by default)
+- **Tests added:** yes — 9 new tests (6 dedup, 3 status rename); 49/49 passing
+- **Decision logged:** no
+- **Deployment gate:** status rename requires Notion select options (`"In Progress"` → `"Ongoing"`, `"Pending"` → `"No Change"`) to be updated **before** this is promoted to `main` and deployed
