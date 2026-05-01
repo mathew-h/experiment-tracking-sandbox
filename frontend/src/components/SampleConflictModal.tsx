@@ -3,10 +3,6 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui'
 import type { SampleConflict } from '@/api/bulkUploads'
 
-export type ConflictResolution =
-  | { action: 'link'; existingSampleId: string }
-  | { action: 'create' }
-
 export interface SampleConflictModalProps {
   open: boolean
   conflicts: SampleConflict[]
@@ -14,9 +10,6 @@ export interface SampleConflictModalProps {
   onCancel: () => void
 }
 
-/** Blocking modal shown when the ActLabs upload finds near-duplicate sample IDs.
- *  The user must resolve every conflict before the upload can proceed.
- */
 export function SampleConflictModal({ open, conflicts, onConfirm, onCancel }: SampleConflictModalProps) {
   const [choices, setChoices] = useState<Record<string, string>>({})
 
@@ -59,7 +52,7 @@ export function SampleConflictModal({ open, conflicts, onConfirm, onCancel }: Sa
           >
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-ink-primary">Incoming:</span>
-              <code className="text-sm font-mono bg-surface-secondary px-1 rounded text-amber-400">
+              <code className="text-sm font-mono bg-surface-secondary px-1 rounded text-status-warning">
                 {conflict.incoming_id}
               </code>
             </div>
