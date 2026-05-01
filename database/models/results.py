@@ -160,6 +160,15 @@ class ICPResults(Base):
     ru = Column(Float, nullable=True)   # Ruthenium
     os = Column(Float, nullable=True)   # Osmium
     tl = Column(Float, nullable=True)   # Thallium
+    ag = Column(Float, nullable=True)   # Silver
+    ce = Column(Float, nullable=True)   # Cerium
+    k = Column(Float, nullable=True)    # Potassium
+    la = Column(Float, nullable=True)   # Lanthanum
+    na = Column(Float, nullable=True)   # Sodium
+    pb = Column(Float, nullable=True)   # Lead
+    sc = Column(Float, nullable=True)   # Scandium
+    th = Column(Float, nullable=True)   # Thorium
+    v = Column(Float, nullable=True)    # Vanadium
 
     # JSON storage for all elements (including the fixed ones above for completeness)
     all_elements = Column(JSONB, nullable=True)  # e.g., {"fe": 125.0, "mg": 45.8, "ca": 12.3, "k": 8.9}

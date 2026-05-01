@@ -579,7 +579,16 @@ _VIEWS = [
             icp.pd   AS pd_ppm,
             icp.ru   AS ru_ppm,
             icp.os   AS os_ppm,
-            icp.tl   AS tl_ppm
+            icp.tl   AS tl_ppm,
+            icp.ag   AS ag_ppm,
+            icp.ce   AS ce_ppm,
+            icp.k    AS k_ppm,
+            icp.la   AS la_ppm,
+            icp.na   AS na_ppm,
+            icp.pb   AS pb_ppm,
+            icp.sc   AS sc_ppm,
+            icp.th   AS th_ppm,
+            icp.v    AS v_ppm
         FROM experimental_results er
         JOIN experiments e          ON e.id  = er.experiment_fk
         JOIN icp_results icp        ON icp.result_id = er.id
