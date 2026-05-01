@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import json
-from typing import Optional
+from typing import Optional, Union
 
 import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
@@ -491,7 +491,7 @@ async def upload_elemental_composition(
     )
 
 
-@router.post("/actlabs-rock", response_model=None)
+@router.post("/actlabs-rock", response_model=Union[UploadResponse, ConflictCheckResponse])
 async def upload_actlabs_rock(
     file: UploadFile = File(...),
     resolutions: Optional[str] = Form(None),
