@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Button, Badge, FileUpload, Spinner, useToast } from '@/components/ui'
-import { bulkUploadsApi, BulkUploadResult, TemplateType } from '@/api/bulkUploads'
+import { bulkUploadsApi, BulkUploadResult, ConflictCheckResult, TemplateType } from '@/api/bulkUploads'
 
 // ─── Minimal inline icons ────────────────────────────────────────────────────
 function IconChevron({ open }: { open: boolean }) {
@@ -49,7 +49,7 @@ export interface UploadRowProps {
   description: string
   helpText?: string
   accept: string
-  uploadFn: (file: File) => Promise<BulkUploadResult>
+  uploadFn: (file: File) => Promise<BulkUploadResult | ConflictCheckResult>
   templateType?: TemplateType
   /** Optional mode passed to the template download endpoint (e.g. 'experiment' for XRD) */
   templateMode?: string
@@ -61,6 +61,10 @@ export interface UploadRowProps {
   topContent?: React.ReactNode
   isOpen: boolean
   onToggle: () => void
+}
+
+function isBulkUploadResult(r: BulkUploadResult | ConflictCheckResult): r is BulkUploadResult {
+  return (r as ConflictCheckResult).status !== 'warnings'
 }
 
 /** Single row in the bulk upload table — file picker, upload trigger, and status display. */
@@ -78,7 +82,7 @@ export function UploadRow({
   isOpen,
   onToggle,
 }: UploadRowProps) {
-  const [result, setResult] = useState<BulkUploadResult | null>(null)
+  const [result, setResult] = useState<BulkUploadResult | ConflictCheckResult | null>(null)
   const [showAllErrors, setShowAllErrors] = useState(false)
   const [showAllWarnings, setShowAllWarnings] = useState(false)
   const { success, error: toastError } = useToast()
@@ -87,7 +91,11 @@ export function UploadRow({
     mutationFn: uploadFn,
     onSuccess: (data) => {
       setResult(data)
-      success(`Upload complete — ${data.created} created, ${data.updated} updated`)
+      if (isBulkUploadResult(data)) {
+        success(`Upload complete — ${data.created} created, ${data.updated} updated`)
+      } else {
+        success(data.message)
+      }
     },
     onError: (err: Error) => {
       toastError('Upload failed', err.message)
@@ -114,7 +122,7 @@ export function UploadRow({
 
   const isPending = uploadMutation.isPending || syncMutation.isPending
   const lastStatus = result
-    ? result.errors.length > 0 ? 'error' : 'success'
+    ? (isBulkUploadResult(result) && result.errors.length > 0) ? 'error' : 'success'
     : null
 
   return (
@@ -131,8 +139,8 @@ export function UploadRow({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {lastStatus === 'success' && <Badge variant="success">Uploaded</Badge>}
-          {lastStatus === 'error' && (
-            <Badge variant="error">{result!.errors.length} error{result!.errors.length !== 1 ? 's' : ''}</Badge>
+          {lastStatus === 'error' && result && isBulkUploadResult(result) && (
+            <Badge variant="error">{result.errors.length} error{result.errors.length !== 1 ? 's' : ''}</Badge>
           )}
           {isPending && <Spinner size="sm" />}
           <IconChevron open={isOpen} />
@@ -197,7 +205,7 @@ export function UploadRow({
           )}
 
           {/* ── Result summary ──────────────────────────────────────────── */}
-          {result && !isPending && (
+          {result && !isPending && isBulkUploadResult(result) && (
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="success">Created: {result.created}</Badge>
