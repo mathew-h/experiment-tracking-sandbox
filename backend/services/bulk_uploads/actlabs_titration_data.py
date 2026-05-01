@@ -10,10 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import Analyte, ElementalAnalysis, SampleInfo
 from database.models.analysis import ExternalAnalysis
-from backend.services.bulk_uploads._id_match import (
-    fuzzy_find_sample as _fuzzy_find_sample,
-    normalize_id as _normalize_sample_id_fn,
-)
+from backend.services.bulk_uploads._id_match import fuzzy_find_sample as _fuzzy_find_sample
 
 log = structlog.get_logger(__name__)
 
