@@ -488,3 +488,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 6 new tests; 6/6 passing
 - **Decision logged:** no
 - **Note:** Commits landed directly on `develop` (no topic branch). Migration must be run manually against the dev DB before deploying.
+
+## 2026-05-01 | inline — Add missing ICP element columns (Ag, Ce, K, La, Na, Pb, Sc, Th, V)
+- **Files changed:**
+  - `database/models/results.py` — added 9 Float columns to `ICPResults`: ag, ce, k, la, na, pb, sc, th, v
+  - `database/event_listeners.py` — extended `v_results_icp` view with 9 new `_ppm` aliases
+  - `alembic/versions/b2c3d4e5f6a7_...py` — additive migration; idempotent upgrade/downgrade
+- **Tests added:** no
+- **Decision logged:** no
+- **Note:** Committed directly to `develop` per user instruction. Migration applied to dev DB.
