@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import math
-import re
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -17,15 +16,6 @@ from backend.services.bulk_uploads._id_match import (
 )
 
 log = structlog.get_logger(__name__)
-
-
-def _normalize_sample_id(sample_id: str) -> str:
-    """Normalize a sample ID for fuzzy matching: lowercase, remove all non-alphanumeric characters.
-
-    Retained for backward compatibility with ElementalCompositionService callers.
-    New code should prefer _id_match.normalize_id.
-    """
-    return re.sub(r"[^a-z0-9]", "", sample_id.lower())
 
 
 def _resolve_sample(
