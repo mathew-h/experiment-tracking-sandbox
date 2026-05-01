@@ -66,7 +66,6 @@ export interface ResultWithFlags {
   h2_grams_per_ton_yield: number | null
   h2_micromoles: number | null
   gross_ammonium_concentration_mM: number | null
-  background_ammonium_concentration_mM: number | null
   final_conductivity_mS_cm: number | null
   final_ph: number | null
   scalar_measurement_date: string | null

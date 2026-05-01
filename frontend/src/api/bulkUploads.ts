@@ -10,6 +10,27 @@ export interface BulkUploadResult {
   message: string
 }
 
+export interface SampleConflictMatch {
+  sample_id: string
+  similarity: number
+}
+
+export interface SampleConflict {
+  incoming_id: string
+  normalized: string
+  candidate_matches: SampleConflictMatch[]
+}
+
+export interface ConflictCheckResult {
+  status: 'warnings'
+  conflicts: SampleConflict[]
+  message: string
+}
+
+export function isConflictCheckResult(r: BulkUploadResult | ConflictCheckResult): r is ConflictCheckResult {
+  return (r as ConflictCheckResult).status === 'warnings'
+}
+
 export interface NextIds {
   HPHT: number
   Serum: number
@@ -87,8 +108,11 @@ export const bulkUploadsApi = {
   },
 
   // Card 10 — ActLabs Rock Analysis
-  uploadActlabsRock: (file: File) =>
-    post<BulkUploadResult>('/bulk-uploads/actlabs-rock', fileForm(file)),
+  uploadActlabsRock: (file: File, resolutions?: Record<string, string>) => {
+    const fd = fileForm(file)
+    if (resolutions) fd.append('resolutions', JSON.stringify(resolutions))
+    return post<BulkUploadResult | ConflictCheckResult>('/bulk-uploads/actlabs-rock', fd)
+  },
 
   // Card 11 — Experiment Status Update
   uploadExperimentStatus: (file: File) =>

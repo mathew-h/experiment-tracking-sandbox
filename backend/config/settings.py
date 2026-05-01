@@ -1,6 +1,7 @@
 from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -70,6 +71,9 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
+
+    # ActLabs sample ID fuzzy matching threshold (0.0–1.0, default 0.90)
+    actlabs_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
 
     # Notion sync — reactor dashboard
     notion_token: str = ""

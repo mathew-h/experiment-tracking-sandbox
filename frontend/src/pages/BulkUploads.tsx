@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Select } from '@/components/ui'
 import { bulkUploadsApi, NextIds } from '@/api/bulkUploads'
 import { UploadRow } from './BulkUploadRow'
+import { ActlabsUploadRow } from './ActlabsUploadRow'
 
 // ─── Next-ID chips (New Experiments card) ────────────────────────────────────
 function NextIdChips({ data }: { data: NextIds | undefined }) {
@@ -288,13 +289,7 @@ export function BulkUploadsPage() {
         />
 
         {/* 10 — ActLabs Rock Analysis */}
-        <UploadRow
-          id="actlabs-rock"
-          title="ActLabs Rock Analysis"
-          description="Import ActLabs titration report (Excel or CSV)"
-          helpText="Accepts ActLabs standard report format. Row 3 = analyte symbols, Row 4 = units. Values like '<0.01', 'nd', 'na' are handled. Analytes are auto-created from file headers."
-          accept=".xlsx,.xls,.csv"
-          uploadFn={(file) => bulkUploadsApi.uploadActlabsRock(file)}
+        <ActlabsUploadRow
           isOpen={isOpen('actlabs-rock')}
           onToggle={() => toggle('actlabs-rock')}
         />

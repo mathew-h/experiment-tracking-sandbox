@@ -34,3 +34,60 @@ from backend.services.bulk_uploads._id_match import normalize_id
 def test_normalize_id(raw, expected):
     """normalize_id produces the expected canonical string for each input."""
     assert normalize_id(raw) == expected
+
+
+# ── find_similar_samples ──────────────────────────────────────────────────────
+
+from unittest.mock import MagicMock
+from backend.services.bulk_uploads._id_match import find_similar_samples
+from database import SampleInfo
+
+
+def _make_db(sample_ids: list[str]):
+    """Build a mock Session whose query().all() returns SampleInfo stubs."""
+    samples = [SampleInfo(sample_id=sid) for sid in sample_ids]
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None  # no exact match
+    db.query.return_value.all.return_value = samples
+    return db
+
+
+def test_find_similar_no_near_matches():
+    """Returns empty dict when no sample is similar enough."""
+    db = _make_db(["Granite", "Basalt"])
+    result = find_similar_samples(db, ["QRTZ9999"], threshold=0.90)
+    assert result == {}
+
+
+def test_find_similar_exact_normalized_excluded():
+    """Exact normalized match (auto-resolved) must NOT appear in conflicts."""
+    db = _make_db(["Tamarack"])
+    result = find_similar_samples(db, ["TAMARACK"], threshold=0.90)
+    assert "TAMARACK" not in result
+
+
+def test_find_similar_near_match_returned():
+    """Near-match above threshold is returned when no exact normalized match exists."""
+    db = _make_db(["Tamarack"])
+    result = find_similar_samples(db, ["Tamarrack"], threshold=0.85)
+    assert "Tamarrack" in result
+    assert len(result["Tamarrack"]) == 1
+    match = result["Tamarrack"][0]
+    assert match["sample_id"] == "Tamarack"
+    assert match["similarity"] >= 0.85
+
+
+def test_find_similar_sorted_by_similarity_desc():
+    """Candidates are sorted best-first."""
+    db = _make_db(["Tamarack", "Tamaraack"])
+    result = find_similar_samples(db, ["Tamarrack"], threshold=0.80)
+    assert "Tamarrack" in result
+    sims = [m["similarity"] for m in result["Tamarrack"]]
+    assert sims == sorted(sims, reverse=True)
+
+
+def test_find_similar_below_threshold_excluded():
+    """Candidates below threshold are excluded."""
+    db = _make_db(["ZZZ999"])
+    result = find_similar_samples(db, ["Tamarack"], threshold=0.90)
+    assert "Tamarack" not in result
