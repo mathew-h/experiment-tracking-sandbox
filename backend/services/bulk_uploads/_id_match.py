@@ -86,8 +86,8 @@ def find_similar_samples(
     """For each incoming_id with NO exact normalized match, return existing
     SampleInfo records whose normalized IDs score >= threshold via rapidfuzz WRatio.
 
-    IDs that resolve via fuzzy_find_sample (exact normalized match) are silently
-    excluded — they are auto-resolved by the caller, not conflicts.
+    IDs that have an exact normalized match are silently excluded — they are
+    auto-resolved by the caller, not conflicts.
 
     Returns dict mapping incoming_id -> sorted-desc list of SimilarSampleMatch.
     Only IDs with >= 1 candidate are included.
@@ -95,12 +95,18 @@ def find_similar_samples(
     from rapidfuzz.fuzz import WRatio  # noqa: PLC0415
 
     all_samples = db.query(SampleInfo).all()
+    # Build normalized lookup once to avoid N+1 full-table scans
+    norm_to_sample = {normalize_id(s.sample_id): s for s in all_samples}
+
     conflicts: dict[str, list[SimilarSampleMatch]] = {}
 
     for raw in incoming_ids:
-        if fuzzy_find_sample(db, raw) is not None:
-            continue  # exact normalized match — auto-resolved, not a conflict
+        # Skip IDs that have an exact normalized match (auto-resolved upstream)
+        if norm_to_sample.get(normalize_id(raw)) is not None:
+            continue
 
+        # Score remaining candidates using normalized strings so that
+        # punctuation/case differences are collapsed before comparison
         target = normalize_id(raw)
         candidates: list[SimilarSampleMatch] = []
         for s in all_samples:

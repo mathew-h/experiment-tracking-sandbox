@@ -39,7 +39,7 @@ def test_normalize_id(raw, expected):
 # ── find_similar_samples ──────────────────────────────────────────────────────
 
 from unittest.mock import MagicMock
-from backend.services.bulk_uploads._id_match import find_similar_samples, SimilarSampleMatch
+from backend.services.bulk_uploads._id_match import find_similar_samples
 from database import SampleInfo
 
 
@@ -61,22 +61,15 @@ def test_find_similar_no_near_matches():
 
 def test_find_similar_exact_normalized_excluded():
     """Exact normalized match (auto-resolved) must NOT appear in conflicts."""
-    # 'TAMARACK' normalizes same as 'Tamarack' → fuzzy_find_sample returns it
-    from unittest.mock import patch
     db = _make_db(["Tamarack"])
-    with patch("backend.services.bulk_uploads._id_match.fuzzy_find_sample") as mock_ffm:
-        mock_ffm.return_value = SampleInfo(sample_id="Tamarack")
-        result = find_similar_samples(db, ["TAMARACK"], threshold=0.90)
+    result = find_similar_samples(db, ["TAMARACK"], threshold=0.90)
     assert "TAMARACK" not in result
 
 
 def test_find_similar_near_match_returned():
     """Near-match above threshold is returned when no exact normalized match exists."""
-    from unittest.mock import patch
     db = _make_db(["Tamarack"])
-    with patch("backend.services.bulk_uploads._id_match.fuzzy_find_sample") as mock_ffm:
-        mock_ffm.return_value = None  # no exact normalized match
-        result = find_similar_samples(db, ["Tamarrack"], threshold=0.85)
+    result = find_similar_samples(db, ["Tamarrack"], threshold=0.85)
     assert "Tamarrack" in result
     assert len(result["Tamarrack"]) == 1
     match = result["Tamarrack"][0]
@@ -86,21 +79,15 @@ def test_find_similar_near_match_returned():
 
 def test_find_similar_sorted_by_similarity_desc():
     """Candidates are sorted best-first."""
-    from unittest.mock import patch
     db = _make_db(["Tamarack", "Tamaraack"])
-    with patch("backend.services.bulk_uploads._id_match.fuzzy_find_sample") as mock_ffm:
-        mock_ffm.return_value = None
-        result = find_similar_samples(db, ["Tamarrack"], threshold=0.80)
-    if "Tamarrack" in result:
-        sims = [m["similarity"] for m in result["Tamarrack"]]
-        assert sims == sorted(sims, reverse=True)
+    result = find_similar_samples(db, ["Tamarrack"], threshold=0.80)
+    assert "Tamarrack" in result
+    sims = [m["similarity"] for m in result["Tamarrack"]]
+    assert sims == sorted(sims, reverse=True)
 
 
 def test_find_similar_below_threshold_excluded():
     """Candidates below threshold are excluded."""
-    from unittest.mock import patch
     db = _make_db(["ZZZ999"])
-    with patch("backend.services.bulk_uploads._id_match.fuzzy_find_sample") as mock_ffm:
-        mock_ffm.return_value = None
-        result = find_similar_samples(db, ["Tamarack"], threshold=0.90)
+    result = find_similar_samples(db, ["Tamarack"], threshold=0.90)
     assert "Tamarack" not in result
