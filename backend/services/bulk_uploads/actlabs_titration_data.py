@@ -6,32 +6,52 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import structlog
 from sqlalchemy.orm import Session
 
 from database import Analyte, ElementalAnalysis, SampleInfo
 from database.models.analysis import ExternalAnalysis
+from backend.services.bulk_uploads._id_match import (
+    fuzzy_find_sample as _fuzzy_find_sample,
+    normalize_id as _normalize_sample_id_fn,
+)
+
+log = structlog.get_logger(__name__)
 
 
 def _normalize_sample_id(sample_id: str) -> str:
-    """Normalize a sample ID for fuzzy matching: lowercase, remove all non-alphanumeric characters."""
+    """Normalize a sample ID for fuzzy matching: lowercase, remove all non-alphanumeric characters.
+
+    Retained for backward compatibility with ElementalCompositionService callers.
+    New code should prefer _id_match.normalize_id.
+    """
     return re.sub(r"[^a-z0-9]", "", sample_id.lower())
 
 
-def _fuzzy_find_sample(db: Session, raw_sample_id: str) -> Optional[SampleInfo]:
-    """Find a SampleInfo by normalized sample_id (case-insensitive, symbols ignored).
+def _resolve_sample(
+    db: "Session",
+    sample_id: str,
+    resolutions: "Optional[dict[str, str]]",
+) -> "Optional[SampleInfo]":
+    """Resolve an incoming sample_id to a SampleInfo using an optional resolutions map.
 
-    Tries exact match first; falls back to normalizing both sides.
-    Returns the first match or None.
+    Resolution values:
+      "link:<existing_sample_id>" — use the named existing sample
+      "create"                    — create a new SampleInfo with this sample_id
+
+    Falls back to fuzzy_find_sample when no resolution is present.
     """
-    sample = db.query(SampleInfo).filter(SampleInfo.sample_id == raw_sample_id).first()
-    if sample:
-        return sample
-    normalized_input = _normalize_sample_id(raw_sample_id)
-    all_samples = db.query(SampleInfo).all()
-    for s in all_samples:
-        if _normalize_sample_id(s.sample_id) == normalized_input:
-            return s
-    return None
+    action = (resolutions or {}).get(sample_id)
+    if action and action.startswith("link:"):
+        existing_id = action[len("link:"):]
+        return db.query(SampleInfo).filter(SampleInfo.sample_id == existing_id).first()
+    if action == "create":
+        new_sample = SampleInfo(sample_id=sample_id)
+        db.add(new_sample)
+        db.flush()
+        log.info("actlabs_sample_created_from_resolution", sample_id=sample_id)
+        return new_sample
+    return _fuzzy_find_sample(db, sample_id)
 
 
 def _write_elemental_record(
@@ -443,7 +463,82 @@ class ActlabsRockTitrationService:
         return diags, warnings
 
     @classmethod
-    def import_excel(cls, db: Session, file_bytes: bytes, overwrite: bool = False) -> Tuple[int, int, int, List[str]]:
+    def preflight_check(
+        cls,
+        db: Session,
+        file_bytes: bytes,
+        threshold: float = 0.90,
+    ) -> "Tuple[List[dict], List[str]]":
+        """Parse sample IDs from the file without any DB writes.
+
+        Returns (conflicts, auto_resolved_log) where:
+        - conflicts: list of dicts with keys incoming_id, normalized, candidate_matches
+        - auto_resolved_log: human-readable strings for exact-normalized auto-resolutions
+
+        A conflict means: no exact normalized match exists, but >= 1 existing sample
+        scores above ``threshold`` via rapidfuzz WRatio.
+        """
+        from backend.services.bulk_uploads._id_match import (  # noqa: PLC0415
+            find_similar_samples, fuzzy_find_sample, normalize_id,
+        )
+
+        df_raw, read_err = cls._read_table(file_bytes)
+        if read_err or df_raw.empty:
+            return [], []
+
+        sample_id_col = cls._detect_sample_id_col(df_raw)
+        data_start = cls._find_data_start_index(df_raw)
+        data = df_raw.iloc[data_start:, :].reset_index(drop=True)
+
+        seen: set[str] = set()
+        unique_ids: list[str] = []
+        for i in range(len(data)):
+            raw = data.iat[i, sample_id_col]
+            if raw is None:
+                continue
+            sid = str(raw).strip()
+            try:
+                import pandas as pd  # noqa: PLC0415
+                if not sid or (isinstance(raw, float) and pd.isna(raw)):
+                    continue
+            except Exception:
+                pass
+            if sid and sid not in seen:
+                seen.add(sid)
+                unique_ids.append(sid)
+
+        # Auto-resolved: exact normalized match exists but ID differs in format
+        auto_log: list[str] = []
+        for sid in unique_ids:
+            match = fuzzy_find_sample(db, sid)
+            if match and match.sample_id != sid:
+                msg = f"auto-resolved '{sid}' → '{match.sample_id}'"
+                auto_log.append(msg)
+                log.info("actlabs_sample_auto_resolved", incoming=sid, resolved_to=match.sample_id)
+
+        # Conflicts: near-match but no exact normalized match
+        similar = find_similar_samples(db, unique_ids, threshold=threshold)
+        conflicts: list[dict] = []
+        for incoming_id, candidates in similar.items():
+            conflicts.append({
+                "incoming_id": incoming_id,
+                "normalized": normalize_id(incoming_id),
+                "candidate_matches": [
+                    {"sample_id": c["sample_id"], "similarity": c["similarity"]}
+                    for c in candidates
+                ],
+            })
+
+        return conflicts, auto_log
+
+    @classmethod
+    def import_excel(
+        cls,
+        db: Session,
+        file_bytes: bytes,
+        overwrite: bool = False,
+        resolutions: Optional[Dict[str, str]] = None,
+    ) -> Tuple[int, int, int, List[str]]:
         """
         Import ActLabs Excel to normalized tables.
         - Upserts analytes (last header wins for units)
@@ -479,6 +574,7 @@ class ActlabsRockTitrationService:
                     existing.unit = unit
             else:
                 db.add(Analyte(analyte_symbol=sym, unit=unit or "ppm"))
+        db.flush()  # ensure newly-added analytes have IDs before the preload query
 
         # Preload analyte ids
         all_analytes = db.query(Analyte).all()
@@ -510,8 +606,8 @@ class ActlabsRockTitrationService:
             sample_id = str(sid_raw).strip()
             if not sample_id:
                 continue
-            # ensure sample exists (fuzzy: case-insensitive, symbols stripped)
-            sample = _fuzzy_find_sample(db, sample_id)
+            # Resolve sample — uses resolutions map if provided, falls back to fuzzy match
+            sample = _resolve_sample(db, sample_id, resolutions)
             if not sample:
                 errors.append(f"Row {i+5}: sample_id '{sample_id}' not found")
                 continue
