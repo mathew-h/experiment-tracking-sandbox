@@ -72,14 +72,9 @@ def _backfill_cumulative_times(db: Session, dry_run: bool = False) -> dict:
     chains_skipped = 0
 
     for (base_id,) in base_ids:
-        # Extra safety: skip if base_id is None (should not happen due to isnot filter above)
-        if base_id is None:
-            chains_skipped += 1
-            continue
-
         anchor = (
             db.query(Experiment)
-            .filter(Experiment.base_experiment_id == base_id)
+            .filter(Experiment.experiment_id == base_id)
             .first()
         )
         if anchor is None:
@@ -97,7 +92,7 @@ def _backfill_cumulative_times(db: Session, dry_run: bool = False) -> dict:
     return {"chains_processed": chains_processed, "chains_skipped": chains_skipped}
 
 
-def run_migration(dry_run: bool = False) -> bool:
+def run_migration(dry_run: bool = False) -> None:
     db = SessionLocal()
     try:
         print("=" * 60)
@@ -111,7 +106,6 @@ def run_migration(dry_run: bool = False) -> bool:
         print(f"Chains processed:  {summary['chains_processed']}")
         print(f"Chains skipped:    {summary['chains_skipped']}")
         print("=" * 60)
-        return True
     except Exception:
         db.rollback()
         raise
