@@ -497,3 +497,22 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no
 - **Decision logged:** no
 - **Note:** Committed directly to `develop` per user instruction. Migration applied to dev DB.
+
+## 2026-05-01 | issue #50 — Fuzzy Sample ID Matching & Duplicate Warning for ActLabs Bulk Upload
+- **Files changed:**
+  - `requirements.txt` — added `rapidfuzz>=3.0.0`
+  - `backend/config/settings.py` — added `actlabs_similarity_threshold` (default 0.90, range 0.0–1.0)
+  - `backend/services/bulk_uploads/_id_match.py` — new: `SimilarSampleMatch` TypedDict, `find_similar_samples()` (preloads all samples, avoids N+1)
+  - `backend/api/schemas/bulk_upload.py` — added `SampleConflictMatch`, `SampleConflict`, `ConflictCheckResponse`
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — removed local `_normalize_sample_id`/`_fuzzy_find_sample`; added `_resolve_sample()`, `preflight_check()` class method, `resolutions` param on `import_excel`
+  - `backend/api/routers/bulk_uploads.py` — two-phase `upload_actlabs_rock` endpoint; Phase 1 returns `ConflictCheckResponse` on near-matches; Phase 2 accepts `resolutions` form field
+  - `frontend/src/api/bulkUploads.ts` — added `ConflictCheckResult`, `SampleConflict`, `SampleConflictMatch` interfaces; exported `isConflictCheckResult`; updated `uploadActlabsRock`
+  - `frontend/src/pages/BulkUploadRow.tsx` — widened `uploadFn` return type; added `onUploadError` prop
+  - `frontend/src/components/SampleConflictModal.tsx` — new: blocking conflict resolution modal
+  - `frontend/src/pages/ActlabsUploadRow.tsx` — new: wraps `UploadRow` with Phase 1 intercept, modal, and Phase 2 confirm mutation
+  - `frontend/src/pages/BulkUploads.tsx` — replaced bare `UploadRow` for card 10 with `ActlabsUploadRow`
+  - `tests/services/bulk_uploads/test_id_match.py` — 5 unit tests for `find_similar_samples`
+  - `tests/services/bulk_uploads/test_actlabs_conflicts.py` — 7 tests for preflight + resolution logic
+  - `tests/api/test_bulk_uploads.py` — 3 endpoint tests for two-phase flow
+- **Tests added:** yes — 15 new tests (94 total, all pass)
+- **Decision logged:** no
