@@ -445,6 +445,87 @@ def test_xrd_template_experiment_mode(client):
     assert "spreadsheetml" in resp.headers.get("content-type", "")
 
 
+# ── Issue #50: ActLabs conflict response ─────────────────────────────────────
+
+import json
+from unittest.mock import patch
+
+
+def _actlabs_csv_bytes():
+    import io, pandas as pd
+    rows = [
+        ["Report Number", "", ""], ["Report Date", "", ""],
+        ["Sample ID", "FeO", "SiO2"], ["", "%", "%"],
+        ["Detection Limit", "0.01", "0.01"],
+        ["Analysis Method: titration", "", ""],
+        ["Tamarrack", 10.0, 40.0],
+    ]
+    df = pd.DataFrame(rows)
+    buf = io.BytesIO()
+    df.to_csv(buf, header=False, index=False)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def test_actlabs_rock_returns_conflict_warning(client):
+    """When conflicts exist and no resolutions provided, returns 200 with status='warnings'."""
+    conflict_payload = [{"incoming_id": "Tamarrack", "normalized": "tamarrack",
+                         "candidate_matches": [{"sample_id": "Tamarack", "similarity": 0.95}]}]
+    with patch(
+        "backend.api.routers.bulk_uploads.ActlabsRockTitrationService.preflight_check",
+        return_value=(conflict_payload, []),
+    ):
+        resp = client.post(
+            "/api/bulk-uploads/actlabs-rock",
+            files={"file": ("test.csv", _actlabs_csv_bytes(), "text/csv")},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "warnings"
+    assert len(body["conflicts"]) == 1
+    assert body["conflicts"][0]["incoming_id"] == "Tamarrack"
+
+
+def test_actlabs_rock_no_conflicts_proceeds_normally(client):
+    """When no conflicts, the upload executes and returns UploadResponse."""
+    with patch(
+        "backend.api.routers.bulk_uploads.ActlabsRockTitrationService.preflight_check",
+        return_value=([], []),
+    ), patch(
+        "backend.api.routers.bulk_uploads.ActlabsRockTitrationService.import_excel",
+        return_value=(2, 0, 0, []),
+    ):
+        resp = client.post(
+            "/api/bulk-uploads/actlabs-rock",
+            files={"file": ("test.csv", _actlabs_csv_bytes(), "text/csv")},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "created" in body
+    assert body["created"] == 2
+
+
+def test_actlabs_rock_with_resolutions_proceeds(client):
+    """When resolutions are provided, import_excel is called with them (no preflight check)."""
+    resolutions = {"Tamarrack": "link:Tamarack"}
+    with patch(
+        "backend.api.routers.bulk_uploads.ActlabsRockTitrationService.import_excel",
+        return_value=(1, 0, 0, []),
+    ) as mock_import:
+        resp = client.post(
+            "/api/bulk-uploads/actlabs-rock",
+            files={"file": ("test.csv", _actlabs_csv_bytes(), "text/csv")},
+            data={"resolutions": json.dumps(resolutions)},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "created" in body
+    call_kwargs = mock_import.call_args
+    assert call_kwargs.kwargs.get("resolutions") == resolutions or (
+        len(call_kwargs.args) >= 4 and call_kwargs.args[3] == resolutions
+    )
+
+
 # ---------------------------------------------------------------------------
 # D1: AppConfig model upsert
 # ---------------------------------------------------------------------------

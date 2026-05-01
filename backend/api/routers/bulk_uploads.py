@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from typing import Optional
 
 import structlog
@@ -10,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
-from backend.api.schemas.bulk_upload import UploadResponse
+from backend.api.schemas.bulk_upload import UploadResponse, ConflictCheckResponse, SampleConflict, SampleConflictMatch
+from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
+from backend.config.settings import get_settings
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/bulk-uploads", tags=["bulk-uploads"])
@@ -488,23 +491,79 @@ async def upload_elemental_composition(
     )
 
 
-@router.post("/actlabs-rock", response_model=UploadResponse)
+@router.post("/actlabs-rock", response_model=None)
 async def upload_actlabs_rock(
     file: UploadFile = File(...),
+    resolutions: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> UploadResponse:
-    """Upload an ActLabs Rock Analysis file (titration report)."""
-    from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService  # noqa: PLC0415
+):
+    """Upload an ActLabs Rock Analysis file.
+
+    Phase 1 (no resolutions): runs preflight; if conflicts found, returns
+    ConflictCheckResponse without writing anything.
+
+    Phase 2 (resolutions provided as JSON string): executes import with
+    caller-supplied conflict resolutions.
+    """
     file_bytes = await file.read()
+
+    # Phase 2: caller has already resolved conflicts
+    if resolutions is not None:
+        try:
+            resolution_map: dict[str, str] = json.loads(resolutions)
+        except (json.JSONDecodeError, ValueError) as exc:
+            return UploadResponse(created=0, updated=0, skipped=0, errors=[f"Invalid resolutions JSON: {exc}"], message="Upload failed")
+        try:
+            created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
+                db, file_bytes, resolutions=resolution_map
+            )
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            log.error("actlabs_rock_upload_failed", error=str(exc))
+            return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
+        return UploadResponse(
+            created=created, updated=updated, skipped=skipped, errors=errors,
+            message=f"ActLabs Rock: {created} created, {updated} updated",
+        )
+
+    # Phase 1: preflight conflict check
+    settings = get_settings()
+    try:
+        conflicts_raw, auto_log = ActlabsRockTitrationService.preflight_check(
+            db, file_bytes, threshold=settings.actlabs_similarity_threshold
+        )
+    except Exception as exc:
+        log.error("actlabs_rock_preflight_failed", error=str(exc))
+        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Preflight failed")
+
+    if conflicts_raw:
+        response_conflicts = [
+            SampleConflict(
+                incoming_id=c["incoming_id"],
+                normalized=c["normalized"],
+                candidate_matches=[
+                    SampleConflictMatch(sample_id=m["sample_id"], similarity=m["similarity"])
+                    for m in c["candidate_matches"]
+                ],
+            )
+            for c in conflicts_raw
+        ]
+        return ConflictCheckResponse(
+            status="warnings",
+            conflicts=response_conflicts,
+            message=f"{len(response_conflicts)} incoming sample ID(s) closely match existing samples. Review before confirming.",
+        )
+
+    # No conflicts — proceed with import
     try:
         created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(db, file_bytes)
         db.commit()
     except Exception as exc:
         db.rollback()
         log.error("actlabs_rock_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=f"ActLabs Rock: {created} created, {updated} updated",
