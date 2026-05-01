@@ -480,3 +480,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 9 new tests (6 dedup, 3 status rename); 49/49 passing
 - **Decision logged:** no
 - **Deployment gate:** status rename requires Notion select options (`"In Progress"` → `"Ongoing"`, `"Pending"` → `"No Change"`) to be updated **before** this is promoted to `main` and deployed
+
+## 2026-05-01 | inline — Backfill cumulative_time_post_reaction_days after lineage fix
+- **Files changed:**
+  - `database/data_migrations/recalculate_cumulative_times_014.py` — new one-time data migration; `_backfill_cumulative_times()` calls `update_cumulative_times_for_chain()` once per unique `base_experiment_id` chain
+  - `tests/data_migrations/test_recalculate_cumulative_times_014.py` — 6 tests covering standalone, single derivation, multi-result parent (max offset), two-deep chain, null time, and no-results edge cases
+- **Tests added:** yes — 6 new tests; 6/6 passing
+- **Decision logged:** no
+- **Note:** Commits landed directly on `develop` (no topic branch). Migration must be run manually against the dev DB before deploying.
