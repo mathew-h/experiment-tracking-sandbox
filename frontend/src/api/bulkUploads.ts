@@ -27,6 +27,10 @@ export interface ConflictCheckResult {
   message: string
 }
 
+export function isConflictCheckResult(r: BulkUploadResult | ConflictCheckResult): r is ConflictCheckResult {
+  return (r as ConflictCheckResult).status === 'warnings'
+}
+
 export interface NextIds {
   HPHT: number
   Serum: number

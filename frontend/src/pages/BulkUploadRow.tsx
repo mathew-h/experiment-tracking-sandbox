@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Button, Badge, FileUpload, Spinner, useToast } from '@/components/ui'
-import { bulkUploadsApi, BulkUploadResult, ConflictCheckResult, TemplateType } from '@/api/bulkUploads'
+import { bulkUploadsApi, BulkUploadResult, ConflictCheckResult, isConflictCheckResult, TemplateType } from '@/api/bulkUploads'
 
 // ─── Minimal inline icons ────────────────────────────────────────────────────
 function IconChevron({ open }: { open: boolean }) {
@@ -64,8 +64,11 @@ export interface UploadRowProps {
 }
 
 function isBulkUploadResult(r: BulkUploadResult | ConflictCheckResult): r is BulkUploadResult {
-  return (r as ConflictCheckResult).status !== 'warnings'
+  return !isConflictCheckResult(r)
 }
+// Note: if a ConflictCheckResult lands here (uploadFn returns warnings without interception),
+// the result summary panel is skipped and onSuccess shows data.message in the toast.
+// ActlabsUploadRow prevents this by intercepting conflict responses before onSuccess fires.
 
 /** Single row in the bulk upload table — file picker, upload trigger, and status display. */
 export function UploadRow({
