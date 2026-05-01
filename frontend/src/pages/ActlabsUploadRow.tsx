@@ -13,11 +13,19 @@ interface ActlabsUploadRowProps {
 export function ActlabsUploadRow({ isOpen, onToggle }: ActlabsUploadRowProps) {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [conflicts, setConflicts] = useState<ConflictCheckResult['conflicts'] | null>(null)
-  const { error: toastError } = useToast()
+  const { success, error: toastError } = useToast()
 
   const confirmMutation = useMutation({
     mutationFn: ({ file, resolutions }: { file: File; resolutions: Record<string, string> }) =>
       bulkUploadsApi.uploadActlabsRock(file, resolutions) as Promise<BulkUploadResult>,
+    onSuccess: (data) => {
+      success(`Upload complete — ${data.created} created, ${data.updated} updated`)
+      setPendingFile(null)
+    },
+    onError: (err: Error) => {
+      toastError('Upload failed', err.message)
+      setPendingFile(null)
+    },
   })
 
   const uploadFn = async (file: File): Promise<BulkUploadResult> => {
@@ -31,15 +39,10 @@ export function ActlabsUploadRow({ isOpen, onToggle }: ActlabsUploadRowProps) {
     return result as BulkUploadResult
   }
 
-  const handleConflictConfirm = async (resolutions: Record<string, string>) => {
+  const handleConflictConfirm = (resolutions: Record<string, string>) => {
     if (!pendingFile) return
     setConflicts(null)
-    try {
-      await confirmMutation.mutateAsync({ file: pendingFile, resolutions })
-    } catch (err) {
-      toastError('Upload failed', (err as Error).message)
-    }
-    setPendingFile(null)
+    confirmMutation.mutate({ file: pendingFile, resolutions })
   }
 
   const handleConflictCancel = () => {
@@ -56,6 +59,9 @@ export function ActlabsUploadRow({ isOpen, onToggle }: ActlabsUploadRowProps) {
         helpText="Accepts ActLabs standard report format. Row 3 = analyte symbols, Row 4 = units. Values like '<0.01', 'nd', 'na' are handled. Analytes are auto-created from file headers."
         accept=".xlsx,.xls,.csv"
         uploadFn={uploadFn}
+        onUploadError={(err) => {
+          if (err.message !== '__conflicts__') toastError('Upload failed', err.message)
+        }}
         isOpen={isOpen}
         onToggle={onToggle}
       />

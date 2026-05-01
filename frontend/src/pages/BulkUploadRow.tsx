@@ -59,6 +59,8 @@ export interface UploadRowProps {
   skippedMessage?: string
   /** Optional content rendered inside the expanded panel (chips, extra fields, etc.) */
   topContent?: React.ReactNode
+  /** Override upload error handling; defaults to toastError('Upload failed', err.message) */
+  onUploadError?: (err: Error) => void
   isOpen: boolean
   onToggle: () => void
 }
@@ -82,6 +84,7 @@ export function UploadRow({
   syncFn,
   skippedMessage,
   topContent,
+  onUploadError,
   isOpen,
   onToggle,
 }: UploadRowProps) {
@@ -101,7 +104,8 @@ export function UploadRow({
       }
     },
     onError: (err: Error) => {
-      toastError('Upload failed', err.message)
+      if (onUploadError) onUploadError(err)
+      else toastError('Upload failed', err.message)
     },
   })
 
