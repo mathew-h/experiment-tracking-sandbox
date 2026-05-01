@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
 
+    # ActLabs sample ID fuzzy matching threshold (0.0–1.0, default 0.90)
+    actlabs_similarity_threshold: float = 0.90
+
     # Notion sync — reactor dashboard
     notion_token: str = ""
     notion_database_id: str = ""

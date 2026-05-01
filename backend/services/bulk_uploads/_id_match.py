@@ -21,7 +21,7 @@ only needed when the file's ID format differs from the stored one.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Optional, TypedDict
 
 from sqlalchemy.orm import Session
 
@@ -71,3 +71,44 @@ def fuzzy_find_experiment(db: Session, raw_id: str) -> Optional[Experiment]:
         if normalize_id(e.experiment_id) == target:
             return e
     return None
+
+
+class SimilarSampleMatch(TypedDict):
+    sample_id: str
+    similarity: float  # 0.0–1.0
+
+
+def find_similar_samples(
+    db: Session,
+    incoming_ids: list[str],
+    threshold: float = 0.90,
+) -> dict[str, list[SimilarSampleMatch]]:
+    """For each incoming_id with NO exact normalized match, return existing
+    SampleInfo records whose normalized IDs score >= threshold via rapidfuzz WRatio.
+
+    IDs that resolve via fuzzy_find_sample (exact normalized match) are silently
+    excluded — they are auto-resolved by the caller, not conflicts.
+
+    Returns dict mapping incoming_id -> sorted-desc list of SimilarSampleMatch.
+    Only IDs with >= 1 candidate are included.
+    """
+    from rapidfuzz.fuzz import WRatio  # noqa: PLC0415
+
+    all_samples = db.query(SampleInfo).all()
+    conflicts: dict[str, list[SimilarSampleMatch]] = {}
+
+    for raw in incoming_ids:
+        if fuzzy_find_sample(db, raw) is not None:
+            continue  # exact normalized match — auto-resolved, not a conflict
+
+        target = normalize_id(raw)
+        candidates: list[SimilarSampleMatch] = []
+        for s in all_samples:
+            score = WRatio(target, normalize_id(s.sample_id)) / 100.0
+            if score >= threshold:
+                candidates.append(SimilarSampleMatch(sample_id=s.sample_id, similarity=round(score, 4)))
+
+        if candidates:
+            conflicts[raw] = sorted(candidates, key=lambda c: c["similarity"], reverse=True)
+
+    return conflicts

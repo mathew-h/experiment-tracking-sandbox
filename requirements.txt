@@ -86,4 +86,5 @@ pydantic==2.10.4
 pydantic-settings==2.6.1
 python-multipart==0.0.9
 notion-client>=2.2.1,<2.3
+rapidfuzz>=3.0.0
 
