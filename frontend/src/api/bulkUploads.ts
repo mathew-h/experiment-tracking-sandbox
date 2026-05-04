@@ -70,8 +70,11 @@ export const bulkUploadsApi = {
     post<BulkUploadResult>('/bulk-uploads/master-results', fileForm(file)),
 
   // Card 2 — ICP-OES Data
-  uploadIcpOes: (file: File) =>
-    post<BulkUploadResult>('/bulk-uploads/icp-oes', fileForm(file)),
+  uploadIcpOes: (file: File, overwrite = false) => {
+    const fd = fileForm(file)
+    fd.append('overwrite', overwrite ? 'true' : 'false')
+    return post<BulkUploadResult>('/bulk-uploads/icp-oes', fd)
+  },
 
   // Card 3 — XRD Mineralogy (auto-detects Aeris, ActLabs, or Experiment+Timepoint)
   uploadXrdMineralogy: (file: File, overwrite = false) => {
