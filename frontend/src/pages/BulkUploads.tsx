@@ -123,6 +123,43 @@ function XrdOverwriteToggle({
   )
 }
 
+// ─── ICP overwrite toggle ─────────────────────────────────────────────────────
+function IcpOverwriteToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          className="w-3.5 h-3.5 rounded accent-red-500"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span className="text-xs text-ink-secondary">
+          Replace existing ICP data for matching experiment / timepoint
+        </span>
+      </label>
+      {checked ? (
+        <p className="text-xs text-amber-400 leading-relaxed pl-5">
+          Existing ICP elemental data for any matching experiment and timepoint in this file
+          will be deleted and replaced with the values from this upload.
+        </p>
+      ) : (
+        <p className="text-xs text-ink-muted leading-relaxed pl-5">
+          Existing ICP data for the same experiment and timepoint will be updated by
+          merging — new elements are added and existing element values are overwritten,
+          but elements absent from this file are preserved.
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 /** Bulk data upload page: one row per upload type with template download and status feedback. */
 export function BulkUploadsPage() {
@@ -130,6 +167,7 @@ export function BulkUploadsPage() {
   const [elemDefaultUnit, setElemDefaultUnit] = useState('ppm')
   const [xrdMode, setXrdMode] = useState<XrdMode>('sample')
   const [xrdOverwrite, setXrdOverwrite] = useState(false)
+  const [icpOverwrite, setIcpOverwrite] = useState(false)
 
   const toggle = (id: string) => setOpenRow((prev) => (prev === id ? null : id))
   const isOpen = (id: string) => openRow === id
@@ -172,7 +210,8 @@ export function BulkUploadsPage() {
           description="Upload ICP-OES elemental analysis CSV"
           helpText="Instrument CSV export from the ICP-OES. Multi-element, multi-timepoint files supported. Blank rows are filtered. Duplicate spectral lines resolved by best intensity."
           accept=".csv"
-          uploadFn={(file) => bulkUploadsApi.uploadIcpOes(file)}
+          uploadFn={(file) => bulkUploadsApi.uploadIcpOes(file, icpOverwrite)}
+          topContent={<IcpOverwriteToggle checked={icpOverwrite} onChange={setIcpOverwrite} />}
           isOpen={isOpen('icp-oes')}
           onToggle={() => toggle('icp-oes')}
         />
