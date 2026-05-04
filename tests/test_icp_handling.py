@@ -674,6 +674,9 @@ class TestICPOverwrite:
         assert result.icp_data is not None
         assert result.icp_data.fe == 99.0
         assert result.icp_data.ni is None       # not preserved
+        # all_elements JSON should also not contain ni from the first upload
+        all_el = result.icp_data.all_elements or {}
+        assert 'ni' not in all_el
 
     def test_overwrite_true_no_existing_data_creates_normally(self, test_db):
         """Overwrite with no prior ICP data behaves like a normal insert."""
@@ -734,15 +737,19 @@ class TestICPRouterOverwrite:
             lambda _: ([], []),
         )
 
-        client = TestClient(app, raise_server_exceptions=False)
-        csv_bytes = b'Label,Element Label,Concentration\n'
-        response = client.post(
-            '/api/bulk-uploads/icp-oes',
-            data={'overwrite': 'true'},
-            files={'file': ('test.csv', csv_bytes, 'text/csv')},
-        )
-        assert len(calls) == 1, "bulk_create_icp_results was not called — overwrite flag not forwarded"
-        assert calls[0] is True
+        try:
+            client = TestClient(app, raise_server_exceptions=False)
+            csv_bytes = b'Label,Element Label,Concentration\n'
+            response = client.post(
+                '/api/bulk-uploads/icp-oes',
+                data={'overwrite': 'true'},
+                files={'file': ('test.csv', csv_bytes, 'text/csv')},
+            )
+            assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+            assert len(calls) == 1, "bulk_create_icp_results was not called — overwrite flag not forwarded"
+            assert calls[0] is True
+        finally:
+            app.dependency_overrides.clear()
 
 
 if __name__ == "__main__":
