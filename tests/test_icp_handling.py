@@ -650,6 +650,12 @@ class TestICPOverwrite:
               'description': 'Day 3', 'fe': 10.0, 'ni': 2.0}],
             overwrite=False,
         )
+        # Capture the parent ExperimentalResults id before overwrite
+        experiment = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
+        result_id_before = test_db.query(ExperimentalResults).filter_by(
+            experiment_fk=experiment.id,
+        ).first().id
+
         # Second upload with overwrite: fe only (ni should disappear)
         results, updated, errors = ICPService.bulk_create_icp_results(
             test_db,
@@ -664,6 +670,7 @@ class TestICPOverwrite:
         result = test_db.query(ExperimentalResults).filter_by(
             experiment_fk=experiment.id,
         ).first()
+        assert result.id == result_id_before   # parent row was NOT replaced
         assert result.icp_data is not None
         assert result.icp_data.fe == 99.0
         assert result.icp_data.ni is None       # not preserved
