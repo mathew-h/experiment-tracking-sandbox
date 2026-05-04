@@ -699,6 +699,26 @@ class TestICPRouterOverwrite:
 
     def test_router_passes_overwrite_flag(self, monkeypatch):
         """upload_icp_oes forwards overwrite=True to bulk_create_icp_results."""
+        from backend.auth.firebase_auth import FirebaseUser
+        import sys
+        from types import ModuleType
+
+        # Stub frontend.config.variable_config before importing app
+        if 'frontend.config.variable_config' not in sys.modules:
+            stub = ModuleType('frontend.config.variable_config')
+            sys.modules.setdefault('frontend', ModuleType('frontend'))
+            sys.modules.setdefault('frontend.config', ModuleType('frontend.config'))
+            sys.modules['frontend.config.variable_config'] = stub
+
+        from fastapi.testclient import TestClient
+        from backend.api.main import app
+
+        # Patch auth dependency on the app before creating the client
+        def mock_auth():
+            return FirebaseUser(uid='test-uid', email='test@addisenergy.com')
+
+        app.dependency_overrides[__import__('backend.auth.firebase_auth', fromlist=['verify_firebase_token']).verify_firebase_token] = mock_auth
+
         calls: list[bool] = []
 
         def fake_bulk_create(db, data, overwrite=False):
@@ -714,17 +734,6 @@ class TestICPRouterOverwrite:
             lambda _: ([], []),
         )
 
-        import sys
-        from types import ModuleType
-        if 'frontend.config.variable_config' not in sys.modules:
-            stub = ModuleType('frontend.config.variable_config')
-            sys.modules.setdefault('frontend', ModuleType('frontend'))
-            sys.modules.setdefault('frontend.config', ModuleType('frontend.config'))
-            sys.modules['frontend.config.variable_config'] = stub
-
-        from fastapi.testclient import TestClient
-        from backend.api.main import app
-
         client = TestClient(app, raise_server_exceptions=False)
         csv_bytes = b'Label,Element Label,Concentration\n'
         response = client.post(
@@ -732,9 +741,8 @@ class TestICPRouterOverwrite:
             data={'overwrite': 'true'},
             files={'file': ('test.csv', csv_bytes, 'text/csv')},
         )
-        # Auth may 401 in test env; we only care that overwrite was forwarded if the call made it through
-        if calls:
-            assert calls[0] is True
+        assert len(calls) == 1, "bulk_create_icp_results was not called — overwrite flag not forwarded"
+        assert calls[0] is True
 
 
 if __name__ == "__main__":
