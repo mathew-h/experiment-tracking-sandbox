@@ -297,10 +297,15 @@ async def upload_master_results(
 @router.post("/icp-oes", response_model=UploadResponse)
 async def upload_icp_oes(
     file: UploadFile = File(...),
+    overwrite: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Upload an ICP-OES CSV file and ingest elemental data."""
+    """Upload an ICP-OES CSV file and ingest elemental data.
+
+    When overwrite=True, existing ICPResults for each matching (experiment, timepoint)
+    are deleted before new data is inserted rather than merged.
+    """
     import sys  # noqa: PLC0415
     from types import ModuleType  # noqa: PLC0415
     if "frontend.config.variable_config" not in sys.modules:
@@ -322,7 +327,9 @@ async def upload_icp_oes(
         if parse_errors and not processed_data:
             return UploadResponse(created=0, updated=0, skipped=0, errors=parse_errors,
                                   message="ICP parse failed")
-        created_rows, updated_count, ingest_errors = ICPService.bulk_create_icp_results(db, processed_data)
+        created_rows, updated_count, ingest_errors = ICPService.bulk_create_icp_results(
+            db, processed_data, overwrite=overwrite
+        )
         all_errors = parse_errors + ingest_errors
         db.commit()
     except Exception as exc:
