@@ -428,20 +428,29 @@ class ICPService:
         return symbol_mapping.get(clean_symbol, clean_symbol)
     
     @staticmethod
-    def create_icp_result(db: Session, experiment_id: str, result_data: Dict[str, Any]) -> Tuple[Optional[ExperimentalResults], bool]:
+    def create_icp_result(
+        db: Session,
+        experiment_id: str,
+        result_data: Dict[str, Any],
+        overwrite: bool = False,
+    ) -> Tuple[Optional[ExperimentalResults], bool]:
         """
         Create an experimental result with ICP elemental analysis data.
         Uses unique result tracking improvements to allow multiple data types per time point.
-        
+
         Args:
             db: Database session
             experiment_id: String experiment ID
             result_data: Dictionary containing result data fields and elemental concentrations
-            
+            overwrite: If True, delete existing ICPResults before inserting fresh data
+                       (replaces all elements rather than merging). The parent
+                       ExperimentalResults row is always preserved.
+
         Returns:
             Tuple of (ExperimentalResults object, was_update: bool)
-            was_update is True if existing ICP data was updated, False if new data was created
-            
+            was_update is True if existing ICP data was updated (merged), False if new
+            data was created (including when overwrite=True deletes and re-creates).
+
         Raises:
             ValueError: If experiment not found
         """
@@ -484,6 +493,13 @@ class ICPService:
                 all_elements_data[key] = value  # Store additional elements in JSON only
 
         was_update = False
+        if overwrite and experimental_result.icp_data:
+            # Delete existing ICPResults so the creation branch runs fresh.
+            # The parent ExperimentalResults row is preserved.
+            db.delete(experimental_result.icp_data)
+            db.flush()
+            db.expire(experimental_result)
+
         if experimental_result.icp_data:
             # Update existing ICP record for this result row.
             # Only overwrite elements present in incoming CSV; preserve others.
@@ -604,13 +620,19 @@ class ICPService:
         return experimental_result, was_update
     
     @staticmethod
-    def bulk_create_icp_results(db: Session, processed_data: List[Dict[str, Any]]) -> Tuple[List[ExperimentalResults], int, List[str]]:
+    def bulk_create_icp_results(
+        db: Session,
+        processed_data: List[Dict[str, Any]],
+        overwrite: bool = False,
+    ) -> Tuple[List[ExperimentalResults], int, List[str]]:
         """
         Bulk create ICP results with validation and error collection.
 
         Args:
             db: Database session
             processed_data: List of processed ICP data dictionaries
+            overwrite: If True, delete existing ICPResults before inserting fresh data
+                       for each row (replaces all elements rather than merging).
 
         Returns:
             Tuple of (successful_results, updated_count, error_messages)
@@ -639,7 +661,8 @@ class ICPService:
                 result, was_update = ICPService.create_icp_result(
                     db=db,
                     experiment_id=experiment_id,
-                    result_data=data
+                    result_data=data,
+                    overwrite=overwrite,
                 )
 
                 if result:

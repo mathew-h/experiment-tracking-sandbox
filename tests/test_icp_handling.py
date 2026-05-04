@@ -18,6 +18,15 @@ from datetime import datetime
 @pytest.fixture
 def test_db():
     """Create an in-memory SQLite database for testing."""
+    from sqlalchemy import JSON
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    # SQLite does not support JSONB; swap to JSON before creating tables.
+    for table in Base.metadata.tables.values():
+        for col in table.columns:
+            if isinstance(col.type, JSONB):
+                col.type = JSON()
+
     engine = create_engine("sqlite:///:memory:", echo=False)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -602,6 +611,80 @@ Test_MH_001_Day3_5x,Fe 238.204,20.0,1800,SAMP
         assert icp_result is not None
         assert icp_result.nd == 32.0  # Preserved from File A (3.2 * 10 dilution)
         assert icp_result.fe == 100.0  # 20.0 * 5 dilution from File B
+
+
+class TestICPOverwrite:
+    """Test overwrite=True replaces existing ICP data instead of merging."""
+
+    def test_overwrite_false_merges_elements(self, test_db):
+        """Without overwrite, re-upload adds new elements but keeps old ones."""
+        # First upload: fe + ni
+        ICPService.bulk_create_icp_results(
+            test_db,
+            [{'experiment_id': 'Test_MH_001', 'time_post_reaction': 3.0,
+              'description': 'Day 3', 'fe': 10.0, 'ni': 2.0}],
+            overwrite=False,
+        )
+        # Second upload: fe only (no ni)
+        ICPService.bulk_create_icp_results(
+            test_db,
+            [{'experiment_id': 'Test_MH_001', 'time_post_reaction': 3.0,
+              'description': 'Day 3', 'fe': 99.0}],
+            overwrite=False,
+        )
+        test_db.expire_all()
+        experiment = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
+        result = test_db.query(ExperimentalResults).filter_by(
+            experiment_fk=experiment.id,
+        ).first()
+        assert result.icp_data is not None
+        assert result.icp_data.fe == 99.0       # updated
+        assert result.icp_data.ni == 2.0        # preserved
+
+    def test_overwrite_true_replaces_all_elements(self, test_db):
+        """With overwrite=True, re-upload discards old elements and inserts fresh."""
+        # First upload: fe + ni
+        ICPService.bulk_create_icp_results(
+            test_db,
+            [{'experiment_id': 'Test_MH_001', 'time_post_reaction': 3.0,
+              'description': 'Day 3', 'fe': 10.0, 'ni': 2.0}],
+            overwrite=False,
+        )
+        # Second upload with overwrite: fe only (ni should disappear)
+        results, updated, errors = ICPService.bulk_create_icp_results(
+            test_db,
+            [{'experiment_id': 'Test_MH_001', 'time_post_reaction': 3.0,
+              'description': 'Day 3', 'fe': 99.0}],
+            overwrite=True,
+        )
+        assert errors == []
+        assert updated == 0           # replaced rows count as "created", not "updated"
+        test_db.expire_all()
+        experiment = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
+        result = test_db.query(ExperimentalResults).filter_by(
+            experiment_fk=experiment.id,
+        ).first()
+        assert result.icp_data is not None
+        assert result.icp_data.fe == 99.0
+        assert result.icp_data.ni is None       # not preserved
+
+    def test_overwrite_true_no_existing_data_creates_normally(self, test_db):
+        """Overwrite with no prior ICP data behaves like a normal insert."""
+        results, updated, errors = ICPService.bulk_create_icp_results(
+            test_db,
+            [{'experiment_id': 'Test_MH_001', 'time_post_reaction': 3.0,
+              'description': 'Day 3', 'fe': 50.0}],
+            overwrite=True,
+        )
+        assert errors == []
+        assert updated == 0
+        test_db.expire_all()
+        experiment = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
+        result = test_db.query(ExperimentalResults).filter_by(
+            experiment_fk=experiment.id,
+        ).first()
+        assert result.icp_data is not None
+        assert result.icp_data.fe == 50.0
 
 
 if __name__ == "__main__":
