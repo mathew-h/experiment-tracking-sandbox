@@ -516,3 +516,13 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_bulk_uploads.py` — 3 endpoint tests for two-phase flow
 - **Tests added:** yes — 15 new tests (94 total, all pass)
 - **Decision logged:** no
+
+## 2026-05-04 | inline — ICP-OES bulk upload overwrite flag
+- **Files changed:**
+  - `backend/services/icp_service.py` — `overwrite: bool = False` on `create_icp_result` and `bulk_create_icp_results`; `db.delete` + `db.flush` + `db.expire` block before merge branch deletes existing `ICPResults` when flag is set
+  - `backend/api/routers/bulk_uploads.py` — `overwrite: bool = Form(False)` added to `upload_icp_oes`; forwarded to service
+  - `frontend/src/api/bulkUploads.ts` — `uploadIcpOes` now accepts `overwrite = false` and appends it to FormData
+  - `frontend/src/pages/BulkUploads.tsx` — `IcpOverwriteToggle` component + `icpOverwrite` state wired into ICP-OES `UploadRow` via `topContent` and `uploadFn`
+  - `tests/test_icp_handling.py` — `TestICPOverwrite` (3 tests: replace, merge-preserve, no-prior-data) + `TestICPRouterOverwrite` (1 test: flag forwarding with auth bypass)
+- **Tests added:** yes — 4 new tests; all pass; pre-existing 14 failures unchanged (pre-date this work)
+- **Decision logged:** no
