@@ -136,14 +136,14 @@ class TestDryRunAndRollback:
         """After a mid-migration rollback, no rows are stranded at the temp value (9999)."""
         cond = _seed(migration_session, "SWAP_RB_001", 9070, reactor=4)
 
-        # Simulate step 1 only (partial migration — crash before steps 2 and 3)
+        # Simulate a partial migration using a savepoint: step 1 only (4 → 9999).
+        # Using begin_nested()/sp.rollback() instead of session.rollback() because
+        # SA 2.0 session.rollback() cascades to root and wipes the outer transaction.
+        sp = migration_session.begin_nested()
         migration_session.query(ExperimentalConditions).filter(
             ExperimentalConditions.reactor_number == 4
         ).update({"reactor_number": 9999}, synchronize_session="fetch")
-
-        # Explicit rollback (what run_migration's except block does)
-        migration_session.rollback()
-        migration_session.begin_nested()  # restart savepoint for test cleanup
+        sp.rollback()  # roll back only the partial update, not the outer seeded data
 
         assert _count(migration_session, 9999) == 0
         fresh = migration_session.query(ExperimentalConditions).filter_by(
