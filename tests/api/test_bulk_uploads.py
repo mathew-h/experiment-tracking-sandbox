@@ -802,3 +802,43 @@ def test_pxrf_upload_no_change_when_no_matching_readings(client, db_session):
     body = resp.json()
     # No samples matched the uploaded readings, so message has no "updated characterized"
     assert "updated characterized" not in body["message"].lower()
+
+
+# ── Issue #54: pxrf_data import error regression ───────────────────────────────
+
+def test_pxrf_data_importable_without_utils_storage():
+    """pxrf_data must not require utils.storage at import time.
+
+    The API uses ingest_from_bytes; utils.storage is only needed by
+    ingest_from_source (legacy file-path loader). A top-level import
+    causes ModuleNotFoundError in production → HTTP 500 on first upload.
+    """
+    import importlib
+
+    keys_to_evict = [
+        "utils",
+        "utils.storage",
+        "backend.services.bulk_uploads.pxrf_data",
+    ]
+    saved = {k: sys.modules.pop(k) for k in keys_to_evict if k in sys.modules}
+
+    try:
+        import backend.services.bulk_uploads.pxrf_data  # must not raise
+    except ModuleNotFoundError as exc:
+        raise AssertionError(
+            f"pxrf_data raised ModuleNotFoundError on import: {exc}\n"
+            "Move 'from utils.storage import get_file' inside ingest_from_source."
+        ) from exc
+    finally:
+        # Restore saved stubs first
+        for k, v in saved.items():
+            sys.modules[k] = v
+        # Remove any new utils.* sub-modules loaded during the fresh import
+        for k in list(sys.modules.keys()):
+            if k.startswith("utils.") and k not in saved:
+                sys.modules.pop(k, None)
+        # Re-import with stubs restored; wrapped so cleanup never masks test failure
+        try:
+            importlib.import_module("backend.services.bulk_uploads.pxrf_data")
+        except Exception:
+            pass
