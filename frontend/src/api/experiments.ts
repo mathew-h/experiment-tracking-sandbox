@@ -124,6 +124,7 @@ export const experimentsApi = {
       researcher?: string
       date?: string
       experiment_id?: string
+      sample_id?: string
     },
   ) =>
     apiClient
