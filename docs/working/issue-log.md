@@ -553,6 +553,13 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 6 backend API tests (pytest)
 - **Decision logged:** no
 
+## 2026-05-05 | inline — Fix sample ID editor: chip clear and dropdown broken
+- **Files changed:**
+  - `frontend/src/components/ui/SampleSelector.tsx` — `handleClear` now calls `setOpen(true)` so dropdown opens immediately after chip is cleared
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — added `sampleDraft` local state; initialized from `experiment.sample_id` on editor open; passed as `value` to `SampleSelector`; `onChange` updates draft for all values including `''`; mutation still guards on non-empty, changed value
+- **Tests added:** no
+- **Decision logged:** no
+
 ## 2026-05-05 | inline — Fix HTTP 500 on pXRF bulk upload (utils.storage lazy import)
 - **Files changed:**
   - `backend/services/bulk_uploads/pxrf_data.py` — removed top-level `from utils.storage import get_file`; added lazy import inside `ingest_from_source` only
