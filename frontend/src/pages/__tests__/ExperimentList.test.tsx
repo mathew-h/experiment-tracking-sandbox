@@ -55,3 +55,38 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   queryClient.clear()
 })
+
+describe('ExperimentListPage — pagination reset on filter', () => {
+  beforeEach(() => {
+    vi.mocked(experimentsApi.list).mockImplementation(async (params) => {
+      const skip = params?.skip ?? 0
+      const limit = params?.limit ?? LIMIT
+      return { items: makeItems(skip, limit), total: TOTAL, skip, limit }
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('resets to page 1 when status filter is applied on page 2', async () => {
+    render(<ExperimentListPage />, { wrapper })
+
+    // Wait for initial page 1 load
+    await waitFor(() => expect(screen.getByText('Page 1 of 4')).toBeInTheDocument())
+
+    // Navigate to page 2
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
+
+    // Apply status filter
+    const statusSelect = screen.getAllByRole('combobox')[0]
+    fireEvent.change(statusSelect, { target: { value: 'COMPLETED' } })
+
+    // Verify reset to page 1 and API called with skip=0
+    await waitFor(() => expect(screen.getByText(/Page 1 of/)).toBeInTheDocument())
+    const lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(0)
+    expect(lastCall?.status).toBe('COMPLETED')
+  })
+})
