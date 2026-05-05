@@ -552,3 +552,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_experiments.py` — 6 new tests: valid sample change, 404 on unknown sample, no conditions no crash, recalculate called on conditions, recalculate called on scalars, ModificationsLog row verified
 - **Tests added:** yes — 6 backend API tests (pytest)
 - **Decision logged:** no
+
+## 2026-05-05 | inline — Fix HTTP 500 on pXRF bulk upload (utils.storage lazy import)
+- **Files changed:**
+  - `backend/services/bulk_uploads/pxrf_data.py` — removed top-level `from utils.storage import get_file`; added lazy import inside `ingest_from_source` only
+  - `tests/api/test_bulk_uploads.py` — added `test_pxrf_data_importable_without_utils_storage` regression guard
+- **Tests added:** yes — 1 regression test (pytest); total pXRF suite now 8 passing
+- **Decision logged:** no
