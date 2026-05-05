@@ -153,4 +153,28 @@ describe('ExperimentListPage — pagination reset on filter', () => {
     expect(lastCall?.skip).toBe(0)
     expect(lastCall?.limit).toBe(50)
   })
-})
+
+  it('paginates forward and backward without resetting when no filter changes', async () => {
+    render(<ExperimentListPage />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText('Page 1 of 4')).toBeInTheDocument())
+
+    // Go to page 2
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
+    let lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(25)
+
+    // Go to page 3
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await waitFor(() => expect(screen.getByText('Page 3 of 4')).toBeInTheDocument())
+    lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(50)
+
+    // Go back to page 2
+    fireEvent.click(screen.getByRole('button', { name: '←' }))
+    await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
+    lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(25)
+  })
+}) // closes describe block
