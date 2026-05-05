@@ -527,6 +527,16 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 4 new tests; all pass; pre-existing 14 failures unchanged (pre-date this work)
 - **Decision logged:** no
 
+## 2026-05-05 | issue #56 — Swap Reactor 4 and Reactor 7: dashboard update + data migration
+- **Files changed:**
+  - `database/data_migrations/swap_reactor_4_7_015.py` — new: migration 015; `_swap_reactor_assignments(db, dry_run)` with three-step temp-value atomic swap (4→9999→7, 7→4); pre/post count validation; grams_per_ton_yield checksum; `run_migration` with `--dry-run` / `--confirm` CLI gate
+  - `tests/data_migrations/test_swap_reactor_4_7_015.py` — new: 9 tests (swap correctness ×7, dry-run, partial-rollback)
+  - `backend/api/routers/dashboard.py` — swapped R4 (300mL/Titanium/Tan) ↔ R7 (500mL/Titanium/Yushen) in `REACTOR_SPECS`
+  - `frontend/src/pages/ReactorGrid.tsx` — same swap in frontend `REACTOR_SPECS`
+- **Tests added:** yes — 9 pytest integration tests; all pass
+- **Decision logged:** no
+- **Note:** Migration script not yet run against production — requires DB backup + `--dry-run` review before executing `--confirm`
+
 ## 2026-05-05 | issue #57 — Change sample ID on existing experiment with calc re-trigger
 - **Files changed:**
   - `backend/api/routers/experiments.py` — pop `sample_id` before generic field loop; validate sample exists (404 on unknown ID); update `exp.sample_id`; recalculate conditions (cascades to scalars via ORM) and scalar results directly; write `ModificationsLog` entry
