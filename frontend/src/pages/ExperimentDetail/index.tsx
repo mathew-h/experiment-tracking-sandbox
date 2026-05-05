@@ -28,6 +28,7 @@ export function ExperimentDetailPage() {
   const [editingDate, setEditingDate] = useState(false)
   const [dateDraft, setDateDraft] = useState('')
   const [editingSampleId, setEditingSampleId] = useState(false)
+  const [sampleDraft, setSampleDraft] = useState('')
 
   const { data: experiment, isLoading, error } = useQuery({
     queryKey: ['experiment', id],
@@ -242,7 +243,7 @@ export function ExperimentDetailPage() {
           )}
           {!editingSampleId && (
             <button
-              onClick={() => setEditingSampleId(true)}
+              onClick={() => { setEditingSampleId(true); setSampleDraft(experiment.sample_id ?? '') }}
               className="text-ink-muted hover:text-ink-secondary transition-colors"
               title="Change sample"
             >
@@ -259,8 +260,9 @@ export function ExperimentDetailPage() {
           <div className="flex items-start gap-2 mt-1">
             <div className={`w-64${sampleMutation.isPending ? ' pointer-events-none opacity-50' : ''}`}>
               <SampleSelector
-                value={experiment.sample_id ?? ''}
+                value={sampleDraft}
                 onChange={(newSampleId) => {
+                  setSampleDraft(newSampleId)
                   if (newSampleId && newSampleId !== experiment.sample_id) {
                     sampleMutation.mutate(newSampleId)
                   }

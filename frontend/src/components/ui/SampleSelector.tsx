@@ -49,6 +49,7 @@ export function SampleSelector({ value, onChange, onCreateNew }: Props) {
   const handleClear = () => {
     onChange('')
     setQuery('')
+    setOpen(true)
   }
 
   return (
