@@ -40,7 +40,6 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-import structlog
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -48,8 +47,6 @@ from database import SessionLocal
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
 from database.models.results import ExperimentalResults, ScalarResults
-
-log = structlog.get_logger(__name__)
 
 _REACTOR_A = 4
 _REACTOR_B = 7
