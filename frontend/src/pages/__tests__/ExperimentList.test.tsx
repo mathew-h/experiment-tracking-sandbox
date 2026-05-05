@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -37,16 +37,21 @@ function makeItems(skip: number, limit: number): ExperimentListItem[] {
   }))
 }
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: false, staleTime: 0 },
+    mutations: { retry: false },
+  },
+})
+
 function wrapper({ children }: { children: React.ReactNode }) {
-  const qc = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: 0 },
-      mutations: { retry: false },
-    },
-  })
   return (
     <MemoryRouter>
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </MemoryRouter>
   )
 }
+
+beforeEach(() => {
+  queryClient.clear()
+})
