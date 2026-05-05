@@ -121,10 +121,13 @@ if ($rebuildFrontend) {
     Write-Step "Step 5: Rebuilding frontend"
     Push-Location $FrontendDir
     try {
-        & npm ci --silent
+        Log "frontend: npm ci starting"
+        & npm ci --prefer-offline --loglevel=error
         if ($LASTEXITCODE -ne 0) { Abort "npm ci" "exit code $LASTEXITCODE -- package.json/package-lock.json out of sync, or install failed" }
+        Log "frontend: npm ci done -- starting vite build"
         & npm run build
         if ($LASTEXITCODE -ne 0) { Abort "npm run build" "exit code $LASTEXITCODE" }
+        Log "frontend: vite build done"
     } finally { Pop-Location }
 }
 
