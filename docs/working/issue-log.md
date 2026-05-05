@@ -526,3 +526,12 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/test_icp_handling.py` — `TestICPOverwrite` (3 tests: replace, merge-preserve, no-prior-data) + `TestICPRouterOverwrite` (1 test: flag forwarding with auth bypass)
 - **Tests added:** yes — 4 new tests; all pass; pre-existing 14 failures unchanged (pre-date this work)
 - **Decision logged:** no
+
+## 2026-05-05 | issue #57 — Change sample ID on existing experiment with calc re-trigger
+- **Files changed:**
+  - `backend/api/routers/experiments.py` — pop `sample_id` before generic field loop; validate sample exists (404 on unknown ID); update `exp.sample_id`; recalculate conditions (cascades to scalars via ORM) and scalar results directly; write `ModificationsLog` entry
+  - `frontend/src/api/experiments.ts` — added `sample_id?: string` to `patch()` payload type
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — inline `SampleSelector` editor; auto-saves on selection; Cancel button exits edit mode; success toast confirms calculations re-run; `pointer-events-none opacity-50` disables selector during pending mutation
+  - `tests/api/test_experiments.py` — 6 new tests: valid sample change, 404 on unknown sample, no conditions no crash, recalculate called on conditions, recalculate called on scalars, ModificationsLog row verified
+- **Tests added:** yes — 6 backend API tests (pytest)
+- **Decision logged:** no
