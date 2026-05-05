@@ -109,4 +109,29 @@ describe('ExperimentListPage — pagination reset on filter', () => {
     expect(lastCall?.skip).toBe(0)
     expect(lastCall?.search).toBe('HP')
   })
+
+  it('resets to page 1 when filters are cleared', async () => {
+    render(<ExperimentListPage />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText('Page 1 of 4')).toBeInTheDocument())
+
+    // Apply a filter (lands on page 1)
+    const statusSelect = screen.getByRole('combobox', { name: /status filter/i })
+    fireEvent.change(statusSelect, { target: { value: 'ONGOING' } })
+    await waitFor(() => expect(screen.getByText(/Page 1 of/)).toBeInTheDocument())
+
+    // Navigate to page 2 within the filtered set
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
+
+    // Clear filters
+    const clearButton = screen.getByRole('button', { name: /clear/i })
+    fireEvent.click(clearButton)
+
+    // Must reset to page 1 and API called with skip=0 and no status filter
+    await waitFor(() => expect(screen.getByText(/Page 1 of/)).toBeInTheDocument())
+    const lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(0)
+    expect(lastCall?.status).toBeUndefined()
+  })
 })
