@@ -22,6 +22,7 @@ from database.models.conditions import ExperimentalConditions
 from database.models.analysis import ExternalAnalysis
 from database.models.xrd import XRDPhase
 from database.models.notion_sync import ReactorChangeRequest
+from database.models.samples import SampleInfo
 from backend.api.schemas.notion_sync import ChangeRequestResponse
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
@@ -530,6 +531,7 @@ def update_experiment(
 
     data = payload.model_dump(exclude_unset=True)
     new_id = data.pop("experiment_id", None)
+    new_sample_id = data.pop("sample_id", None)
     old_date = exp.date  # capture before mutation
 
     for field, value in data.items():
@@ -593,6 +595,38 @@ def update_experiment(
                 new_values={"experiment_id": new_id},
             ))
             log.info("experiment_renamed", old_id=experiment_id, new_id=new_id, user=current_user.uid)
+
+    if new_sample_id is not None:
+        sample = db.get(SampleInfo, new_sample_id)
+        if sample is None:
+            raise HTTPException(status_code=404, detail=f"Sample '{new_sample_id}' not found")
+        old_sample_id = exp.sample_id
+        exp.sample_id = new_sample_id
+        db.flush()
+        cond = db.execute(
+            select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+        ).scalar_one_or_none()
+        if cond is not None:
+            recalculate(cond, db)
+            db.flush()
+        result_ids = db.execute(
+            select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
+        ).scalars().all()
+        scalars = db.execute(
+            select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
+        ).scalars().all()
+        for scalar in scalars:
+            recalculate(scalar, db)
+        db.add(ModificationsLog(
+            experiment_id=exp.experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type="update",
+            modified_table="experiments",
+            old_values={"sample_id": old_sample_id},
+            new_values={"sample_id": new_sample_id},
+        ))
+        log.info("experiment_sample_updated", experiment_id=exp.experiment_id, new_sample_id=new_sample_id, user=current_user.uid)
 
     db.commit()
     db.refresh(exp)
