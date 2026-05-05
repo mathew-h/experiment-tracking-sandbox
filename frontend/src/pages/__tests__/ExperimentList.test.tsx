@@ -89,4 +89,24 @@ describe('ExperimentListPage — pagination reset on filter', () => {
     expect(lastCall?.skip).toBe(0)
     expect(lastCall?.status).toBe('COMPLETED')
   })
+
+  it('resets to page 1 when experiment ID text filter is typed on page 2', async () => {
+    const user = userEvent.setup()
+    render(<ExperimentListPage />, { wrapper })
+
+    // Wait for initial load and navigate to page 2
+    await waitFor(() => expect(screen.getByText('Page 1 of 4')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
+
+    // Type in the experiment ID filter
+    const idInput = screen.getByPlaceholderText('Experiment ID…')
+    await user.type(idInput, 'HP')
+
+    // After typing, must be back on page 1 and API called with skip=0
+    await waitFor(() => expect(screen.getByText(/Page 1 of/)).toBeInTheDocument())
+    const lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(0)
+    expect(lastCall?.search).toBe('HP')
+  })
 })
