@@ -532,3 +532,149 @@ def test_get_change_requests_experiment_not_found(client):
     """Nonexistent experiment returns 404, not 200 []."""
     resp = client.get("/api/experiments/NONEXISTENT_999/change-requests")
     assert resp.status_code == 404
+
+
+# ============================================================
+# Issue #57: Change sample_id on existing experiment
+# ============================================================
+
+def _make_sample(db, sample_id: str):
+    """Create a minimal SampleInfo row."""
+    from database.models.samples import SampleInfo
+    s = SampleInfo(sample_id=sample_id)
+    db.add(s)
+    db.flush()
+    return s
+
+
+def test_patch_sample_id_to_valid_sample(client, db_session):
+    """PATCH with a valid sample_id updates the field and returns 200."""
+    _make_sample(db_session, "SAMPLE_VALID_001")
+    _make_experiment(db_session, "SAMPLETEST_001", 9700)
+    db_session.commit()
+
+    resp = client.patch(
+        "/api/experiments/SAMPLETEST_001",
+        json={"sample_id": "SAMPLE_VALID_001"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["sample_id"] == "SAMPLE_VALID_001"
+
+
+def test_patch_sample_id_nonexistent_returns_404(client, db_session):
+    """PATCH with a sample_id that does not exist in SampleInfo returns 404."""
+    _make_experiment(db_session, "SAMPLETEST_002", 9701)
+    db_session.commit()
+
+    resp = client.patch(
+        "/api/experiments/SAMPLETEST_002",
+        json={"sample_id": "GHOST_SAMPLE_XYZ"},
+    )
+    assert resp.status_code == 404
+    assert "GHOST_SAMPLE_XYZ" in resp.json()["detail"]
+
+
+def test_patch_sample_id_no_conditions_no_crash(client, db_session):
+    """Experiment with no conditions row: PATCH sample_id succeeds, no crash."""
+    _make_sample(db_session, "SAMPLE_NOCOND_001")
+    _make_experiment(db_session, "SAMPLETEST_003", 9702)
+    db_session.commit()
+
+    resp = client.patch(
+        "/api/experiments/SAMPLETEST_003",
+        json={"sample_id": "SAMPLE_NOCOND_001"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["sample_id"] == "SAMPLE_NOCOND_001"
+
+
+def test_patch_sample_id_calls_recalculate_on_conditions(client, db_session):
+    """recalculate is called with the ExperimentalConditions instance."""
+    from unittest.mock import patch as mock_patch
+    from database.models.conditions import ExperimentalConditions
+
+    _make_sample(db_session, "SAMPLE_COND_001")
+    exp = _make_experiment(db_session, "SAMPLETEST_004", 9703)
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+        rock_mass_g=100.0,
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    with mock_patch("backend.api.routers.experiments.recalculate") as mock_recalc:
+        resp = client.patch(
+            "/api/experiments/SAMPLETEST_004",
+            json={"sample_id": "SAMPLE_COND_001"},
+        )
+
+    assert resp.status_code == 200
+    called_types = [type(call_args[0][0]) for call_args in mock_recalc.call_args_list]
+    assert ExperimentalConditions in called_types
+
+
+def test_patch_sample_id_calls_recalculate_on_scalars(client, db_session):
+    """recalculate is called with each ScalarResults instance."""
+    from unittest.mock import patch as mock_patch
+    from database.models.conditions import ExperimentalConditions
+    from database.models.results import ExperimentalResults, ScalarResults
+
+    _make_sample(db_session, "SAMPLE_SCALAR_001")
+    exp = _make_experiment(db_session, "SAMPLETEST_005", 9704)
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+    )
+    db_session.add(cond)
+    db_session.flush()
+    result = ExperimentalResults(
+        experiment_fk=exp.id,
+        time_post_reaction_days=1.0,
+        time_post_reaction_bucket_days=1.0,
+        cumulative_time_post_reaction_days=1.0,
+        is_primary_timepoint_result=True,
+        description="T1",
+    )
+    db_session.add(result)
+    db_session.flush()
+    scalar = ScalarResults(result_id=result.id)
+    db_session.add(scalar)
+    db_session.commit()
+
+    with mock_patch("backend.api.routers.experiments.recalculate") as mock_recalc:
+        resp = client.patch(
+            "/api/experiments/SAMPLETEST_005",
+            json={"sample_id": "SAMPLE_SCALAR_001"},
+        )
+
+    assert resp.status_code == 200
+    called_types = [type(call_args[0][0]) for call_args in mock_recalc.call_args_list]
+    assert ScalarResults in called_types
+
+
+def test_patch_sample_id_logs_modification(client, db_session):
+    """Changing sample_id writes a ModificationsLog entry."""
+    from database.models.experiments import ModificationsLog
+    from sqlalchemy import select as sa_select
+
+    _make_sample(db_session, "OLD_SAMPLE")
+    _make_sample(db_session, "SAMPLE_LOG_001")
+    exp = _make_experiment(db_session, "SAMPLETEST_006", 9705)
+    exp.sample_id = "OLD_SAMPLE"
+    db_session.commit()
+
+    client.patch(
+        "/api/experiments/SAMPLETEST_006",
+        json={"sample_id": "SAMPLE_LOG_001"},
+    )
+
+    log = db_session.execute(
+        sa_select(ModificationsLog)
+        .where(ModificationsLog.experiment_id == "SAMPLETEST_006")
+        .where(ModificationsLog.modified_table == "experiments")
+        .order_by(ModificationsLog.id.desc())
+    ).scalar_one_or_none()
+    assert log is not None
+    assert log.old_values == {"sample_id": "OLD_SAMPLE"}
+    assert log.new_values == {"sample_id": "SAMPLE_LOG_001"}
