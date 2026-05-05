@@ -609,6 +609,9 @@ def update_experiment(
         if cond is not None:
             recalculate(cond, db)
             db.flush()
+        # Also recalculate scalars directly: conditions_calcs.py cascades to scalars via ORM
+        # relationships when conditions exist, but this explicit loop ensures scalars update
+        # even when there are no conditions (total_ferrous_iron_g stays NULL in that case).
         result_ids = db.execute(
             select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
         ).scalars().all()
