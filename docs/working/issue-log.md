@@ -537,6 +537,13 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Decision logged:** no
 - **Note:** Migration script not yet run against production — requires DB backup + `--dry-run` review before executing `--confirm`
 
+## 2026-05-05 | issue #53 — Experiments filter pagination reset: add regression tests
+- **Files changed:**
+  - `frontend/src/pages/ExperimentList.tsx` — added `aria-label="Status filter"` to the status filter Select (enables accessible-name query in tests)
+  - `frontend/src/pages/__tests__/ExperimentList.test.tsx` — new: 5 vitest tests covering all 5 acceptance criteria: status filter resets to page 1, text filter resets to page 1, clearing filters resets to page 1, page size change resets to page 1, normal prev/next pagination regression guard
+- **Tests added:** yes — 5 vitest unit tests; all pass (44 total unit tests green)
+- **Decision logged:** no
+
 ## 2026-05-05 | issue #57 — Change sample ID on existing experiment with calc re-trigger
 - **Files changed:**
   - `backend/api/routers/experiments.py` — pop `sample_id` before generic field loop; validate sample exists (404 on unknown ID); update `exp.sample_id`; recalculate conditions (cascades to scalars via ORM) and scalar results directly; write `ModificationsLog` entry
