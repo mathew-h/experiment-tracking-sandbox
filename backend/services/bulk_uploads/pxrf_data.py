@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from database import PXRFReading
 from frontend.config.variable_config import PXRF_REQUIRED_COLUMNS
-from utils.storage import get_file
 
 
 NULL_EQUIVALENTS = ['', '<LOD', 'LOD', 'ND', 'n.d.', 'n/a', 'N/A', None]
@@ -146,6 +145,8 @@ class PXRFUploadService:
     def ingest_from_source(
         cls, db: Session, file_source: str, update_existing: bool = False
     ) -> Tuple[int, int, int, List[str], List[str]]:
+        from utils.storage import get_file  # noqa: PLC0415
+
         try:
             file_bytes = get_file(file_source)
         except Exception as e:
