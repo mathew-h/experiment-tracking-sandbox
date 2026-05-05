@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { conditionsApi } from '@/api/conditions'
 import { StatusBadge, Button, Input, PageSpinner, useToast } from '@/components/ui'
+import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { ConditionsTab } from './ConditionsTab'
 import { ResultsTab } from './ResultsTab'
@@ -26,6 +27,7 @@ export function ExperimentDetailPage() {
   const [idDraft, setIdDraft] = useState('')
   const [editingDate, setEditingDate] = useState(false)
   const [dateDraft, setDateDraft] = useState('')
+  const [editingSampleId, setEditingSampleId] = useState(false)
 
   const { data: experiment, isLoading, error } = useQuery({
     queryKey: ['experiment', id],
@@ -74,6 +76,23 @@ export function ExperimentDetailPage() {
     onError: () => {
       toastError('Update failed', 'Could not save start date')
       setEditingDate(false)
+    },
+  })
+
+  const sampleMutation = useMutation({
+    mutationFn: (newSampleId: string) =>
+      experimentsApi.patch(id!, { sample_id: newSampleId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['experiment', id] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      success('Sample updated — calculations re-run')
+      setEditingSampleId(false)
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })
+        ?.response?.data?.detail
+      toastError('Sample change failed', detail ?? String(err))
+      setEditingSampleId(false)
     },
   })
 
@@ -221,9 +240,44 @@ export function ExperimentDetailPage() {
                 : ' · Set start date'}
             </button>
           )}
-          {experiment.sample_id && ` · Sample: ${experiment.sample_id}`}
+          {!editingSampleId && (
+            <button
+              onClick={() => setEditingSampleId(true)}
+              className="text-ink-muted hover:text-ink-secondary transition-colors"
+              title="Change sample"
+            >
+              {experiment.sample_id
+                ? ` · Sample: ${experiment.sample_id}`
+                : ' · Assign sample'}
+            </button>
+          )}
           {conditions?.reactor_number != null && ` · Reactor ${conditions.reactor_number}`}
         </p>
+
+        {/* Inline sample ID editor */}
+        {editingSampleId && (
+          <div className="flex items-start gap-2 mt-1">
+            <div className="w-64">
+              <SampleSelector
+                value={experiment.sample_id ?? ''}
+                onChange={(newSampleId) => {
+                  if (newSampleId && newSampleId !== experiment.sample_id) {
+                    sampleMutation.mutate(newSampleId)
+                  }
+                }}
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-5"
+              onClick={() => setEditingSampleId(false)}
+              disabled={sampleMutation.isPending}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Quick actions */}
