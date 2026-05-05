@@ -83,7 +83,7 @@ export function ExperimentDetailPage() {
     mutationFn: (newSampleId: string) =>
       experimentsApi.patch(id!, { sample_id: newSampleId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['experiment', id] })
+      queryClient.invalidateQueries({ queryKey: ['experiment'] })
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
       success('Sample updated — calculations re-run')
       setEditingSampleId(false)
@@ -257,7 +257,7 @@ export function ExperimentDetailPage() {
         {/* Inline sample ID editor */}
         {editingSampleId && (
           <div className="flex items-start gap-2 mt-1">
-            <div className="w-64">
+            <div className={`w-64${sampleMutation.isPending ? ' pointer-events-none opacity-50' : ''}`}>
               <SampleSelector
                 value={experiment.sample_id ?? ''}
                 onChange={(newSampleId) => {
