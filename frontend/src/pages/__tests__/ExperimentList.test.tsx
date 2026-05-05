@@ -134,4 +134,23 @@ describe('ExperimentListPage — pagination reset on filter', () => {
     expect(lastCall?.skip).toBe(0)
     expect(lastCall?.status).toBeUndefined()
   })
+
+  it('resets to page 1 when page size is changed on page 2', async () => {
+    render(<ExperimentListPage />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText('Page 1 of 4')).toBeInTheDocument())
+
+    // Navigate to page 2
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
+
+    // Change page size to 50
+    fireEvent.click(screen.getByRole('button', { name: '50' }))
+
+    // Must reset to page 1 and API called with skip=0, limit=50
+    await waitFor(() => expect(screen.getByText(/Page 1 of/)).toBeInTheDocument())
+    const lastCall = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+    expect(lastCall?.skip).toBe(0)
+    expect(lastCall?.limit).toBe(50)
+  })
 })
