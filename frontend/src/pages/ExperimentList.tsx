@@ -99,6 +99,7 @@ export function ExperimentListPage() {
         <div className="w-40">
           <Select
             label=""
+            aria-label="Status filter"
             options={STATUS_OPTIONS}
             placeholder="All statuses"
             value={statusFilter}

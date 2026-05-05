@@ -80,7 +80,7 @@ describe('ExperimentListPage — pagination reset on filter', () => {
     await waitFor(() => expect(screen.getByText('Page 2 of 4')).toBeInTheDocument())
 
     // Apply status filter
-    const statusSelect = screen.getAllByRole('combobox')[0]
+    const statusSelect = screen.getByRole('combobox', { name: /status filter/i })
     fireEvent.change(statusSelect, { target: { value: 'COMPLETED' } })
 
     // Verify reset to page 1 and API called with skip=0
