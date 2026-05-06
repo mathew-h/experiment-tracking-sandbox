@@ -261,19 +261,25 @@ export function ExperimentDetailPage() {
             <div className={`w-64${sampleMutation.isPending ? ' pointer-events-none opacity-50' : ''}`}>
               <SampleSelector
                 value={sampleDraft}
-                onChange={(newSampleId) => {
-                  setSampleDraft(newSampleId)
-                  if (newSampleId && newSampleId !== experiment.sample_id) {
-                    sampleMutation.mutate(newSampleId)
-                  }
-                }}
+                onChange={(newSampleId) => setSampleDraft(newSampleId)}
               />
             </div>
+            {sampleDraft && sampleDraft !== experiment.sample_id && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-5"
+                onClick={() => sampleMutation.mutate(sampleDraft)}
+                disabled={sampleMutation.isPending}
+              >
+                Save
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
               className="mt-5"
-              onClick={() => setEditingSampleId(false)}
+              onClick={() => { setSampleDraft(''); setEditingSampleId(false) }}
               disabled={sampleMutation.isPending}
             >
               Cancel
