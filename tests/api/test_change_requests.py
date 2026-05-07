@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from database.models.experiments import Experiment
 from database.models.enums import ExperimentStatus
@@ -74,3 +74,50 @@ def test_upsert_missing_experiment_returns_404(client, db_session):
         json={"reactor_label": "R08", "requested_change": "Test"},
     )
     assert resp.status_code == 404
+
+
+def test_get_recent_returns_today_and_previous(client, db_session):
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R10", experiment_id=None,
+        requested_change="Today's note", sync_date=today,
+        notion_page_id=None, notion_status=None, carried_forward=False,
+    ))
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R10", experiment_id=None,
+        requested_change="Yesterday's note", sync_date=yesterday,
+        notion_page_id=None, notion_status=None, carried_forward=False,
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/change-requests/reactor/R10/recent")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["today"]["requested_change"] == "Today's note"
+    assert data["previous"]["requested_change"] == "Yesterday's note"
+
+
+def test_get_recent_returns_nulls_when_no_records(client, db_session):
+    resp = client.get("/api/change-requests/reactor/R99/recent")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["today"] is None
+    assert data["previous"] is None
+
+
+def test_get_recent_no_today_still_returns_previous(client, db_session):
+    two_days_ago = date.today() - timedelta(days=2)
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R11", experiment_id=None,
+        requested_change="Old note", sync_date=two_days_ago,
+        notion_page_id=None, notion_status=None, carried_forward=False,
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/change-requests/reactor/R11/recent")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["today"] is None
+    assert data["previous"]["requested_change"] == "Old note"
