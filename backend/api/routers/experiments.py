@@ -23,7 +23,7 @@ from database.models.analysis import ExternalAnalysis
 from database.models.xrd import XRDPhase
 from database.models.notion_sync import ReactorChangeRequest
 from database.models.samples import SampleInfo
-from backend.api.schemas.notion_sync import ChangeRequestResponse
+from backend.api.schemas.notion_sync import ChangeRequestResponse, ChangeRequestUpsertRequest
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
 
@@ -436,6 +436,65 @@ def list_change_requests(
         .order_by(ReactorChangeRequest.sync_date.desc())
     ).scalars().all()
     return [ChangeRequestResponse.model_validate(r) for r in rows]
+
+
+@router.post("/{experiment_id}/change-requests", response_model=ChangeRequestResponse)
+def upsert_change_request(
+    experiment_id: str,
+    payload: ChangeRequestUpsertRequest,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ChangeRequestResponse:
+    """Create or update a change request for the given reactor on today's date.
+
+    Upserts on the unique constraint (reactor_label, sync_date): if a row already
+    exists for this reactor today, its requested_change is overwritten. Returns the
+    persisted record. Returns 422 if requested_change is blank; 404 if the
+    experiment does not exist.
+    """
+    from datetime import date as _date
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if not payload.requested_change.strip():
+        raise HTTPException(status_code=422, detail="requested_change must not be blank")
+
+    exp = db.execute(
+        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    today = _date.today()
+    stmt = (
+        pg_insert(ReactorChangeRequest)
+        .values(
+            reactor_label=payload.reactor_label,
+            experiment_id=experiment_id,
+            requested_change=payload.requested_change.strip(),
+            sync_date=today,
+            notion_page_id=None,
+            notion_status=None,
+            carried_forward=False,
+        )
+        .on_conflict_do_update(
+            constraint="uq_change_request_reactor_date",
+            set_={
+                "requested_change": payload.requested_change.strip(),
+                "experiment_id": experiment_id,
+            },
+        )
+    )
+    db.execute(stmt)
+    db.commit()
+
+    record = db.execute(
+        select(ReactorChangeRequest).where(
+            ReactorChangeRequest.reactor_label == payload.reactor_label,
+            ReactorChangeRequest.sync_date == today,
+        )
+    ).scalar_one()
+    log.info("change_request_upserted", experiment_id=experiment_id, reactor_label=payload.reactor_label)
+    return ChangeRequestResponse.model_validate(record)
 
 
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
