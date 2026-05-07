@@ -94,12 +94,14 @@ if ($headBefore -eq $headAfter) {
 $ErrorActionPreference = 'Continue'
 $changedFiles    = @(git -C $RepoRoot diff $headBefore $headAfter --name-only 2>&1)
 $ErrorActionPreference = 'Stop'
-$reinstallDeps   = [bool]($changedFiles -match '^requirements\.txt$')
-$rebuildFrontend = [bool]($changedFiles -match '^frontend/(src/|package\.json)')
+$reinstallDeps        = [bool]($changedFiles -match '^requirements\.txt$')
+$reinstallNodeModules = [bool]($changedFiles -match '^frontend/package(-lock)?\.json$')
+$rebuildFrontend      = [bool]($changedFiles -match '^frontend/(src/|public/|index\.html|package\.json)')
 
 $depsStr  = if ($reinstallDeps)   { "yes" } else { "no" }
 $frontStr = if ($rebuildFrontend) { "yes" } else { "no" }
-Write-Host "  deps:$depsStr  migrations:always  frontend:$frontStr"
+$nmStr    = if ($reinstallNodeModules) { "yes" } else { "no" }
+Write-Host "  deps:$depsStr  migrations:always  frontend:$frontStr  node_modules:$nmStr"
 
 # -- Step 3: Reinstall Python dependencies (conditional) ----------------------
 if ($reinstallDeps) {
@@ -121,10 +123,15 @@ if ($rebuildFrontend) {
     Write-Step "Step 5: Rebuilding frontend"
     Push-Location $FrontendDir
     try {
-        Log "frontend: npm ci starting"
-        & npm ci --prefer-offline --loglevel=error
-        if ($LASTEXITCODE -ne 0) { Abort "npm ci" "exit code $LASTEXITCODE -- package.json/package-lock.json out of sync, or install failed" }
-        Log "frontend: npm ci done -- starting vite build"
+        if ($reinstallNodeModules) {
+            Log "frontend: npm ci starting (package files changed)"
+            $env:CI = '1'
+            & npm ci --prefer-offline --loglevel=error
+            if ($LASTEXITCODE -ne 0) { Abort "npm ci" "exit code $LASTEXITCODE -- package.json/package-lock.json out of sync, or install failed" }
+            Log "frontend: npm ci done"
+        }
+        Log "frontend: vite build starting"
+        $env:CI = '1'
         & npm run build
         if ($LASTEXITCODE -ne 0) { Abort "npm run build" "exit code $LASTEXITCODE" }
         Log "frontend: vite build done"
