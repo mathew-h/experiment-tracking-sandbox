@@ -22,11 +22,11 @@ class ReactorChangeRequest(Base):
         nullable=True,
     )
     requested_change: str = Column(String, nullable=False)
-    notion_status: str = Column(String(50), nullable=False)
+    notion_status: str | None = Column(String(50), nullable=True)
     carried_forward: bool = Column(Boolean, nullable=False, default=False)
     sync_date: date = Column(Date, nullable=False)
     # 32-char UUID (hyphens stripped) for Notion page traceability.
-    notion_page_id: str = Column(String(32), nullable=False)
+    notion_page_id: str | None = Column(String(32), nullable=True)
     created_at: datetime = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
