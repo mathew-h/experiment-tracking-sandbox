@@ -101,7 +101,7 @@ export interface ChangeRequestEntry {
   id: number
   reactor_label: string
   requested_change: string
-  notion_status: string
+  notion_status: string | null
   carried_forward: boolean
   sync_date: string
   created_at: string
@@ -161,6 +161,14 @@ export const experimentsApi = {
     apiClient.get<ChangeRequestEntry[]>(
       `/experiments/${experimentId}/change-requests`
     ).then((r) => r.data),
+
+  createChangeRequest: (
+    experimentId: string,
+    payload: { reactor_label: string; requested_change: string },
+  ) =>
+    apiClient
+      .post<ChangeRequestEntry>(`/experiments/${experimentId}/change-requests`, payload)
+      .then((r) => r.data),
 
   delete: (experimentId: string) =>
     apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),
