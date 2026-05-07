@@ -1,16 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { experimentsApi, type ChangeRequestEntry } from '@/api/experiments'
-import { Badge } from '@/components/ui'
+import { experimentsApi } from '@/api/experiments'
 
 interface Props { experimentId: string }
-
-function statusVariant(status: string | null): 'warning' | 'success' | 'default' {
-  switch (status) {
-    case 'In Progress': return 'warning'
-    case 'Completed': return 'success'
-    default: return 'default'
-  }
-}
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
@@ -34,8 +25,6 @@ export function ChangeRequestsTab({ experimentId }: Props) {
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs text-ink-muted">{formatDate(entry.sync_date)}</span>
             <span className="text-xs font-mono-data text-ink-secondary">{entry.reactor_label}</span>
-            {entry.notion_status && <Badge variant={statusVariant(entry.notion_status)}>{entry.notion_status}</Badge>}
-            {entry.carried_forward && <Badge variant="info">Carried Forward</Badge>}
           </div>
           <p className="text-sm text-ink-primary">{entry.requested_change}</p>
         </div>
