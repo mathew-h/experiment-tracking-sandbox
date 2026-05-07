@@ -253,7 +253,7 @@ function ReactorDetailModal({
   const isQueued = card.status === 'QUEUED'
 
   const { data: recentCR } = useQuery({
-    queryKey: ['changeRequestsRecent', card.reactor_label],
+    queryKey: ['changeRequestsRecent', card.reactor_label, card.experiment_id],
     queryFn: () => changeRequestsApi.getRecentForReactor(card.reactor_label),
     enabled: !!card.experiment_id,
   })
@@ -282,14 +282,14 @@ function ReactorDetailModal({
   })
 
   const crMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (text: string) =>
       experimentsApi.createChangeRequest(card.experiment_id as string, {
         reactor_label: card.reactor_label,
-        requested_change: crText.trim(),
+        requested_change: text,
       }),
     onSuccess: (saved) => {
       setCrText(saved.requested_change)
-      queryClient.invalidateQueries({ queryKey: ['changeRequestsRecent', card.reactor_label] })
+      queryClient.invalidateQueries({ queryKey: ['changeRequestsRecent', card.reactor_label, card.experiment_id] })
       queryClient.invalidateQueries({ queryKey: ['changeRequests', card.experiment_id] })
       success('Change request saved')
     },
@@ -504,7 +504,7 @@ function ReactorDetailModal({
               className="w-full text-sm bg-surface-raised border border-surface-border rounded px-2.5 py-2 text-ink-primary placeholder:text-ink-muted resize-none focus:outline-none focus:border-ink-muted transition-colors"
             />
             <button
-              onClick={() => crMutation.mutate()}
+              onClick={() => crMutation.mutate(crText.trim())}
               disabled={!crText.trim() || crMutation.isPending}
               className="mt-2 px-3 py-1.5 text-sm bg-brand-red text-white rounded hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -580,7 +580,11 @@ export function ReactorGrid({ cards }: { cards: ReactorCardData[] }) {
       </div>
 
       {selected && (
-        <ReactorDetailModal card={selected} onClose={() => setSelected(null)} />
+        <ReactorDetailModal
+          key={selected.experiment_id ?? selected.reactor_label}
+          card={selected}
+          onClose={() => setSelected(null)}
+        />
       )}
     </>
   )
