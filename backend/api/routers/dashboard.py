@@ -56,6 +56,8 @@ def get_dashboard(
     # ── 1. Summary stats ──────────────────────────────────────────────────
     summary_row = db.execute(
         select(
+            # active_experiments counts only ONGOING experiments (not QUEUED).
+            # QUEUED experiments appear in reactor cards but are intentionally excluded from this count.
             func.count(case((Experiment.status == ExperimentStatus.ONGOING, 1))).label("active"),
             func.count(
                 distinct(case((
@@ -278,6 +280,9 @@ def get_reactor_status(
             ExperimentalConditions.experiment_type,
         )
         .join(Experiment, Experiment.id == ExperimentalConditions.experiment_fk)
+        # Legacy endpoint: intentionally filters ONGOING only.
+        # The reactor cards query (/api/dashboard/reactor-cards) includes QUEUED.
+        # Do not change this filter without verifying no downstream callers depend on ONGOING-only behavior.
         .where(Experiment.status == ExperimentStatus.ONGOING)
         .where(ExperimentalConditions.reactor_number.isnot(None))
         .where(ExperimentalConditions.experiment_type.in_(["HPHT", "Core Flood"]))
