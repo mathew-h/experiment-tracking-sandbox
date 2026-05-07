@@ -128,10 +128,20 @@ def get_dashboard(
         )
         .join(Experiment, Experiment.id == ExperimentalConditions.experiment_fk)
         .outerjoin(note_sq, note_sq.c.experiment_fk == Experiment.id)
-        .where(Experiment.status == ExperimentStatus.ONGOING)
+        .where(
+            Experiment.status.in_([ExperimentStatus.ONGOING, ExperimentStatus.QUEUED])
+        )
         .where(ExperimentalConditions.reactor_number.isnot(None))
         .where(ExperimentalConditions.experiment_type.in_(["HPHT", "Core Flood"]))
-        .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
+        .order_by(
+            ExperimentalConditions.reactor_number,
+            case(
+                (Experiment.status == ExperimentStatus.ONGOING, 0),
+                (Experiment.status == ExperimentStatus.QUEUED, 1),
+                else_=2,
+            ),
+            Experiment.created_at.desc(),
+        )
     ).all()
 
     seen_labels: set[str] = set()
@@ -150,7 +160,8 @@ def get_dashboard(
             continue
         seen_labels.add(label)
         start = row.date or row.created_at
-        days = (now - start).days if start else None
+        status_val = row.status.value if hasattr(row.status, "value") else str(row.status)
+        days = (now - start).days if (start and status_val == "ONGOING") else None
         specs = REACTOR_SPECS.get(rn, {})
         reactor_cards.append(ReactorCardData(
             reactor_number=rn,
