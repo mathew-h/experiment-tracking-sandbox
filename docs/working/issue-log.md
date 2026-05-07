@@ -566,3 +566,21 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `tests/api/test_bulk_uploads.py` — added `test_pxrf_data_importable_without_utils_storage` regression guard
 - **Tests added:** yes — 1 regression test (pytest); total pXRF suite now 8 passing
 - **Decision logged:** no
+
+## 2026-05-07 | issue #58 — Reactor Dashboard Change Request Overhaul
+- **Files changed:**
+  - `database/models/notion_sync.py` — `notion_page_id` and `notion_status` made nullable (enables UI-created records without a Notion page)
+  - `alembic/versions/13fc77a07865_loosen_change_request_notion_constraints.py` — nullable migration with downgrade data-backfill
+  - `backend/api/schemas/notion_sync.py` — replaced with `ChangeRequestResponse`, `ChangeRequestUpsertRequest`, `RecentChangeRequestsResponse`
+  - `backend/api/routers/experiments.py` — new `POST /{experiment_id}/change-requests` upsert endpoint (pg_insert on_conflict_do_update on `uq_change_request_reactor_date`)
+  - `backend/api/routers/change_requests.py` — new router: `GET /api/change-requests/reactor/{reactor_label}/recent` (today + most-recent-prior-day)
+  - `backend/api/main.py` — registered `change_requests` router; added openapi tag
+  - `backend/api/routers/dashboard.py` — reactor cards now include QUEUED experiments (ordered ONGOING first, then QUEUED); `days_running` is None for QUEUED; legacy endpoint and active_experiments count unchanged (with clarifying comments)
+  - `frontend/src/api/experiments.ts` — `notion_status: string | null`; added `createChangeRequest`
+  - `frontend/src/api/change_requests.ts` — new: `changeRequestsApi.getRecentForReactor(reactorLabel)`
+  - `frontend/src/pages/ExperimentDetail/ChangeRequestsTab.tsx` — simplified: removed status and Carried Forward badges; shows date, reactor label, description only
+  - `frontend/src/pages/ReactorGrid.tsx` — full `ReactorDetailModal` redesign: three-section layout (EXPERIMENT / HARDWARE / CHANGE REQUEST); inline CR textarea with Save; `key={selected.experiment_id ?? selected.reactor_label}` forces remount on reactor switch; query key includes experiment_id; mutation accepts text parameter to avoid stale closure
+  - `tests/api/test_change_requests.py` — new: 7 tests (upsert create, overwrite, blank 422, missing experiment 404; recent today+previous, nulls, prior-only)
+  - `frontend/src/pages/ExperimentDetail/__tests__/ChangeRequestsTab.test.tsx` — updated: 3 tests (empty state, renders date/reactor/description, no status or Carried Forward)
+- **Tests added:** yes — 7 backend API tests (pytest); 3 frontend vitest tests updated
+- **Decision logged:** no
