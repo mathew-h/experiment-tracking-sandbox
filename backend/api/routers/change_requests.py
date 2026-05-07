@@ -22,6 +22,11 @@ def get_recent_for_reactor(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> RecentChangeRequestsResponse:
+    """Return today's and the most recent prior-day change request for a reactor.
+
+    Both fields are nullable — returns nulls if no records exist for that label.
+    Does not 404 on unknown reactor_label; absence is represented by null.
+    """
     today = date.today()
 
     today_row = db.execute(
