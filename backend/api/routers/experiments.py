@@ -1,7 +1,9 @@
 from __future__ import annotations
+from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, func, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -452,9 +454,6 @@ def upsert_change_request(
     persisted record. Returns 422 if requested_change is blank; 404 if the
     experiment does not exist.
     """
-    from datetime import date as _date
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
     if not payload.requested_change.strip():
         raise HTTPException(status_code=422, detail="requested_change must not be blank")
 
@@ -464,7 +463,7 @@ def upsert_change_request(
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
 
-    today = _date.today()
+    today = date.today()
     stmt = (
         pg_insert(ReactorChangeRequest)
         .values(

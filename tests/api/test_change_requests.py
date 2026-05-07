@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import date
 
-import pytest
 from database.models.experiments import Experiment
 from database.models.enums import ExperimentStatus
 from database.models.notion_sync import ReactorChangeRequest
