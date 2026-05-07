@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
+import { changeRequestsApi } from '@/api/change_requests'
 
 // Fixed reactor layout: R01-R16 and CF01-CF02
 const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(2, '0')}`)
@@ -223,7 +224,7 @@ function ReactorCard({
         </div>
       ) : (
         <div className="space-y-1">
-          <p className="text-xs text-ink-muted mt-1">No active experiment</p>
+          <p className="text-xs text-ink-muted mt-1">No experiment assigned</p>
           <ReactorSpecsBadge
             volume_mL={REACTOR_SPECS[label]?.volume_mL ?? null}
             material={REACTOR_SPECS[label]?.material ?? null}
@@ -247,6 +248,23 @@ function ReactorDetailModal({
   const { success, error: toastError } = useToast()
   const [editingDate, setEditingDate] = useState(false)
   const [dateDraft, setDateDraft] = useState('')
+  const [crText, setCrText] = useState('')
+  const [crInitialized, setCrInitialized] = useState(false)
+  const isQueued = card.status === 'QUEUED'
+
+  const { data: recentCR } = useQuery({
+    queryKey: ['changeRequestsRecent', card.reactor_label],
+    queryFn: () => changeRequestsApi.getRecentForReactor(card.reactor_label),
+    enabled: !!card.experiment_id,
+  })
+
+  // Pre-populate the CR field with today's entry when the query first resolves
+  useEffect(() => {
+    if (recentCR && !crInitialized) {
+      setCrText(recentCR.today?.requested_change ?? '')
+      setCrInitialized(true)
+    }
+  }, [recentCR, crInitialized])
 
   const dateMutation = useMutation({
     mutationFn: (newDate: string) =>
@@ -263,6 +281,23 @@ function ReactorDetailModal({
     },
   })
 
+  const crMutation = useMutation({
+    mutationFn: () =>
+      experimentsApi.createChangeRequest(card.experiment_id as string, {
+        reactor_label: card.reactor_label,
+        requested_change: crText.trim(),
+      }),
+    onSuccess: (saved) => {
+      setCrText(saved.requested_change)
+      queryClient.invalidateQueries({ queryKey: ['changeRequestsRecent', card.reactor_label] })
+      queryClient.invalidateQueries({ queryKey: ['changeRequests', card.experiment_id] })
+      success('Change request saved')
+    },
+    onError: () => {
+      toastError('Save failed', 'Could not save change request')
+    },
+  })
+
   function startDateEdit() {
     setDateDraft(card.started_at?.slice(0, 10) ?? '')
     setEditingDate(true)
@@ -271,12 +306,23 @@ function ReactorDetailModal({
   function confirmDate() {
     if (!card.experiment_id) return
     const trimmed = dateDraft.trim()
-    if (trimmed) {
-      dateMutation.mutate(`${trimmed}T00:00:00`)
-    } else {
-      setEditingDate(false)
-    }
+    if (trimmed) dateMutation.mutate(`${trimmed}T00:00:00`)
+    else setEditingDate(false)
   }
+
+  function formatDateShort(iso: string): string {
+    return new Date(iso).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+  }
+
+  const todayLabel = new Date().toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
 
   return (
     <div
@@ -284,9 +330,10 @@ function ReactorDetailModal({
       onClick={onClose}
     >
       <div
-        className="bg-surface-overlay border border-surface-border rounded-lg p-6 w-full max-w-md shadow-xl"
+        className="bg-surface-overlay border border-surface-border rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
             <p className="text-2xs text-ink-muted uppercase tracking-wider mb-1">
@@ -305,124 +352,169 @@ function ReactorDetailModal({
           </button>
         </div>
 
-        <dl className="space-y-2 text-sm">
-          {card.sample_id && (
-            <div className="flex gap-2">
-              <dt className="text-ink-muted w-28 shrink-0">Sample ID</dt>
-              <dd className="text-ink-primary font-mono-data">{card.sample_id}</dd>
-            </div>
-          )}
-          {card.researcher && (
-            <div className="flex gap-2">
-              <dt className="text-ink-muted w-28 shrink-0">Researcher</dt>
-              <dd className="text-ink-secondary">{card.researcher}</dd>
-            </div>
-          )}
-          {card.experiment_type && (
-            <div className="flex gap-2">
-              <dt className="text-ink-muted w-28 shrink-0">Type</dt>
-              <dd className="text-ink-secondary">{card.experiment_type}</dd>
-            </div>
-          )}
-          {card.temperature_c != null && (
-            <div className="flex gap-2">
-              <dt className="text-ink-muted w-28 shrink-0">Temperature</dt>
-              <dd className="font-mono-data text-ink-secondary">{card.temperature_c} °C</dd>
-            </div>
-          )}
-          {card.days_running != null && (
-            <div className="flex gap-2">
-              <dt className="text-ink-muted w-28 shrink-0">Elapsed</dt>
-              <dd className="font-mono-data text-ink-secondary">Day {card.days_running}</dd>
-            </div>
-          )}
-          <div className="flex gap-2 items-center">
-            <dt className="text-ink-muted w-28 shrink-0">Started</dt>
-            <dd className="font-mono-data text-ink-secondary flex items-center gap-1">
-              {editingDate ? (
-                <>
-                  <input
-                    type="date"
-                    value={dateDraft}
-                    onChange={(e) => setDateDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') confirmDate()
-                      if (e.key === 'Escape') setEditingDate(false)
-                    }}
-                    className="font-mono-data border border-surface-border rounded px-1 bg-surface-raised text-ink-primary text-sm"
-                    autoFocus
-                  />
-                  <button
-                    onClick={confirmDate}
-                    disabled={dateMutation.isPending}
-                    className="text-status-success hover:opacity-80 text-sm"
-                    title="Save date"
-                    aria-label="Save date"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    onClick={() => setEditingDate(false)}
-                    className="text-ink-muted hover:text-ink-secondary text-sm"
-                    title="Cancel"
-                    aria-label="Cancel date edit"
-                  >
-                    ✗
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span>{card.started_at ? card.started_at.slice(0, 10) : '—'}</span>
-                  <button
-                    onClick={startDateEdit}
-                    className="text-ink-muted hover:text-ink-secondary transition-colors text-sm leading-none cursor-pointer"
-                    title="Edit start date"
-                    aria-label="Edit start date"
-                  >
-                    ✎
-                  </button>
-                </>
-              )}
-            </dd>
-          </div>
-          {(card.volume_mL != null || card.material || card.vendor) && (
-            <div className="pt-2 border-t border-surface-border">
-              <p className="text-ink-muted text-2xs uppercase tracking-wider mb-1.5">
-                Hardware
-              </p>
-              <div className="space-y-1.5">
-                {card.volume_mL != null && (
-                  <div className="flex gap-2">
-                    <dt className="text-ink-muted w-28 shrink-0">Volume</dt>
-                    <dd className="font-mono-data text-ink-secondary">{card.volume_mL} mL</dd>
-                  </div>
-                )}
-                {card.material && (
-                  <div className="flex gap-2">
-                    <dt className="text-ink-muted w-28 shrink-0">Material</dt>
-                    <dd className="text-ink-secondary">{card.material}</dd>
-                  </div>
-                )}
-                {card.vendor && (
-                  <div className="flex gap-2">
-                    <dt className="text-ink-muted w-28 shrink-0">Vendor</dt>
-                    <dd className="text-ink-secondary">{card.vendor}</dd>
-                  </div>
-                )}
+        {/* EXPERIMENT section */}
+        <div className="mb-4">
+          <p className="text-ink-muted text-2xs uppercase tracking-wider mb-2">Experiment</p>
+          <dl className="space-y-2 text-sm">
+            {card.sample_id && (
+              <div className="flex gap-2">
+                <dt className="text-ink-muted w-28 shrink-0">Sample ID</dt>
+                <dd className="text-ink-primary font-mono-data">{card.sample_id}</dd>
               </div>
-            </div>
-          )}
-          {card.description && (
-            <div className="pt-2 border-t border-surface-border">
-              <p className="text-ink-muted text-2xs uppercase tracking-wider mb-1.5">
-                Description
-              </p>
-              <p className="text-ink-secondary leading-relaxed text-sm">{card.description}</p>
-            </div>
-          )}
-        </dl>
+            )}
+            {card.researcher && (
+              <div className="flex gap-2">
+                <dt className="text-ink-muted w-28 shrink-0">Researcher</dt>
+                <dd className="text-ink-secondary">{card.researcher}</dd>
+              </div>
+            )}
+            {card.experiment_type && (
+              <div className="flex gap-2">
+                <dt className="text-ink-muted w-28 shrink-0">Type</dt>
+                <dd className="text-ink-secondary">{card.experiment_type}</dd>
+              </div>
+            )}
+            {card.temperature_c != null && (
+              <div className="flex gap-2">
+                <dt className="text-ink-muted w-28 shrink-0">Temperature</dt>
+                <dd className="font-mono-data text-ink-secondary">{card.temperature_c} °C</dd>
+              </div>
+            )}
+            {!isQueued && card.days_running != null && (
+              <div className="flex gap-2">
+                <dt className="text-ink-muted w-28 shrink-0">Elapsed</dt>
+                <dd className="font-mono-data text-ink-secondary">
+                  Day {card.days_running}
+                  {card.started_at
+                    ? ` (started ${formatDateShort(card.started_at)})`
+                    : ''}
+                </dd>
+              </div>
+            )}
+            {!isQueued && (
+              <div className="flex gap-2 items-center">
+                <dt className="text-ink-muted w-28 shrink-0">Started</dt>
+                <dd className="font-mono-data text-ink-secondary flex items-center gap-1">
+                  {editingDate ? (
+                    <>
+                      <input
+                        type="date"
+                        value={dateDraft}
+                        onChange={(e) => setDateDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') confirmDate()
+                          if (e.key === 'Escape') setEditingDate(false)
+                        }}
+                        className="font-mono-data border border-surface-border rounded px-1 bg-surface-raised text-ink-primary text-sm"
+                        autoFocus
+                      />
+                      <button
+                        onClick={confirmDate}
+                        disabled={dateMutation.isPending}
+                        className="text-status-success hover:opacity-80 text-sm"
+                        title="Save date"
+                        aria-label="Save date"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        onClick={() => setEditingDate(false)}
+                        className="text-ink-muted hover:text-ink-secondary text-sm"
+                        title="Cancel"
+                        aria-label="Cancel date edit"
+                      >
+                        ✗
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{card.started_at ? card.started_at.slice(0, 10) : '—'}</span>
+                      <button
+                        onClick={startDateEdit}
+                        className="text-ink-muted hover:text-ink-secondary transition-colors text-sm leading-none cursor-pointer"
+                        title="Edit start date"
+                        aria-label="Edit start date"
+                      >
+                        ✎
+                      </button>
+                    </>
+                  )}
+                </dd>
+              </div>
+            )}
+            {card.description && (
+              <div className="pt-1">
+                <p className="text-ink-secondary leading-relaxed text-sm">{card.description}</p>
+              </div>
+            )}
+          </dl>
+        </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        {/* HARDWARE section */}
+        {(card.volume_mL != null || card.material || card.vendor) && (
+          <div className="pt-3 border-t border-surface-border mb-4">
+            <p className="text-ink-muted text-2xs uppercase tracking-wider mb-2">Hardware</p>
+            <dl className="space-y-1.5 text-sm">
+              {card.volume_mL != null && (
+                <div className="flex gap-2">
+                  <dt className="text-ink-muted w-28 shrink-0">Volume</dt>
+                  <dd className="font-mono-data text-ink-secondary">{card.volume_mL} mL</dd>
+                </div>
+              )}
+              {card.material && (
+                <div className="flex gap-2">
+                  <dt className="text-ink-muted w-28 shrink-0">Material</dt>
+                  <dd className="text-ink-secondary">{card.material}</dd>
+                </div>
+              )}
+              {card.vendor && (
+                <div className="flex gap-2">
+                  <dt className="text-ink-muted w-28 shrink-0">Vendor</dt>
+                  <dd className="text-ink-secondary">{card.vendor}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
+
+        {/* CHANGE REQUEST section */}
+        {card.experiment_id && (
+          <div className="pt-3 border-t border-surface-border">
+            <p className="text-ink-muted text-2xs uppercase tracking-wider mb-3">Change Request</p>
+
+            {/* Most recent prior entry — read only */}
+            {recentCR?.previous && (
+              <div className="mb-3 p-2.5 bg-surface-raised rounded border border-surface-border">
+                <p className="text-2xs text-ink-muted mb-1">
+                  {formatDateShort(recentCR.previous.sync_date)}
+                </p>
+                <p className="text-xs text-ink-secondary leading-relaxed">
+                  {recentCR.previous.requested_change}
+                </p>
+              </div>
+            )}
+
+            {/* Today's editable field */}
+            <p className="text-xs text-ink-muted mb-1.5">Change Request for {todayLabel}</p>
+            <textarea
+              value={crText}
+              onChange={(e) => setCrText(e.target.value)}
+              rows={3}
+              placeholder="Enter a change request for today…"
+              className="w-full text-sm bg-surface-raised border border-surface-border rounded px-2.5 py-2 text-ink-primary placeholder:text-ink-muted resize-none focus:outline-none focus:border-ink-muted transition-colors"
+            />
+            <button
+              onClick={() => crMutation.mutate()}
+              disabled={!crText.trim() || crMutation.isPending}
+              className="mt-2 px-3 py-1.5 text-sm bg-brand-red text-white rounded hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {crMutation.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="mt-5 flex justify-end gap-2 pt-3 border-t border-surface-border">
           <button
             onClick={onClose}
             className="px-3 py-1.5 text-sm text-ink-muted hover:text-ink-primary border border-surface-border rounded transition-colors"
