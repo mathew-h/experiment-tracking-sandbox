@@ -31,6 +31,18 @@ def _parse_float(val: Any) -> Optional[float]:
         return None
 
 
+def _parse_measurement_float(val: Any) -> Optional[float]:
+    """Like _parse_float but also treats 0 as None.
+
+    Used for pH and conductivity: the Excel template produces 0 (not NaN) for
+    blank cells in these columns, so 0 is indistinguishable from a blank entry.
+    A genuinely measured 0 for either field is not physically meaningful in our
+    experimental context.
+    """
+    result = _parse_float(val)
+    return None if result == 0.0 else result
+
+
 def _parse_date(val: Any) -> Optional[dt.datetime]:
     if val is None:
         return None
@@ -144,8 +156,8 @@ def _process_bytes(
         gas_vol_ml = _parse_float(row.get("Gas Volume (mL)"))
         gas_psi = _parse_float(row.get("Gas Pressure (psi)"))
         gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None
-        ph = _parse_float(row.get("Sample pH"))
-        conductivity = _parse_float(row.get("Sample Conductivity (mS/cm)"))
+        ph = _parse_measurement_float(row.get("Sample pH"))
+        conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
         sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
         modification = str(row.get("Modification") or "").strip() or None
         overwrite = _parse_bool(row.get("Overwrite"))

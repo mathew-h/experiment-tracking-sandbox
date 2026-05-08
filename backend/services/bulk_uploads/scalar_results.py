@@ -150,6 +150,8 @@ class ScalarResultsUploadService:
         records: List[Dict[str, Any]] = df.to_dict('records')
         cleaned_records: List[Dict[str, Any]] = []
         parse_feedbacks: List[Dict[str, Any]] = []
+        # Fields where 0 is indistinguishable from a blank template cell.
+        _ZERO_AS_BLANK = {"final_ph", "final_conductivity_mS_cm"}
 
         for row_index, rec in enumerate(records):
             row_num = row_index + 2
@@ -160,6 +162,8 @@ class ScalarResultsUploadService:
                 if isinstance(v, float) and math.isnan(v):
                     continue
                 if isinstance(v, str) and v.strip() == '':
+                    continue
+                if k in _ZERO_AS_BLANK and v == 0:
                     continue
                 clean[k] = v
 

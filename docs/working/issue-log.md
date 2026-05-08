@@ -584,3 +584,11 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/ExperimentDetail/__tests__/ChangeRequestsTab.test.tsx` — updated: 3 tests (empty state, renders date/reactor/description, no status or Carried Forward)
 - **Tests added:** yes — 7 backend API tests (pytest); 3 frontend vitest tests updated
 - **Decision logged:** no
+
+## 2026-05-08 | inline — Treat blank pH and conductivity cells as NULL in both bulk upload parsers
+- **Files changed:**
+  - `backend/services/bulk_uploads/master_bulk_upload.py` — new `_parse_measurement_float` helper returns `None` for `0.0`; used for `Sample pH` and `Sample Conductivity (mS/cm)` columns
+  - `backend/services/bulk_uploads/scalar_results.py` — `_ZERO_AS_BLANK` set strips `0` values for `final_ph` and `final_conductivity_mS_cm` in the row-clean loop
+  - `scripts/cleanup_zero_ph_conductivity.py` — new one-time data cleanup script; dry-run by default, `--apply` to commit; confirmed 120 pH zeros and 225 conductivity zeros in live DB
+- **Tests added:** no
+- **Decision logged:** no
