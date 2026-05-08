@@ -592,3 +592,13 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `scripts/cleanup_zero_ph_conductivity.py` — new one-time data cleanup script; dry-run by default, `--apply` to commit; confirmed 120 pH zeros and 225 conductivity zeros in live DB
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-05-08 | issue #59 — Add `cumulative_ferrous_iron_yield_h2_pct` to `v_results_scalar`
+- **Files changed:**
+  - `database/event_listeners.py` — `v_results_scalar`: added `SUM(COALESCE(sr.ferrous_iron_yield_h2_pct, 0)) OVER (PARTITION BY COALESCE(e.base_experiment_id, e.experiment_id) ORDER BY er.cumulative_time_post_reaction_days, er.id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_ferrous_iron_yield_h2_pct` immediately after `ferrous_iron_yield_h2_pct`
+  - `docs/POWERBI_MODEL.md` — added `cumulative_ferrous_iron_yield_h2_pct` to `v_results_scalar` key columns list
+  - `docs/project_context/POWERBI_MODEL.md` — auto-synced copy
+  - `tests/views/test_v_results_scalar_cum_fe.py` — new: 6 tests covering column existence, running sum accumulation, NULL-as-zero, missing scalar row, independent experiment isolation, chain partitioning (CTEST_001 / CTEST_001-2)
+- **Tests added:** yes — 6 view integration tests; 18/18 view suite passing
+- **Decision logged:** no
+- **Note:** Commits landed directly on `develop` (no topic branch; task started without `/start-task`).
