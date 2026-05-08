@@ -198,10 +198,12 @@ class TestCumulativeSum:
 class TestChainPartitioning:
     def test_derived_experiment_shares_cumulative_with_root(self, view_db):
         """Root and derived experiments in the same chain accumulate into one running sum."""
-        # Root experiment: base_experiment_id is NULL (COALESCE resolves to 'CHAIN_ROOT')
-        root = _make_experiment(view_db, "CHAIN_ROOT", 20)
-        # Derived experiment: base_experiment_id = 'CHAIN_ROOT' (COALESCE resolves to 'CHAIN_ROOT')
-        derived = _make_experiment(view_db, "CHAIN_ROOT-2", 21, base_id="CHAIN_ROOT")
+        # Root experiment: base_experiment_id is NULL (COALESCE resolves to 'CTEST_001').
+        # Use a digit-suffix ID so the lineage parser recognises 'CTEST_001-2' as derived.
+        root = _make_experiment(view_db, "CTEST_001", 20)
+        view_db.flush()  # Ensure root is persisted before derived is created
+        # Derived experiment: base_experiment_id = 'CTEST_001' (COALESCE resolves to 'CTEST_001')
+        derived = _make_experiment(view_db, "CTEST_001-2", 21, base_id="CTEST_001")
 
         er_root = _make_result(view_db, root, cumulative_days=1.0)
         er_derived = _make_result(view_db, derived, cumulative_days=30.0)
@@ -214,15 +216,15 @@ class TestChainPartitioning:
             text("""
                 SELECT experiment_id, cumulative_ferrous_iron_yield_h2_pct
                 FROM v_results_scalar
-                WHERE experiment_id IN ('CHAIN_ROOT', 'CHAIN_ROOT-2')
+                WHERE experiment_id IN ('CTEST_001', 'CTEST_001-2')
                 ORDER BY cumulative_time_post_reaction_days
             """)
         ).fetchall()
 
         assert len(rows) == 2
         # Root timepoint: cumulative = 10.0 (first in partition)
-        assert rows[0][0] == "CHAIN_ROOT"
+        assert rows[0][0] == "CTEST_001"
         assert rows[0][1] == pytest.approx(10.0)
         # Derived timepoint: cumulative = 10.0 + 5.0 = 15.0 (same partition)
-        assert rows[1][0] == "CHAIN_ROOT-2"
+        assert rows[1][0] == "CTEST_001-2"
         assert rows[1][1] == pytest.approx(15.0)
