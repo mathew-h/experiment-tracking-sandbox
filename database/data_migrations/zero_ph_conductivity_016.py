@@ -8,16 +8,16 @@ this script corrects the historical rows.
 
 Usage:
     # Dry run (preview only, no writes)
-    python scripts/cleanup_zero_ph_conductivity.py
+    python database/data_migrations/zero_ph_conductivity_016.py
 
     # Apply
-    python scripts/cleanup_zero_ph_conductivity.py --apply
+    python database/data_migrations/zero_ph_conductivity_016.py --apply
 """
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from database import get_db  # noqa: E402
 
