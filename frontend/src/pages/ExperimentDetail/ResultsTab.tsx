@@ -20,7 +20,7 @@ function fmtPct(n: number | null | undefined, decimals = 1) {
   return n != null ? `${n.toFixed(decimals)}%` : '—'
 }
 
-const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_4.5rem_5rem_5rem_4.5rem_4rem_6rem_5rem_minmax(0,1fr)_1.5rem]'
+const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_4.5rem_5rem_5rem_4.5rem_4rem_6rem_5rem_1.5rem]'
 
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
@@ -60,6 +60,17 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
               </div>
             ) : null)}
           </div>
+        </div>
+      )}
+      {result.has_brine_modification && (
+        <div>
+          <p className="text-xs font-semibold text-ink-secondary mb-1">
+            Sampling Modification
+            <Badge variant="warning" dot className="ml-2">MOD</Badge>
+          </p>
+          {result.brine_modification_description && (
+            <p className="text-xs text-ink-primary">{result.brine_modification_description}</p>
+          )}
         </div>
       )}
       {icp && (
@@ -198,7 +209,6 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             <span>pH</span>
             <span>Cond. (mS/cm)</span>
             <span>ICP / XRD</span>
-            <span>Sampling Mod</span>
             <span></span>
           </div>
           {results.map((r) => (
@@ -221,17 +231,6 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
                 <span className="flex items-center gap-1">
                   {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
                   {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
-                </span>
-                <span className="flex items-center gap-1 min-w-0">
-                  {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
-                  {r.brine_modification_description && (
-                    <span
-                      className="truncate text-xs text-ink-secondary"
-                      title={r.brine_modification_description}
-                    >
-                      {r.brine_modification_description}
-                    </span>
-                  )}
                 </span>
                 <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
               </div>

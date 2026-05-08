@@ -602,3 +602,9 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** yes — 6 view integration tests; 18/18 view suite passing
 - **Decision logged:** no
 - **Note:** Commits landed directly on `develop` (no topic branch; task started without `/start-task`).
+
+## 2026-05-08 | inline — Move brine modification out of results table column into expanded row
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — removed "Sampling Mod" grid column; moved MOD badge + full description into `ExpandedRow` under a "Sampling Modification" section
+- **Tests added:** no
+- **Decision logged:** no
