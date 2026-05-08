@@ -489,7 +489,7 @@ _VIEWS = [
             sr.ferrous_iron_yield_h2_pct,
             SUM(COALESCE(sr.ferrous_iron_yield_h2_pct, 0)) OVER (
                 PARTITION BY COALESCE(e.base_experiment_id, e.experiment_id)
-                ORDER BY er.cumulative_time_post_reaction_days
+                ORDER BY er.cumulative_time_post_reaction_days, er.id
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
             ) AS cumulative_ferrous_iron_yield_h2_pct,
             sr.ferrous_iron_yield_nh3_pct,

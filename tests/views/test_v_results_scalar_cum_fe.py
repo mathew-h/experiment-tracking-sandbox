@@ -193,3 +193,36 @@ class TestCumulativeSum:
         by_exp = {r[0]: r[1] for r in rows}
         assert by_exp["IND_A"] == pytest.approx(20.0)
         assert by_exp["IND_B"] == pytest.approx(5.0)
+
+
+class TestChainPartitioning:
+    def test_derived_experiment_shares_cumulative_with_root(self, view_db):
+        """Root and derived experiments in the same chain accumulate into one running sum."""
+        # Root experiment: base_experiment_id is NULL (COALESCE resolves to 'CHAIN_ROOT')
+        root = _make_experiment(view_db, "CHAIN_ROOT", 20)
+        # Derived experiment: base_experiment_id = 'CHAIN_ROOT' (COALESCE resolves to 'CHAIN_ROOT')
+        derived = _make_experiment(view_db, "CHAIN_ROOT-2", 21, base_id="CHAIN_ROOT")
+
+        er_root = _make_result(view_db, root, cumulative_days=1.0)
+        er_derived = _make_result(view_db, derived, cumulative_days=30.0)
+
+        _make_scalar(view_db, er_root, fe_h2_pct=10.0)
+        _make_scalar(view_db, er_derived, fe_h2_pct=5.0)
+        view_db.commit()
+
+        rows = view_db.execute(
+            text("""
+                SELECT experiment_id, cumulative_ferrous_iron_yield_h2_pct
+                FROM v_results_scalar
+                WHERE experiment_id IN ('CHAIN_ROOT', 'CHAIN_ROOT-2')
+                ORDER BY cumulative_time_post_reaction_days
+            """)
+        ).fetchall()
+
+        assert len(rows) == 2
+        # Root timepoint: cumulative = 10.0 (first in partition)
+        assert rows[0][0] == "CHAIN_ROOT"
+        assert rows[0][1] == pytest.approx(10.0)
+        # Derived timepoint: cumulative = 10.0 + 5.0 = 15.0 (same partition)
+        assert rows[1][0] == "CHAIN_ROOT-2"
+        assert rows[1][1] == pytest.approx(15.0)
