@@ -92,3 +92,6 @@ test-results/
 
 # Git worktrees
 .worktrees/
+
+# User onboarding (contains internal IP addresses)
+docs/user_guide/ONBOARDING.md
