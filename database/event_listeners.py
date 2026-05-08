@@ -487,6 +487,11 @@ _VIEWS = [
             sr."final_nitrate_concentration_mM",
             sr.ferrous_iron_yield,
             sr.ferrous_iron_yield_h2_pct,
+            SUM(COALESCE(sr.ferrous_iron_yield_h2_pct, 0)) OVER (
+                PARTITION BY COALESCE(e.base_experiment_id, e.experiment_id)
+                ORDER BY er.cumulative_time_post_reaction_days
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS cumulative_ferrous_iron_yield_h2_pct,
             sr.ferrous_iron_yield_nh3_pct,
             sr."final_dissolved_oxygen_mg_L",
             sr."final_conductivity_mS_cm",
