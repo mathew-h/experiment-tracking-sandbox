@@ -611,6 +611,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Root cause:** CF-NNN, VAE-NN, VHE-NN, MHE-NN experiments were originally uploaded with underscore naming (e.g. CF_015). Old parser treated numeric suffix as derivation index and wrote `base_experiment_id='CF'/'VAE'/'VHE'/'MHE'`. After rename to hyphen style the stale values were never recomputed. 103 experiments affected. The window function in `v_results_scalar` partitions by `COALESCE(base_experiment_id, experiment_id)`, so CF-015 (base='CF') and CF-015-2/3 (base='CF-015') land in different partitions and never accumulate together.
 - **Fix:** Run `.venv/Scripts/python database/data_migrations/establish_experiment_lineage_006.py --fix-stale` on the lab PC after deploy.
 
+## 2026-05-11 | inline — Fix new-experiments bulk upload template (3-sheet workbook)
+- **Files changed:**
+  - `backend/api/routers/bulk_uploads.py` — replaced broken single-sheet `_simple_template` call for `new-experiments` with a 4-sheet openpyxl workbook: `experiments`, `conditions`, `additives`, `INSTRUCTIONS`; INSTRUCTIONS sheet documents overwrite semantics, auto-copy behavior, and additives asymmetry
+  - `tests/api/test_bulk_uploads.py` — 3 new tests: `test_new_experiments_template_has_three_sheets`, `test_new_experiments_template_experiments_sheet_headers`, `test_new_experiments_template_additives_sheet_headers`
+- **Tests added:** yes — 3 API tests (70/70 passing)
+- **Decision logged:** no
+- **Note:** Commit `3b44bb8` landed directly on `develop` (no topic branch; task started without `/start-task`).
+
 ## 2026-05-08 | inline — Move brine modification out of results table column into expanded row
 - **Files changed:**
   - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — removed "Sampling Mod" grid column; moved MOD badge + full description into `ExpandedRow` under a "Sampling Modification" section
