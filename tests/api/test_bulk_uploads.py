@@ -445,6 +445,47 @@ def test_xrd_template_experiment_mode(client):
     assert "spreadsheetml" in resp.headers.get("content-type", "")
 
 
+def test_new_experiments_template_has_three_sheets(client):
+    """new-experiments template must have 'experiments', 'conditions', 'additives' sheets."""
+    import openpyxl, io as _io
+    resp = client.get("/api/bulk-uploads/templates/new-experiments")
+    assert resp.status_code == 200
+    wb = openpyxl.load_workbook(_io.BytesIO(resp.content))
+    sheet_names = [s.lower() for s in wb.sheetnames]
+    assert "experiments" in sheet_names
+    assert "conditions" in sheet_names
+    assert "additives" in sheet_names
+
+
+def test_new_experiments_template_experiments_sheet_headers(client):
+    """experiments sheet must contain all columns the parser reads."""
+    import openpyxl, io as _io
+    resp = client.get("/api/bulk-uploads/templates/new-experiments")
+    assert resp.status_code == 200
+    wb = openpyxl.load_workbook(_io.BytesIO(resp.content))
+    ws = next((s for s in wb.worksheets if s.title.lower() == "experiments"), None)
+    assert ws is not None, "Sheet 'experiments' not found in template"
+    headers = [str(c.value).replace("*", "").split("(")[0].strip().lower()
+               for c in ws[1] if c.value]
+    for required in ("experiment_id", "sample_id", "date", "status",
+                     "initial_note", "overwrite", "researcher"):
+        assert required in headers, f"Missing column '{required}' in experiments sheet"
+
+
+def test_new_experiments_template_additives_sheet_headers(client):
+    """additives sheet must contain experiment_id, compound, amount, unit."""
+    import openpyxl, io as _io
+    resp = client.get("/api/bulk-uploads/templates/new-experiments")
+    assert resp.status_code == 200
+    wb = openpyxl.load_workbook(_io.BytesIO(resp.content))
+    ws = next((s for s in wb.worksheets if s.title.lower() == "additives"), None)
+    assert ws is not None, "Sheet 'additives' not found in template"
+    headers = [str(c.value).replace("*", "").split("(")[0].strip().lower()
+               for c in ws[1] if c.value]
+    for required in ("experiment_id", "compound", "amount", "unit"):
+        assert required in headers, f"Missing column '{required}' in additives sheet"
+
+
 # ── Issue #50: ActLabs conflict response ─────────────────────────────────────
 
 import json

@@ -750,12 +750,140 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
     if upload_type == "new-experiments":
-        return _simple_template(
-            headers=["experiment_id", "experiment_type", "date", "researcher",
-                     "sample_id", "temperature_c", "description"],
-            required={"experiment_id", "experiment_type"},
-            example_row=["HPHT_072", "HPHT", None, "MH", "S001", 200.0, ""],
+        import openpyxl  # noqa: PLC0415
+        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
+
+        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+        def _write_sheet(ws, headers, required, example_row=None):
+            for col, h in enumerate(headers, start=1):
+                cell = ws.cell(row=1, column=col, value=h)
+                cell.font = Font(bold=True)
+                cell.fill = req_fill if h.replace("*", "").split("(")[0].strip() in required else opt_fill
+                cell.alignment = Alignment(horizontal="center")
+                ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
+            if example_row:
+                for col, val in enumerate(example_row, start=1):
+                    ws.cell(row=2, column=col, value=val)
+
+        wb = openpyxl.Workbook()
+
+        # Sheet 1: experiments
+        ws_exp = wb.active
+        ws_exp.title = "experiments"
+        _write_sheet(
+            ws_exp,
+            headers=[
+                "experiment_id*",
+                "old_experiment_id (optional, for renames)",
+                "sample_id",
+                "date",
+                "status",
+                "researcher",
+                "initial_note",
+                "overwrite",
+            ],
+            required={"experiment_id*"},
+            example_row=[
+                "HPHT_001", None, "S001", "2026-01-15", "ONGOING", "MH",
+                "Initial setup note", "FALSE",
+            ],
         )
+
+        # Sheet 2: conditions
+        ws_cond = wb.create_sheet("conditions")
+        _write_sheet(
+            ws_cond,
+            headers=[
+                "experiment_id*",
+                "experiment_type",
+                "temperature_c",
+                "initial_ph",
+                "rock_mass_g",
+                "water_volume_mL",
+                "reactor_number",
+                "stir_speed_rpm",
+                "room_temp_pressure_psi",
+                "rxn_temp_pressure_psi",
+                "particle_size",
+                "feedstock",
+                "initial_conductivity_mS_cm",
+                "co2_partial_pressure_MPa",
+                "initial_nitrate_concentration",
+                "initial_dissolved_oxygen",
+                "initial_alkalinity",
+            ],
+            required={"experiment_id*"},
+            example_row=[
+                "HPHT_001", "HPHT", 200.0, 7.0, 5.0, 50.0, 3, 300,
+                100.0, 1450.0, "< 150 μm", "Nitrogen", None, None, None, None, None,
+            ],
+        )
+
+        # Sheet 3: additives
+        ws_add = wb.create_sheet("additives")
+        _write_sheet(
+            ws_add,
+            headers=[
+                "experiment_id*",
+                "compound*",
+                "amount*",
+                "unit*",
+                "order",
+                "method",
+            ],
+            required={"experiment_id*", "compound*", "amount*", "unit*"},
+            example_row=["HPHT_001", "Magnesium hydroxide", 5.0, "g", 1, "dissolved in DI water"],
+        )
+
+        # Instructions sheet
+        ws_inst = wb.create_sheet("INSTRUCTIONS")
+        ws_inst.column_dimensions["A"].width = 35
+        ws_inst.column_dimensions["B"].width = 75
+        instructions = [
+            ("Column / Sheet", "Notes"),
+            ("--- experiments sheet ---", ""),
+            ("experiment_id*", "REQUIRED. Format: TYPE_INITIALS_INDEX (e.g. Serum_MH_101) or TYPE_INDEX (e.g. HPHT_001). Supports -N sequential suffix and _TEXT treatment suffix."),
+            ("old_experiment_id", "Optional. Must be used together with overwrite=TRUE to rename. If old_experiment_id is provided without overwrite=TRUE, it is silently ignored and the row is processed as a standard lookup."),
+            ("sample_id", "Sample identifier. Auto-copied from parent for sequential/treatment experiments if left blank. Note: ALL conditions fields are also auto-copied from the parent experiment for sequential/treatment experiments — provide a conditions row to override specific fields."),
+            ("date", "Experiment start date (YYYY-MM-DD or Excel date)."),
+            ("status", "ONGOING, COMPLETED, CANCELLED, or QUEUED. Defaults to ONGOING."),
+            ("researcher", "Researcher initials. Auto-populated from experiment_id (3-part format) if omitted."),
+            ("initial_note", "Free-text note attached to the experiment at creation."),
+            ("overwrite", "TRUE = update existing experiment (must already exist); FALSE (default) = skip if experiment already exists. Note: overwrite=TRUE on a non-existent experiment skips with a warning — it does NOT create. Also: overwrite=TRUE clears all existing notes before adding the new initial_note."),
+            ("--- conditions sheet ---", ""),
+            ("experiment_id*", "REQUIRED. Must match an experiment_id in the experiments sheet or already exist in the database."),
+            ("experiment_type", "Auto-populated from experiment_id if omitted. Values: Serum, Autoclave, HPHT, Core Flood, Other."),
+            ("temperature_c", "Reaction temperature in Celsius."),
+            ("initial_ph", "Initial solution pH."),
+            ("rock_mass_g", "Rock mass in grams."),
+            ("water_volume_mL", "Water/brine volume in mL."),
+            ("reactor_number", "Reactor vessel number (integer). Setting ONGOING status auto-completes conflicting experiments."),
+            ("stir_speed_rpm", "Stir bar speed in RPM."),
+            ("room_temp_pressure_psi", "Headspace pressure at room temperature (psi)."),
+            ("rxn_temp_pressure_psi", "Headspace pressure at reaction temperature (psi)."),
+            ("particle_size", "Rock particle size description (e.g. '< 150 μm')."),
+            ("feedstock", "Nitrogen, Nitrate, or Blank."),
+            ("--- additives sheet ---", ""),
+            ("experiment_id*", "REQUIRED. Must match an experiment in the experiments sheet or exist in database."),
+            ("compound*", "REQUIRED. Chemical compound name. Auto-created in compound inventory if not found."),
+            ("amount*", "REQUIRED. Numeric amount > 0."),
+            ("unit*", "REQUIRED. One of: g, mg, μg, kg, μL, mL, L, μmol, mmol, mol, ppm, mM, M, %, wt%, % of Rock, wt% of fluid."),
+            ("(additives note)", "Additives are NEVER auto-copied from parent experiments. Each experiment's additives must be specified explicitly in this sheet."),
+            ("order", "Integer addition order (optional)."),
+            ("method", "Free-text addition method description (optional)."),
+        ]
+        for r_idx, (col_name, note) in enumerate(instructions, start=1):
+            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
+            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
+            if r_idx == 1:
+                name_cell.font = Font(bold=True)
+                note_cell.font = Font(bold=True)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
     if upload_type == "rock-inventory":
         import openpyxl  # noqa: PLC0415
