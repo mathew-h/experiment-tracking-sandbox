@@ -624,3 +624,10 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — removed "Sampling Mod" grid column; moved MOD badge + full description into `ExpandedRow` under a "Sampling Modification" section
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-05-11 | inline — Fix MOD badge not showing in main results row
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — added `has_brine_modification` MOD badge to main row badge span alongside ICP/XRD; updated column header to "ICP / XRD / MOD"
+  - `frontend/src/pages/ExperimentDetail/__tests__/ResultsTab.columns.test.tsx` — 2 new tests for MOD badge visibility
+- **Tests added:** yes — 2 vitest tests (badge present when `has_brine_modification=true`, absent when false)
+- **Decision logged:** no
