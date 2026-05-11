@@ -20,7 +20,7 @@ function fmtPct(n: number | null | undefined, decimals = 1) {
   return n != null ? `${n.toFixed(decimals)}%` : '—'
 }
 
-const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_4.5rem_5rem_5rem_4.5rem_4rem_6rem_5rem_1.5rem]'
+const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_4.5rem_5rem_5rem_4.5rem_4rem_6rem_9rem_1.5rem]'
 
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
