@@ -603,6 +603,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Decision logged:** no
 - **Note:** Commits landed directly on `develop` (no topic branch; task started without `/start-task`).
 
+## 2026-05-11 | inline — Fix stale base_experiment_id breaking cumulative Fe-to-H2 for CF/VAE/VHE/MHE series
+- **Files changed:**
+  - `database/data_migrations/establish_experiment_lineage_006.py` — added `fix_stale_lineage()` function; updated `run_migration()` to call it as a second pass; updated `__main__` to support `--fix-stale` flag
+- **Tests added:** no — data migration repair; existing 18 migration tests all pass
+- **Decision logged:** no
+- **Root cause:** CF-NNN, VAE-NN, VHE-NN, MHE-NN experiments were originally uploaded with underscore naming (e.g. CF_015). Old parser treated numeric suffix as derivation index and wrote `base_experiment_id='CF'/'VAE'/'VHE'/'MHE'`. After rename to hyphen style the stale values were never recomputed. 103 experiments affected. The window function in `v_results_scalar` partitions by `COALESCE(base_experiment_id, experiment_id)`, so CF-015 (base='CF') and CF-015-2/3 (base='CF-015') land in different partitions and never accumulate together.
+- **Fix:** Run `.venv/Scripts/python database/data_migrations/establish_experiment_lineage_006.py --fix-stale` on the lab PC after deploy.
+
 ## 2026-05-08 | inline — Move brine modification out of results table column into expanded row
 - **Files changed:**
   - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — removed "Sampling Mod" grid column; moved MOD badge + full description into `ExpandedRow` under a "Sampling Modification" section
