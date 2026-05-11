@@ -208,7 +208,7 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             <span>Fe²⁺ H₂ (%)</span>
             <span>pH</span>
             <span>Cond. (mS/cm)</span>
-            <span>ICP / XRD</span>
+            <span>ICP / XRD / MOD</span>
             <span></span>
           </div>
           {results.map((r) => (
@@ -231,6 +231,7 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
                 <span className="flex items-center gap-1">
                   {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
                   {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
+                  {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
                 </span>
                 <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
               </div>

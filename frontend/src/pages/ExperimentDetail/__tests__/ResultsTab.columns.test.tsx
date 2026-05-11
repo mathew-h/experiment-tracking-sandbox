@@ -93,4 +93,19 @@ describe('ResultsTab — new columns', () => {
     await screen.findByText('T+7')
     expect(screen.queryByText('XRD')).not.toBeInTheDocument()
   })
+
+  it('renders MOD badge in the main row when has_brine_modification is true', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, has_brine_modification: true, brine_modification_description: 'Added HCl' },
+    ])
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    expect(await screen.findAllByText('MOD')).not.toHaveLength(0)
+  })
+
+  it('does not render MOD badge when has_brine_modification is false', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    await screen.findByText('T+7')
+    expect(screen.queryByText('MOD')).not.toBeInTheDocument()
+  })
 })
