@@ -144,28 +144,26 @@ class TestICPServiceBasicFunctionality:
         assert corrected_df['Corrected_Concentration'].iloc[1] == 25.0  # 5.0 * 5.0
     
     def test_select_best_lines(self):
-        """Test best line selection based on intensity."""
-        # Create test data with multiple lines per element
+        """Best line selection groups by element symbol and picks highest calibrated intensity."""
         test_data = {
             'Label': ['Sample1'] * 4,
             'Element Label': ['Fe 238.204', 'Fe 259.940', 'Mg 285.213', 'Mg 202.582'],
             'Concentration': [10.0, 8.0, 5.0, 4.8],
-            'Intensity': [1500, 1200, 800, 750],  # Fe 238.204 and Mg 285.213 have higher intensity
-            'Corrected_Concentration': [50.0, 40.0, 25.0, 24.0]
+            'Intensity': [1500, 1200, 800, 750],
+            'Corrected_Concentration': [50.0, 40.0, 25.0, 24.0],
         }
         df = pd.DataFrame(test_data)
-        
-        best_lines = ICPService.select_best_lines(df)
-        
-        # Should select 2 rows (best line for each element)
-        assert len(best_lines) == 2
-        
-        # Check that highest intensity lines were selected
+
+        best_lines, warnings = ICPService.select_best_lines(df)
+
+        assert len(warnings) == 0
+        assert len(best_lines) == 2  # one row per element symbol
+
         fe_row = best_lines[best_lines['Element Label'].str.startswith('Fe')].iloc[0]
         mg_row = best_lines[best_lines['Element Label'].str.startswith('Mg')].iloc[0]
-        
-        assert fe_row['Element Label'] == 'Fe 238.204'  # Higher intensity Fe line
-        assert mg_row['Element Label'] == 'Mg 285.213'  # Higher intensity Mg line
+
+        assert fe_row['Element Label'] == 'Fe 238.204'   # higher intensity Fe line
+        assert mg_row['Element Label'] == 'Mg 285.213'   # higher intensity Mg line
 
 
 class TestICPServiceProcessing:
@@ -750,6 +748,83 @@ class TestICPRouterOverwrite:
             assert calls[0] is True
         finally:
             app.dependency_overrides.clear()
+
+
+class TestICPUncalHandling:
+    """Tests for Uncal spectral-line fallback (issue #61)."""
+
+    def test_uncal_highest_intensity_falls_back_to_next_line(self):
+        """When the max-intensity line is Uncal, use the next-best calibrated line."""
+        test_data = {
+            'Label': ['Serum_MH_011_Day5_5x'] * 3,
+            'Type': ['SAMP'] * 3,
+            'Element Label': ['Fe 238.204', 'Fe 259.940', 'Fe 234.350'],
+            'Concentration': ['Uncal', '50.0', '30.0'],
+            'Intensity': [9999.0, 1500.0, 800.0],
+        }
+        df = pd.DataFrame(test_data)
+        processed_data, errors = ICPService.process_icp_dataframe(df)
+
+        assert len(processed_data) == 1
+        # Fe 259.940 concentration 50.0 × 5 (dilution from label) = 250.0
+        assert processed_data[0]['fe'] == 250.0
+        # No Uncal warning — a valid fallback was found
+        assert not any('Uncal' in e for e in errors)
+
+    def test_all_spectral_lines_uncal_skips_element_and_warns(self):
+        """When every spectral line for an element is Uncal, skip it and emit a warning."""
+        test_data = {
+            'Label': ['Serum_MH_011_Day5_5x'] * 3,
+            'Type': ['SAMP'] * 3,
+            'Element Label': ['Fe 238.204', 'Fe 259.940', 'Mg 285.213'],
+            'Concentration': ['Uncal', 'UNCAL', '4.0'],
+            'Intensity': [9999.0, 5000.0, 800.0],
+        }
+        df = pd.DataFrame(test_data)
+        processed_data, errors = ICPService.process_icp_dataframe(df)
+
+        assert len(processed_data) == 1
+        sample = processed_data[0]
+        assert 'fe' not in sample                  # all Fe lines Uncal — element absent
+        assert sample['mg'] == 20.0                # 4.0 × 5 dilution
+        assert any('Uncal' in e and 'fe' in e.lower() for e in errors)
+
+    def test_select_best_lines_uncal_fallback_direct(self):
+        """Unit: select_best_lines returns (df, []) when a valid fallback exists."""
+        test_data = {
+            'Label': ['S1', 'S1', 'S1'],
+            'Element Label': ['Fe 238.204', 'Fe 259.940', 'Fe 234.350'],
+            'Concentration': ['Uncal', '50.0', '30.0'],
+            'Intensity': [9999.0, 1500.0, 800.0],
+            'Corrected_Concentration': [float('nan'), 250.0, 150.0],
+        }
+        df = pd.DataFrame(test_data)
+
+        best_lines, warnings = ICPService.select_best_lines(df)
+
+        assert len(warnings) == 0
+        assert len(best_lines) == 1
+        assert best_lines.iloc[0]['Element Label'] == 'Fe 259.940'
+
+    def test_select_best_lines_all_uncal_emits_warning_and_excludes_element(self):
+        """Unit: select_best_lines warns and excludes elements where all lines are Uncal."""
+        test_data = {
+            'Label': ['S1', 'S1', 'S1'],
+            'Element Label': ['Fe 238.204', 'Fe 259.940', 'Mg 285.213'],
+            'Concentration': ['Uncal', 'uncal', '4.0'],
+            'Intensity': [9999.0, 5000.0, 800.0],
+            'Corrected_Concentration': [float('nan'), float('nan'), 20.0],
+        }
+        df = pd.DataFrame(test_data)
+
+        best_lines, warnings = ICPService.select_best_lines(df)
+
+        assert len(best_lines) == 1
+        assert best_lines.iloc[0]['Element Label'] == 'Mg 285.213'
+        assert len(warnings) == 1
+        assert 'Uncal' in warnings[0]
+        assert 'fe' in warnings[0].lower()
+        assert "'S1'" in warnings[0]
 
 
 if __name__ == "__main__":
