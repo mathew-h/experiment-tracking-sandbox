@@ -29,7 +29,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 |---|---|
 | `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `sampling_description`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `cumulative_ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
-| `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `tl_ppm` (27 element columns) |
+| `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `v_ppm` (36 element columns) |
 
 ---
 
@@ -40,7 +40,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_sample_info` | `sample_id`, `rock_classification`, `state`, `country`, `locality`, `latitude`, `longitude`, `description`, `characterized` |
 | `public.v_sample_characterization` | `sample_id`, `external_analysis_id`, `analysis_type`, `analysis_date`, `laboratory`, `analyst`, `description`, `magnetic_susceptibility`, `pxrf_reading_no` |
 | `public.v_pxrf_characterization` | `sample_id`, `pxrf_reading_no`, `analysis_date`, `fe_ppm`, `mg_ppm`, `ni_ppm`, `cu_ppm`, `si_ppm`, `co_ppm`, `mo_ppm`, `al_ppm`, `ca_ppm`, `k_ppm`, `au_ppm`, `zn_ppm` |
-| `public.v_sample_elemental_comp` | `sample_id`, `external_analysis_id`, `analysis_date`, `laboratory`, `analyst`, `FeO`, `SiO2`, `Al2O3`, `Fe2O3`, `MnO`, `MgO`, `CaO`, … (63 analyte columns) |
+| `public.v_sample_elemental_comp` | `sample_id`, `external_analysis_id`, `analysis_date`, `laboratory`, `analyst`, `FeO`, `SiO2`, `Al2O3`, `Fe2O3`, `MnO`, `MgO`, `CaO`, … (66 analyte columns) |
 | `public.v_sample_xrd` | `sample_id`, `mineral_name`, `amount_pct`, `analysis_date`, `laboratory`, `analyst` |
 
 ---
@@ -122,7 +122,10 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
 - `v_sample_xrd` covers sample characterisation XRD (Mode A + ActLabs reports), where
   `time_post_reaction_days IS NULL` and the phase is linked to a sample rather than an experiment.
 - All ICP element columns in `v_results_icp` use `_ppm` suffix to avoid name collisions in
-  Power BI when joining with `v_sample_elemental_comp` (which uses oxide symbols).
+  Power BI when joining with `v_sample_elemental_comp` (which uses oxide symbols). The 36
+  element columns are: `fe`, `si`, `mg`, `ca`, `ni`, `cu`, `mo`, `zn`, `mn`, `cr`, `co`,
+  `al`, `sr`, `y`, `nb`, `sb`, `cs`, `ba`, `nd`, `gd`, `pt`, `rh`, `ir`, `pd`, `ru`, `os`,
+  `tl`, `ag`, `ce`, `k`, `la`, `na`, `pb`, `sc`, `th`, `v` (each suffixed `_ppm`).
 - `v_experiment_additives_summary` and `v_experiment_additive_names_summary` are convenience views; `v_chemical_additives` is the normalised long-format alternative for per-additive analysis. Use `additive_names` (names only, alphabetical) for slicers and text labels; use `additives_summary` (name + amount + unit) for display columns where quantities matter. `additive_names` is NULL for experiments with no additives — use `COALESCE(additive_names, '')` in Power BI if a blank string is preferred.
 - `v_experiment_xrd` retains its own `time_post_reaction_days` and connects directly to
   `v_experiments` via `experiment_id` — it is intentionally **not** routed through

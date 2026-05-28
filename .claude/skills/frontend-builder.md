@@ -1,3 +1,8 @@
+---
+name: frontend-builder
+description: Use when the task involves React components, Tailwind styling, brand tokens, the design system, Firebase auth integration, or any file under frontend/
+---
+
 # Skill: frontend-builder
 
 ## When Claude Loads This Skill

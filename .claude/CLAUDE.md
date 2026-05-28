@@ -16,28 +16,25 @@
 ## 2. Task Mode
 
 Every session operates in one of three modes. The mode is set during `/start-task`
-and governs which context files are loaded and whether `plan.md` is updated.
+and governs which context files are loaded.
 
-| Mode | Trigger | plan.md | Milestone files |
-|------|---------|---------|-----------------|
-| `milestone` | User references a milestone | Full read + update | Yes |
-| `issue` | GitHub issue number or URL | Header only, no update | No |
-| `inline` | Direct prompt description | Skip | No |
+| Mode | Trigger | Milestone files |
+|------|---------|-----------------|
+| `milestone` | User references a milestone | Yes — read the active milestone file |
+| `issue` | GitHub issue number or URL | No |
+| `inline` | Direct prompt description | No |
 
 The current mode must be stated in the scope confirmation (Step 4 of `/start-task`).
-
-For `issue`, "no update" applies at session start; `/complete-task` still updates `plan.md` when the issue is resolved.
 
 ---
 
 ## 3. Project Overview
 
-A laboratory experiment tracking system for a small geochemistry team (2-5 users).
+A laboratory experiment tracking system for a small geochemistry team (8 users).
 Researchers log experiments, upload bulk analytical data, track samples and chemicals,
-and visualize reactor status. Data exports to Power BI.
+and visualize reactor status.
 
-**Current state:** Streamlit + SQLAlchemy + PostgreSQL (migrated M1)
-**Target state:** React 18 + FastAPI + PostgreSQL (see `docs/STACK.md` for full table)
+**Current state:** React 18 + FastAPI + PostgreSQL (see `docs/STACK.md` for full table)
 
 **Deployment:** Single always-on lab PC, LAN only, no cloud, no Docker in production.
 
@@ -55,17 +52,7 @@ Sub-agent skills (load when relevant):
 
 ---
 
-## 5. Active Milestone
-
-**Current: M9 — Sample Management** (`feature/m9-sample-management`)
-
-Read `docs/milestones/MILESTONE_INDEX.md` to find the current active milestone.
-Read the corresponding milestone file before starting any work.
-Do not begin a milestone until the previous one has received explicit user sign-off.
-
----
-
-## 6. What Is Locked
+## 5. What Is Locked
 
 Full details in `docs/LOCKED_COMPONENTS.md`. Summary:
 
@@ -97,19 +84,11 @@ git commit -m "chore: ..."   # both files in the same commit
 
 ---
 
-## 7. Working Memory
-
-`docs/working/plan.md` is the project's working memory.
-Read and update rules depend on **task mode** (section 2).
-It tracks what has been done, what decisions were made, and what comes next.
-
----
-
-## 8. Key Reference Files
+## 6. Key Reference Files
 
 | Need | Read |
 |------|------|
-| Schema details | `MODELS.md` and `docs/SCHEMA.md` |
+| Schema details | `MODELS.md` |
 | Derived field formulas | `docs/CALCULATIONS.md` |
 | Milestone details | `docs/milestones/[milestone file]` |
 | Locked components | `docs/LOCKED_COMPONENTS.md` |
@@ -122,7 +101,7 @@ It tracks what has been done, what decisions were made, and what comes next.
 
 ---
 
-## 9. Stop and Ask the User When
+## 7. Stop and Ask the User When
 
 - A schema change affects more than one model
 - A new third-party package is needed
@@ -137,7 +116,7 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 
 ---
 
-## 10. Commit Format
+## 8. Commit Format
 
 **Milestone tasks:**
 ```
@@ -168,13 +147,13 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 
 All descriptions: imperative mood, under 50 characters, no trailing period.
 
-## 11. MCP Servers
+## 9. MCP Servers
 Notion MCP (`notion`, `author`) is disabled for this project via `.mcp.json` -- not needed and consumes significant context tokens.
 Claude.ai Slack and Microsoft 365 plugins are disabled for this project via `disabledMcpServers` in `.mcp.json` -- not needed and consume significant context tokens. If they reappear, disable via Cursor Settings > Features > MCP.
 
 ---
 
-## 12. Documentation Sync — `docs/project_context/`
+## 10. Documentation Sync — `docs/project_context/`
 
 `docs/project_context/` is the **external team folder**. It receives copies of all documentation
 files so the broader team can stay informed of schema changes, API updates, and app functionality.
@@ -188,7 +167,7 @@ after every `Write` or `Edit` tool call. It copies any file written inside `docs
 
 ### Agent responsibility on task completion
 Before running `/complete-task`, the agent must:
-1. Update all documentation files affected by the completed work (e.g. `MODELS.md`, `API_REFERENCE.md`, `CALCULATIONS.md`, milestone files, `plan.md`)
+1. Update all documentation files affected by the completed work (e.g. `MODELS.md`, `API_REFERENCE.md`, `CALCULATIONS.md`, milestone files)
 2. The hook will automatically copy each written doc to `docs/project_context/`
 3. Confirm in the commit message: `- Docs updated: yes`
 
