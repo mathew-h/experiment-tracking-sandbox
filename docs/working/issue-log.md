@@ -625,6 +625,14 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no
 - **Decision logged:** no
 
+## 2026-05-28 | issue #61 — ICP-OES Uncal spectral-line fallback
+- **Files changed:**
+  - `backend/services/icp_service.py` — `select_best_lines`: now groups by element symbol (not full wavelength label); skips `Uncal` rows when picking best line; falls back to next-best calibrated line; emits warning if all lines are Uncal; explicit fallback for all-NaN Intensity; return type changed to `Tuple[pd.DataFrame, List[str]]`; `process_icp_dataframe` updated to unpack and propagate warnings
+  - `tests/test_icp_handling.py` — updated `test_select_best_lines` to unpack tuple; added `TestICPUncalHandling` (4 new tests); fixed 8 `bulk_create_icp_results` 2-tuple unpack errors (3-tuple since earlier refactor)
+- **Tests added:** yes — 4 new Uncal-handling tests; 24/35 passing (11 pre-existing failures unrelated to this fix: skipped-sample error assertions and `ExperimentalResults.experiment_id` model mismatch — tracked separately)
+- **Decision logged:** no
+- **Note:** Work done directly on `develop` (no topic branch); merged to `main` at user request.
+
 ## 2026-05-11 | inline — Fix MOD badge not showing in main results row
 - **Files changed:**
   - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — added `has_brine_modification` MOD badge to main row badge span alongside ICP/XRD; updated column header to "ICP / XRD / MOD"
