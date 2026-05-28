@@ -270,6 +270,15 @@ class ICPService:
                     break
 
             if best_row is None:
+                # Fallback: all calibrated rows had NaN Intensity — pick the first calibrated row
+                calibrated = group[
+                    group['Concentration'].apply(lambda v: str(v).strip().lower() != 'uncal')
+                ]
+                if not calibrated.empty:
+                    best_row = calibrated.iloc[0]
+
+            if best_row is None:
+                # Truly all lines are Uncal — skip and warn
                 element_labels = group['Element Label'].tolist()
                 display = (
                     element_labels[0]
