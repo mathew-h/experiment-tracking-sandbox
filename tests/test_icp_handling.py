@@ -796,7 +796,7 @@ class TestICPUncalHandling:
             'Element Label': ['Fe 238.204', 'Fe 259.940', 'Fe 234.350'],
             'Concentration': ['Uncal', '50.0', '30.0'],
             'Intensity': [9999.0, 1500.0, 800.0],
-            'Corrected_Concentration': [float('nan'), 250.0, 150.0],
+            'Corrected_Concentration': [float('nan'), 250.0, 150.0],  # pre-computed: not used by selection logic, row picked by Intensity + Uncal check
         }
         df = pd.DataFrame(test_data)
 
