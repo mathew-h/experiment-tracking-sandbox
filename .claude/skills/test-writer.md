@@ -1,3 +1,8 @@
+---
+name: test-writer
+description: Use when writing tests, reviewing coverage, running pytest or vitest, or performing the post-feature test pass before a merge
+---
+
 # Skill: test-writer
 
 ## When Claude Loads This Skill

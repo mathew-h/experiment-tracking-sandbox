@@ -1,3 +1,8 @@
+---
+name: api-developer
+description: Use when the task involves FastAPI routers, Pydantic schemas, calculation engine formulas, bulk upload service wrappers, or any file under backend/api/ or backend/services/
+---
+
 # Skill: api-developer
 
 ## When Claude Loads This Skill

@@ -1,3 +1,8 @@
+---
+name: db-architect
+description: Use when the task involves database schema changes, Alembic migrations, SQLAlchemy models, PostgreSQL queries, the calculation engine trigger registry, or any file under database/models/
+---
+
 # Skill: db-architect
 
 ## When Claude Loads This Skill
@@ -13,8 +18,7 @@ PostgreSQL queries, the calculation engine trigger registry, or any model file i
 - Must read `docs/SCHEMA.md` and `MODELS.md` before any action
 
 ## Must Read Before Acting
-- `MODELS.md` — locked schema reference
-- `docs/SCHEMA.md` — PostgreSQL-specific notes
+- `MODELS.md` — locked schema reference (includes PostgreSQL-specific notes)
 - `docs/CALCULATIONS.md` — derived field rules
 - `docs/LOCKED_COMPONENTS.md` — full locked models table and constraints
 
