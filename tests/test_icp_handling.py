@@ -213,7 +213,7 @@ class TestICPDuplicateHandling:
         """Test uploading ICP data twice for the same experiment and time point."""
         # First upload
         processed_data1, _ = ICPService.parse_and_process_icp_file(sample_icp_csv_content)
-        results1, errors1 = ICPService.bulk_create_icp_results(test_db, processed_data1)
+        results1, _, errors1 = ICPService.bulk_create_icp_results(test_db, processed_data1)
         
         assert len(results1) == 2  # Day3 and Day5
         assert len(errors1) == 0
@@ -221,7 +221,7 @@ class TestICPDuplicateHandling:
         
         # Second upload with same experiment and Day3 (different dilution factor)
         processed_data2, _ = ICPService.parse_and_process_icp_file(duplicate_icp_csv_content)
-        results2, errors2 = ICPService.bulk_create_icp_results(test_db, processed_data2)
+        results2, _, errors2 = ICPService.bulk_create_icp_results(test_db, processed_data2)
         
         # Should fail because ICP data already exists for Day3
         assert len(results2) == 0
@@ -248,7 +248,7 @@ class TestICPDuplicateHandling:
         
         # Now upload ICP data for the same time point
         processed_data, _ = ICPService.parse_and_process_icp_file(sample_icp_csv_content)
-        icp_results, icp_errors = ICPService.bulk_create_icp_results(test_db, processed_data)
+        icp_results, _, icp_errors = ICPService.bulk_create_icp_results(test_db, processed_data)
         
         # Should succeed - both scalar and ICP can exist for same time point
         assert len(icp_results) == 2  # Day3 and Day5
@@ -277,7 +277,7 @@ class TestICPDuplicateHandling:
         """Test uploading scalar data when ICP data already exists for the same time point."""
         # First, upload ICP data
         processed_data, _ = ICPService.parse_and_process_icp_file(sample_icp_csv_content)
-        icp_results, icp_errors = ICPService.bulk_create_icp_results(test_db, processed_data)
+        icp_results, _, icp_errors = ICPService.bulk_create_icp_results(test_db, processed_data)
         
         assert len(icp_results) == 2
         assert len(icp_errors) == 0
@@ -323,7 +323,7 @@ class TestICPServiceEdgeCases:
             'raw_label': 'NonExistent_Exp_999_Day1_5x'
         }]
         
-        results, errors = ICPService.bulk_create_icp_results(test_db, fake_data)
+        results, _, errors = ICPService.bulk_create_icp_results(test_db, fake_data)
         
         assert len(results) == 0
         assert len(errors) == 1
@@ -337,7 +337,7 @@ class TestICPServiceEdgeCases:
             {'experiment_id': 'Test_MH_001', 'time_post_reaction': 1.0}  # No elemental data
         ]
         
-        results, errors = ICPService.bulk_create_icp_results(test_db, incomplete_data)
+        results, _, errors = ICPService.bulk_create_icp_results(test_db, incomplete_data)
         
         assert len(results) == 0
         assert len(errors) == 2  # Only experiment_id missing and no elemental data should fail
@@ -387,7 +387,7 @@ class TestICPModelMethods:
         """Test ICPResults model get_element_concentration and get_all_detected_elements methods."""
         # Upload ICP data
         processed_data, _ = ICPService.parse_and_process_icp_file(sample_icp_csv_content)
-        results, _ = ICPService.bulk_create_icp_results(test_db, processed_data)
+        results, _, _ = ICPService.bulk_create_icp_results(test_db, processed_data)
         test_db.commit()
         
         # Get the ICP result
@@ -466,7 +466,7 @@ class TestUniqueResultTrackingImprovements:
         
         # Upload ICP data for the same time point
         processed_data, _ = ICPService.parse_and_process_icp_file(sample_icp_csv_content)
-        icp_results, icp_errors = ICPService.bulk_create_icp_results(test_db, processed_data)
+        icp_results, _, icp_errors = ICPService.bulk_create_icp_results(test_db, processed_data)
         assert len(icp_results) == 2  # Day3 and Day5
         test_db.commit()
         
