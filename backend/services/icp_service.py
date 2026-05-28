@@ -234,45 +234,63 @@ class ICPService:
         return dt.datetime.combine(first_valid.date(), dt.time.min)
     
     @staticmethod
-    def select_best_lines(df: pd.DataFrame) -> pd.DataFrame:
+    def select_best_lines(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
         """
-        Select the row with highest intensity for each element per sample.
-        Handles long-format data where each row is one element measurement.
-        
-        Expected columns: Label, Element Label, Intensity
-        
-        Args:
-            df: DataFrame with long-format elemental data
-            
+        Select the calibrated row with highest intensity for each element per sample.
+
+        Groups by (Label, element_symbol) — not by the full 'Element Label' — so
+        multiple spectral lines for the same element compete. Rows where Concentration
+        is 'Uncal' (case-insensitive) are skipped; if all lines for an element are
+        Uncal, the element is omitted and a warning is returned.
+
+        Expected columns: Label, Element Label, Intensity, Concentration
+
         Returns:
-            DataFrame with best line selected for each element per sample
+            Tuple of (best_lines_df, warnings):
+                best_lines_df: one row per (label, element_symbol), Uncal rows excluded
+                warnings: messages for elements where every spectral line was Uncal
         """
-        required_columns = ['Label', 'Element Label', 'Intensity']
+        required_columns = ['Label', 'Element Label', 'Intensity', 'Concentration']
         if not all(col in df.columns for col in required_columns):
             raise ValueError(f"DataFrame must contain columns: {required_columns}")
-        
-        # Convert Intensity to numeric, handling any non-numeric values
+
         df = df.copy()
         df['Intensity'] = pd.to_numeric(df['Intensity'], errors='coerce')
-        
-        # Group by Label and Element, select row with maximum intensity
-        # This handles multiple wavelengths/lines per element
+        df['_element_symbol'] = df['Element Label'].str.split().str[0].str.lower()
+
         best_rows = []
-        
-        for (label, element), group in df.groupby(['Label', 'Element Label']):
-            if len(group) == 1:
-                # Only one measurement for this element
-                best_rows.append(group.iloc[0])
+        warnings = []
+
+        for (label, element_symbol), group in df.groupby(['Label', '_element_symbol']):
+            sorted_group = group.sort_values('Intensity', ascending=False, na_position='last')
+            best_row = None
+            for _, row in sorted_group.iterrows():
+                if str(row['Concentration']).strip().lower() != 'uncal':
+                    best_row = row
+                    break
+
+            if best_row is None:
+                element_labels = group['Element Label'].tolist()
+                display = (
+                    element_labels[0]
+                    if len(element_labels) == 1
+                    else f"{element_symbol.upper()} ({', '.join(element_labels)})"
+                )
+                warnings.append(
+                    f"All spectral lines for {display} in sample '{label}' are Uncal — element skipped."
+                )
             else:
-                # Multiple lines for this element, select the one with highest intensity
-                max_intensity_idx = group['Intensity'].idxmax()
-                if pd.notna(max_intensity_idx):  # Check for valid max index
-                    best_rows.append(df.loc[max_intensity_idx])
-                else:
-                    # If all intensities are NaN, take the first row
-                    best_rows.append(group.iloc[0])
-        
-        return pd.DataFrame(best_rows).reset_index(drop=True)
+                best_rows.append(best_row)
+
+        if best_rows:
+            result_df = pd.DataFrame(best_rows).reset_index(drop=True)
+            result_df = result_df.drop(columns=['_element_symbol'], errors='ignore')
+        else:
+            result_df = pd.DataFrame(
+                columns=[c for c in df.columns if c != '_element_symbol']
+            )
+
+        return result_df, warnings
     
     @staticmethod
     def process_icp_dataframe(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -339,7 +357,8 @@ class ICPService:
                     )
                     
                     # Select best lines for each element
-                    best_lines = ICPService.select_best_lines(sample_data_corrected)
+                    best_lines, uncal_warnings = ICPService.select_best_lines(sample_data_corrected)
+                    errors.extend(uncal_warnings)
                     
                     # Pivot from long format to wide format (one row per sample)
                     elemental_data = {}
