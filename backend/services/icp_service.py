@@ -577,52 +577,23 @@ class ICPService:
                     new_values=changed_new or None,
                 ))
         else:
-            # Create ICP data with elemental concentrations
+            # Build fixed-column kwargs from ICP_FIXED_ELEMENT_FIELDS so the
+            # constructor stays in sync with the field list automatically.
+            element_kwargs = {el: fixed_column_data.get(el) for el in ICP_FIXED_ELEMENT_FIELDS}
             icp_data = ICPResults(
-                result_id=experimental_result.id,  # Link to ExperimentalResults
-                # Fixed columns for Power BI efficiency
-                fe=fixed_column_data.get('fe'),
-                si=fixed_column_data.get('si'),
-                ni=fixed_column_data.get('ni'),
-                cu=fixed_column_data.get('cu'),
-                mo=fixed_column_data.get('mo'),
-                zn=fixed_column_data.get('zn'),
-                mn=fixed_column_data.get('mn'),
-                ca=fixed_column_data.get('ca'),
-                cr=fixed_column_data.get('cr'),
-                co=fixed_column_data.get('co'),
-                mg=fixed_column_data.get('mg'),
-                al=fixed_column_data.get('al'),
-                sr=fixed_column_data.get('sr'),
-                y=fixed_column_data.get('y'),
-                nb=fixed_column_data.get('nb'),
-                sb=fixed_column_data.get('sb'),
-                cs=fixed_column_data.get('cs'),
-                ba=fixed_column_data.get('ba'),
-                nd=fixed_column_data.get('nd'),
-                gd=fixed_column_data.get('gd'),
-                pt=fixed_column_data.get('pt'),
-                rh=fixed_column_data.get('rh'),
-                ir=fixed_column_data.get('ir'),
-                pd=fixed_column_data.get('pd'),
-                ru=fixed_column_data.get('ru'),
-                os=fixed_column_data.get('os'),
-                tl=fixed_column_data.get('tl'),
-                # JSON storage for all elements (including fixed ones)
+                result_id=experimental_result.id,
+                **element_kwargs,
                 all_elements=all_elements_data if all_elements_data else None,
-                # ICP metadata
                 dilution_factor=result_data.get('dilution_factor'),
                 raw_label=result_data.get('raw_label'),
                 instrument_used=result_data.get('instrument_used'),
                 detection_limits=result_data.get('detection_limits'),
                 measurement_date=result_data.get('measurement_date'),
                 sample_date=result_data.get('sample_date'),
-                # Relationship
                 result_entry=experimental_result
             )
             db.add(icp_data)
 
-            # Audit trail for new ICP record
             if all_elements_data:
                 db.add(ModificationsLog(
                     experiment_id=experiment.experiment_id,

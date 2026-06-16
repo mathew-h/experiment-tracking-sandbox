@@ -827,5 +827,77 @@ class TestICPUncalHandling:
         assert "'S1'" in warnings[0]
 
 
+class TestICPKNaStorage:
+    """K and Na have model columns that must be populated via the bulk upload path."""
+
+    def test_k_na_stored_in_fixed_columns_on_create(self, test_db):
+        """A fresh ICP upload with K and Na must populate ICPResults.k and .na."""
+        data = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 20.0,
+            'dilution_factor': 1.0,
+            'k': 8.5,
+            'na': 12.3,
+            'fe': 50.0,
+            'raw_label': 'Test_MH_001_Day20_1x',
+        }]
+        results, updated_count, errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert not errors, errors
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == results[0].experiment_fk)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 20.0)
+            .first()
+        )
+        assert icp is not None, "ICPResults row not found"
+        assert icp.k == 8.5,   f"Expected k=8.5, got {icp.k}"
+        assert icp.na == 12.3, f"Expected na=12.3, got {icp.na}"
+        assert icp.all_elements is not None
+        assert icp.all_elements.get('k') == 8.5
+        assert icp.all_elements.get('na') == 12.3
+
+    def test_k_na_stored_in_fixed_columns_on_merge(self, test_db):
+        """K and Na are populated on the UPDATE (merge) path too."""
+        # File 1: Fe only
+        first = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 21.0,
+            'dilution_factor': 1.0,
+            'fe': 20.0,
+            'raw_label': 'Test_MH_001_Day21_1x',
+        }]
+        results1, _, errors1 = ICPService.bulk_create_icp_results(test_db, first)
+        assert not errors1, errors1
+        test_db.commit()
+
+        # File 2: same timepoint, K and Na only
+        second = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 21.0,
+            'dilution_factor': 1.0,
+            'k': 9.0,
+            'na': 6.0,
+            'raw_label': 'Test_MH_001_Day21_1x',
+        }]
+        results2, _, errors2 = ICPService.bulk_create_icp_results(test_db, second)
+        assert not errors2, errors2
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == results1[0].experiment_fk)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 21.0)
+            .first()
+        )
+        assert icp is not None, "ICPResults row not found after merge"
+        assert icp.fe == 20.0,  "Fe from file 1 must be preserved"
+        assert icp.k == 9.0,   f"Expected k=9.0, got {icp.k}"
+        assert icp.na == 6.0,  f"Expected na=6.0, got {icp.na}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
