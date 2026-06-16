@@ -141,19 +141,18 @@ function IcpOverwriteToggle({
           onChange={(e) => onChange(e.target.checked)}
         />
         <span className="text-xs text-ink-secondary">
-          Replace existing ICP data for matching experiment / timepoint
+          Replace existing ICP data instead of merging
         </span>
       </label>
       {checked ? (
         <p className="text-xs text-amber-400 leading-relaxed pl-5">
-          Existing ICP elemental data for any matching experiment and timepoint in this file
-          will be deleted and replaced with the values from this upload.
+          Existing ICP elemental data for matching experiments and timepoints will be
+          deleted and replaced with only the values from this upload.
         </p>
       ) : (
         <p className="text-xs text-ink-muted leading-relaxed pl-5">
-          Existing ICP data for the same experiment and timepoint will be updated by
-          merging — new elements are added and existing element values are overwritten,
-          but elements absent from this file are preserved.
+          Default: new elements are added and conflicting values are overwritten, but
+          elements absent from this file are preserved.
         </p>
       )}
     </div>
