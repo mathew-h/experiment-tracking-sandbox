@@ -899,5 +899,35 @@ class TestICPKNaStorage:
         assert icp.na == 6.0,  f"Expected na=6.0, got {icp.na}"
 
 
+class TestICPSStorage:
+    """Sulfur (S) must be stored in a dedicated ICPResults column, not just all_elements."""
+
+    def test_s_stored_in_fixed_column_on_create(self, test_db):
+        """A fresh upload with S must populate ICPResults.s."""
+        data = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 30.0,
+            'dilution_factor': 1.0,
+            's': 3.7,
+            'fe': 44.0,
+            'raw_label': 'Test_MH_001_Day30_1x',
+        }]
+        results, updated_count, errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert not errors, errors
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == results[0].experiment_fk)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 30.0)
+            .first()
+        )
+        assert icp is not None, "ICPResults row not found"
+        assert icp.s == 3.7,  f"Expected s=3.7, got {icp.s}"
+        assert icp.all_elements is not None
+        assert icp.all_elements.get('s') == 3.7
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

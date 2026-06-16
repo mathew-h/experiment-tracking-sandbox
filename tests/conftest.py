@@ -9,7 +9,7 @@ sys.modules['frontend.config'] = MagicMock()
 sys.modules['frontend.config.variable_config'] = MagicMock(
     ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mn', 'ca', 'cr', 'co', 'mg',
                                'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh',
-                               'ir', 'pd', 'ru', 'os', 'tl', 'k', 'na'],
+                               'ir', 'pd', 'ru', 'os', 'tl', 'k', 'na', 's'],
     PXRF_REQUIRED_COLUMNS={"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
 )
 

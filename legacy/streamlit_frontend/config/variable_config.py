@@ -58,7 +58,7 @@ ELEMENT_COLUMNS = PXRF_ELEMENT_COLUMNS
 ICP_FIXED_ELEMENT_FIELDS = [
     'fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mn', 'ca', 'cr', 'co', 'mg', 'al',
     'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh', 'ir',
-    'pd', 'ru', 'os', 'tl', 'k', 'na',
+    'pd', 'ru', 'os', 'tl', 'k', 'na', 's',
 ]
 
 # Configuration for rock sample form fields
