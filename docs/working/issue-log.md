@@ -667,7 +667,8 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Net result:** ~100 failures → 18 failures + 15 errors (677 passing); full `tests/services/bulk_uploads/` now 122/122 in both isolation and full-suite runs
 - **Remaining unresolved failures (33 total) — root causes documented below:**
 
-### A. `test_experiment_rename.py` — 2 failures (service logic mismatch)
+### A. `test_experiment_rename.py` — 3 failures (service logic mismatch)
+- `test_chain_rename_wrong_order`: `assert any('EXPERIMENT_RENAME_GUIDE' in str(w) for w in warnings)` — service emits the correct "⚠️ CHAIN RENAME CONFLICT" warning but the message no longer contains the string `EXPERIMENT_RENAME_GUIDE`. Test expectation is stale. Fix: update the assertion to match the current warning message format.
 - `test_rename_updates_notes`: note query returns `None` after rename — rename service does not update `experiment_id` on associated `ExperimentNotes` rows. Fix: update rename service to cascade ID update to notes.
 - `test_rename_with_conditions_sheet`: service emits 2 warnings — (1) column names in test CSV (`rock_mass`, `water_volume`) don't match model fields (`rock_mass_g`, `water_volume_mL`); (2) service calls `conditions.calculate_derived_conditions()` which no longer exists on `ExperimentalConditions`. Fix: update test CSV column names to match model; remove or replace `calculate_derived_conditions` call in the bulk upload service.
 
@@ -691,3 +692,12 @@ Tests require a PostgreSQL `experiments_restore_test` database. The fixture trie
 
 ### F. `test_fresh_install_migration.py` — 4 errors (alembic.ini not found at subprocess CWD)
 Fixture runs `subprocess(['.venv/Scripts/alembic.exe', 'stamp', 'head'])` from a temporary directory; alembic cannot find `alembic.ini`. Fix: pass `cwd=<project_root>` to the subprocess call.
+
+### G. `tests/api/test_dashboard.py::test_reactor_specs_values` — 1 failure (API 500 error)
+Endpoint returns HTTP 500; test expects 200/300-range. Pre-existing server error — likely a runtime error in the reactor specs endpoint. Fix: debug the dashboard route to find what raises during test.
+
+### H. `tests/test_actlabs_titration_import.py::test_actlabs_import_creates_analytes_and_results` — 1 failure (multi-sample coverage mismatch)
+Test asserts `('Rock_2', 1) in results_dict` but the dict only contains `Rock_1` entries — the import only creates elemental analysis rows for the first sample. Pre-existing service logic gap. Fix: investigate `ActlabsRockTitrationService.import_excel` to confirm it processes all sample rows.
+
+### I. `tests/test_compound_migration.py::test_deprecated_fields_migrated_to_chemicals` — 1 failure (FK violation)
+Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` with `id=1` exists in the test DB at that point, violating the FK constraint. Pre-existing test isolation issue (hardcoded FK). Fix: create the parent `Experiment` row in the test setup before inserting conditions.
