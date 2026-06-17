@@ -77,7 +77,7 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
         <div>
           <p className="text-xs font-semibold text-ink-secondary mb-1">ICP-OES</p>
           <div className="grid grid-cols-4 gap-x-4 gap-y-1">
-            {['fe','si','mg','ca','ni','cu','mo','zn','mn','cr','co','al'].map((el) => {
+            {['fe','si','mg','ca','ni','cu','mo','zn','mn','cr','co','al','s'].map((el) => {
               const val = (icp as unknown as Record<string, unknown>)[el]
               return val != null ? (
                 <div key={el} className="text-xs">

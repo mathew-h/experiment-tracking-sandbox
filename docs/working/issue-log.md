@@ -712,3 +712,11 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** no
 - **Decision logged:** no
 - **Remaining known failures:** 3 in `test_pg_backup_restore.py` (Group D — require `experiments_restore_test` DB, infrastructure-only)
+
+## 2026-06-17 | inline — Add sulfur (S) to ICP results display
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — added `'s'` to ICP element array in `ExpandedRow`
+  - `backend/api/schemas/results.py` — added `"s"` to `ICP_ELEMENTS`; added `s: Optional[float] = None` to `ICPCreate`
+  - `frontend/src/api/results.ts` — added `s: number | null` to `ICPResult` interface
+- **Tests added:** no
+- **Decision logged:** no
