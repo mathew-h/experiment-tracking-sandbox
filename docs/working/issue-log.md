@@ -701,3 +701,14 @@ Test asserts `('Rock_2', 1) in results_dict` but the dict only contains `Rock_1`
 
 ### I. `tests/test_compound_migration.py::test_deprecated_fields_migrated_to_chemicals` — 1 failure (FK violation)
 Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` with `id=1` exists in the test DB at that point, violating the FK constraint. Pre-existing test isolation issue (hardcoded FK). Fix: create the parent `Experiment` row in the test setup before inserting conditions.
+
+---
+
+## 2026-06-17 | inline — Fix residual test suite failures (continuation: Groups G, H, ICP service)
+- **Files changed:**
+  - `backend/services/bulk_uploads/actlabs_titration_data.py` — added `db.flush()` after inner analyte loop so the last sample's `ElementalAnalysis` records are persisted (previously only flushed as a side effect of subsequent samples; last sample was never flushed)
+  - `backend/services/icp_service.py` — `bulk_create_icp_results`: silent-skip on `time_post_reaction=None` (was erroring); added explicit error when no elemental data provided (was silently succeeding)
+  - `tests/api/test_dashboard.py` — corrected `test_reactor_specs_values` assertions to match actual hardware: R4–R6 = 500 mL Yushen, R7 = 300 mL Tan
+- **Tests added:** no
+- **Decision logged:** no
+- **Remaining known failures:** 3 in `test_pg_backup_restore.py` (Group D — require `experiments_restore_test` DB, infrastructure-only)
