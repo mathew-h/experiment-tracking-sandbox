@@ -53,6 +53,7 @@ npm-debug.log
 yarn-error.log
 frontend/dist/
 frontend/.env.local
+frontend/.vite/
 .pnp
 .pnp.js
 
