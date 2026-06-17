@@ -70,6 +70,9 @@ If you used a **PR to `develop`** instead of a local merge, close the issue afte
 - You already committed on the current branch in Step 3 (must not be `develop` or `main`)
 - If the current branch is `develop` or `main`, stop and ask the user
 
+### If task type = issue and no branch was created
+- Once the user confirms the fix is integrated (or you have pushed as they directed), mark the GitHub issue complete — open the issue URL and **Close issue** (with a short comment), or `gh issue close <number> --comment "..."`
+
 ## Step 5 — Report
 State what was completed, what was recorded, and where. For **issue** tasks, say whether the GitHub issue was closed (or skipped per user preference).
 Wait for sign-off before starting the next task.

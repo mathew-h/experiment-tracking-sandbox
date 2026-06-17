@@ -625,6 +625,18 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
 - **Tests added:** no
 - **Decision logged:** no
 
+## 2026-06-17 | issue #62 — ICP multi-file merge tests + label fix + K/Na/S fixed columns
+- **Files changed:**
+  - `frontend/src/pages/BulkUploads.tsx` — `IcpOverwriteToggle` label copy: "Replace existing ICP data instead of merging"; conditional helper text clarifies replace vs. merge behavior
+  - `backend/services/icp_service.py` — dynamic `element_kwargs` dict comprehension replaces 27-element hardcoded constructor; eliminates K/Na constructor-drift root cause
+  - `database/models/results.py` — added `s = Column(Float, nullable=True)` (Sulfur)
+  - `alembic/versions/e78eb12b81d6_add_s_column_to_icp_results.py` — additive migration (upgrade/downgrade)
+  - `legacy/streamlit_frontend/config/variable_config.py` — `ICP_FIXED_ELEMENT_FIELDS` extended with `k`, `na`, `s`
+  - `tests/conftest.py` — ICP stub updated to match real list (added `mn`, `k`, `na`, `s`)
+  - `tests/test_icp_handling.py` — `TestICPKNaStorage` (2), `TestICPSStorage` (1), `TestICPMultiFileMerge` (5)
+- **Tests added:** yes — 8 new pytest tests (K/Na fixed column routing, S fixed column, disjoint merge, JSON-only survival, conflict second-file-wins, overwrite clears priors, persistence re-query)
+- **Decision logged:** no
+
 ## 2026-05-11 | inline — Fix MOD badge not showing in main results row
 - **Files changed:**
   - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — added `has_brine_modification` MOD badge to main row badge span alongside ICP/XRD; updated column header to "ICP / XRD / MOD"
