@@ -303,14 +303,15 @@ def test_reactor_specs_values():
         assert REACTOR_SPECS[rn]["material"] == "Hastelloy"
         assert REACTOR_SPECS[rn]["volume_mL"] == 100
         assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
-    # R04: 300 mL Titanium, Tan
-    assert REACTOR_SPECS[4]["volume_mL"] == 300
-    assert REACTOR_SPECS[4]["material"] == "Titanium"
-    assert REACTOR_SPECS[4]["vendor"] == "Tan"
-    # R05–R07: 500 mL Titanium, Yushen
-    for rn in (5, 6, 7):
+    # R04–R06: 500 mL Titanium, Yushen
+    for rn in (4, 5, 6):
         assert REACTOR_SPECS[rn]["volume_mL"] == 500
+        assert REACTOR_SPECS[rn]["material"] == "Titanium"
         assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+    # R07: 300 mL Titanium, Tan
+    assert REACTOR_SPECS[7]["volume_mL"] == 300
+    assert REACTOR_SPECS[7]["material"] == "Titanium"
+    assert REACTOR_SPECS[7]["vendor"] == "Tan"
     # R08–R09: 100 mL Titanium, Tan
     for rn in (8, 9):
         assert REACTOR_SPECS[rn]["vendor"] == "Tan"

@@ -618,6 +618,7 @@ class ActlabsRockTitrationService:
                 )
                 results_created += delta_c
                 results_updated += delta_u
+            db.flush()
 
         if affected_sample_ids:
             from backend.services.elemental_composition_service import recalculate_conditions_for_samples  # noqa: PLC0415
