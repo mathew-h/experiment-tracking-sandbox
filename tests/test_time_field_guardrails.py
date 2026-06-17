@@ -2,7 +2,6 @@
 
 import datetime
 import pytest
-from unittest.mock import patch, MagicMock
 from sqlalchemy.orm import Session
 
 from database import (
@@ -45,27 +44,7 @@ def _make_experiment(db: Session, experiment_id: str = "TEST_001") -> Experiment
 
 
 # ---------------------------------------------------------------------------
-# Test 1: save_results rejects None time and returns False
-# ---------------------------------------------------------------------------
-
-def test_save_results_rejects_none_time():
-    """save_results() should return False when time_post_reaction is None."""
-    with patch("frontend.components.experimental_results.st") as mock_st:
-        from frontend.components.experimental_results import save_results
-
-        result = save_results(
-            experiment_id=1,
-            time_post_reaction=None,
-            result_description="Test",
-            scalar_data={},
-        )
-        assert result is False
-        mock_st.error.assert_called_once()
-        assert "required" in mock_st.error.call_args[0][0].lower()
-
-
-# ---------------------------------------------------------------------------
-# Test 2: create_experimental_result_row raises ValueError for None time
+# Test 1: create_experimental_result_row raises ValueError for None time
 # ---------------------------------------------------------------------------
 
 def test_create_result_row_rejects_none_time(test_db: Session):

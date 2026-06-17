@@ -652,8 +652,19 @@ class ICPService:
                     continue
 
                 if time_post_reaction is None:
+                    # time_post_reaction is optional; skip silently without error
                     savepoint.rollback()
-                    errors.append(f"Sample {idx + 1}: Missing time_post_reaction.")
+                    continue
+
+                # Require at least one elemental field to have data
+                has_elements = any(
+                    v is not None
+                    for k, v in data.items()
+                    if k not in ICPService.NON_ELEMENT_FIELDS
+                )
+                if not has_elements:
+                    savepoint.rollback()
+                    errors.append(f"Sample {idx + 1}: No elemental data provided.")
                     continue
 
                 # Create or update the ICP result

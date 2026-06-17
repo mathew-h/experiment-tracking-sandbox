@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy.orm import Session
 
-from database.models import ExperimentalConditions, ChemicalAdditive, Compound
+from database.models import Experiment, ExperimentalConditions, ChemicalAdditive, Compound
 from database.models.enums import AmountUnit
 
 
@@ -14,6 +14,15 @@ def test_deprecated_fields_migrated_to_chemicals(test_db: Session):
       - Catalyst-related info should be captured by ChemicalAdditive entries linked to a Compound
       - Deprecated fields on ExperimentalConditions remain nullable and unused
     """
+    # 0) Create a parent Experiment to satisfy the FK constraint
+    experiment = Experiment(
+        experiment_id="MIGRATION_TEST_001",
+        experiment_number=9001,
+        status="ONGOING",
+    )
+    test_db.add(experiment)
+    test_db.flush()
+
     # 1) Create a Compound that represents a catalyst/additive that used to be free-text on conditions
     compound = Compound(name="Nickel Chloride", formula="NiCl2·6H2O", cas_number=None)
     test_db.add(compound)
@@ -22,7 +31,7 @@ def test_deprecated_fields_migrated_to_chemicals(test_db: Session):
     # 2) Create baseline ExperimentalConditions with deprecated fields populated (legacy style)
     conditions = ExperimentalConditions(
         experiment_id="MIGRATION_TEST_001",
-        experiment_fk=1,  # dummy FK for in-memory test; not asserting FK integrity here
+        experiment_fk=experiment.id,
         rock_mass_g=100.0,
         water_volume_mL=500.0,
         catalyst="Nickel chloride",        # deprecated
