@@ -26,16 +26,31 @@ class TestExperimentLineageMigration:
     @pytest.fixture
     def test_db_session(self):
         """Create a test database session with sample data."""
-        # Create in-memory database
+        from sqlalchemy import JSON
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        _original_types: dict = {}
+        for table in Base.metadata.tables.values():
+            for col in table.columns:
+                if isinstance(col.type, JSONB):
+                    _original_types[(table.name, col.name)] = col.type
+                    col.type = JSON()
+
         engine = create_engine('sqlite:///:memory:', connect_args={'check_same_thread': False})
         Base.metadata.create_all(engine)
-        
+
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         session = TestingSessionLocal()
-        
-        yield session
-        
-        session.close()
+
+        try:
+            yield session
+        finally:
+            session.close()
+            for table in Base.metadata.tables.values():
+                for col in table.columns:
+                    key = (table.name, col.name)
+                    if key in _original_types:
+                        col.type = _original_types[key]
     
     @pytest.fixture
     def sample_experiments(self, test_db_session):
@@ -168,9 +183,10 @@ class TestExperimentLineageMigration:
         assert parent.experiment_id == "HPHT_MH_001"
         
         # Test finding parent with different derivation number
+        # -3's immediate parent is -2, not the root base
         parent = get_or_find_parent_experiment(test_db_session, "HPHT_MH_001-3")
         assert parent is not None
-        assert parent.experiment_id == "HPHT_MH_001"
+        assert parent.experiment_id == "HPHT_MH_001-2"
         
         # Test orphaned derivation (parent doesn't exist)
         parent = get_or_find_parent_experiment(test_db_session, "ORPHANED_EXP_001-1")
@@ -258,10 +274,12 @@ class TestExperimentLineageMigration:
             parent_1 = test_db_session.query(Experiment).filter_by(id=deriv_1.parent_experiment_fk).first()
             assert parent_1.experiment_id == "HPHT_MH_001"
             
-            # Check another linked derivation
+            # Check another linked derivation (-3's immediate parent is -2, not root)
             deriv_2 = test_db_session.query(Experiment).filter_by(experiment_id="HPHT_MH_001-3").first()
             assert deriv_2.base_experiment_id == "HPHT_MH_001"
-            assert deriv_2.parent_experiment_fk == parent_1.id  # Same parent as deriv_1
+            assert deriv_2.parent_experiment_fk is not None
+            parent_2 = test_db_session.query(Experiment).filter_by(id=deriv_2.parent_experiment_fk).first()
+            assert parent_2.experiment_id == "HPHT_MH_001-2"
             
             # Check orphaned derivation
             orphaned = test_db_session.query(Experiment).filter_by(experiment_id="ORPHANED_EXP_001-1").first()
@@ -619,7 +637,8 @@ def test_snapshot_functionality():
     test_db_path = "test_migration_snapshot.db"
     engine = None
     temp_engine = None
-    
+    _orig_types: dict = {}
+
     try:
         # Clean up any existing test database first
         if os.path.exists(test_db_path):
@@ -628,7 +647,14 @@ def test_snapshot_functionality():
             except PermissionError:
                 pass  # File locked, will be overwritten
         
-        # Create a temporary test database
+        # Create a temporary test database (patch JSONB→JSON for SQLite)
+        from sqlalchemy import JSON
+        from sqlalchemy.dialects.postgresql import JSONB
+        for _tbl in Base.metadata.tables.values():
+            for _col in _tbl.columns:
+                if isinstance(_col.type, JSONB):
+                    _orig_types[(_tbl.name, _col.name)] = _col.type
+                    _col.type = JSON()
         engine = create_engine(f'sqlite:///{test_db_path}')
         Base.metadata.create_all(engine)
         
@@ -698,12 +724,19 @@ def test_snapshot_functionality():
         print("\n✓ Snapshot functionality tests passed!")
         
     finally:
+        # Restore JSONB types patched for SQLite compatibility
+        for _tbl in Base.metadata.tables.values():
+            for _col in _tbl.columns:
+                key = (_tbl.name, _col.name)
+                if key in _orig_types:
+                    _col.type = _orig_types[key]
+
         # Dispose engines to release file locks (Windows requirement)
         if engine:
             engine.dispose()
         if temp_engine:
             temp_engine.dispose()
-        
+
         # Small delay for Windows to release file locks
         import time
         time.sleep(0.1)

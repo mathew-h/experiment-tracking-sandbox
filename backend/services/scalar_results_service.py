@@ -12,7 +12,7 @@ from backend.services.result_merge_utils import (
 # All updatable scalar fields -- shared by create and audit-trail logic.
 SCALAR_UPDATABLE_FIELDS = [
     'ferrous_iron_yield', 'gross_ammonium_concentration_mM', 'background_ammonium_concentration_mM',
-    'background_experiment_id',
+    'background_experiment_id', 'ammonium_quant_method',
     'h2_concentration', 'h2_concentration_unit', 'gas_sampling_volume_ml', 'gas_sampling_pressure_MPa',
     'final_ph', 'final_nitrate_concentration_mM', 'final_dissolved_oxygen_mg_L', 'co2_partial_pressure_MPa',
     'final_conductivity_mS_cm', 'final_alkalinity_mg_L', 'sampling_volume_mL', 'measurement_date',
@@ -146,6 +146,7 @@ class ScalarResultsService:
                 gross_ammonium_concentration_mM=result_data.get('gross_ammonium_concentration_mM'),
                 background_ammonium_concentration_mM=result_data.get('background_ammonium_concentration_mM'),
                 background_experiment_id=result_data.get('background_experiment_id'),
+                ammonium_quant_method=result_data.get('ammonium_quant_method'),
                 h2_concentration=result_data.get('h2_concentration'),
                 h2_concentration_unit=result_data.get('h2_concentration_unit'),
                 gas_sampling_volume_ml=result_data.get('gas_sampling_volume_ml'),

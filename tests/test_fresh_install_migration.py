@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import subprocess
 import pytest
+from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 
 PG_BIN = r"C:\Program Files\PostgreSQL\18\bin"
@@ -56,7 +57,7 @@ EXPECTED_COLUMNS = {
     "app_config": ["key", "value", "updated_at"],
 }
 
-PROJECT_ROOT = r"C:\Users\MathewHearl\Documents\0x_Software\database_sandbox\experiment_tracking_sandbox"
+PROJECT_ROOT = str(Path(__file__).parents[1])
 
 
 def _super_env() -> dict:

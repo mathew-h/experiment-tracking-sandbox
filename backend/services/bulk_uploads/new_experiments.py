@@ -592,9 +592,6 @@ class NewExperimentsUploadService:
                             if parsed.experiment_type:
                                 conditions.experiment_type = parsed.experiment_type.value
                         
-                        # Recalculate derived fields
-                        conditions.calculate_derived_conditions()
-                        
                         # Manage reactor occupancy: if experiment is ONGOING and has reactor_number, 
                         # mark other ONGOING experiments in same reactor as COMPLETED
                         if conditions.reactor_number and experiment.status == ExperimentStatus.ONGOING:
@@ -667,8 +664,7 @@ class NewExperimentsUploadService:
                         setattr(conditions, attr, parent_value)
                 
                 info_messages.append(f"Experiment {exp_id}: Copied all conditions from parent {parent.experiment_id} (no conditions sheet row provided)")
-                conditions.calculate_derived_conditions()
-                
+
                 # Manage reactor occupancy for auto-copied conditions
                 if conditions.reactor_number and experiment.status == ExperimentStatus.ONGOING:
                     marked, reactor_warnings = ExperimentStatusService.manage_reactor_occupancy(

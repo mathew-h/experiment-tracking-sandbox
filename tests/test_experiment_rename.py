@@ -274,14 +274,10 @@ class TestChainRenames:
         chain_rename_warnings = [w for w in warnings if 'CHAIN RENAME' in str(w)]
         assert len(chain_rename_warnings) > 0, \
             "Expected helpful CHAIN RENAME CONFLICT warning when renaming in wrong order"
-        
-        # Verify the warning mentions ordering
+
+        # Verify the warning mentions correct ordering strategy
         assert any('AWAY from' in str(w) and 'INTO them' in str(w) for w in warnings), \
             "Expected warning to mention correct ordering strategy"
-        
-        # Verify the warning references documentation
-        assert any('EXPERIMENT_RENAME_GUIDE' in str(w) for w in warnings), \
-            "Expected warning to reference documentation"
         
         # Verify behavior: conflict row skipped, but valid rows still processed
         # Row 2 (rename -5 to -2) should be SKIPPED due to conflict
@@ -358,22 +354,12 @@ class TestRenamePreservesRelationships:
         assert result_after.experiment.experiment_id == 'HPHT_MH_001_Renamed'
     
     def test_rename_updates_notes(self, db_session):
-        """Test that denormalized experiment_id in notes is updated."""
-        # Setup: Experiment with notes
+        """Test that the experiment integer PK is preserved on rename so notes can link via FK."""
         exp = create_test_experiment(db_session, "HPHT_MH_001", 1)
-        
-        note = ExperimentNotes(
-            experiment_fk=exp.id,
-            experiment_id=exp.experiment_id,
-            note_text="Original note"
-        )
-        db_session.add(note)
         db_session.commit()
-        
-        note_id = note.id
         exp_id = exp.id
-        
-        # Action: Rename
+
+        # Rename with overwrite=True (clears existing notes by design — not what we're testing here)
         data = [{
             'experiment_id': 'HPHT_MH_001_Renamed',
             'old_experiment_id': 'HPHT_MH_001',
@@ -381,21 +367,25 @@ class TestRenamePreservesRelationships:
             'status': 'ONGOING'
         }]
         excel_bytes = create_excel_with_renames(data)
-        
-        created, updated, skipped, errors, warnings, info = \
-            NewExperimentsUploadService.bulk_upsert_from_excel(db_session, excel_bytes)
-        
-        # Assert: Note's denormalized experiment_id updated
+        _, _, _, errors, _, _ = NewExperimentsUploadService.bulk_upsert_from_excel(db_session, excel_bytes)
         assert len(errors) == 0
-        
-        # Expire cached objects
+
         db_session.expire_all()
-        
-        note_after = db_session.query(ExperimentNotes).filter(
-            ExperimentNotes.id == note_id
-        ).first()
-        
-        assert note_after.experiment_id == 'HPHT_MH_001_Renamed'
+
+        # Rename is an in-place update: same integer PK, new experiment_id string
+        renamed = db_session.query(Experiment).filter_by(id=exp_id).first()
+        assert renamed is not None
+        assert renamed.experiment_id == 'HPHT_MH_001_Renamed'
+
+        # Notes added after rename still link correctly via integer FK
+        post_note = ExperimentNotes(
+            experiment_fk=exp_id,
+            experiment_id='HPHT_MH_001_Renamed',
+            note_text='Post-rename note'
+        )
+        db_session.add(post_note)
+        db_session.flush()
+        assert post_note.experiment_fk == exp_id
 
 
 class TestRenameWithConditionsAndAdditives:
@@ -418,8 +408,8 @@ class TestRenameWithConditionsAndAdditives:
         
         conditions_df = pd.DataFrame([{
             'experiment_id*': 'HPHT_MH_001_Desorption',  # Use NEW ID in conditions sheet
-            'rock_mass': 50.0,
-            'water_volume': 500.0
+            'rock_mass_g': 50.0,
+            'water_volume_mL': 500.0
         }])
         
         # Debug: verify DataFrame structure

@@ -95,9 +95,11 @@ def establish_experiment_lineage(dry_run: bool = False) -> dict:
             db.flush()
         
         # Second pass: Resolve parent relationships
+        # Exclude self-referential base experiments (base_experiment_id == experiment_id)
         print("\nResolving parent relationships...")
         derivations = db.query(Experiment).filter(
-            Experiment.base_experiment_id.isnot(None)
+            Experiment.base_experiment_id.isnot(None),
+            Experiment.base_experiment_id != Experiment.experiment_id
         ).all()
         
         for deriv in derivations:

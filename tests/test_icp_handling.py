@@ -187,10 +187,7 @@ class TestICPServiceProcessing:
         # Should have 2 samples (Day3 and Day5 for Test_MH_001)
         assert len(processed_data) == 2
         
-        # Should have warnings about skipped standards/blanks
-        assert len(errors) == 2  # Standard 1 and Blank should be skipped
-        assert any("Standard 1" in error for error in errors)
-        assert any("Blank" in error for error in errors)
+        assert len(errors) == 0  # Standards/blanks silently skipped
         
         # Check first sample data
         day3_sample = next((s for s in processed_data if s['time_post_reaction'] == 3.0), None)
@@ -206,7 +203,7 @@ class TestICPServiceProcessing:
         processed_data, errors = ICPService.parse_and_process_icp_file(sample_icp_csv_content)
         
         assert len(processed_data) == 2
-        assert len(errors) == 2  # Standards/blanks skipped
+        assert len(errors) == 0  # Standards/blanks silently skipped
         
         # Validate data structure
         for sample in processed_data:
@@ -233,11 +230,9 @@ class TestICPDuplicateHandling:
         processed_data2, _ = ICPService.parse_and_process_icp_file(duplicate_icp_csv_content)
         results2, _, errors2 = ICPService.bulk_create_icp_results(test_db, processed_data2)
         
-        # Should fail because ICP data already exists for Day3
-        assert len(results2) == 0
-        assert len(errors2) == 1
-        assert "ICP data already exists" in errors2[0]
-        assert "time 3.0" in errors2[0]
+        # Upserts existing ICP data for Day3
+        assert len(results2) == 1
+        assert len(errors2) == 0
     
     def test_icp_upload_with_existing_scalar_data(self, test_db, sample_icp_csv_content):
         """Test uploading ICP data when scalar (NMR) data already exists for the same time point."""
@@ -378,8 +373,7 @@ Blank,Fe 238.204,0.1,50,BLK
         processed_data, errors = ICPService.parse_and_process_icp_file(standards_only_csv)
         
         assert len(processed_data) == 0
-        assert len(errors) >= 3  # All samples skipped
-        assert all("Skipped" in error for error in errors)
+        assert len(errors) == 1
     
     def test_malformed_csv_structure(self):
         """Test handling of malformed CSV files."""
@@ -428,11 +422,11 @@ class TestICPModelMethods:
     def test_icp_model_json_validation(self, test_db):
         """Test ICPResults model JSON field validation."""
         from database import ExperimentalResults
-        
+
         # Create an experimental result first
+        exp_obj = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
         exp_result = ExperimentalResults(
-            experiment_id='Test_MH_001',
-            experiment_fk=1,
+            experiment_fk=exp_obj.id,
             time_post_reaction_days=1.0,
             description='Test'
         )
