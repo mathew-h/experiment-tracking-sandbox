@@ -929,5 +929,208 @@ class TestICPSStorage:
         assert icp.all_elements.get('s') == 3.7
 
 
+class TestICPMultiFileMerge:
+    """
+    Regression suite for ICP multi-file merge behavior.
+
+    A single timepoint can be measured across multiple ICP runs (different element subsets).
+    Both uploads must accumulate into ONE ExperimentalResults row with the full element union.
+    """
+
+    def test_disjoint_elements_merge_into_one_row(self, test_db):
+        """Two uploads with non-overlapping elements → one row, all elements present."""
+        # File 1: Fe, Mg, Si
+        file1 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 50.0,
+            'dilution_factor': 1.0,
+            'fe': 100.0, 'mg': 45.0, 'si': 30.0,
+            'raw_label': 'Test_MH_001_Day50_1x',
+        }]
+        results1, _, errors1 = ICPService.bulk_create_icp_results(test_db, file1)
+        assert not errors1, errors1
+        test_db.commit()
+
+        # File 2: same timepoint, Na, K, Ca (disjoint)
+        file2 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 50.0,
+            'dilution_factor': 1.0,
+            'na': 12.0, 'k': 8.0, 'ca': 5.0,
+            'raw_label': 'Test_MH_001_Day50_1x',
+        }]
+        results2, _, errors2 = ICPService.bulk_create_icp_results(test_db, file2)
+        assert not errors2, errors2
+        test_db.commit()
+
+        # Exactly one ExperimentalResults row for this timepoint
+        rows = (
+            test_db.query(ExperimentalResults)
+            .filter_by(experiment_fk=results1[0].experiment_fk)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 50.0)
+            .all()
+        )
+        assert len(rows) == 1, f"Expected 1 ExperimentalResults row, got {len(rows)}"
+
+        icp = rows[0].icp_data
+        assert icp is not None, "No ICPResults attached to the row"
+        # File 1 elements
+        assert icp.fe == 100.0
+        assert icp.mg == 45.0
+        assert icp.si == 30.0
+        # File 2 elements
+        assert icp.na == 12.0
+        assert icp.k == 8.0
+        assert icp.ca == 5.0
+        # all_elements holds all six
+        assert icp.all_elements is not None
+        for el in ('fe', 'mg', 'si', 'na', 'k', 'ca'):
+            assert el in icp.all_elements, f"'{el}' missing from all_elements"
+
+    def test_file1_json_only_element_survives_file2(self, test_db):
+        """An element present only in file 1's all_elements is not erased by file 2."""
+        # File 1: standard elements + a JSON-only oddball
+        file1 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 51.0,
+            'dilution_factor': 1.0,
+            'fe': 10.0,
+            'zr': 0.5,   # Zr is not a fixed column — goes to all_elements only
+            'raw_label': 'Test_MH_001_Day51_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file1)
+        test_db.commit()
+
+        # File 2: Mg only — does not mention Zr
+        file2 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 51.0,
+            'dilution_factor': 1.0,
+            'mg': 22.0,
+            'raw_label': 'Test_MH_001_Day51_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file2)
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 51.0)
+            .first()
+        )
+        assert icp is not None
+        assert icp.all_elements is not None
+        assert icp.all_elements.get('zr') == 0.5, "Zr from file 1 must survive file 2 merge"
+        assert icp.all_elements.get('mg') == 22.0, "Mg from file 2 must be present"
+
+    def test_conflicting_element_second_file_wins(self, test_db):
+        """When both files report the same element, the second upload's value wins."""
+        file1 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 52.0,
+            'dilution_factor': 1.0,
+            'fe': 111.0,
+            'raw_label': 'Test_MH_001_Day52_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file1)
+        test_db.commit()
+
+        file2 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 52.0,
+            'dilution_factor': 1.0,
+            'fe': 222.0,   # same element, different value
+            'raw_label': 'Test_MH_001_Day52_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file2)
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 52.0)
+            .first()
+        )
+        assert icp is not None
+        assert icp.fe == 222.0, "Second upload must overwrite conflicting fixed column"
+        assert icp.all_elements.get('fe') == 222.0, "Second upload must overwrite conflicting JSON value"
+
+    def test_overwrite_true_drops_prior_elements(self, test_db):
+        """overwrite=True replaces all existing elements with only the current file's content."""
+        # File 1: Fe + Mg
+        file1 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 53.0,
+            'dilution_factor': 1.0,
+            'fe': 50.0, 'mg': 25.0,
+            'raw_label': 'Test_MH_001_Day53_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file1, overwrite=False)
+        test_db.commit()
+
+        # File 2: Ni only, with overwrite=True
+        file2 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 53.0,
+            'dilution_factor': 1.0,
+            'ni': 7.0,
+            'raw_label': 'Test_MH_001_Day53_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file2, overwrite=True)
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 53.0)
+            .first()
+        )
+        assert icp is not None
+        assert icp.ni == 7.0, "Ni from overwrite upload must be present"
+        assert icp.fe is None, f"Fe from file 1 must be wiped by overwrite, got {icp.fe}"
+        assert icp.mg is None, f"Mg from file 1 must be wiped by overwrite, got {icp.mg}"
+        assert 'fe' not in (icp.all_elements or {}), "Fe must not appear in all_elements after overwrite"
+
+    def test_merged_all_elements_persisted_to_db(self, test_db):
+        """
+        Re-querying the row after commit confirms all_elements was written to the DB
+        (guards the SQLAlchemy JSON mutation-tracking trap).
+        """
+        file1 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 54.0,
+            'dilution_factor': 1.0,
+            'fe': 60.0,
+            'raw_label': 'Test_MH_001_Day54_1x',
+        }]
+        results1, _, _ = ICPService.bulk_create_icp_results(test_db, file1)
+        test_db.commit()
+
+        file2 = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 54.0,
+            'dilution_factor': 1.0,
+            'mg': 30.0,
+            'raw_label': 'Test_MH_001_Day54_1x',
+        }]
+        ICPService.bulk_create_icp_results(test_db, file2)
+        test_db.commit()
+
+        # Expire the identity map so the next query hits the DB
+        test_db.expire_all()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == results1[0].experiment_fk)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 54.0)
+            .first()
+        )
+        assert icp is not None
+        assert icp.all_elements is not None, "all_elements must be persisted, not None after re-query"
+        assert icp.all_elements.get('fe') == 60.0, "Fe from file 1 must survive re-query"
+        assert icp.all_elements.get('mg') == 30.0, "Mg from file 2 must survive re-query"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
