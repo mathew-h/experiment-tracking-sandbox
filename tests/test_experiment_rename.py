@@ -28,25 +28,40 @@ from database.lineage_utils import parse_experiment_id
 @pytest.fixture
 def db_session():
     """Create an in-memory test database session."""
-    # Create in-memory SQLite database for testing
+    from sqlalchemy import JSON
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    # SQLite does not support JSONB; swap to JSON before creating tables.
+    # Save originals so the global Base.metadata is restored after the test.
+    _original_types: dict = {}
+    for table in Base.metadata.tables.values():
+        for col in table.columns:
+            if isinstance(col.type, JSONB):
+                _original_types[(table.name, col.name)] = col.type
+                col.type = JSON()
+
     engine = create_engine(
         'sqlite:///:memory:',
         connect_args={'check_same_thread': False},
         poolclass=StaticPool
     )
-    
-    # Create all tables
+
     Base.metadata.create_all(engine)
-    
-    # Create session
+
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = TestingSessionLocal()
-    
-    yield db
-    
-    # Cleanup
-    db.close()
-    Base.metadata.drop_all(engine)
+
+    try:
+        yield db
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        # Restore original JSONB types so subsequent test modules see correct metadata.
+        for table in Base.metadata.tables.values():
+            for col in table.columns:
+                key = (table.name, col.name)
+                if key in _original_types:
+                    col.type = _original_types[key]
 
 
 def create_test_experiment(db: Session, exp_id: str, exp_number: int):

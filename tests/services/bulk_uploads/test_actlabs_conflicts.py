@@ -29,33 +29,33 @@ def _make_csv(sample_ids: list[str]) -> bytes:
 
 # ── preflight_check ───────────────────────────────────────────────────────────
 
-def test_preflight_no_conflicts(test_db):
+def test_preflight_no_conflicts(db_session):
     """Exact match → no conflicts returned."""
-    test_db.add(SampleInfo(sample_id="Granite"))
-    test_db.commit()
+    db_session.add(SampleInfo(sample_id="Granite"))
+    db_session.flush()
     conflicts, auto_log = ActlabsRockTitrationService.preflight_check(
-        test_db, _make_csv(["Granite"])
+        db_session, _make_csv(["Granite"])
     )
     assert conflicts == []
 
 
-def test_preflight_exact_case_auto_resolved(test_db):
+def test_preflight_exact_case_auto_resolved(db_session):
     """Case-only difference is auto-resolved; not returned as conflict."""
-    test_db.add(SampleInfo(sample_id="Tamarack"))
-    test_db.commit()
+    db_session.add(SampleInfo(sample_id="Tamarack"))
+    db_session.flush()
     conflicts, auto_log = ActlabsRockTitrationService.preflight_check(
-        test_db, _make_csv(["TAMARACK"])
+        db_session, _make_csv(["TAMARACK"])
     )
     assert conflicts == []
     assert any("TAMARACK" in entry for entry in auto_log)
 
 
-def test_preflight_near_match_returned_as_conflict(test_db):
+def test_preflight_near_match_returned_as_conflict(db_session):
     """Near-match (typo) above default threshold produces a conflict entry."""
-    test_db.add(SampleInfo(sample_id="Tamarack"))
-    test_db.commit()
+    db_session.add(SampleInfo(sample_id="Tamarack"))
+    db_session.flush()
     conflicts, _ = ActlabsRockTitrationService.preflight_check(
-        test_db, _make_csv(["Tamarrack"]), threshold=0.85
+        db_session, _make_csv(["Tamarrack"]), threshold=0.85
     )
     assert len(conflicts) == 1
     c = conflicts[0]
@@ -64,45 +64,44 @@ def test_preflight_near_match_returned_as_conflict(test_db):
     assert c["candidate_matches"][0]["sample_id"] == "Tamarack"
 
 
-def test_preflight_no_existing_samples_no_conflicts(test_db):
+def test_preflight_no_existing_samples_no_conflicts(db_session):
     """No existing samples → no conflicts (sample not found, but not a conflict)."""
     conflicts, auto_log = ActlabsRockTitrationService.preflight_check(
-        test_db, _make_csv(["NewSample"])
+        db_session, _make_csv(["NewSample"])
     )
     assert conflicts == []
 
 
 # ── import_excel with resolutions ────────────────────────────────────────────
 
-def test_import_link_resolution(test_db):
+def test_import_link_resolution(db_session):
     """Resolution 'link:<id>' maps incoming ID to an existing sample."""
-    test_db.add(SampleInfo(sample_id="Tamarack"))
-    test_db.commit()
+    db_session.add(SampleInfo(sample_id="Tamarack"))
+    db_session.flush()
 
     resolutions = {"Tamarrack": "link:Tamarack"}
     created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
-        test_db, _make_csv(["Tamarrack"]), resolutions=resolutions
+        db_session, _make_csv(["Tamarrack"]), resolutions=resolutions
     )
     assert errors == []
     assert created + updated > 0
 
 
-def test_import_create_resolution(test_db):
+def test_import_create_resolution(db_session):
     """Resolution 'create' creates a new SampleInfo record and imports results."""
     resolutions = {"BrandNew": "create"}
     created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
-        test_db, _make_csv(["BrandNew"]), resolutions=resolutions
+        db_session, _make_csv(["BrandNew"]), resolutions=resolutions
     )
     assert errors == []
-    from database import SampleInfo
-    new_sample = test_db.query(SampleInfo).filter(SampleInfo.sample_id == "BrandNew").first()
+    new_sample = db_session.query(SampleInfo).filter(SampleInfo.sample_id == "BrandNew").first()
     assert new_sample is not None
 
 
-def test_import_no_resolution_still_errors(test_db):
+def test_import_no_resolution_still_errors(db_session):
     """No resolution for an unmatched ID → error row (existing behavior preserved)."""
     resolutions = {}
     _, _, _, errors = ActlabsRockTitrationService.import_excel(
-        test_db, _make_csv(["NoMatch999"]), resolutions=resolutions
+        db_session, _make_csv(["NoMatch999"]), resolutions=resolutions
     )
     assert any("NoMatch999" in e for e in errors)

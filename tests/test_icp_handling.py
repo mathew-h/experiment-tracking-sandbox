@@ -22,17 +22,20 @@ def test_db():
     from sqlalchemy.dialects.postgresql import JSONB
 
     # SQLite does not support JSONB; swap to JSON before creating tables.
+    # Save originals so the global Base.metadata is restored after the test.
+    _original_types: dict = {}
     for table in Base.metadata.tables.values():
         for col in table.columns:
             if isinstance(col.type, JSONB):
+                _original_types[(table.name, col.name)] = col.type
                 col.type = JSON()
 
     engine = create_engine("sqlite:///:memory:", echo=False)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
-    
+
     db = SessionLocal()
-    
+
     # Create test experiment
     test_experiment = Experiment(
         experiment_id="Test_MH_001",
@@ -43,10 +46,17 @@ def test_db():
     )
     db.add(test_experiment)
     db.commit()
-    
-    yield db
-    
-    db.close()
+
+    try:
+        yield db
+    finally:
+        db.close()
+        # Restore original JSONB types so subsequent test modules see correct metadata.
+        for table in Base.metadata.tables.values():
+            for col in table.columns:
+                key = (table.name, col.name)
+                if key in _original_types:
+                    col.type = _original_types[key]
 
 
 @pytest.fixture
@@ -256,19 +266,20 @@ class TestICPDuplicateHandling:
         test_db.commit()
         
         # Verify both data types exist for Day3
+        _exp = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
         experimental_result = test_db.query(ExperimentalResults).filter_by(
-            experiment_id='Test_MH_001',
+            experiment_fk=_exp.id,
             time_post_reaction_days=3.0
         ).first()
-        
+
         assert experimental_result is not None
         assert experimental_result.scalar_data is not None
         assert experimental_result.icp_data is not None
-        
+
         # Check scalar data
         assert experimental_result.scalar_data.gross_ammonium_concentration_mM == 15.5
         assert experimental_result.scalar_data.ammonium_quant_method == 'NMR'
-        
+
         # Check ICP data
         assert experimental_result.icp_data.fe is not None
         assert experimental_result.icp_data.dilution_factor == 10.0
@@ -300,11 +311,12 @@ class TestICPDuplicateHandling:
         test_db.commit()
         
         # Verify both data types exist
+        _exp = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
         experimental_result = test_db.query(ExperimentalResults).filter_by(
-            experiment_id='Test_MH_001',
+            experiment_fk=_exp.id,
             time_post_reaction_days=3.0
         ).first()
-        
+
         assert experimental_result.scalar_data is not None
         assert experimental_result.icp_data is not None
 
@@ -471,15 +483,16 @@ class TestUniqueResultTrackingImprovements:
         test_db.commit()
         
         # Verify single ExperimentalResults record with both data types
+        _exp = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
         exp_result = test_db.query(ExperimentalResults).filter_by(
-            experiment_id='Test_MH_001',
+            experiment_fk=_exp.id,
             time_post_reaction_days=3.0
         ).first()
-        
+
         assert exp_result is not None
         assert exp_result.scalar_data is not None
         assert exp_result.icp_data is not None
-        
+
         # Verify data integrity
         assert exp_result.scalar_data.gross_ammonium_concentration_mM == 12.5
         assert exp_result.icp_data.dilution_factor == 10.0
@@ -499,12 +512,13 @@ class TestUniqueResultTrackingImprovements:
         test_db.commit()
         
         # Count ExperimentalResults before second upload
+        _exp = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
         initial_count = test_db.query(ExperimentalResults).filter_by(
-            experiment_id='Test_MH_001',
+            experiment_fk=_exp.id,
             time_post_reaction_days=5.0
         ).count()
         assert initial_count == 1
-        
+
         # Add second data type to same time point
         icp_data = [{
             'experiment_id': 'Test_MH_001',
@@ -514,20 +528,20 @@ class TestUniqueResultTrackingImprovements:
             'mg': 8.0,
             'raw_label': 'Test_MH_001_Day5_5x'
         }]
-        
+
         ICPService.bulk_create_icp_results(test_db, icp_data)
         test_db.commit()
-        
+
         # Should still be only 1 ExperimentalResults record
         final_count = test_db.query(ExperimentalResults).filter_by(
-            experiment_id='Test_MH_001',
+            experiment_fk=_exp.id,
             time_post_reaction_days=5.0
         ).count()
         assert final_count == 1
-        
+
         # Verify both data types are linked to the same ExperimentalResults
         exp_result = test_db.query(ExperimentalResults).filter_by(
-            experiment_id='Test_MH_001',
+            experiment_fk=_exp.id,
             time_post_reaction_days=5.0
         ).first()
         
@@ -590,13 +604,13 @@ Test_MH_001_Day3_5x,Fe 238.204,20.0,1800,SAMP
 
         # Upload File A (Fe and Nd)
         processed_a, _ = ICPService.parse_and_process_icp_file(csv_with_fe_nd)
-        results_a, _ = ICPService.bulk_create_icp_results(test_db, processed_a)
+        results_a, _, _ = ICPService.bulk_create_icp_results(test_db, processed_a)
         assert len(results_a) == 1
         test_db.commit()
 
         # Upload File B (Fe only) - same experiment and time point
         processed_b, _ = ICPService.parse_and_process_icp_file(csv_fe_only)
-        results_b, errors_b = ICPService.bulk_create_icp_results(test_db, processed_b)
+        results_b, _, errors_b = ICPService.bulk_create_icp_results(test_db, processed_b)
         assert len(results_b) == 1
         test_db.commit()
 

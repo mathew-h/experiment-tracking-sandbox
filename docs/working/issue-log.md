@@ -651,3 +651,53 @@ Append-only entries from `/complete-task` for task types **issue** and **inline*
   - `frontend/src/pages/ExperimentDetail/__tests__/ResultsTab.columns.test.tsx` — 2 new tests for MOD badge visibility
 - **Tests added:** yes — 2 vitest tests (badge present when `has_brine_modification=true`, absent when false)
 - **Decision logged:** no
+
+## 2026-06-17 | inline — Test suite cleanup: eliminate ~100 collection errors and isolation failures
+- **Branch:** `fix/test-suite-cleanup`
+- **Files changed:**
+  - `tests/test_backup.py` — deleted (imported `utils.database_backup`, `utils.scheduler`: Streamlit-era modules removed)
+  - `tests/test_init_db.py` — deleted (not a pytest file; `main()` script importing `from config import DATABASE_URL`)
+  - `tests/test_load_info.py` — deleted (imported `frontend.components.load_info`: Streamlit-era Python frontend)
+  - `tests/test_pxrf_analysis.py` — rewritten: added `from database.models import SampleInfo, PXRFReading`; deleted 3 tests using `Laboratory`/`Analyst`/`Sample` (models no longer exist); kept 1 valid test
+  - `tests/test_experiment_rename.py` — fixed `db_session` fixture: added JSONB→JSON patching with save/restore so SQLite can compile JSONB columns; restored original types on teardown to prevent global-state leak
+  - `tests/test_icp_handling.py` — fixed `test_db` fixture: same JSONB→JSON patching with save/restore; fixed 2 `bulk_create_icp_results` 2-tuple unpacks → 3-tuple; fixed 6 `filter_by(experiment_id=...)` calls on `ExperimentalResults` (no such column) → join through `Experiment` model using `experiment_fk=_exp.id`
+  - `tests/services/bulk_uploads/test_actlabs_conflicts.py` — rewrote all 7 tests to use `db_session` (transaction rollback) instead of `test_db` (drops all tables); changed `commit()` → `flush()`; this was the root cause of 89 isolation failures in the full bulk_uploads suite
+- **Tests added:** no (test fixes only)
+- **Decision logged:** no
+- **Net result:** ~100 failures → 18 failures + 15 errors (677 passing); full `tests/services/bulk_uploads/` now 122/122 in both isolation and full-suite runs
+- **Remaining unresolved failures (33 total) — root causes documented below:**
+
+### A. `test_experiment_rename.py` — 3 failures (service logic mismatch)
+- `test_chain_rename_wrong_order`: `assert any('EXPERIMENT_RENAME_GUIDE' in str(w) for w in warnings)` — service emits the correct "⚠️ CHAIN RENAME CONFLICT" warning but the message no longer contains the string `EXPERIMENT_RENAME_GUIDE`. Test expectation is stale. Fix: update the assertion to match the current warning message format.
+- `test_rename_updates_notes`: note query returns `None` after rename — rename service does not update `experiment_id` on associated `ExperimentNotes` rows. Fix: update rename service to cascade ID update to notes.
+- `test_rename_with_conditions_sheet`: service emits 2 warnings — (1) column names in test CSV (`rock_mass`, `water_volume`) don't match model fields (`rock_mass_g`, `water_volume_mL`); (2) service calls `conditions.calculate_derived_conditions()` which no longer exists on `ExperimentalConditions`. Fix: update test CSV column names to match model; remove or replace `calculate_derived_conditions` call in the bulk upload service.
+
+### B. `test_icp_handling.py` — 7 failures (test expectations predate service refactors)
+These 7 tests were partially noted in the issue #61 log entry. Root causes per test:
+- `test_process_icp_dataframe_success` / `test_parse_and_process_icp_file_complete_workflow`: `assert len(errors) == 2` — service used to report standards/blanks as errors; now silently skips them. Fix: update assertions to `== 0`.
+- `test_duplicate_icp_upload_same_time_point`: `assert len(results2) == 0` — service now upserts on duplicate (returns 1). Fix: update to assert upsert behavior.
+- `test_icp_upload_with_existing_scalar_data`: `assert scalar.ammonium_quant_method == 'NMR'` — scalar row's `ammonium_quant_method` is `None`; test setup likely doesn't set it. Fix: set field in test setup or update assertion.
+- `test_missing_required_fields`: `assert len(results) == 0` — service creates result with defaults even when fields missing. Fix: align assertion with current permissive behavior.
+- `test_csv_with_only_standards_and_blanks`: `assert len(errors) >= 3` — service returns `['No data to validate']` (1 error). Fix: update assertion to `== 1`.
+- `test_icp_model_json_validation`: `TypeError: 'experiment_id' is an invalid keyword argument for ExperimentalResults` — test constructs `ExperimentalResults(experiment_id=...)` but that field doesn't exist (column is `experiment_fk`). Fix: use `experiment_fk=<int>` or omit and look up via `Experiment`.
+
+### C. `test_time_field_guardrails.py::test_save_results_rejects_none_time` — 1 failure (stale Streamlit import)
+Patches `frontend.components.experimental_results.st` — Streamlit-era module deleted. The other 3 tests in this file use current models and pass. Fix: delete this single test function.
+
+### D. `test_pg_backup_restore.py` — 3 failures (missing infrastructure)
+Tests require a PostgreSQL `experiments_restore_test` database. The fixture tries `DROP DATABASE ... CREATE DATABASE` but the DB doesn't exist and the pg_dump/restore never runs. All 3 tests fail with missing tables. Fix: create the restore test DB (`CREATE DATABASE experiments_restore_test OWNER experiments_user`) or mark tests with `@pytest.mark.skipif` unless restore DB is present.
+
+### E. `test_lineage_migration.py` — 1 failure + 11 errors (same JSONB/SQLite pattern)
+`test_snapshot_functionality` and all 11 `TestExperimentLineageMigration` tests fail with `SQLiteTypeCompiler can't render element of type JSONB`. These tests build SQLite engines from `Base.metadata` without the JSONB→JSON patching added to `test_experiment_rename.py` and `test_icp_handling.py` in this task. Fix: apply the same save/restore JSONB patching pattern to the `db` fixture in `test_lineage_migration.py`.
+
+### F. `test_fresh_install_migration.py` — 4 errors (alembic.ini not found at subprocess CWD)
+Fixture runs `subprocess(['.venv/Scripts/alembic.exe', 'stamp', 'head'])` from a temporary directory; alembic cannot find `alembic.ini`. Fix: pass `cwd=<project_root>` to the subprocess call.
+
+### G. `tests/api/test_dashboard.py::test_reactor_specs_values` — 1 failure (API 500 error)
+Endpoint returns HTTP 500; test expects 200/300-range. Pre-existing server error — likely a runtime error in the reactor specs endpoint. Fix: debug the dashboard route to find what raises during test.
+
+### H. `tests/test_actlabs_titration_import.py::test_actlabs_import_creates_analytes_and_results` — 1 failure (multi-sample coverage mismatch)
+Test asserts `('Rock_2', 1) in results_dict` but the dict only contains `Rock_1` entries — the import only creates elemental analysis rows for the first sample. Pre-existing service logic gap. Fix: investigate `ActlabsRockTitrationService.import_excel` to confirm it processes all sample rows.
+
+### I. `tests/test_compound_migration.py::test_deprecated_fields_migrated_to_chemicals` — 1 failure (FK violation)
+Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` with `id=1` exists in the test DB at that point, violating the FK constraint. Pre-existing test isolation issue (hardcoded FK). Fix: create the parent `Experiment` row in the test setup before inserting conditions.
