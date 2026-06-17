@@ -100,7 +100,7 @@ Stores solution chemistry measurements.
 
 ### `ICPResults`
 Stores ICP-OES elemental analysis data.
-- **Fixed Columns**: `fe`, `si`, `mg`, `ca`, `ni`, `cu`, `mo`, `zn`, `mn`, `cr`, `co`, `al`, `sr`, `y`, `nb`, `sb`, `cs`, `ba`, `nd`, `gd`, `pt`, `rh`, `ir`, `pd`, `ru`, `os`, `tl` (Float, ppm).
+- **Fixed Columns**: `fe`, `si`, `mg`, `ca`, `ni`, `cu`, `mo`, `zn`, `mn`, `cr`, `co`, `al`, `sr`, `y`, `nb`, `sb`, `cs`, `ba`, `nd`, `gd`, `pt`, `rh`, `ir`, `pd`, `ru`, `os`, `tl`, `k`, `na`, `s` (Float, ppm).
 - **Flexible Data**: `all_elements` (JSON) stores full dataset.
 - **Metadata**: `dilution_factor`, `instrument_used`, `detection_limits` (JSON), `measurement_date`, `sample_date`, `raw_label`, `created_at`, `updated_at`.
 
