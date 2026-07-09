@@ -720,3 +720,19 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `frontend/src/api/results.ts` — added `s: number | null` to `ICPResult` interface
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-07-09 | inline — Contributor docs audit: fix stale branch model, auth architecture, dead migrations dir
+- **Files changed:**
+  - `.claude/skills/conductor.md` — removed phantom plugin references (Superpowers/Code Review/etc. that don't exist as installed plugins); fixed two stale escalation conditions
+  - `CONTRIBUTING.md` — Branch Naming section referenced a non-existent production branch (`infra/lab-pc-server-setup`) instead of `develop`/`main`; replaced with the model in `docs/GIT_WORKFLOW.md`; added `--base develop` to the PR checklist; PostgreSQL 15+ → 16+
+  - `docs/STACK.md` — flipped stale "Streamlit is current / React+FastAPI is target" framing now that the migration is complete (M0–M8 done per `docs/milestones/MILESTONE_INDEX.md`); Streamlit moved to a "Legacy" section
+  - `docs/ENVIRONMENT.md` — removed stale "Docker Compose used for local dev" line (no Docker dev workflow exists; native venv + npm is current per README.md); replaced phantom `"use context7"` prompt pattern with actual Context7 MCP tool calls
+  - `docs/DIRECTORY_STRUCTURE.md` — full rewrite; old tree was aspirational/wrong (listed files that don't exist, e.g. `docs/api/ADDING_ENDPOINTS.md`, root `QUICKSTART.md`; omitted real current docs)
+  - `PROJECT_STRUCTURE.md` — replaced with a deprecation pointer to `docs/DIRECTORY_STRUCTURE.md` (duplicate/stale tree, redundant maintenance burden)
+  - `.claude/rules/AUTH.md` — full rewrite; described the old Streamlit server-side REST login flow. Actual current flow: React uses the Firebase Web SDK directly in the browser; `backend/auth/firebase_auth.py` verifies ID tokens for FastAPI; root `auth/user_management.py` remains the shared Firestore approval-queue module (used by the new `/api/auth/register` endpoint and the CLI); `auth/firebase_config.py` is now legacy-Streamlit-only
+  - `README_DEV_SETUP.md` — deleted (Docker Compose dev guide, superseded, unreferenced elsewhere)
+  - `experiment_tracking_sandbox/QUICKSTART.md` (and the stray nested folder containing it) — deleted; leftover pre-project bootstrap artifact instructing readers to copy files from a "parent repo" into this sandbox
+  - `database/migrations/` (48 files: `README`, `env.py`, `script.py.mako`, `versions/*.py`) — deleted; confirmed dead duplicate of `alembic/` (added in the same initial commit, zero commits since, not referenced by `alembic.ini`'s active `script_location`, which points at `alembic/`)
+  - `docs/project_context/{STACK.md,ENVIRONMENT.md,DIRECTORY_STRUCTURE.md}` — auto-synced by the `PostToolUse` hook
+- **Tests added:** no — documentation and dead-file removal only; `pytest --collect-only` (711 tests) and `alembic.ini` config parsing verified clean after the `database/migrations` deletion
+- **Decision logged:** yes — `docs/working/decisions.md`

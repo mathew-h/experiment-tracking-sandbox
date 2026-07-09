@@ -4,7 +4,7 @@
 
 - Python 3.11+
 - Node 18+
-- PostgreSQL 15+
+- PostgreSQL 16+
 - A Firebase project with credentials (contact the project maintainer)
 
 ## Dev Setup
@@ -36,15 +36,16 @@ auth/           Firebase auth module
 
 ## Branch Naming
 
-Cut feature branches from the main branch (`infra/lab-pc-server-setup`):
+Branch from `develop` — never from `main`. Full model in `docs/GIT_WORKFLOW.md`; in summary:
 
-```
-feature/m<N>-short-description
-```
+| Type | Pattern | Example |
+|---|---|---|
+| Milestone | `feature/m<N>-short-description` | `feature/m9-sample-management` |
+| Issue (fix) | `fix/issue-<N>-short-description` | `fix/issue-52-icp-null-dilution` |
+| Issue (feature) | `feat/issue-<N>-short-description` | `feat/issue-61-sample-photos` |
+| Inline | `fix/`, `feat/`, `chore/`, `refactor/`, `infra/` + short description | `chore/add-experiment-id-index` |
 
-Example: `feature/m5-bulk-upload-icp`
-
-Do not commit directly to `infra/lab-pc-server-setup`.
+Never commit directly to `develop` or `main`.
 
 ## Commit Format
 
@@ -89,6 +90,7 @@ Before requesting review, confirm:
 - [ ] Migration (if any) is purely additive — no column drops or renames
 - [ ] `alembic downgrade -1` works cleanly
 - [ ] Commit messages follow the format above
+- [ ] PR opened with `--base develop` (`gh pr create --base develop`) — GitHub's default is `main`, so this must be set explicitly
 
 ## Adding New Derived Fields
 
