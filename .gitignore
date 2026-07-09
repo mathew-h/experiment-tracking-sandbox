@@ -10,7 +10,8 @@
 *.db
 *.sqlite
 *.sqlite3
-docs/sample_data/
+docs/sample_data/*
+!docs/sample_data/*.md
 
 # Python
 __pycache__/

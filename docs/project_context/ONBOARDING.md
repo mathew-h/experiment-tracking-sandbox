@@ -17,8 +17,10 @@ Welcome to the Experiment Tracking System. This guide covers two things: how to 
 The Experiment Tracking System runs on a dedicated lab PC and is available to anyone on the local network. Open your browser and navigate to:
 
 ```
-http://100.97.130.43:8000
+http://<lab-pc-ip>:8000
 ```
+
+> Ask your lab administrator for the current address.
 
 > **Note:** The app is LAN-only. You must be connected to the lab network to access it. It is not available over the internet.
 
@@ -41,7 +43,7 @@ If you see a "pending approval" message, your account has not yet been approved.
 
 | Problem | What to check |
 |---------|---------------|
-| Page does not load | Confirm you are on the lab network. Try pinging `100.97.130.43`. |
+| Page does not load | Confirm you are on the lab network. Try pinging the lab PC's address. |
 | "Connection refused" error | The app service may be stopped. Ask the administrator to check the `ExperimentTracker` Windows Service on the lab PC. |
 | "Pending approval" after registering | Your account needs admin approval. Reach out to the lab admin. |
 | Forgotten password | Contact the lab admin to reset your password via the management CLI. |
@@ -64,7 +66,7 @@ You will need the following information. Your administrator will provide the spe
 
 | Setting | Value |
 |---------|-------|
-| Server | `100.97.130.43` |
+| Server | `<lab-pc-ip>` (ask your lab administrator) |
 | Port | `5432` |
 | Database | `experiments` |
 | Username | Provided by your admin |
@@ -89,7 +91,7 @@ Power BI does not ship with a PostgreSQL driver. You need to install the Npgsql 
 3. In the data source list, search for **PostgreSQL database** and select it. Click **Connect**.
    - If you do not see a PostgreSQL option, you need to install the Npgsql provider first. See the "Installing Npgsql" section below.
 4. In the connection dialog:
-   - **Server**: enter `100.97.130.43`.
+   - **Server**: enter the lab PC's address (ask your administrator).
    - **Database**: enter `experiments`.
    - Choose **DirectQuery** if you want the dashboard to pull live data on each refresh, or **Import** if you prefer to load a snapshot into your Power BI file.
 5. Click **OK**.
@@ -125,7 +127,7 @@ Since the app runs on a LAN without cloud access, Power BI scheduled refresh thr
 
 | Problem | What to check |
 |---------|---------------|
-| "Unable to connect" | Verify that PostgreSQL is running on `100.97.130.43` (port 5432). Check Windows Firewall on the lab PC allows inbound connections on port 5432. |
+| "Unable to connect" | Verify that PostgreSQL is running on the lab PC (port 5432). Check Windows Firewall on the lab PC allows inbound connections on port 5432. |
 | "Npgsql not installed" | Install the Npgsql provider (see "Installing Npgsql" section above), then restart Power BI Desktop. |
 | Authentication failure | Double-check the username and password. PostgreSQL credentials are separate from your web app login. |
 | Views are missing | The views are created at application startup. Ask the administrator to restart the `ExperimentTracker` service, which will recreate the views. |
