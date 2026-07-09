@@ -3,10 +3,10 @@
 ## Deployment Reality
 - **Server:** One always-on lab PC on a local area network
 - **Users:** 2-5 researchers accessing via browser at `http://<lab-pc-hostname>:8000`
-- **No cloud, no external hosting, no Docker required in production**
+- **No cloud, no external hosting, no Docker in production or development**
 - React app is served as static files by FastAPI — no separate Node server in production
 - All users are on the same LAN — no public internet exposure needed
-- Docker Compose is used for local development only
+- Local dev runs natively (Python venv + `npm run dev`) — see `README.md` Quick Start and `docs/deployment/STARTUP_GUIDE.md`
 
 ## Environment Variables (never hardcode these)
 ```
@@ -31,7 +31,7 @@ PUBLIC_COPY_DIR=
 
 ## Permitted Operations
 - Read and write to this Git repository
-- Fetch external documentation via Context7 MCP (`use context7`) for all stack libraries: FastAPI, React, PostgreSQL, SQLAlchemy, Alembic, Firebase, Tailwind, Vite, Vitest, structlog, TanStack Query, Pydantic, psycopg2
+- Fetch external documentation via Context7 MCP (`resolve-library-id` then `get-library-docs`) for all stack libraries: FastAPI, React, PostgreSQL, SQLAlchemy, Alembic, Firebase, Tailwind, Vite, Vitest, structlog, TanStack Query, Pydantic, psycopg2
 - Research full-stack experimental data tracking best practices
 - Run tests, linters, formatters, and build tools within the repo
 - Run database migrations against the local development database
