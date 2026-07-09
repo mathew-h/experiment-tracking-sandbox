@@ -736,3 +736,12 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `docs/project_context/{STACK.md,ENVIRONMENT.md,DIRECTORY_STRUCTURE.md}` — auto-synced by the `PostToolUse` hook
 - **Tests added:** no — documentation and dead-file removal only; `pytest --collect-only` (711 tests) and `alembic.ini` config parsing verified clean after the `database/migrations` deletion
 - **Decision logged:** yes — `docs/working/decisions.md`
+
+## 2026-07-09 | inline — Fix docs/sample_data/ gitignore scope; redact leaked lab PC IP
+- **Files changed:**
+  - `.gitignore` — `docs/sample_data/` → `docs/sample_data/*` + `!docs/sample_data/*.md`; the blanket rule was silently dropping markdown docs placed in that directory (data dumps were the intended target, per the "# Databases" grouping). Confirmed real impact: `docs/sample_data/FIELD_MAPPING.md`, logged as "created" in `docs/working/plan.md` during M8, does not exist in the working tree or git history — it matched the old blanket ignore the moment it was created and was never tracked
+  - `docs/user_guide/ONBOARDING.md` — redacted the lab PC's IP (`100.97.130.43`, appeared 5×) to `<lab-pc-ip>` / prose pointers to the lab admin. The file was already tracked and pushed to this **public** GitHub repo before the "contains internal IP addresses" gitignore line (added later) was added, so that line was a no-op
+  - `docs/project_context/ONBOARDING.md` — auto-synced by the `PostToolUse` hook
+- **Tests added:** no
+- **Decision logged:** no
+- **Known residual risk:** the real IP remains visible in this repo's git history/GitHub commit log (redaction only affects HEAD going forward). User chose not to purge history or make the repo private at this time — revisit if that changes.
