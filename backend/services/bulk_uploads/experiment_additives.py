@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import Experiment, ExperimentalConditions, ChemicalAdditive, Compound, AmountUnit
+from backend.services.calculations.registry import recalculate
 
 
 class ExperimentAdditivesService:
@@ -121,7 +122,8 @@ class ExperimentAdditivesService:
                     existing_add.unit = unit_enum
                     existing_add.addition_order = order_int
                     existing_add.addition_method = method_text
-                    existing_add.calculate_derived_values()
+                    db.flush()
+                    recalculate(existing_add, db)
                     updated += 1
                 else:
                     new_add = ChemicalAdditive(
@@ -132,8 +134,9 @@ class ExperimentAdditivesService:
                         addition_order=order_int,
                         addition_method=method_text,
                     )
-                    new_add.calculate_derived_values()
                     db.add(new_add)
+                    db.flush()
+                    recalculate(new_add, db)
                     created += 1
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
