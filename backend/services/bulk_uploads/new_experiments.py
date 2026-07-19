@@ -20,6 +20,7 @@ from database import (
 from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryService
 from backend.services.bulk_uploads.experiment_status import ExperimentStatusService
 from backend.services.experiment_validation import parse_experiment_id as parse_exp_id_validation, validate_experiment_id, extract_lineage_info
+from backend.services.calculations.registry import recalculate
 from database.lineage_utils import update_experiment_lineage
 
 
@@ -806,9 +807,9 @@ class NewExperimentsUploadService:
                                     addition_order=order_int,
                                     addition_method=method_text,
                                 )
-                                # Derived fields auto via event listeners; call explicitly for safety
-                                new_add.calculate_derived_values()
                                 db.add(new_add)
+                                db.flush()
+                                recalculate(new_add, db)
                             else:
                                 # Upsert per-compound
                                 existing_add = db.query(ChemicalAdditive).filter(
@@ -821,7 +822,8 @@ class NewExperimentsUploadService:
                                     existing_add.unit = unit_enum
                                     existing_add.addition_order = order_int
                                     existing_add.addition_method = method_text
-                                    existing_add.calculate_derived_values()
+                                    db.flush()
+                                    recalculate(existing_add, db)
                                 else:
                                     # New additive from user sheet
                                     new_add = ChemicalAdditive(
@@ -832,8 +834,9 @@ class NewExperimentsUploadService:
                                         addition_order=order_int,
                                         addition_method=method_text,
                                     )
-                                    new_add.calculate_derived_values()
                                     db.add(new_add)
+                                    db.flush()
+                                    recalculate(new_add, db)
                         except Exception as e:
                             warnings.append(f"[additives] Row {int(ridx)+2}: {e}")
 

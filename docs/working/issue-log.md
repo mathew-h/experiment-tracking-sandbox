@@ -744,6 +744,7 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `docs/project_context/ONBOARDING.md` — auto-synced by the `PostToolUse` hook
 - **Tests added:** no
 - **Decision logged:** no
+- **Known residual risk:** the real IP remains visible in this repo's git history/GitHub commit log (redaction only affects HEAD going forward). User chose not to purge history or make the repo private at this time — revisit if that changes.
 
 ## 2026-07-19 | inline — Reactor dashboard grid redesign (unified 3×6 layout)
 - **Files changed:**
@@ -751,7 +752,6 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** no — no existing unit tests target `ReactorGrid.tsx`; verified manually via chrome-devtools MCP against the live dev server (desktop + 900px breakpoints, CF01 detail-modal click-through)
 - **Decision logged:** no
 - **Note:** found (not fixed here, out of scope) that `ReactorDetailModal` in the same file still surfaces leaked HPHT hardware specs for CF01 in its "Hardware" section — that's a backend data issue already fixed on branch `fix/cf-reactor-card-description` (commit `efebf34`), which was not yet merged to `develop` when this branch was cut from it.
-- **Known residual risk:** the real IP remains visible in this repo's git history/GitHub commit log (redaction only affects HEAD going forward). User chose not to purge history or make the repo private at this time — revisit if that changes.
 
 ## 2026-07-19 | inline — Stop CF reactor cards inheriting HPHT specs
 - **Files changed:**
@@ -759,3 +759,11 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `tests/api/test_dashboard.py` — added `test_cf01_does_not_inherit_hpht_reactor_1_hardware_specs`
 - **Tests added:** yes — full `tests/api/test_dashboard.py` (28 tests) and full backend suite (709 passed, 3 pre-existing unrelated failures in `tests/test_pg_backup_restore.py` requiring a live Postgres instance) verified clean on this branch before merge
 - **Decision logged:** no
+
+## 2026-07-19 | inline — Use calc registry for bulk additive uploads
+- **Files changed:**
+  - `backend/services/bulk_uploads/experiment_additives.py` — replaced direct `ChemicalAdditive.calculate_derived_values()` model-method calls with `db.flush()` + `backend.services.calculations.registry.recalculate(instance, db)`, matching the registry write pattern used elsewhere
+  - `backend/services/bulk_uploads/new_experiments.py` — same replacement for additives created during new-experiment bulk upload
+- **Tests added:** no new tests in this branch; existing `tests/services/bulk_uploads/` suite (122 tests) and full backend suite (708 passed, 3 pre-existing unrelated Postgres-only failures) verified clean before merge
+- **Decision logged:** no
+- **Note:** this touches `backend/services/bulk_uploads/` (a locked component per `docs/LOCKED_COMPONENTS.md`); merge was explicitly confirmed by the user before proceeding
