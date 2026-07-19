@@ -745,3 +745,11 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** no
 - **Decision logged:** no
 - **Known residual risk:** the real IP remains visible in this repo's git history/GitHub commit log (redaction only affects HEAD going forward). User chose not to purge history or make the repo private at this time — revisit if that changes.
+
+## 2026-07-19 | inline — Use calc registry for bulk additive uploads
+- **Files changed:**
+  - `backend/services/bulk_uploads/experiment_additives.py` — replaced direct `ChemicalAdditive.calculate_derived_values()` model-method calls with `db.flush()` + `backend.services.calculations.registry.recalculate(instance, db)`, matching the registry write pattern used elsewhere
+  - `backend/services/bulk_uploads/new_experiments.py` — same replacement for additives created during new-experiment bulk upload
+- **Tests added:** no new tests in this branch; existing `tests/services/bulk_uploads/` suite (122 tests) and full backend suite (708 passed, 3 pre-existing unrelated Postgres-only failures) verified clean before merge
+- **Decision logged:** no
+- **Note:** this touches `backend/services/bulk_uploads/` (a locked component per `docs/LOCKED_COMPONENTS.md`); merge was explicitly confirmed by the user before proceeding
