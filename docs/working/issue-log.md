@@ -745,3 +745,10 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** no
 - **Decision logged:** no
 - **Known residual risk:** the real IP remains visible in this repo's git history/GitHub commit log (redaction only affects HEAD going forward). User chose not to purge history or make the repo private at this time — revisit if that changes.
+
+## 2026-07-19 | inline — Stop CF reactor cards inheriting HPHT specs
+- **Files changed:**
+  - `backend/api/routers/dashboard.py` — `REACTOR_SPECS` is keyed by bare `reactor_number` (1-16, the HPHT vessel inventory). CF01/CF02 reuse `reactor_number` 1/2, so the lookup silently attached R01/R02's Hastelloy/100mL/Yushen spec to Core Flood cards. Gated the lookup on `not is_cf`.
+  - `tests/api/test_dashboard.py` — added `test_cf01_does_not_inherit_hpht_reactor_1_hardware_specs`
+- **Tests added:** yes — full `tests/api/test_dashboard.py` (28 tests) and full backend suite (709 passed, 3 pre-existing unrelated failures in `tests/test_pg_backup_restore.py` requiring a live Postgres instance) verified clean on this branch before merge
+- **Decision logged:** no
