@@ -37,16 +37,20 @@ const REACTOR_SPECS: Record<string, { volume_mL: number; material: string; vendo
 function statusColors(status: string | null) {
   switch (status) {
     case 'ONGOING':
-      return 'text-status-ongoing bg-status-ongoing/10 border-status-ongoing/20'
+      return 'text-status-ongoing bg-status-ongoing/10'
     case 'COMPLETED':
-      return 'text-status-completed bg-status-completed/10 border-status-completed/20'
+      return 'text-status-completed bg-status-completed/10'
     case 'CANCELLED':
-      return 'text-status-cancelled bg-status-cancelled/10 border-status-cancelled/20'
+      return 'text-status-cancelled bg-status-cancelled/10'
     case 'QUEUED':
-      return 'text-status-queued bg-status-queued/10 border-status-queued/20'
+      return 'text-status-queued bg-status-queued/10'
     default:
-      return 'text-ink-muted bg-surface-overlay border-surface-border'
+      return 'text-ink-muted bg-surface-overlay'
   }
+}
+
+function isCoreFlood(label: string): boolean {
+  return label.startsWith('CF')
 }
 
 function StatusBadge({
@@ -82,7 +86,7 @@ function StatusBadge({
         onClick={() => setOpen((v) => !v)}
         disabled={isPending}
         className={[
-          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider border transition-opacity',
+          'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium uppercase tracking-wide transition-opacity',
           statusColors(card.status),
           isPending ? 'opacity-50' : 'hover:opacity-80 cursor-pointer',
         ].join(' ')}
@@ -164,23 +168,26 @@ function ReactorCard({
   onClick: (card: ReactorCardData) => void
 }) {
   const occupied = card !== null
+  const isCF = isCoreFlood(label)
+  // HPHT-only hardware spec (volume/material/vendor) — never shown on Core Flood cards.
+  const showSpecsBadge = !isCF
 
   return (
     <Card
+      padding="none"
       className={[
-        'transition-colors duration-150 select-none min-h-[100px]',
-        occupied ? 'hover:border-ink-muted cursor-pointer' : 'opacity-40',
+        'transition-colors duration-150 select-none min-h-[100px] p-4 px-5 border-l-2',
+        isCF ? 'border-l-status-info/70' : 'border-l-transparent',
+        occupied ? 'hover:border-ink-muted cursor-pointer' : 'opacity-35 border-dashed',
       ].join(' ')}
       onClick={() => occupied && onClick(card!)}
     >
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <p className="text-xl font-bold text-ink-primary font-mono-data leading-none">{label}</p>
-        </div>
+      <div className="flex items-start justify-between mb-1">
+        <p className="text-xl font-bold text-ink-primary font-mono-data leading-none">{label}</p>
         {occupied ? (
           <StatusBadge card={card!} />
         ) : (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider border text-ink-muted bg-surface-overlay border-surface-border">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium uppercase tracking-wide text-ink-muted bg-surface-overlay">
             <span className="w-1.5 h-1.5 rounded-full bg-surface-border" />
             Empty
           </span>
@@ -188,18 +195,21 @@ function ReactorCard({
       </div>
 
       {occupied ? (
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-ink-primary font-mono-data leading-tight">
+        <div className="space-y-1.5">
+          <p className="text-base font-semibold text-ink-primary font-mono-data leading-snug">
             {card!.experiment_id}
           </p>
           {card!.sample_id && (
-            <p className="text-xs text-ink-secondary">
+            <p className="text-xs text-ink-secondary leading-snug">
               <span className="text-ink-muted">Sample:</span>{' '}
               <span className="font-mono-data">{card!.sample_id}</span>
             </p>
           )}
           {card!.description && (
-            <p className="text-xs text-ink-secondary line-clamp-2 leading-snug italic">
+            <p
+              className="text-xs text-ink-secondary line-clamp-2 leading-snug italic"
+              title={card!.description}
+            >
               {card!.description}
             </p>
           )}
@@ -210,26 +220,29 @@ function ReactorCard({
               </span>
             )}
             {card!.days_running != null && (
-              <span className="text-xs text-ink-muted">
-                Day{' '}
-                <span className="font-mono-data text-ink-secondary">{card!.days_running}</span>
+              <span className="inline-flex items-center gap-1 rounded bg-surface-overlay px-1.5 py-0.5 text-xs font-semibold text-ink-primary">
+                Day <span className="font-mono-data">{card!.days_running}</span>
               </span>
             )}
           </div>
-          <ReactorSpecsBadge
-            volume_mL={card!.volume_mL ?? REACTOR_SPECS[label]?.volume_mL ?? null}
-            material={card!.material ?? REACTOR_SPECS[label]?.material ?? null}
-            vendor={card!.vendor ?? REACTOR_SPECS[label]?.vendor ?? null}
-          />
+          {showSpecsBadge && (
+            <ReactorSpecsBadge
+              volume_mL={card!.volume_mL ?? REACTOR_SPECS[label]?.volume_mL ?? null}
+              material={card!.material ?? REACTOR_SPECS[label]?.material ?? null}
+              vendor={card!.vendor ?? REACTOR_SPECS[label]?.vendor ?? null}
+            />
+          )}
         </div>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-xs text-ink-muted mt-1">No experiment assigned</p>
-          <ReactorSpecsBadge
-            volume_mL={REACTOR_SPECS[label]?.volume_mL ?? null}
-            material={REACTOR_SPECS[label]?.material ?? null}
-            vendor={REACTOR_SPECS[label]?.vendor ?? null}
-          />
+          {showSpecsBadge && (
+            <ReactorSpecsBadge
+              volume_mL={REACTOR_SPECS[label]?.volume_mL ?? null}
+              material={REACTOR_SPECS[label]?.material ?? null}
+              vendor={REACTOR_SPECS[label]?.vendor ?? null}
+            />
+          )}
         </div>
       )}
     </Card>
@@ -543,40 +556,23 @@ export function ReactorGrid({ cards }: { cards: ReactorCardData[] }) {
     byLabel[c.reactor_label] = c
   }
 
+  // Single unified grid: R01–R16 then CF01–CF02, in slot order. At 6 columns
+  // this lays out as R01–R06 / R07–R12 / R13–R16+CF01–CF02 — CF cards land in
+  // the last two positions of row 3 with no separate section needed.
+  const ALL_SLOTS = [...R_SLOTS, ...CF_SLOTS]
+
   return (
     <>
-      {/* Standard reactors R01–R16 */}
-      <div>
-        <p className="text-2xs text-ink-muted uppercase tracking-wider font-medium mb-2">
-          Standard Reactors (R01–R16)
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-          {R_SLOTS.map((label) => (
-            <ReactorCard
-              key={label}
-              label={label}
-              card={byLabel[label] ?? null}
-              onClick={setSelected}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Core flood CF01–CF02 */}
-      <div className="mt-4">
-        <p className="text-2xs text-ink-muted uppercase tracking-wider font-medium mb-2">
-          Core Flood (CF01–CF02)
-        </p>
-        <div className="grid grid-cols-2 gap-2 max-w-xs">
-          {CF_SLOTS.map((label) => (
-            <ReactorCard
-              key={label}
-              label={label}
-              card={byLabel[label] ?? null}
-              onClick={setSelected}
-            />
-          ))}
-        </div>
+      {/* Section title lives in the enclosing Dashboard CardHeader ("Reactor Status") */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        {ALL_SLOTS.map((label) => (
+          <ReactorCard
+            key={label}
+            label={label}
+            card={byLabel[label] ?? null}
+            onClick={setSelected}
+          />
+        ))}
       </div>
 
       {selected && (
