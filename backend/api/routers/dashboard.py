@@ -164,7 +164,10 @@ def get_dashboard(
         start = row.date or row.created_at
         status_val = row.status.value if hasattr(row.status, "value") else str(row.status)
         days = (now - start).days if (start and status_val == "ONGOING") else None
-        specs = REACTOR_SPECS.get(rn, {})
+        # REACTOR_SPECS is keyed by bare reactor_number and only covers the R01-R16
+        # HPHT vessels. Core Flood reactors reuse the same 1/2 numbering (CF01/CF02),
+        # so this must be skipped for CF or it silently inherits R01/R02's HPHT spec.
+        specs = REACTOR_SPECS.get(rn, {}) if not is_cf else {}
         reactor_cards.append(ReactorCardData(
             reactor_number=rn,
             reactor_label=label,

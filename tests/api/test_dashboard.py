@@ -437,6 +437,43 @@ def test_core_flood_experiment_in_reactor_2_gets_cf02_label(client, db_session):
     assert cards[2]["experiment_id"] == "CF_LABEL_R2_001"
 
 
+def test_cf01_does_not_inherit_hpht_reactor_1_hardware_specs(client, db_session):
+    """CF01 (Core Flood, reactor_number=1) must not show R01's Hastelloy/Yushen HPHT vessel spec.
+
+    REACTOR_SPECS is keyed by bare reactor_number and only covers the R01-R16
+    HPHT vessel inventory. CF01/CF02 reuse reactor_number 1/2, so the lookup
+    must be skipped for Core Flood experiments.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="CF_SPEC_LEAK_001",
+        experiment_number=91010,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="CF_SPEC_LEAK_001",
+        reactor_number=1,
+        experiment_type="Core Flood",
+    )
+    db_session.add(cond)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert "CF01" in cards
+    assert cards["CF01"]["volume_mL"] is None, "CF01 must not show R01's HPHT volume_mL"
+    assert cards["CF01"]["material"] is None, "CF01 must not show R01's HPHT material (Hastelloy)"
+    assert cards["CF01"]["vendor"] is None, "CF01 must not show R01's HPHT vendor (Yushen)"
+
+
 def test_hpht_experiment_in_reactor_1_gets_r01_not_cf01(client, db_session):
     """HPHT experiment in reactor 1 must produce reactor_label = 'R01', not CF01."""
     from database.models.experiments import Experiment
