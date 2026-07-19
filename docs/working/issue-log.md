@@ -744,4 +744,11 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `docs/project_context/ONBOARDING.md` — auto-synced by the `PostToolUse` hook
 - **Tests added:** no
 - **Decision logged:** no
+
+## 2026-07-19 | inline — Reactor dashboard grid redesign (unified 3×6 layout)
+- **Files changed:**
+  - `frontend/src/pages/ReactorGrid.tsx` — merged the two sections (`Standard Reactors (R01–R16)` + `Core Flood (CF01–CF02)`) into one unified grid (`R01–R06 / R07–R12 / R13–R16+CF01–CF02` at 6 columns); removed the now-duplicate inner section label (the enclosing `Dashboard.tsx` `CardHeader` already renders "Reactor Status"); CF cards get a `border-l-status-info` accent and never render the HPHT-only volume/material/vendor spec row (gated on label/experiment_type, not on the API returning nulls); experiment ID bumped to the card's visual anchor (`text-base font-semibold`, was `text-sm font-medium`); tighter badge-to-ID gap; lighter/smaller status badge (dropped border); Day counter is now a filled pill; empty-slot cards are more ghosted (`opacity-35` + `border-dashed`); description gets a `title` tooltip; slightly more horizontal card padding
+- **Tests added:** no — no existing unit tests target `ReactorGrid.tsx`; verified manually via chrome-devtools MCP against the live dev server (desktop + 900px breakpoints, CF01 detail-modal click-through)
+- **Decision logged:** no
+- **Note:** found (not fixed here, out of scope) that `ReactorDetailModal` in the same file still surfaces leaked HPHT hardware specs for CF01 in its "Hardware" section — that's a backend data issue already fixed on branch `fix/cf-reactor-card-description` (commit `efebf34`), which was not yet merged to `develop` when this branch was cut from it.
 - **Known residual risk:** the real IP remains visible in this repo's git history/GitHub commit log (redaction only affects HEAD going forward). User chose not to purge history or make the repo private at this time — revisit if that changes.
