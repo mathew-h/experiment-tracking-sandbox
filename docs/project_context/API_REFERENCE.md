@@ -9,15 +9,66 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 |--------|------|-------------|
 | GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `reactor_number`, `date_from`, `date_to` |
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
+| GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags |
 | POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
-| PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id |
+| PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, and experiment_id (rename) |
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a note |
 | PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit note text. Body: `{"note_text": "..."}`. No-op if text unchanged. Writes ModificationsLog. Returns updated note with `updated_at`. |
-| GET | `/api/experiments/{experiment_id}/change-requests` | List change request entries linked to this experiment. Returns `[]` if none. |
+| GET | `/api/experiments/{experiment_id}/change-requests` | List reactor modification entries linked to this experiment. Returns `[]` if none. |
+| GET | `/api/experiments/{experiment_id}/change-requests/recent` | Reactor modification entry for `date` (query param, default today) plus the most recent prior entry — both scoped to this experiment only, never another experiment that previously occupied the same reactor. Returns `{"selected": ..., "previous": ...}`, either nullable. |
+| POST | `/api/experiments/{experiment_id}/change-requests` | Create or update a reactor modification for a given reactor + date. Body: `{"reactor_label": "R05", "requested_change": "...", "sync_date": "2026-07-20"}` (`sync_date` optional, defaults to today). Upserts on `(reactor_label, experiment_id, sync_date)`. |
+
+### GET /api/experiments/{experiment_id}/exists
+
+Check whether an experiment ID string is already in use.
+
+**Auth:** Required (Firebase token)
+
+**Path params:**
+- `experiment_id` — the string to check
+
+**Response `200`:**
+```json
+{ "exists": true }
+```
+or
+```json
+{ "exists": false }
+```
+
+**Usage:** Called by the frontend on a 300 ms debounce while the user types a custom ID, to show real-time availability feedback without submitting the form.
+
+### PATCH /api/experiments/{experiment_id}
+
+Update experiment properties.
+
+**Auth:** Required (Firebase token)
+
+**Path params:**
+- `experiment_id` — the experiment string ID
+
+**Request body fields:**
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `status` | string (enum) | No | `ONGOING`, `COMPLETED`, `CANCELLED` |
+| `researcher` | string | No | Researcher name or initials |
+| `date` | string (ISO 8601) | No | Experiment start date |
+| `sample_id` | string | No | Reference to `SampleInfo.sample_id` |
+| `experiment_id` | string | No | Rename: must be unique; max 100 chars; whitespace stripped before validation |
+
+**Response `200`:** Updated experiment object with all fields.
+
+**Errors:**
+- `409 Conflict` — `experiment_id` is already in use by another experiment; `sample_id` FK constraint fails
+- `422 Unprocessable Entity` — validation error (e.g., invalid status enum)
+
+**Side effects:**
+- On rename, `ExperimentalConditions.experiment_id` is updated and a `ModificationsLog` entry is written.
 
 ## Conditions
 

@@ -38,3 +38,13 @@ Append-only lasting decisions from milestone, issue, or inline work (newest at b
 **Why:** The React/FastAPI rewrite moved login itself to the Firebase Web SDK client-side and moved token verification to `backend/auth/firebase_auth.py`, but never touched the registration/approval plumbing — that logic was reused as-is from the Streamlit era. This left one module (`user_management.py`) genuinely live in both stacks and one (`firebase_config.py`) orphaned to the legacy stack only, which `.claude/rules/AUTH.md` didn't reflect until this pass.
 
 **Scope:** Do not import `auth/firebase_config.py` from new backend or frontend code. If `role`/`approved` custom claims (set at approval time but not currently read anywhere) are wired into an access-control decision, update `.claude/rules/AUTH.md` to document where that check lives.
+
+## 2026-07-20 — `reactor_change_requests` unique constraint widened to include `experiment_id`
+
+**Decision:** `ReactorChangeRequest.__table_args__` unique constraint changed from `(reactor_label, sync_date)` to `(reactor_label, experiment_id, sync_date)` (constraint renamed `uq_change_request_reactor_experiment_date`, migration `ca5d57c6b272`). No backfill was performed for existing rows with a null `experiment_id` — Postgres/SQLite both treat `NULL` as distinct under a unique constraint, so those rows remain safe without one.
+
+**Why:** Issue #63 made the modification date user-editable. Under the old 2-column constraint, saving a modification for a new experiment on a reactor for a date that the *previous* occupant of that reactor also logged an entry for would silently overwrite the outgoing experiment's row — the risk existed before this ticket but became much easier to trigger by accident once dates could be backdated. Confirmed with the user to ship the widening in this same pass rather than deferring.
+
+**Consequence:** `backend/services/notion_sync/import_.py::run_import` targeted the old constraint by `index_elements=["reactor_label", "sync_date"]`; updated to target the new constraint by name (`uq_change_request_reactor_experiment_date`). Its dedup helper (`_is_text_unchanged`) still only looks at `reactor_label`, so if that importer ever runs again for a reactor with an unresolved (`None`) `experiment_id`, repeat syncs will no longer dedupe against each other on that column pair alone — rows with a null `experiment_id` never collide with each other under the widened constraint. Not fixed here since Notion sync is understood to be retired; flagging in case it's ever reactivated.
+
+**Scope:** Any future write path to `reactor_change_requests` must use `uq_change_request_reactor_experiment_date` as the conflict target, not a bare `(reactor_label, sync_date)` column list.

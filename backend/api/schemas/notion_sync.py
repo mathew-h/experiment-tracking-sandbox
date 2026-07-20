@@ -21,8 +21,9 @@ class ChangeRequestResponse(BaseModel):
 class ChangeRequestUpsertRequest(BaseModel):
     reactor_label: str
     requested_change: str
+    sync_date: Optional[date] = None
 
 
 class RecentChangeRequestsResponse(BaseModel):
-    today: Optional[ChangeRequestResponse] = None
+    selected: Optional[ChangeRequestResponse] = None
     previous: Optional[ChangeRequestResponse] = None

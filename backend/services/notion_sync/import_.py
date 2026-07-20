@@ -72,7 +72,6 @@ def _is_text_unchanged(db: Session, reactor_label: str, incoming_text: str) -> b
     """Return True if the most recent CR row for this reactor has identical text.
 
     Used to prevent duplicate rows when a carried-forward request hasn't changed.
-    The ORDER BY sync_date DESC uses the implicit index from uq_change_request_reactor_date.
     """
     existing = (
         db.execute(
@@ -150,9 +149,8 @@ def run_import(
                     notion_page_id=page_id_raw.replace("-", ""),
                 )
                 .on_conflict_do_update(
-                    index_elements=["reactor_label", "sync_date"],
+                    constraint="uq_change_request_reactor_experiment_date",
                     set_=dict(
-                        experiment_id=resolved_exp_id,
                         requested_change=change_request,
                         notion_status=status,
                         carried_forward=carried_forward,

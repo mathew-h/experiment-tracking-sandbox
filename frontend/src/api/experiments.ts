@@ -107,6 +107,11 @@ export interface ChangeRequestEntry {
   created_at: string
 }
 
+export interface RecentChangeRequestsResponse {
+  selected: ChangeRequestEntry | null
+  previous: ChangeRequestEntry | null
+}
+
 export const experimentsApi = {
   list: (params?: ExperimentListParams) =>
     apiClient.get<ExperimentListResponse>('/experiments', { params }).then((r) => r.data),
@@ -162,9 +167,16 @@ export const experimentsApi = {
       `/experiments/${experimentId}/change-requests`
     ).then((r) => r.data),
 
+  getRecentChangeRequests: (experimentId: string, date?: string) =>
+    apiClient
+      .get<RecentChangeRequestsResponse>(`/experiments/${experimentId}/change-requests/recent`, {
+        params: date ? { date } : undefined,
+      })
+      .then((r) => r.data),
+
   createChangeRequest: (
     experimentId: string,
-    payload: { reactor_label: string; requested_change: string },
+    payload: { reactor_label: string; requested_change: string; sync_date?: string },
   ) =>
     apiClient
       .post<ChangeRequestEntry>(`/experiments/${experimentId}/change-requests`, payload)

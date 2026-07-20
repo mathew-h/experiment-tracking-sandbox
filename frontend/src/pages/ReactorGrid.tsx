@@ -4,7 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
-import { changeRequestsApi } from '@/api/change_requests'
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 
 // Fixed reactor layout: R01-R16 and CF01-CF02
 const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(2, '0')}`)
@@ -261,23 +264,25 @@ function ReactorDetailModal({
   const { success, error: toastError } = useToast()
   const [editingDate, setEditingDate] = useState(false)
   const [dateDraft, setDateDraft] = useState('')
+  const [crDate, setCrDate] = useState(todayISO)
   const [crText, setCrText] = useState('')
-  const [crInitialized, setCrInitialized] = useState(false)
+  const [crLoadedForDate, setCrLoadedForDate] = useState<string | null>(null)
   const isQueued = card.status === 'QUEUED'
 
   const { data: recentCR } = useQuery({
-    queryKey: ['changeRequestsRecent', card.reactor_label, card.experiment_id],
-    queryFn: () => changeRequestsApi.getRecentForReactor(card.reactor_label),
+    queryKey: ['reactorModificationRecent', card.experiment_id, crDate],
+    queryFn: () => experimentsApi.getRecentChangeRequests(card.experiment_id as string, crDate),
     enabled: !!card.experiment_id,
   })
 
-  // Pre-populate the CR field with today's entry when the query first resolves
+  // Pre-populate the modification text field with whatever entry exists for the
+  // selected date, whenever the selected date changes and its data has arrived.
   useEffect(() => {
-    if (recentCR && !crInitialized) {
-      setCrText(recentCR.today?.requested_change ?? '')
-      setCrInitialized(true)
+    if (recentCR && crLoadedForDate !== crDate) {
+      setCrText(recentCR.selected?.requested_change ?? '')
+      setCrLoadedForDate(crDate)
     }
-  }, [recentCR, crInitialized])
+  }, [recentCR, crDate, crLoadedForDate])
 
   const dateMutation = useMutation({
     mutationFn: (newDate: string) =>
@@ -299,15 +304,16 @@ function ReactorDetailModal({
       experimentsApi.createChangeRequest(card.experiment_id as string, {
         reactor_label: card.reactor_label,
         requested_change: text,
+        sync_date: crDate,
       }),
     onSuccess: (saved) => {
       setCrText(saved.requested_change)
-      queryClient.invalidateQueries({ queryKey: ['changeRequestsRecent', card.reactor_label, card.experiment_id] })
+      queryClient.invalidateQueries({ queryKey: ['reactorModificationRecent', card.experiment_id] })
       queryClient.invalidateQueries({ queryKey: ['changeRequests', card.experiment_id] })
-      success('Change request saved')
+      success('Reactor modification saved')
     },
     onError: () => {
-      toastError('Save failed', 'Could not save change request')
+      toastError('Save failed', 'Could not save reactor modification')
     },
   })
 
@@ -330,12 +336,6 @@ function ReactorDetailModal({
       year: 'numeric',
     })
   }
-
-  const todayLabel = new Date().toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
 
   return (
     <div
@@ -490,12 +490,12 @@ function ReactorDetailModal({
           </div>
         )}
 
-        {/* CHANGE REQUEST section */}
+        {/* REACTOR MODIFICATION section */}
         {card.experiment_id && (
           <div className="pt-3 border-t border-surface-border">
-            <p className="text-ink-muted text-2xs uppercase tracking-wider mb-3">Change Request</p>
+            <p className="text-ink-muted text-2xs uppercase tracking-wider mb-3">Reactor Modification</p>
 
-            {/* Most recent prior entry — read only */}
+            {/* Most recent prior entry for this experiment — read only */}
             {recentCR?.previous && (
               <div className="mb-3 p-2.5 bg-surface-raised rounded border border-surface-border">
                 <p className="text-2xs text-ink-muted mb-1">
@@ -507,13 +507,22 @@ function ReactorDetailModal({
               </div>
             )}
 
-            {/* Today's editable field */}
-            <p className="text-xs text-ink-muted mb-1.5">Change Request for {todayLabel}</p>
+            {/* Editable date + text for the selected entry */}
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs text-ink-muted">Reactor Modification for</p>
+              <input
+                type="date"
+                value={crDate}
+                onChange={(e) => setCrDate(e.target.value)}
+                className="font-mono-data text-xs border border-surface-border rounded px-1.5 py-0.5 bg-surface-raised text-ink-primary"
+                aria-label="Modification date"
+              />
+            </div>
             <textarea
               value={crText}
               onChange={(e) => setCrText(e.target.value)}
               rows={3}
-              placeholder="Enter a change request for today…"
+              placeholder="Enter a reactor modification…"
               className="w-full text-sm bg-surface-raised border border-surface-border rounded px-2.5 py-2 text-ink-primary placeholder:text-ink-muted resize-none focus:outline-none focus:border-ink-muted transition-colors"
             />
             <button

@@ -15,7 +15,7 @@ export function ChangeRequestsTab({ experimentId }: Props) {
   })
 
   if (!entries || entries.length === 0) {
-    return <p className="text-sm text-ink-muted p-4">No change requests tracked for this experiment.</p>
+    return <p className="text-sm text-ink-muted p-4">No reactor modifications tracked for this experiment.</p>
   }
 
   return (
