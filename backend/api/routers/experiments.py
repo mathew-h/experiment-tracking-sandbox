@@ -55,13 +55,35 @@ def list_experiments(
     reactor_number: int | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    description: str | None = None,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentListResponse:
     """List experiments with optional filters, joins for conditions/additives, and pagination."""
-    from database.models.conditions import ExperimentalConditions
+    # First note per experiment (the "description" shown in the Description column) —
+    # same pattern as backend/api/routers/dashboard.py.
+    first_note_sq = (
+        select(ExperimentNotes.experiment_fk, func.min(ExperimentNotes.id).label("min_note_id"))
+        .group_by(ExperimentNotes.experiment_fk)
+        .subquery()
+    )
+    note_sq = (
+        select(ExperimentNotes.experiment_fk, ExperimentNotes.note_text)
+        .join(first_note_sq, ExperimentNotes.id == first_note_sq.c.min_note_id)
+        .subquery()
+    )
 
-    stmt = select(Experiment).order_by(Experiment.experiment_number.desc())
+    # Outer-join conditions/first-note so type, reactor #, and description filters run in
+    # SQL before pagination — filtering these in Python after offset/limit produced wrong
+    # totals and could return an empty page 1 even when matches existed (#64). Both joins
+    # are at most 1 row per experiment (ExperimentalConditions is 1:1; note_sq is keyed by
+    # min note id), so this cannot fan out rows or inflate `total`.
+    stmt = (
+        select(Experiment)
+        .outerjoin(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
+        .outerjoin(note_sq, note_sq.c.experiment_fk == Experiment.id)
+        .order_by(Experiment.experiment_number.desc())
+    )
     if status:
         stmt = stmt.where(Experiment.status == status)
     if researcher:
@@ -74,6 +96,12 @@ def list_experiments(
         stmt = stmt.where(Experiment.date >= date_from)
     if date_to:
         stmt = stmt.where(Experiment.date <= date_to)
+    if experiment_type:
+        stmt = stmt.where(ExperimentalConditions.experiment_type == experiment_type)
+    if reactor_number is not None:
+        stmt = stmt.where(ExperimentalConditions.reactor_number == reactor_number)
+    if description:
+        stmt = stmt.where(note_sq.c.note_text.ilike(f"%{description}%"))
 
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
     rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
@@ -87,14 +115,6 @@ def list_experiments(
         ).scalar_one_or_none()
         item_data["experiment_type"] = cond.experiment_type if cond else None
         item_data["reactor_number"] = cond.reactor_number if cond else None
-        # In-memory filter for type/reactor (acceptable for < 500 experiments)
-        # TODO: replace with proper JOIN query when lab data grows
-        if experiment_type and item_data["experiment_type"] != experiment_type:
-            total -= 1
-            continue
-        if reactor_number is not None and item_data["reactor_number"] != reactor_number:
-            total -= 1
-            continue
         # Additives summary — inline query avoids view dependency
         additive_row = db.execute(
             text("""

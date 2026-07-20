@@ -787,3 +787,14 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Decision logged:** yes — `docs/working/decisions.md` (constraint widening + its consequence for the Notion sync importer)
 - **Note:** dev environment was missing `pytest`/`pytest-cov`/`flake8`/`black` in `.venv` (not in `requirements.txt`, apparently dev-only tooling that had gone missing); installed ad hoc to run the pre-merge checklist, not added to `requirements.txt`.
 - **Note:** `frontend`'s `npm test` (`vitest run`) currently collects the Playwright `e2e/*.spec.ts` files too and fails on all of them — pre-existing vitest/Playwright config gap predating this branch, not fixed here; verification instead ran `vitest run src`.
+
+## 2026-07-20 | issue #64 — Experiment filter pagination + description search
+- **Files changed:**
+  - `backend/api/routers/experiments.py` — `list_experiments`: outer-joined `ExperimentalConditions` and a first-note subquery (same pattern as `dashboard.py`) into the main query so `experiment_type`, `reactor_number`, and the new `description` filter run in SQL before `offset`/`limit`; removed the old in-memory post-pagination filter/decrement that produced an empty page 1 and a wrong, page-dependent `total` whenever type/reactor filters were active. Verified `Experiment`↔`ExperimentalConditions` is 1:1 in the live data (723/723, no duplicate `experiment_fk`) before adding the join, per the issue's flagged risk.
+  - `frontend/src/api/experiments.ts` — added `description?: string` to `ExperimentListParams`
+  - `frontend/src/pages/ExperimentList.tsx` — new "Description…" filter input (state, `resetPage()` wiring, Clear button)
+  - `tests/api/test_experiments.py` — 3 new tests: type/reactor filter+pagination regression (matches given the lowest `experiment_number`s so they'd be excluded from page 1 under the old bug), `total` stability across `skip` values, `description` search
+  - `frontend/src/pages/__tests__/ExperimentList.test.tsx` — new test for the Description input's page-reset + param pass-through
+  - `docs/api/API_REFERENCE.md` — documented `description` param and the SQL-before-pagination behavior
+- **Tests added:** yes — full backend suite (717 passed, 3 pre-existing unrelated failures in `tests/test_pg_backup_restore.py`, confirmed present on `develop` before this branch via `git stash`); frontend unit suite (47 passed via `vitest run src`); eslint clean on all changed frontend files (5 pre-existing errors elsewhere in the repo, unrelated to this change)
+- **Decision logged:** no

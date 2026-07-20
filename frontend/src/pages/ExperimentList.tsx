@@ -38,12 +38,13 @@ export function ExperimentListPage() {
   const [experimentIdFilter, setExperimentIdFilter] = useState('')
   const [sampleFilter, setSampleFilter] = useState('')
   const [reactorFilter, setReactorFilter] = useState('')
+  const [descriptionFilter, setDescriptionFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [skip, setSkip] = useState(0)
   const [limit, setLimit] = useState(25)
 
-  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, dateFrom, dateTo, skip, limit]
+  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, skip, limit]
   const { data, isLoading, error } = useQuery({
     queryKey,
     queryFn: () => experimentsApi.list({
@@ -52,6 +53,7 @@ export function ExperimentListPage() {
       search: experimentIdFilter || undefined,
       sample_id: sampleFilter || undefined,
       reactor_number: reactorFilter ? parseInt(reactorFilter) : undefined,
+      description: descriptionFilter || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       skip,
@@ -68,7 +70,7 @@ export function ExperimentListPage() {
   const resetPage = () => setSkip(0)
   const totalPages = data ? Math.ceil(data.total / limit) : 0
   const currentPage = Math.floor(skip / limit) + 1
-  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || dateFrom || dateTo)
+  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || descriptionFilter || dateFrom || dateTo)
 
   return (
     <div className="space-y-4">
@@ -136,6 +138,13 @@ export function ExperimentListPage() {
             onChange={(e) => { setReactorFilter(e.target.value); resetPage() }}
           />
         </div>
+        <div className="w-44">
+          <Input
+            placeholder="Description…"
+            value={descriptionFilter}
+            onChange={(e) => { setDescriptionFilter(e.target.value); resetPage() }}
+          />
+        </div>
         <div className="w-36">
           <Input
             type="date"
@@ -158,7 +167,8 @@ export function ExperimentListPage() {
             size="sm"
             onClick={() => {
               setStatusFilter(''); setTypeFilter(''); setExperimentIdFilter('')
-              setSampleFilter(''); setReactorFilter(''); setDateFrom(''); setDateTo(''); resetPage()
+              setSampleFilter(''); setReactorFilter(''); setDescriptionFilter('')
+              setDateFrom(''); setDateTo(''); resetPage()
             }}
           >
             Clear

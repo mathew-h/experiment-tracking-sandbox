@@ -288,6 +288,89 @@ def test_upsert_additive_experiment_not_found(client, db_session):
     assert resp.status_code == 404
 
 
+# ============================================================
+# Type/reactor filter + description search regression (Issue #64)
+# ============================================================
+
+def test_list_experiments_type_reactor_filter_pagination_regression(client, db_session):
+    """Type/reactor filters must be applied in SQL before pagination. Matches are given
+    the LOWEST experiment_numbers in the batch (i.e. NOT among the "newest" page), which
+    reproduces the original bug: filtering in Python after offset/limit returned an empty
+    page 1 even though matches existed further down."""
+    from sqlalchemy import select, func as sqlfunc
+    base_num = (db_session.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0) + 1000
+
+    match_count = 3
+    total_count = 30
+    for i in range(total_count):
+        exp = Experiment(experiment_id=f"FILTREG_{i:03d}", experiment_number=base_num + i, status=ExperimentStatus.ONGOING)
+        db_session.add(exp)
+        db_session.flush()
+        is_match = i < match_count
+        db_session.add(_EC(
+            experiment_fk=exp.id,
+            experiment_id=exp.experiment_id,
+            experiment_type="HPHT" if is_match else "Serum",
+            reactor_number=3 if is_match else 7,
+        ))
+    db_session.commit()
+
+    resp = client.get("/api/experiments?experiment_type=HPHT&reactor_number=3&skip=0&limit=25")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == match_count
+    assert len(data["items"]) == match_count
+    returned_ids = {item["experiment_id"] for item in data["items"]}
+    assert returned_ids == {f"FILTREG_{i:03d}" for i in range(match_count)}
+
+
+def test_list_experiments_total_stable_across_pages(client, db_session):
+    """total must be identical across skip=0 and skip=limit for the same filter."""
+    from sqlalchemy import select, func as sqlfunc
+    base_num = (db_session.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0) + 2000
+
+    for i in range(10):
+        exp = Experiment(experiment_id=f"TOTSTABLE_{i:03d}", experiment_number=base_num + i, status=ExperimentStatus.ONGOING)
+        db_session.add(exp)
+        db_session.flush()
+        db_session.add(_EC(
+            experiment_fk=exp.id, experiment_id=exp.experiment_id,
+            experiment_type="Autoclave", reactor_number=5,
+        ))
+    db_session.commit()
+
+    resp1 = client.get("/api/experiments?experiment_type=Autoclave&reactor_number=5&skip=0&limit=4")
+    resp2 = client.get("/api/experiments?experiment_type=Autoclave&reactor_number=5&skip=4&limit=4")
+    assert resp1.status_code == 200 and resp2.status_code == 200
+    assert resp1.json()["total"] == resp2.json()["total"] == 10
+
+
+def test_list_experiments_description_search(client, db_session):
+    """description filters on the experiment's first note (initial_note)."""
+    from database.models.experiments import ExperimentNotes
+    from sqlalchemy import select, func as sqlfunc
+    base_num = (db_session.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0) + 3000
+
+    exp_match = Experiment(experiment_id="DESC_MATCH_001", experiment_number=base_num, status=ExperimentStatus.ONGOING)
+    exp_other = Experiment(experiment_id="DESC_OTHER_001", experiment_number=base_num + 1, status=ExperimentStatus.ONGOING)
+    db_session.add_all([exp_match, exp_other])
+    db_session.flush()
+    db_session.add(ExperimentNotes(experiment_id=exp_match.experiment_id, experiment_fk=exp_match.id, note_text="unique magnetite pulse test"))
+    db_session.add(ExperimentNotes(experiment_id=exp_other.experiment_id, experiment_fk=exp_other.id, note_text="unrelated note text"))
+    db_session.commit()
+
+    resp = client.get("/api/experiments?description=magnetite")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["experiment_id"] == "DESC_MATCH_001"
+
+    resp2 = client.get("/api/experiments?description=magnetite&skip=0&limit=1")
+    assert resp2.json()["total"] == 1
+    assert len(resp2.json()["items"]) == 1
+
+
 def test_upsert_additive_no_conditions(client, db_session):
     """Experiment exists but has no conditions row — should 404."""
     from sqlalchemy import select, func as sqlfunc

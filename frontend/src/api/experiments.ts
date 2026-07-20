@@ -83,6 +83,7 @@ export interface ExperimentListParams {
   reactor_number?: number
   date_from?: string
   date_to?: string
+  description?: string
   skip?: number
   limit?: number
 }
