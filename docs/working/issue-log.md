@@ -798,3 +798,9 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `docs/api/API_REFERENCE.md` — documented `description` param and the SQL-before-pagination behavior
 - **Tests added:** yes — full backend suite (717 passed, 3 pre-existing unrelated failures in `tests/test_pg_backup_restore.py`, confirmed present on `develop` before this branch via `git stash`); frontend unit suite (47 passed via `vitest run src`); eslint clean on all changed frontend files (5 pre-existing errors elsewhere in the repo, unrelated to this change)
 - **Decision logged:** no
+
+## 2026-07-20 | issue #65 — Exclude Playwright e2e specs from vitest
+- **Files changed:**
+  - `frontend/vitest.config.ts` — added `exclude: ['e2e/**', 'node_modules/**', 'dist/**']`, matching the fix proposed in the issue. Closes the gap noted above in the #63 entry and again during #64's verification: `vitest run` was collecting `e2e/journeys/*.spec.ts` (Playwright specs) and failing on all of them since Vitest's default include glob matched them and it doesn't understand Playwright's `test`/`expect` API.
+- **Tests added:** no — config-only change; verified `npx vitest run` now collects only the 10 unit/component spec files (46 tests, all passing) and that `npx playwright test --list` still sees its own specs unaffected
+- **Decision logged:** no
