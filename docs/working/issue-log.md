@@ -787,3 +787,9 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Decision logged:** yes — `docs/working/decisions.md` (constraint widening + its consequence for the Notion sync importer)
 - **Note:** dev environment was missing `pytest`/`pytest-cov`/`flake8`/`black` in `.venv` (not in `requirements.txt`, apparently dev-only tooling that had gone missing); installed ad hoc to run the pre-merge checklist, not added to `requirements.txt`.
 - **Note:** `frontend`'s `npm test` (`vitest run`) currently collects the Playwright `e2e/*.spec.ts` files too and fails on all of them — pre-existing vitest/Playwright config gap predating this branch, not fixed here; verification instead ran `vitest run src`.
+
+## 2026-07-20 | issue #65 — Exclude Playwright e2e specs from vitest
+- **Files changed:**
+  - `frontend/vitest.config.ts` — added `exclude: ['e2e/**', 'node_modules/**', 'dist/**']`, matching the fix proposed in the issue. Closes the gap noted above in the #63 entry and again during #64's verification: `vitest run` was collecting `e2e/journeys/*.spec.ts` (Playwright specs) and failing on all of them since Vitest's default include glob matched them and it doesn't understand Playwright's `test`/`expect` API.
+- **Tests added:** no — config-only change; verified `npx vitest run` now collects only the 10 unit/component spec files (46 tests, all passing) and that `npx playwright test --list` still sees its own specs unaffected
+- **Decision logged:** no
