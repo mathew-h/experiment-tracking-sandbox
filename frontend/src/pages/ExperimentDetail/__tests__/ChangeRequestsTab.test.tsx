@@ -23,7 +23,7 @@ describe('ChangeRequestsTab', () => {
     vi.mocked(experimentsApi.getChangeRequests).mockResolvedValue([])
     render(<ChangeRequestsTab experimentId="TEST_001" />, { wrapper })
     expect(
-      await screen.findByText('No change requests tracked for this experiment.')
+      await screen.findByText('No reactor modifications tracked for this experiment.')
     ).toBeTruthy()
   })
 

@@ -30,5 +30,8 @@ class ReactorChangeRequest(Base):
     created_at: datetime = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("reactor_label", "sync_date", name="uq_change_request_reactor_date"),
+        UniqueConstraint(
+            "reactor_label", "experiment_id", "sync_date",
+            name="uq_change_request_reactor_experiment_date",
+        ),
     )

@@ -47,13 +47,14 @@ def test_reactor_change_request_create(mem_db) -> None:
     assert row.created_at is not None
 
 
-def test_unique_constraint_reactor_date(mem_db) -> None:
-    """Same reactor_label + date should raise on duplicate insert."""
+def test_unique_constraint_reactor_experiment_date(mem_db) -> None:
+    """Same reactor_label + experiment_id + date should raise on duplicate insert."""
     from sqlalchemy.exc import IntegrityError
 
     def _row():
         return ReactorChangeRequest(
             reactor_label="R01",
+            experiment_id="EXP_001",
             requested_change="Test",
             notion_status="Pending",
             carried_forward=False,
@@ -66,3 +67,25 @@ def test_unique_constraint_reactor_date(mem_db) -> None:
     mem_db.add(_row())
     with pytest.raises(IntegrityError):
         mem_db.commit()
+
+
+def test_same_reactor_date_different_experiment_does_not_collide(mem_db) -> None:
+    """Widened constraint (issue #63): two experiments on the same reactor on the
+    same calendar day must not silently overwrite each other's entry."""
+    def _row(experiment_id, text):
+        return ReactorChangeRequest(
+            reactor_label="R02",
+            experiment_id=experiment_id,
+            requested_change=text,
+            notion_status=None,
+            carried_forward=False,
+            sync_date=date(2026, 4, 1),
+            notion_page_id=None,
+        )
+
+    mem_db.add(_row("EXP_OUTGOING", "Outgoing note"))
+    mem_db.add(_row("EXP_INCOMING", "Incoming note"))
+    mem_db.commit()
+
+    rows = mem_db.query(ReactorChangeRequest).filter_by(reactor_label="R02").all()
+    assert len(rows) == 2

@@ -13,7 +13,7 @@ import { ModificationsTab } from './ModificationsTab'
 import { AnalysisTab } from './AnalysisTab'
 import { ChangeRequestsTab } from './ChangeRequestsTab'
 
-const TABS = ['Conditions', 'Results', 'Notes', 'Change Requests', 'Analysis', 'Entry Logs'] as const
+const TABS = ['Conditions', 'Results', 'Notes', 'Reactor Modifications', 'Analysis', 'Entry Logs'] as const
 type Tab = typeof TABS[number]
 
 /** Full experiment detail page with tabbed navigation (Results, Conditions, Analysis, Notes, Modifications). */
@@ -331,7 +331,7 @@ export function ExperimentDetailPage() {
         {activeTab === 'Notes' && (
           <NotesTab experimentId={id!} notes={experiment.notes} />
         )}
-        {activeTab === 'Change Requests' && <ChangeRequestsTab experimentId={id!} />}
+        {activeTab === 'Reactor Modifications' && <ChangeRequestsTab experimentId={id!} />}
         {activeTab === 'Entry Logs' && (
           <ModificationsTab modifications={experiment.modifications} />
         )}

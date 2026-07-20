@@ -767,3 +767,23 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** no new tests in this branch; existing `tests/services/bulk_uploads/` suite (122 tests) and full backend suite (708 passed, 3 pre-existing unrelated Postgres-only failures) verified clean before merge
 - **Decision logged:** no
 - **Note:** this touches `backend/services/bulk_uploads/` (a locked component per `docs/LOCKED_COMPONENTS.md`); merge was explicitly confirmed by the user before proceeding
+
+## 2026-07-20 | issue #63 — Reactor Modification: rename, cross-experiment scoping fix, editable date
+- **Files changed:**
+  - `database/models/notion_sync.py` — `ReactorChangeRequest` unique constraint widened to `(reactor_label, experiment_id, sync_date)` (was `(reactor_label, sync_date)`), renamed `uq_change_request_reactor_experiment_date`
+  - `alembic/versions/ca5d57c6b272_widen_reactor_change_request_unique_.py` — drop/recreate constraint; upgrade+downgrade round-trip verified
+  - `backend/api/schemas/notion_sync.py` — `ChangeRequestUpsertRequest` gains optional `sync_date`; `RecentChangeRequestsResponse.today` renamed `selected`
+  - `backend/api/routers/experiments.py` — `upsert_change_request` uses `payload.sync_date or date.today()`, upserts on the new 3-column constraint; new `GET /{experiment_id}/change-requests/recent?date=` (experiment-scoped, replaces the reactor-scoped one)
+  - `backend/api/routers/change_requests.py` — deleted (buggy `GET /api/change-requests/reactor/{reactor_label}/recent` had no `experiment_id` filter, so a fresh experiment on a reactor could surface a prior experiment's entry)
+  - `backend/api/main.py` — removed `change_requests` router import/registration
+  - `backend/services/notion_sync/import_.py` — `run_import`'s `on_conflict_do_update` retargeted from `index_elements=["reactor_label", "sync_date"]` (index no longer exists) to `constraint="uq_change_request_reactor_experiment_date"`; would otherwise have crashed on next sync run
+  - `frontend/src/api/change_requests.ts` — deleted; folded into `experimentsApi`
+  - `frontend/src/api/experiments.ts` — added `getRecentChangeRequests(experimentId, date?)`; `createChangeRequest` payload gains optional `sync_date`
+  - `frontend/src/pages/ReactorGrid.tsx` — pop-out: "Change Request" → "Reactor Modification" copy, editable date input (default today, future dates allowed per user decision), query rescoped to the new experiment-based endpoint
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — tab label "Change Requests" → "Reactor Modifications"
+  - `frontend/src/pages/ExperimentDetail/ChangeRequestsTab.tsx` — empty-state copy updated
+  - `docs/api/API_REFERENCE.md` — documented the new/changed change-request endpoints
+- **Tests added:** yes — `tests/api/test_change_requests.py` rewritten (upsert with explicit `sync_date`, same-day/different-experiment non-collision, experiment-scoped `/recent` incl. cross-experiment isolation and `date` query param); `tests/models/test_notion_sync_model.py` updated for the widened constraint; `frontend/.../__tests__/ChangeRequestsTab.test.tsx` updated for renamed empty-state copy. Full backend suite: 714 passed, 3 pre-existing infra-only failures (`test_pg_backup_restore.py`, needs a live restore-test Postgres instance). Frontend: 46 unit tests passing, eslint clean on all changed files, production build clean.
+- **Decision logged:** yes — `docs/working/decisions.md` (constraint widening + its consequence for the Notion sync importer)
+- **Note:** dev environment was missing `pytest`/`pytest-cov`/`flake8`/`black` in `.venv` (not in `requirements.txt`, apparently dev-only tooling that had gone missing); installed ad hoc to run the pre-merge checklist, not added to `requirements.txt`.
+- **Note:** `frontend`'s `npm test` (`vitest run`) currently collects the Playwright `e2e/*.spec.ts` files too and fails on all of them — pre-existing vitest/Playwright config gap predating this branch, not fixed here; verification instead ran `vitest run src`.
