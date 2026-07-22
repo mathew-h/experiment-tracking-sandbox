@@ -407,3 +407,160 @@ def test_manage_reactor_occupancy_guard_warns_when_newer_than_is_none(db_session
     assert marked == 0
     db_session.refresh(occupant)
     assert occupant.status == ExperimentStatus.ONGOING
+
+
+# ---------------------------------------------------------------------------
+# Apply
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "status,exp_num",
+    [("ONGOING", 6700), ("COMPLETED", 6701), ("CANCELLED", 6702), ("QUEUED", 6703)],
+)
+def test_apply_sets_each_status_value(db_session: Session, status: str, exp_num: int):
+    exp = _seed_experiment(db_session, f"HPHT_ST_{status}", exp_num, ExperimentStatus.ONGOING, "HPHT")
+
+    xlsx = make_excel(["experiment_id", "status"], [[exp.experiment_id, status]])
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert preview.errors == []
+
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.errors == []
+    assert result.status_changes_applied == 1
+    db_session.refresh(exp)
+    assert exp.status == ExperimentStatus(status)
+
+
+def test_apply_writes_date_when_provided(db_session: Session):
+    exp = _seed_experiment(db_session, "HPHT_ST030", 6640, ExperimentStatus.ONGOING, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "date"],
+        [["HPHT_ST030", "ONGOING", "2026-03-15"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.date_updates == 1
+    db_session.refresh(exp)
+    assert exp.date.date().isoformat() == "2026-03-15"
+
+
+def test_apply_leaves_date_untouched_when_absent(db_session: Session):
+    from datetime import datetime
+
+    exp = _seed_experiment(
+        db_session, "HPHT_ST031", 6641, ExperimentStatus.ONGOING, "HPHT", date=datetime(2026, 1, 1),
+    )
+
+    xlsx = make_excel(["experiment_id", "status"], [["HPHT_ST031", "COMPLETED"]])
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.date_updates == 0
+    db_session.refresh(exp)
+    assert exp.date.date().isoformat() == "2026-01-01"
+
+
+def test_apply_updates_reactor_number_when_provided(db_session: Session):
+    exp = _seed_experiment(
+        db_session, "HPHT_ST032", 6642, ExperimentStatus.ONGOING, "HPHT", reactor_number=1,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number"],
+        [["HPHT_ST032", "ONGOING", 9]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.reactor_updates == 1
+    db_session.refresh(exp)
+    assert exp.conditions.reactor_number == 9
+
+
+def test_apply_triggers_demotion_for_ongoing_hpht_with_older_occupant(db_session: Session):
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_ST033", 6643, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=15, date=datetime(2026, 1, 1),
+    )
+    new_exp = _seed_experiment(db_session, "HPHT_ST034", 6644, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST034", "ONGOING", 15, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.demotions_applied == 1
+    db_session.refresh(occupant)
+    db_session.refresh(new_exp)
+    assert occupant.status == ExperimentStatus.COMPLETED
+    assert new_exp.status == ExperimentStatus.ONGOING
+
+
+def test_apply_no_demotion_for_serum_type_even_with_reactor_number(db_session: Session):
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "Serum_ST005", 6645, ExperimentStatus.ONGOING, "Serum",
+        reactor_number=16, date=datetime(2026, 1, 1),
+    )
+    new_exp = _seed_experiment(db_session, "Serum_ST006", 6646, ExperimentStatus.COMPLETED, "Serum")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["Serum_ST006", "ONGOING", 16, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.demotions_applied == 0
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING
+
+
+def test_apply_does_not_touch_unlisted_ongoing_experiment(db_session: Session):
+    """The retired 'complete every unlisted ongoing HPHT' behavior must not fire."""
+    unlisted = _seed_experiment(db_session, "HPHT_ST035", 6647, ExperimentStatus.ONGOING, "HPHT")
+    listed = _seed_experiment(db_session, "HPHT_ST036", 6648, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(["experiment_id", "status"], [["HPHT_ST036", "ONGOING"]])
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    db_session.refresh(unlisted)
+    assert unlisted.status == ExperimentStatus.ONGOING
+
+
+def test_full_round_trip_file_to_db_state(db_session: Session):
+    """Full round-trip: file → preview → apply → DB state correct, including a demotion."""
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_ST037", 6649, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=5, date=datetime(2026, 1, 1),
+    )
+    new_exp = _seed_experiment(db_session, "HPHT_ST038", 6650, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST038", "ONGOING", 5, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert preview.errors == []
+
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.errors == []
+    assert result.status_changes_applied == 1
+    assert result.demotions_applied == 1
+    db_session.refresh(new_exp)
+    db_session.refresh(occupant)
+    assert new_exp.status == ExperimentStatus.ONGOING
+    assert new_exp.date.date().isoformat() == "2026-06-01"
+    assert occupant.status == ExperimentStatus.COMPLETED

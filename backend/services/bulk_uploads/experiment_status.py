@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime
-from typing import List, Tuple, Dict, Any
+from typing import List, Any
 from dataclasses import dataclass
 
 import pandas as pd
@@ -80,6 +80,17 @@ class StatusChangePreview:
     missing_ids: List[str]
     errors: List[str]
     warnings: List[str]
+
+
+@dataclass
+class ApplyResult:
+    """Outcome of applying a StatusChangePreview."""
+    status_changes_applied: int
+    demotions_applied: int
+    reactor_updates: int
+    date_updates: int
+    warnings: List[str]
+    errors: List[str]
 
 
 class ExperimentStatusService:
@@ -259,66 +270,77 @@ class ExperimentStatusService:
     @staticmethod
     def apply_status_changes(
         db: Session,
-        experiment_ids_to_ongoing: List[str],
-        reactor_number_map: Dict[str, int] = None
-    ) -> Tuple[int, int, int, List[str]]:
+        preview: StatusChangePreview,
+    ) -> ApplyResult:
         """
-        Apply status changes: set listed experiments to ONGOING, others to COMPLETED.
-        Optionally update reactor numbers.
-        
+        Apply a StatusChangePreview: set each row's status/date/reactor_number,
+        then run reactor-occupancy demotion for eligible ONGOING rows.
+
         Args:
             db: Database session
-            experiment_ids_to_ongoing: List of experiment IDs to mark as ONGOING
-            reactor_number_map: Optional dict mapping experiment_id to reactor_number
-            
+            preview: The StatusChangePreview returned by preview_status_changes_from_excel
+
         Returns:
-            Tuple of (marked_ongoing_count, marked_completed_count, reactor_updates_count, errors)
+            ApplyResult with counts and any warnings/errors encountered.
         """
         errors: List[str] = []
-        marked_ongoing = 0
-        marked_completed = 0
+        warnings: List[str] = []
+        status_changes = 0
+        date_updates = 0
         reactor_updates = 0
-        reactor_number_map = reactor_number_map or {}
-        
+        demotions_applied = 0
+
         try:
-            # Update experiments to ONGOING and update reactor numbers
-            if experiment_ids_to_ongoing:
-                to_ongoing_exps = db.query(Experiment).outerjoin(
-                    ExperimentalConditions,
-                    Experiment.id == ExperimentalConditions.experiment_fk
-                ).filter(
-                    Experiment.experiment_id.in_(experiment_ids_to_ongoing)
-                ).all()
-                
-                for exp in to_ongoing_exps:
-                    exp.status = ExperimentStatus.ONGOING
-                    marked_ongoing += 1
-                    
-                    # Update reactor_number if provided
-                    if exp.experiment_id in reactor_number_map and exp.conditions:
-                        new_reactor_number = reactor_number_map[exp.experiment_id]
-                        if exp.conditions.reactor_number != new_reactor_number:
-                            exp.conditions.reactor_number = new_reactor_number
-                            reactor_updates += 1
-            
-            # Update other ONGOING HPHT experiments to COMPLETED
-            to_completed_exps = db.query(Experiment).join(
+            exp_ids = [c.experiment_id for c in preview.changes]
+            exps = db.query(Experiment).outerjoin(
                 ExperimentalConditions,
-                Experiment.id == ExperimentalConditions.experiment_fk
-            ).filter(
-                Experiment.status == ExperimentStatus.ONGOING,
-                ExperimentalConditions.experiment_type == "HPHT",
-                ~Experiment.experiment_id.in_(experiment_ids_to_ongoing) if experiment_ids_to_ongoing else True
-            ).all()
-            
-            for exp in to_completed_exps:
-                exp.status = ExperimentStatus.COMPLETED
-                marked_completed += 1
-            
+                Experiment.id == ExperimentalConditions.experiment_fk,
+            ).filter(Experiment.experiment_id.in_(exp_ids)).all() if exp_ids else []
+            exp_by_id = {e.experiment_id: e for e in exps}
+
+            for change in preview.changes:
+                exp = exp_by_id.get(change.experiment_id)
+                if exp is None:
+                    continue
+
+                exp.status = ExperimentStatus(change.new_status)
+                status_changes += 1
+
+                if change.new_date is not None:
+                    exp.date = change.new_date.to_pydatetime()
+                    date_updates += 1
+
+                if change.new_reactor_number is not None and exp.conditions:
+                    if exp.conditions.reactor_number != change.new_reactor_number:
+                        exp.conditions.reactor_number = change.new_reactor_number
+                        reactor_updates += 1
+
+                if (
+                    change.new_status == ExperimentStatus.ONGOING.value
+                    and change.new_reactor_number is not None
+                    and _is_eligible_for_occupancy(change.experiment_type)
+                ):
+                    newer_than = change.new_date.to_pydatetime() if change.new_date is not None else None
+                    marked, occ_warnings = ExperimentStatusService.manage_reactor_occupancy(
+                        db, exp, change.new_reactor_number, commit=False, newer_than=newer_than,
+                    )
+                    demotions_applied += marked
+                    warnings.extend(occ_warnings)
+
+            db.commit()
+
         except Exception as e:
             errors.append(f"Error applying status changes: {e}")
-        
-        return marked_ongoing, marked_completed, reactor_updates, errors
+            db.rollback()
+
+        return ApplyResult(
+            status_changes_applied=status_changes,
+            demotions_applied=demotions_applied,
+            reactor_updates=reactor_updates,
+            date_updates=date_updates,
+            warnings=warnings,
+            errors=errors,
+        )
     
     @staticmethod
     def manage_reactor_occupancy(
