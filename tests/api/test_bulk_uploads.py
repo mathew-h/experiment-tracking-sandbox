@@ -552,6 +552,25 @@ def test_new_experiments_template_additives_sheet_headers(client):
         assert required in headers, f"Missing column '{required}' in additives sheet"
 
 
+def test_experiment_status_template_has_four_columns_and_instructions(client):
+    import openpyxl
+
+    resp = client.get("/api/bulk-uploads/templates/experiment-status")
+    assert resp.status_code == 200
+
+    wb = openpyxl.load_workbook(io.BytesIO(resp.content))
+    ws = wb["Template"]
+    headers = [c.value for c in ws[1]]
+    assert headers == ["experiment_id", "status", "reactor_number", "date"]
+    assert ws.cell(row=2, column=1).value == "HPHT_072"
+    assert ws.cell(row=2, column=2).value == "ONGOING"
+
+    assert "INSTRUCTIONS" in wb.sheetnames
+    inst_col_a = [c.value for c in wb["INSTRUCTIONS"]["A"] if c.value]
+    assert "status" in inst_col_a
+    assert "date" in inst_col_a
+
+
 # ── Issue #50: ActLabs conflict response ─────────────────────────────────────
 
 import json

@@ -984,11 +984,58 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
     if upload_type == "experiment-status":
-        return _simple_template(
-            headers=["experiment_id", "reactor_number"],
-            required={"experiment_id"},
-            example_row=["HPHT_072", 3],
-        )
+        import openpyxl  # noqa: PLC0415
+        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
+
+        headers = ["experiment_id", "status", "reactor_number", "date"]
+        required = {"experiment_id", "status"}
+        example_row = ["HPHT_072", "ONGOING", 3, "2026-07-15"]
+        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        for col, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = Font(bold=True)
+            cell.fill = req_fill if h in required else opt_fill
+            cell.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
+        for col, val in enumerate(example_row, start=1):
+            ws.cell(row=2, column=col, value=val)
+
+        ws_inst = wb.create_sheet("INSTRUCTIONS")
+        ws_inst.column_dimensions["A"].width = 30
+        ws_inst.column_dimensions["B"].width = 80
+        instructions = [
+            ("Column", "Notes"),
+            ("experiment_id", "REQUIRED. Must match an existing experiment_id."),
+            ("status", "REQUIRED. One of ONGOING, COMPLETED, CANCELLED, QUEUED (case-insensitive)."),
+            ("reactor_number", "Integer. Only meaningful for HPHT / Core Flood experiments."),
+            (
+                "date",
+                "Experiment start date (YYYY-MM-DD or Excel date). Used both to set the "
+                "experiment's start date and to decide reactor demotion order.",
+            ),
+            (
+                "Demotion rule",
+                "Setting an HPHT or Core Flood experiment to ONGOING with a reactor_number "
+                "completes an older experiment currently ongoing in the same reactor. If the "
+                "reactor is held by a newer-or-equal-dated experiment (or either start date "
+                "is missing), nothing is demoted and a warning is returned.",
+            ),
+        ]
+        for r_idx, (col_name, note) in enumerate(instructions, start=1):
+            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
+            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
+            if r_idx == 1:
+                name_cell.font = Font(bold=True)
+                note_cell.font = Font(bold=True)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
     raise ValueError(f"Unknown template type: {upload_type}")
 
