@@ -342,6 +342,7 @@ def test_manage_reactor_occupancy_legacy_call_still_demotes_unconditionally(db_s
     )
 
     assert marked == 1
+    db_session.flush()
     db_session.refresh(occupant)
     assert occupant.status == ExperimentStatus.COMPLETED
     assert any("COMPLETED" in w for w in warnings)
@@ -364,6 +365,7 @@ def test_manage_reactor_occupancy_guard_demotes_older_occupant(db_session: Sessi
     )
 
     assert marked == 1
+    db_session.flush()
     db_session.refresh(occupant)
     assert occupant.status == ExperimentStatus.COMPLETED
 

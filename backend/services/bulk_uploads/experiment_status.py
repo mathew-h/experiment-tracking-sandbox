@@ -386,8 +386,6 @@ class ExperimentStatusService:
 
             if commit:
                 db.commit()
-            else:
-                db.flush()
 
         except Exception as e:
             warnings.append(f"Error managing reactor occupancy: {e}")
