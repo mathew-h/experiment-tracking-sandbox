@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 
@@ -28,7 +28,7 @@ def _is_eligible_for_occupancy(experiment_type: str | None) -> bool:
     return _normalize_type(experiment_type) in _OCCUPANCY_TYPES
 
 
-def _occupant_is_older(occupant_date, incoming_date) -> bool:
+def _occupant_is_older(occupant_date: date | None, incoming_date: date | None) -> bool:
     """True only when both dates are present and the occupant started strictly earlier."""
     if occupant_date is None or incoming_date is None:
         return False
