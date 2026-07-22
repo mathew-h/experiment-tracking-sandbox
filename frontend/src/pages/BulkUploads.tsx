@@ -336,8 +336,8 @@ export function BulkUploadsPage() {
         <UploadRow
           id="experiment-status"
           title="Experiment Status Update"
-          description="Bulk-set ONGOING / COMPLETED statuses"
-          helpText="Required column: experiment_id. Listed experiments are set to ONGOING; other HPHT experiments currently ONGOING are set to COMPLETED. Optional: reactor_number column."
+          description="Bulk-set experiment status (ONGOING / COMPLETED / QUEUED / CANCELLED)"
+          helpText="Required columns: experiment_id, status. Optional: reactor_number, date (start date). Setting an HPHT or Core Flood experiment to ONGOING with a reactor_number auto-completes an older experiment in the same reactor; a newer-or-equal-dated occupant triggers a warning instead of a completion."
           accept=".xlsx,.xls,.csv"
           uploadFn={(file) => bulkUploadsApi.uploadExperimentStatus(file)}
           templateType="experiment-status"
