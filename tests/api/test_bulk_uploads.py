@@ -366,7 +366,7 @@ def test_experiment_status_validation_errors_skip_apply(client):
     mock_svc.apply_status_changes.assert_not_called()
 
 
-def test_experiment_status_rolls_back_on_apply_errors(client):
+def test_experiment_status_rolls_back_on_apply_errors(client, db_session):
     mock_preview = MagicMock()
     mock_preview.errors = []
     mock_preview.missing_ids = []
@@ -387,7 +387,8 @@ def test_experiment_status_rolls_back_on_apply_errors(client):
 
     with patch.dict(sys.modules, {
         "backend.services.bulk_uploads.experiment_status": fake_mod,
-    }):
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
         resp = client.post(
             "/api/bulk-uploads/experiment-status",
             files={"file": ("status.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
@@ -397,6 +398,8 @@ def test_experiment_status_rolls_back_on_apply_errors(client):
     _assert_upload_shape(body)
     assert "Error applying status changes: boom" in body["errors"]
     assert body["updated"] == 0
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
