@@ -342,6 +342,63 @@ def test_experiment_status_returns_upload_response_shape(client):
     _assert_upload_shape(resp.json())
 
 
+def test_experiment_status_validation_errors_skip_apply(client):
+    mock_preview = MagicMock()
+    mock_preview.errors = ["Missing required column: 'status'"]
+    mock_preview.missing_ids = []
+
+    mock_svc = MagicMock()
+    mock_svc.preview_status_changes_from_excel.return_value = mock_preview
+    fake_mod = MagicMock()
+    fake_mod.ExperimentStatusService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.experiment_status": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/experiment-status",
+            files={"file": ("status.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    _assert_upload_shape(body)
+    assert "Missing required column: 'status'" in body["errors"]
+    mock_svc.apply_status_changes.assert_not_called()
+
+
+def test_experiment_status_rolls_back_on_apply_errors(client):
+    mock_preview = MagicMock()
+    mock_preview.errors = []
+    mock_preview.missing_ids = []
+
+    mock_result = MagicMock()
+    mock_result.status_changes_applied = 0
+    mock_result.demotions_applied = 0
+    mock_result.reactor_updates = 0
+    mock_result.date_updates = 0
+    mock_result.warnings = []
+    mock_result.errors = ["Error applying status changes: boom"]
+
+    mock_svc = MagicMock()
+    mock_svc.preview_status_changes_from_excel.return_value = mock_preview
+    mock_svc.apply_status_changes.return_value = mock_result
+    fake_mod = MagicMock()
+    fake_mod.ExperimentStatusService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.experiment_status": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/experiment-status",
+            files={"file": ("status.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    _assert_upload_shape(body)
+    assert "Error applying status changes: boom" in body["errors"]
+    assert body["updated"] == 0
+
+
 # ---------------------------------------------------------------------------
 # Auth rejection tests (sample of endpoints)
 # ---------------------------------------------------------------------------
