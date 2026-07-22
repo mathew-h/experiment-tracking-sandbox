@@ -317,3 +317,91 @@ def test_preview_serum_ongoing_with_reactor_no_demotion(db_session: Session):
 
     assert preview.demotions == []
     assert preview.warnings == []
+
+
+# ---------------------------------------------------------------------------
+# manage_reactor_occupancy — start-date guard
+# ---------------------------------------------------------------------------
+
+def test_manage_reactor_occupancy_legacy_call_still_demotes_unconditionally(db_session: Session):
+    """Regression: callers that don't pass newer_than (new_experiments.py, legacy create)
+    keep demoting regardless of start dates."""
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_ST020", 6624, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=11, date=datetime(2026, 12, 31),  # newer than the incoming experiment
+    )
+    new_exp = _seed_experiment(
+        db_session, "HPHT_ST021", 6625, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=11, date=datetime(2026, 1, 1),
+    )
+
+    marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
+        db_session, new_exp, 11, commit=False,
+    )
+
+    assert marked == 1
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.COMPLETED
+    assert any("COMPLETED" in w for w in warnings)
+
+
+def test_manage_reactor_occupancy_guard_demotes_older_occupant(db_session: Session):
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_ST022", 6626, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=12, date=datetime(2026, 1, 1),
+    )
+    new_exp = _seed_experiment(
+        db_session, "HPHT_ST023", 6627, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=12, date=datetime(2026, 6, 1),
+    )
+
+    marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
+        db_session, new_exp, 12, commit=False, newer_than=datetime(2026, 6, 1),
+    )
+
+    assert marked == 1
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.COMPLETED
+
+
+def test_manage_reactor_occupancy_guard_warns_on_newer_or_equal_occupant(db_session: Session):
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_ST024", 6628, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=13, date=datetime(2026, 6, 1),
+    )
+    new_exp = _seed_experiment(
+        db_session, "HPHT_ST025", 6629, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=13, date=datetime(2026, 1, 1),
+    )
+
+    marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
+        db_session, new_exp, 13, commit=False, newer_than=datetime(2026, 1, 1),
+    )
+
+    assert marked == 0
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING
+    assert any("HPHT_ST024" in w and "HPHT_ST025" in w for w in warnings)
+
+
+def test_manage_reactor_occupancy_guard_warns_when_newer_than_is_none(db_session: Session):
+    occupant = _seed_experiment(
+        db_session, "HPHT_ST026", 6630, ExperimentStatus.ONGOING, "HPHT", reactor_number=14,
+    )
+    new_exp = _seed_experiment(
+        db_session, "HPHT_ST027", 6631, ExperimentStatus.ONGOING, "HPHT", reactor_number=14,
+    )
+
+    marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
+        db_session, new_exp, 14, commit=False, newer_than=None,
+    )
+
+    assert marked == 0
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING

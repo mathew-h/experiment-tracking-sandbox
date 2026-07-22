@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from datetime import datetime
 from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 
@@ -14,6 +15,7 @@ from database.models.enums import ExperimentStatus
 
 _VALID_STATUSES = {s.value for s in ExperimentStatus}
 _OCCUPANCY_TYPES = {"hpht", "core flood"}
+_UNSET = object()
 
 
 def _normalize_type(experiment_type: str | None) -> str:
@@ -323,63 +325,74 @@ class ExperimentStatusService:
         db: Session,
         new_experiment: Experiment,
         reactor_number: int,
-        commit: bool = True
+        commit: bool = True,
+        newer_than: datetime | None = _UNSET,
     ) -> Tuple[int, List[str]]:
         """
         Ensure only one experiment is ONGOING per reactor at a time.
-        
+
         When a new experiment is set to ONGOING with a reactor number, this function
-        automatically marks any other ONGOING experiments in the same reactor as COMPLETED.
-        
+        marks other ONGOING experiments in the same reactor as COMPLETED.
+
+        If `newer_than` is explicitly passed (even as None), a start-date guard is
+        active: an occupant is only demoted if its `date` is strictly older (by
+        calendar date) than `newer_than`; occupants with a missing date, or a date
+        that is newer-or-equal, are left ONGOING with a warning instead. Omitting
+        `newer_than` entirely preserves the original unconditional behavior relied
+        on by `new_experiments.py` and the legacy create path.
+
         Args:
             db: Database session
             new_experiment: The experiment being created/updated
             reactor_number: The reactor number being assigned
             commit: Whether to commit changes (default True)
-            
+            newer_than: Optional start-date guard (see above)
+
         Returns:
             Tuple of (marked_completed_count, warnings)
-            
-        Example:
-            >>> marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
-            ...     db, new_exp, reactor_number=3
-            ... )
-            >>> print(f"Marked {marked} experiments as completed")
         """
         warnings: List[str] = []
         marked_completed = 0
-        
+        guard_active = newer_than is not _UNSET
+
         try:
-            # Only manage occupancy if the new experiment is ONGOING
             if new_experiment.status != ExperimentStatus.ONGOING:
                 return 0, []
-            
-            # Find other ONGOING experiments in the same reactor
+
             conflicting_experiments = db.query(Experiment).join(
                 ExperimentalConditions,
                 Experiment.id == ExperimentalConditions.experiment_fk
             ).filter(
-                Experiment.id != new_experiment.id,  # Exclude the current experiment
+                Experiment.id != new_experiment.id,
                 Experiment.status == ExperimentStatus.ONGOING,
                 ExperimentalConditions.reactor_number == reactor_number
             ).all()
-            
-            # Mark conflicting experiments as COMPLETED
+
             for exp in conflicting_experiments:
+                if guard_active:
+                    occ_date = exp.date.date() if exp.date else None
+                    incoming_date = newer_than.date() if newer_than else None
+                    if incoming_date is None or occ_date is None or occ_date >= incoming_date:
+                        warnings.append(
+                            _not_demoted_message(reactor_number, exp.experiment_id, new_experiment.experiment_id)
+                        )
+                        continue
+
                 exp.status = ExperimentStatus.COMPLETED
                 marked_completed += 1
                 warnings.append(
-                    f"Reactor {reactor_number}: Marked experiment '{exp.experiment_id}' "
-                    f"as COMPLETED (replaced by '{new_experiment.experiment_id}')"
+                    _demoted_message(reactor_number, exp.experiment_id, new_experiment.experiment_id)
                 )
-            
+
             if commit:
                 db.commit()
-                
+            else:
+                db.flush()
+
         except Exception as e:
             warnings.append(f"Error managing reactor occupancy: {e}")
             if commit:
                 db.rollback()
-        
+
         return marked_completed, warnings
 
