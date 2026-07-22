@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime
-from typing import List, Any
+from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 
 import pandas as pd
@@ -327,11 +327,10 @@ class ExperimentStatusService:
                     demotions_applied += marked
                     warnings.extend(occ_warnings)
 
-            db.commit()
+            db.flush()
 
         except Exception as e:
             errors.append(f"Error applying status changes: {e}")
-            db.rollback()
 
         return ApplyResult(
             status_changes_applied=status_changes,
