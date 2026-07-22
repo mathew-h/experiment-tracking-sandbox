@@ -196,7 +196,7 @@ class ExperimentStatusService:
             return StatusChangePreview([], [], missing_ids, conflict_errors, [])
 
         return StatusChangePreview(changes, [], missing_ids, [], [])
-
+    
     @staticmethod
     def apply_status_changes(
         db: Session,
@@ -206,12 +206,12 @@ class ExperimentStatusService:
         """
         Apply status changes: set listed experiments to ONGOING, others to COMPLETED.
         Optionally update reactor numbers.
-
+        
         Args:
             db: Database session
             experiment_ids_to_ongoing: List of experiment IDs to mark as ONGOING
             reactor_number_map: Optional dict mapping experiment_id to reactor_number
-
+            
         Returns:
             Tuple of (marked_ongoing_count, marked_completed_count, reactor_updates_count, errors)
         """
@@ -220,7 +220,7 @@ class ExperimentStatusService:
         marked_completed = 0
         reactor_updates = 0
         reactor_number_map = reactor_number_map or {}
-
+        
         try:
             # Update experiments to ONGOING and update reactor numbers
             if experiment_ids_to_ongoing:
@@ -230,18 +230,18 @@ class ExperimentStatusService:
                 ).filter(
                     Experiment.experiment_id.in_(experiment_ids_to_ongoing)
                 ).all()
-
+                
                 for exp in to_ongoing_exps:
                     exp.status = ExperimentStatus.ONGOING
                     marked_ongoing += 1
-
+                    
                     # Update reactor_number if provided
                     if exp.experiment_id in reactor_number_map and exp.conditions:
                         new_reactor_number = reactor_number_map[exp.experiment_id]
                         if exp.conditions.reactor_number != new_reactor_number:
                             exp.conditions.reactor_number = new_reactor_number
                             reactor_updates += 1
-
+            
             # Update other ONGOING HPHT experiments to COMPLETED
             to_completed_exps = db.query(Experiment).join(
                 ExperimentalConditions,
@@ -251,16 +251,16 @@ class ExperimentStatusService:
                 ExperimentalConditions.experiment_type == "HPHT",
                 ~Experiment.experiment_id.in_(experiment_ids_to_ongoing) if experiment_ids_to_ongoing else True
             ).all()
-
+            
             for exp in to_completed_exps:
                 exp.status = ExperimentStatus.COMPLETED
                 marked_completed += 1
-
+            
         except Exception as e:
             errors.append(f"Error applying status changes: {e}")
-
+        
         return marked_ongoing, marked_completed, reactor_updates, errors
-
+    
     @staticmethod
     def manage_reactor_occupancy(
         db: Session,
@@ -270,19 +270,19 @@ class ExperimentStatusService:
     ) -> Tuple[int, List[str]]:
         """
         Ensure only one experiment is ONGOING per reactor at a time.
-
+        
         When a new experiment is set to ONGOING with a reactor number, this function
         automatically marks any other ONGOING experiments in the same reactor as COMPLETED.
-
+        
         Args:
             db: Database session
             new_experiment: The experiment being created/updated
             reactor_number: The reactor number being assigned
             commit: Whether to commit changes (default True)
-
+            
         Returns:
             Tuple of (marked_completed_count, warnings)
-
+            
         Example:
             >>> marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
             ...     db, new_exp, reactor_number=3
@@ -291,12 +291,12 @@ class ExperimentStatusService:
         """
         warnings: List[str] = []
         marked_completed = 0
-
+        
         try:
             # Only manage occupancy if the new experiment is ONGOING
             if new_experiment.status != ExperimentStatus.ONGOING:
                 return 0, []
-
+            
             # Find other ONGOING experiments in the same reactor
             conflicting_experiments = db.query(Experiment).join(
                 ExperimentalConditions,
@@ -306,7 +306,7 @@ class ExperimentStatusService:
                 Experiment.status == ExperimentStatus.ONGOING,
                 ExperimentalConditions.reactor_number == reactor_number
             ).all()
-
+            
             # Mark conflicting experiments as COMPLETED
             for exp in conflicting_experiments:
                 exp.status = ExperimentStatus.COMPLETED
@@ -315,13 +315,13 @@ class ExperimentStatusService:
                     f"Reactor {reactor_number}: Marked experiment '{exp.experiment_id}' "
                     f"as COMPLETED (replaced by '{new_experiment.experiment_id}')"
                 )
-
+            
             if commit:
                 db.commit()
-
+                
         except Exception as e:
             warnings.append(f"Error managing reactor occupancy: {e}")
             if commit:
                 db.rollback()
-
+        
         return marked_completed, warnings
