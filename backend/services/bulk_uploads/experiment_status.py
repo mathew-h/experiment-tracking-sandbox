@@ -26,6 +26,28 @@ def _is_eligible_for_occupancy(experiment_type: str | None) -> bool:
     return _normalize_type(experiment_type) in _OCCUPANCY_TYPES
 
 
+def _occupant_is_older(occupant_date, incoming_date) -> bool:
+    """True only when both dates are present and the occupant started strictly earlier."""
+    if occupant_date is None or incoming_date is None:
+        return False
+    return occupant_date < incoming_date
+
+
+def _demoted_message(reactor_number: int, demoted_id: str, new_id: str) -> str:
+    return (
+        f"Reactor {reactor_number}: Marked experiment '{demoted_id}' "
+        f"as COMPLETED (replaced by '{new_id}')"
+    )
+
+
+def _not_demoted_message(reactor_number: int, occupant_id: str, new_id: str) -> str:
+    return (
+        f"Reactor {reactor_number}: '{occupant_id}' was NOT completed — its start date "
+        f"is not older than '{new_id}''s (or a start date is missing on one of them). "
+        f"Manual review needed."
+    )
+
+
 @dataclass
 class PlannedChange:
     """One row's planned effect on an Experiment."""
@@ -195,7 +217,42 @@ class ExperimentStatusService:
         if conflict_errors:
             return StatusChangePreview([], [], missing_ids, conflict_errors, [])
 
-        return StatusChangePreview(changes, [], missing_ids, [], [])
+        demotions: List[PlannedDemotion] = []
+        warnings: List[str] = []
+
+        for r in parsed_rows:
+            exp = exp_by_id.get(r["experiment_id"])
+            if exp is None or r["status"] != ExperimentStatus.ONGOING.value or r["reactor_number"] is None:
+                continue
+            exp_type = exp.conditions.experiment_type if exp.conditions else None
+            if not _is_eligible_for_occupancy(exp_type):
+                continue
+
+            occupants = db.query(Experiment).join(
+                ExperimentalConditions,
+                Experiment.id == ExperimentalConditions.experiment_fk,
+            ).filter(
+                Experiment.id != exp.id,
+                Experiment.status == ExperimentStatus.ONGOING,
+                ExperimentalConditions.reactor_number == r["reactor_number"],
+            ).all()
+
+            incoming_date = r["date"].date() if r["date"] is not None else None
+
+            for occ in occupants:
+                occ_date = occ.date.date() if occ.date else None
+                if _occupant_is_older(occ_date, incoming_date):
+                    demotions.append(PlannedDemotion(
+                        experiment_id=occ.experiment_id,
+                        experiment_pk=occ.id,
+                        reactor_number=r["reactor_number"],
+                        triggering_experiment_id=exp.experiment_id,
+                    ))
+                    warnings.append(_demoted_message(r["reactor_number"], occ.experiment_id, exp.experiment_id))
+                else:
+                    warnings.append(_not_demoted_message(r["reactor_number"], occ.experiment_id, exp.experiment_id))
+
+        return StatusChangePreview(changes, demotions, missing_ids, [], warnings)
     
     @staticmethod
     def apply_status_changes(

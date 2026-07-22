@@ -173,3 +173,147 @@ def test_preview_serum_rows_same_reactor_do_not_conflict(db_session: Session):
 
     assert preview.errors == []
     assert len(preview.changes) == 2
+
+
+# ---------------------------------------------------------------------------
+# Reactor demotion planning (read-only — preview does not mutate the DB)
+# ---------------------------------------------------------------------------
+
+def test_preview_demotes_older_hpht_occupant_in_same_reactor(db_session: Session):
+    from datetime import datetime
+
+    _seed_experiment(
+        db_session, "HPHT_ST010", 6610, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=5, date=datetime(2026, 1, 1),
+    )
+    _seed_experiment(db_session, "HPHT_ST011", 6611, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST011", "ONGOING", 5, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.errors == []
+    assert len(preview.demotions) == 1
+    assert preview.demotions[0].experiment_id == "HPHT_ST010"
+    assert preview.demotions[0].triggering_experiment_id == "HPHT_ST011"
+    assert any("HPHT_ST010" in w and "COMPLETED" in w for w in preview.warnings)
+
+
+def test_preview_demotes_older_core_flood_occupant_in_same_reactor(db_session: Session):
+    from datetime import datetime
+
+    _seed_experiment(
+        db_session, "CF_ST001", 6612, ExperimentStatus.ONGOING, "Core Flood",
+        reactor_number=1, date=datetime(2026, 1, 1),
+    )
+    _seed_experiment(db_session, "CF_ST002", 6613, ExperimentStatus.COMPLETED, "Core Flood")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["CF_ST002", "ONGOING", 1, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.errors == []
+    demoted_ids = [d.experiment_id for d in preview.demotions]
+    assert "CF_ST001" in demoted_ids
+
+
+def test_preview_warns_no_demote_when_occupant_newer(db_session: Session):
+    from datetime import datetime
+
+    _seed_experiment(
+        db_session, "HPHT_ST012", 6614, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=6, date=datetime(2026, 6, 1),
+    )
+    _seed_experiment(db_session, "HPHT_ST013", 6615, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST013", "ONGOING", 6, "2026-01-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.errors == []
+    assert preview.demotions == []
+    assert any("HPHT_ST012" in w for w in preview.warnings)
+
+
+def test_preview_warns_no_demote_when_occupant_equal_date(db_session: Session):
+    """Open Item #4: same-day → warn, do not demote."""
+    from datetime import datetime
+
+    _seed_experiment(
+        db_session, "HPHT_ST014", 6616, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=7, date=datetime(2026, 6, 1),
+    )
+    _seed_experiment(db_session, "HPHT_ST015", 6617, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST015", "ONGOING", 7, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.demotions == []
+    assert any("HPHT_ST014" in w for w in preview.warnings)
+
+
+def test_preview_warns_no_demote_when_incoming_date_missing(db_session: Session):
+    """Open Item #1: missing incoming date → don't demote, warn."""
+    from datetime import datetime
+
+    _seed_experiment(
+        db_session, "HPHT_ST016", 6618, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=8, date=datetime(2026, 1, 1),
+    )
+    _seed_experiment(db_session, "HPHT_ST017", 6619, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number"],
+        [["HPHT_ST017", "ONGOING", 8]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.demotions == []
+    assert any("HPHT_ST016" in w for w in preview.warnings)
+
+
+def test_preview_warns_no_demote_when_occupant_date_missing(db_session: Session):
+    """Open Item #1: missing occupant date → don't demote, warn."""
+    _seed_experiment(
+        db_session, "HPHT_ST018", 6620, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=9, date=None,
+    )
+    _seed_experiment(db_session, "HPHT_ST019", 6621, ExperimentStatus.COMPLETED, "HPHT")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST019", "ONGOING", 9, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.demotions == []
+    assert any("HPHT_ST018" in w for w in preview.warnings)
+
+
+def test_preview_serum_ongoing_with_reactor_no_demotion(db_session: Session):
+    """Non-occupancy types never trigger demotion, even if ONGOING with a reactor_number."""
+    from datetime import datetime
+
+    _seed_experiment(
+        db_session, "Serum_ST003", 6622, ExperimentStatus.ONGOING, "Serum",
+        reactor_number=10, date=datetime(2026, 1, 1),
+    )
+    _seed_experiment(db_session, "Serum_ST004", 6623, ExperimentStatus.COMPLETED, "Serum")
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["Serum_ST004", "ONGOING", 10, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.demotions == []
+    assert preview.warnings == []
