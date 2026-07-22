@@ -583,7 +583,7 @@ async def upload_experiment_status(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Upload an Experiment Status Excel file (bulk ONGOING / COMPLETED changes)."""
+    """Upload an Experiment Status Excel file (per-row status/date/reactor updates)."""
     from backend.services.bulk_uploads.experiment_status import ExperimentStatusService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
@@ -594,16 +594,8 @@ async def upload_experiment_status(
                 errors=preview.errors,
                 message="Validation failed — no changes applied",
             )
-        to_ongoing_ids = [item["experiment_id"] for item in preview.to_ongoing]
-        reactor_map = {
-            item["experiment_id"]: item["new_reactor_number"]
-            for item in preview.to_ongoing
-            if item.get("new_reactor_number") is not None
-        }
-        marked_ongoing, marked_completed, _reactor_updates, errors = (
-            ExperimentStatusService.apply_status_changes(db, to_ongoing_ids, reactor_map)
-        )
-        if not errors:
+        result = ExperimentStatusService.apply_status_changes(db, preview)
+        if not result.errors:
             db.commit()
         else:
             db.rollback()
@@ -612,16 +604,22 @@ async def upload_experiment_status(
         log.error("experiment_status_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
-    total = marked_ongoing + marked_completed
     return UploadResponse(
-        created=0, updated=total, skipped=len(preview.missing_ids),
-        errors=errors,
-        feedbacks=[
-            {"marked_ongoing": marked_ongoing, "marked_completed": marked_completed}
-        ],
+        created=0,
+        updated=result.status_changes_applied,
+        skipped=len(preview.missing_ids),
+        errors=result.errors,
+        warnings=result.warnings,
+        feedbacks=[{
+            "status_changes": result.status_changes_applied,
+            "demotions": result.demotions_applied,
+            "reactor_updates": result.reactor_updates,
+            "date_updates": result.date_updates,
+        }],
         message=(
-            f"Status update: {marked_ongoing} → ONGOING, "
-            f"{marked_completed} → COMPLETED, {len(preview.missing_ids)} not found"
+            f"Status update: {result.status_changes_applied} row(s) applied, "
+            f"{result.demotions_applied} reactor demotion(s), "
+            f"{len(preview.missing_ids)} not found"
         ),
     )
 

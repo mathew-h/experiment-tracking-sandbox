@@ -315,13 +315,19 @@ def test_actlabs_rock_returns_upload_response_shape(client):
 def test_experiment_status_returns_upload_response_shape(client):
     mock_preview = MagicMock()
     mock_preview.errors = []
-    mock_preview.to_ongoing = []
-    mock_preview.to_completed = []
     mock_preview.missing_ids = []
+
+    mock_result = MagicMock()
+    mock_result.status_changes_applied = 0
+    mock_result.demotions_applied = 0
+    mock_result.reactor_updates = 0
+    mock_result.date_updates = 0
+    mock_result.warnings = []
+    mock_result.errors = []
 
     mock_svc = MagicMock()
     mock_svc.preview_status_changes_from_excel.return_value = mock_preview
-    mock_svc.apply_status_changes.return_value = (0, 0, {}, [])
+    mock_svc.apply_status_changes.return_value = mock_result
     fake_mod = MagicMock()
     fake_mod.ExperimentStatusService = mock_svc
 
