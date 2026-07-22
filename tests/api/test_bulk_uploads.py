@@ -315,13 +315,19 @@ def test_actlabs_rock_returns_upload_response_shape(client):
 def test_experiment_status_returns_upload_response_shape(client):
     mock_preview = MagicMock()
     mock_preview.errors = []
-    mock_preview.to_ongoing = []
-    mock_preview.to_completed = []
     mock_preview.missing_ids = []
+
+    mock_result = MagicMock()
+    mock_result.status_changes_applied = 0
+    mock_result.demotions_applied = 0
+    mock_result.reactor_updates = 0
+    mock_result.date_updates = 0
+    mock_result.warnings = []
+    mock_result.errors = []
 
     mock_svc = MagicMock()
     mock_svc.preview_status_changes_from_excel.return_value = mock_preview
-    mock_svc.apply_status_changes.return_value = (0, 0, {}, [])
+    mock_svc.apply_status_changes.return_value = mock_result
     fake_mod = MagicMock()
     fake_mod.ExperimentStatusService = mock_svc
 
@@ -334,6 +340,66 @@ def test_experiment_status_returns_upload_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_experiment_status_validation_errors_skip_apply(client):
+    mock_preview = MagicMock()
+    mock_preview.errors = ["Missing required column: 'status'"]
+    mock_preview.missing_ids = []
+
+    mock_svc = MagicMock()
+    mock_svc.preview_status_changes_from_excel.return_value = mock_preview
+    fake_mod = MagicMock()
+    fake_mod.ExperimentStatusService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.experiment_status": fake_mod,
+    }):
+        resp = client.post(
+            "/api/bulk-uploads/experiment-status",
+            files={"file": ("status.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    _assert_upload_shape(body)
+    assert "Missing required column: 'status'" in body["errors"]
+    mock_svc.apply_status_changes.assert_not_called()
+
+
+def test_experiment_status_rolls_back_on_apply_errors(client, db_session):
+    mock_preview = MagicMock()
+    mock_preview.errors = []
+    mock_preview.missing_ids = []
+
+    mock_result = MagicMock()
+    mock_result.status_changes_applied = 0
+    mock_result.demotions_applied = 0
+    mock_result.reactor_updates = 0
+    mock_result.date_updates = 0
+    mock_result.warnings = []
+    mock_result.errors = ["Error applying status changes: boom"]
+
+    mock_svc = MagicMock()
+    mock_svc.preview_status_changes_from_excel.return_value = mock_preview
+    mock_svc.apply_status_changes.return_value = mock_result
+    fake_mod = MagicMock()
+    fake_mod.ExperimentStatusService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.experiment_status": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/experiment-status",
+            files={"file": ("status.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    _assert_upload_shape(body)
+    assert "Error applying status changes: boom" in body["errors"]
+    assert body["updated"] == 0
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +550,25 @@ def test_new_experiments_template_additives_sheet_headers(client):
                for c in ws[1] if c.value]
     for required in ("experiment_id", "compound", "amount", "unit"):
         assert required in headers, f"Missing column '{required}' in additives sheet"
+
+
+def test_experiment_status_template_has_four_columns_and_instructions(client):
+    import openpyxl
+
+    resp = client.get("/api/bulk-uploads/templates/experiment-status")
+    assert resp.status_code == 200
+
+    wb = openpyxl.load_workbook(io.BytesIO(resp.content))
+    ws = wb["Template"]
+    headers = [c.value for c in ws[1]]
+    assert headers == ["experiment_id", "status", "reactor_number", "date"]
+    assert ws.cell(row=2, column=1).value == "HPHT_072"
+    assert ws.cell(row=2, column=2).value == "ONGOING"
+
+    assert "INSTRUCTIONS" in wb.sheetnames
+    inst_col_a = [c.value for c in wb["INSTRUCTIONS"]["A"] if c.value]
+    assert "status" in inst_col_a
+    assert "date" in inst_col_a
 
 
 # ── Issue #50: ActLabs conflict response ─────────────────────────────────────

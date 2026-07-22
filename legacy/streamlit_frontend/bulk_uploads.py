@@ -1692,37 +1692,43 @@ def _process_icp_csv(
 
 def handle_experiment_status_update():
     """
-    Bulk update experiment status: mark listed experiments as ONGOING,
-    mark all other ONGOING experiments as COMPLETED.
+    Bulk update experiment status per row: each row sets an explicit status
+    (ONGOING/COMPLETED/CANCELLED/QUEUED); HPHT/Core Flood rows set to ONGOING
+    with a reactor_number demote an older same-reactor occupant (date-gated).
     Shows preview before applying changes with confirmation required.
     """
     st.header("Bulk Update Experiment Status")
+
     st.markdown("""
-    Upload an Excel file with experiment IDs to mark as **ONGOING**. 
-    All other **HPHT** experiments currently marked as **ONGOING** will be changed to **COMPLETED**.
-    
+    Upload an Excel file with one row per experiment status change.
+
     **Columns:**
-    - `experiment_id` (required): Experiments to mark as ONGOING
-    - `reactor_number` (optional): Update reactor number for HPHT experiments
-    
+    - `experiment_id` (required)
+    - `status` (required): ONGOING, COMPLETED, CANCELLED, or QUEUED (case-insensitive)
+    - `reactor_number` (optional): only meaningful for HPHT / Core Flood experiments
+    - `date` (optional): experiment start date; also used to decide reactor demotion order
+
     **Important Notes:**
-    - Only HPHT experiments not in the list will be auto-completed
-    - Other experiment types (Serum, Autoclave, etc.) maintain their status
+    - Setting an HPHT or Core Flood experiment to ONGOING with a reactor_number completes
+      an older experiment currently ongoing in the same reactor — only if that occupant's
+      start date is older. If the reactor is held by a newer-or-equal-dated experiment (or
+      either date is missing), nothing is demoted and a warning is shown instead.
+    - An experiment not listed in the file is never touched.
     - You will see a preview before any changes are applied
     - Confirmation is required before applying changes
     """)
 
     # Generate template
     template_df = pd.DataFrame([
-        {"experiment_id": "HPHT_MH_001", "reactor_number": 1},
-        {"experiment_id": "HPHT_MH_002", "reactor_number": 2},
-        {"experiment_id": "Serum_JD_015", "reactor_number": ""},
-    ], columns=["experiment_id", "reactor_number"])
+        {"experiment_id": "HPHT_MH_001", "status": "ONGOING", "reactor_number": 1, "date": "2026-07-15"},
+        {"experiment_id": "HPHT_MH_002", "status": "COMPLETED", "reactor_number": "", "date": ""},
+        {"experiment_id": "Serum_JD_015", "status": "QUEUED", "reactor_number": "", "date": ""},
+    ], columns=["experiment_id", "status", "reactor_number", "date"])
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
         template_df.to_excel(writer, index=False, sheet_name='experiment_status')
-        
+
         # Autosize columns for readability
         try:
             from frontend.components.utils import autosize_excel_columns
@@ -1739,7 +1745,7 @@ def handle_experiment_status_update():
     )
 
     st.markdown("---")
-    
+
     # File uploader
     uploaded_file = st.file_uploader("Upload filled template (xlsx)", type=["xlsx"], key="status_upload")
 
@@ -1750,99 +1756,98 @@ def handle_experiment_status_update():
     db = SessionLocal()
     try:
         preview = ExperimentStatusService.preview_status_changes_from_excel(db, uploaded_file.read())
-        
+
         # Show errors if any
         if preview.errors:
             st.error("Validation errors found:")
             for error in preview.errors:
                 st.error(error)
             return
-        
+
         # Show missing IDs warning
         if preview.missing_ids:
             st.warning(f"⚠️ {len(preview.missing_ids)} experiment ID(s) not found in database:")
             missing_df = pd.DataFrame({"Missing Experiment IDs": preview.missing_ids})
             st.dataframe(missing_df, use_container_width=True)
             st.info("These IDs will be skipped. Only experiments found in the database will be processed.")
-        
+
         # Show preview of changes
         st.subheader("📋 Preview of Changes")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric("Experiments → ONGOING", len(preview.to_ongoing))
-            if preview.to_ongoing:
-                st.write("**Will be marked as ONGOING:**")
-                ongoing_df = pd.DataFrame(preview.to_ongoing)
-                # Reorder columns for better display
-                col_order = ['experiment_id', 'current_status', 'current_reactor_number', 'new_reactor_number']
-                ongoing_df = ongoing_df[[col for col in col_order if col in ongoing_df.columns]]
-                st.dataframe(ongoing_df, use_container_width=True)
-        
-        with col2:
-            st.metric("Experiments → COMPLETED", len(preview.to_completed))
-            if preview.to_completed:
-                st.write("**Will be marked as COMPLETED (HPHT only):**")
-                completed_df = pd.DataFrame(preview.to_completed)
-                # Reorder columns for better display
-                col_order = ['experiment_id', 'current_status', 'current_reactor_number']
-                completed_df = completed_df[[col for col in col_order if col in completed_df.columns]]
-                st.dataframe(completed_df, use_container_width=True)
-        
+
+        st.metric("Experiments to update", len(preview.changes))
+        if preview.changes:
+            changes_df = pd.DataFrame([{
+                "experiment_id": c.experiment_id,
+                "current_status": c.current_status,
+                "new_status": c.new_status,
+                "reactor_number": c.reactor_number,
+                "new_reactor_number": c.new_reactor_number,
+                "new_date": c.new_date.date().isoformat() if c.new_date is not None else None,
+            } for c in preview.changes])
+            st.dataframe(changes_df, use_container_width=True)
+
+        if preview.demotions:
+            st.write("**Reactor demotions that will be applied:**")
+            demotions_df = pd.DataFrame([{
+                "experiment_id": d.experiment_id,
+                "reactor_number": d.reactor_number,
+                "replaced_by": d.triggering_experiment_id,
+            } for d in preview.demotions])
+            st.dataframe(demotions_df, use_container_width=True)
+
+        if preview.warnings:
+            for warning in preview.warnings:
+                st.warning(warning)
+
         # No changes to apply
-        if not preview.to_ongoing and not preview.to_completed:
+        if not preview.changes:
             st.info("ℹ️ No status changes needed based on this file.")
             return
-        
+
         # Confirmation section
         st.markdown("---")
         st.subheader("⚠️ Confirm Changes")
-        
-        total_changes = len(preview.to_ongoing) + len(preview.to_completed)
+
+        total_changes = len(preview.changes)
         st.warning(f"This will update the status of **{total_changes} experiment(s)**. This action cannot be undone through the UI.")
-        
+
         # Confirmation text input
         confirmation_text = st.text_input(
             'Type "CONFIRM" to proceed with status updates:',
             key="status_confirm"
         )
-        
+
         # Apply button (disabled unless confirmation entered)
         apply_disabled = confirmation_text.upper() != "CONFIRM"
-        
+
         if st.button("Apply Status Changes", disabled=apply_disabled, type="primary"):
-            # Extract experiment IDs to mark as ONGOING
-            exp_ids_to_ongoing = [exp["experiment_id"] for exp in preview.to_ongoing]
-            
-            # Get reactor_number_map from preview
-            reactor_number_map = getattr(preview, 'reactor_number_map', {})
-            
-            # Apply changes
-            marked_ongoing, marked_completed, reactor_updates, errors = ExperimentStatusService.apply_status_changes(
-                db, exp_ids_to_ongoing, reactor_number_map
-            )
-            
-            if errors:
+            result = ExperimentStatusService.apply_status_changes(db, preview)
+
+            if result.errors:
                 db.rollback()
                 st.error("Failed to apply status changes:")
-                for error in errors:
+                for error in result.errors:
                     st.error(error)
             else:
                 db.commit()
                 st.success(f"✅ Status changes applied successfully!")
-                st.info(f"**{marked_ongoing}** experiment(s) marked as ONGOING")
-                st.info(f"**{marked_completed}** experiment(s) marked as COMPLETED")
-                if reactor_updates > 0:
-                    st.info(f"**{reactor_updates}** reactor number(s) updated")
-                
+                st.info(f"**{result.status_changes_applied}** experiment(s) updated")
+                if result.demotions_applied > 0:
+                    st.info(f"**{result.demotions_applied}** reactor demotion(s) applied")
+                if result.reactor_updates > 0:
+                    st.info(f"**{result.reactor_updates}** reactor number(s) updated")
+                if result.date_updates > 0:
+                    st.info(f"**{result.date_updates}** start date(s) updated")
+                for warning in result.warnings:
+                    st.info(warning)
+
                 # Clear the confirmation text
                 if 'status_confirm' in st.session_state:
                     del st.session_state['status_confirm']
-        
+
         if apply_disabled and confirmation_text:
             st.info('Please type "CONFIRM" exactly (case-insensitive) to enable the Apply button.')
-            
+
     except Exception as e:
         db.rollback()
         st.error(f"An unexpected error occurred: {e}")

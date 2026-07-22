@@ -24,23 +24,19 @@ def _seed(db: Session, exp_id: str, num: int, status: ExperimentStatus, exp_type
 
 
 def test_bulk_status_upload_does_not_complete_queued(db_session: Session):
-    """A QUEUED HPHT experiment absent from the upload file must remain QUEUED."""
+    """A QUEUED HPHT experiment absent from the upload file must remain QUEUED (issue #33)."""
     queued_exp = _seed(db_session, "HPHT_QUEUED_001", 33010, ExperimentStatus.QUEUED, "HPHT")
     _seed(db_session, "HPHT_ACTIVE_001", 33011, ExperimentStatus.ONGOING, "HPHT")
 
     xlsx = make_excel(
-        ["experiment_id", "reactor_number"],
-        [["HPHT_ACTIVE_001", 1]],
+        ["experiment_id", "status", "reactor_number"],
+        [["HPHT_ACTIVE_001", "ONGOING", 1]],
     )
     preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
     assert preview.errors == []
-    completed_ids = [r["experiment_id"] for r in preview.to_completed]
-    assert "HPHT_QUEUED_001" not in completed_ids
 
-    _ongoing, _completed, _ru, errors = ExperimentStatusService.apply_status_changes(
-        db_session, ["HPHT_ACTIVE_001"], {}
-    )
-    assert errors == []
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+    assert result.errors == []
     db_session.refresh(queued_exp)
     assert queued_exp.status == ExperimentStatus.QUEUED, (
         "QUEUED experiment must not be auto-completed by bulk status upload"

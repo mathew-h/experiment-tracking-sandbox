@@ -277,7 +277,7 @@ All endpoints return `UploadResponse`:
 | POST | `/api/bulk-uploads/chemical-inventory` | Create/update `Compound` (reagent) records. |
 | POST | `/api/bulk-uploads/elemental-composition` | Import wide-format elemental composition into `ElementalAnalysis`. Query param: `default_unit` (auto-creates unknown analytes). |
 | POST | `/api/bulk-uploads/actlabs-rock` | Import ActLabs geochemical analysis reports (Excel or CSV). Heuristic header detection. |
-| POST | `/api/bulk-uploads/experiment-status` | Preview + apply bulk ONGOING/COMPLETED transitions. |
+| POST | `/api/bulk-uploads/experiment-status` | Per-row status/date/reactor update. HPHT/Core Flood rows set to ONGOING with a reactor_number auto-complete an older occupant in the same reactor (date-gated); no blanket "complete unlisted HPHT" behavior. |
 | POST | `/api/bulk-uploads/pxrf` | Import pXRF readings from instrument export. |
 | GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`. Returns 404 for types with no template. |
 | GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
