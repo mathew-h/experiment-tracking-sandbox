@@ -271,22 +271,34 @@ No template available — upload the ActLabs-exported file directly.
 **Endpoint:** `POST /api/bulk-uploads/experiment-status`
 **Template:** available
 
-Preview and apply bulk experiment status transitions (ONGOING / COMPLETED).
+Set each experiment's status explicitly, per row. Applies to experiments of any
+type — Serum, Autoclave, HPHT, Core Flood.
 
 Logic:
-- All experiments listed in the file are moved to **ONGOING**
-- All ONGOING experiments with HPHT conditions **not** in the file are moved to **COMPLETED**
-- Experiment IDs not found in the database are reported as `missing_ids`
+- Each row sets its own `status` (`ONGOING`, `COMPLETED`, `CANCELLED`, or `QUEUED`; case-insensitive).
+- If `date` is provided, it updates the experiment's start date (`Experiment.date`).
+- If `reactor_number` is provided, it updates `ExperimentalConditions.reactor_number`.
+- Setting an **HPHT or Core Flood** row to `ONGOING` with a `reactor_number` completes
+  an experiment already `ONGOING` in that same reactor, **only if** the occupant's
+  start date is older than the incoming row's start date.
+- If the reactor is held by a newer-or-equal-dated experiment (or either date is
+  missing), nothing is demoted and a warning names both experiments and the reactor.
+- Experiment IDs not found in the database are reported as `missing_ids`.
+- There is no blanket "complete every unlisted ongoing HPHT" behavior — an
+  experiment not referenced in the file is never touched.
+- Invalid `status`/`reactor_number`/`date` values, or two rows targeting the same
+  `reactor_number`, hard-fail the whole upload with no changes applied. A missing
+  `experiment_id` or `status` column does the same.
 
-The endpoint uses a two-phase preview → apply workflow:
-1. Upload the file to see a preview of what will change
-2. The UI displays the pending changes; user confirms
-3. Changes are applied atomically
+The endpoint runs preview validation and apply in one request (no separate
+confirm step): upload the file and the response reports what was applied.
 
 | Column | Required | Notes |
 |--------|----------|-------|
 | experiment_id | ✓ | |
-| reactor_number | | Optional; updates the reactor assignment if provided |
+| status | ✓ | ONGOING, COMPLETED, CANCELLED, or QUEUED (case-insensitive) |
+| reactor_number | | Optional; only meaningful for HPHT / Core Flood experiments |
+| date | | Optional; experiment start date (YYYY-MM-DD or Excel date) |
 
 ---
 
