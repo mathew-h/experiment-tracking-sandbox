@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui'
+import { Button, Input } from '@/components/ui'
 import type { Step1Data } from './Step1BasicInfo'
 import type { Step2Data } from './Step2Conditions'
 import type { AdditiveRow } from './Step3Additives'
@@ -8,6 +8,8 @@ interface Props {
   step1: Step1Data
   step2: Step2Data
   additives: AdditiveRow[]
+  replicateCount: number
+  onReplicateCountChange: (count: number) => void
   onBack: () => void
   onSubmit: () => void
   isSubmitting: boolean
@@ -24,8 +26,18 @@ function kv(label: string, value: string | undefined) {
 }
 
 /** Step 4 of new experiment wizard: read-only summary and final submission. */
-export function Step4Review({ step1, step2, additives, onBack, onSubmit, isSubmitting }: Props) {
+export function Step4Review({
+  step1,
+  step2,
+  additives,
+  replicateCount,
+  onReplicateCountChange,
+  onBack,
+  onSubmit,
+  isSubmitting,
+}: Props) {
   const visibleFields = step1.experimentType ? FIELD_VISIBILITY[step1.experimentType] : new Set<string>()
+  const isLetteredId = /\d+[a-z]$/.test(step1.experimentId.trim())
 
   return (
     <div className="space-y-4">
@@ -57,6 +69,22 @@ export function Step4Review({ step1, step2, additives, onBack, onSubmit, isSubmi
               <span className="font-mono-data text-ink-primary">{a.amount} {a.unit}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {!isLetteredId && (
+        <div className="w-40">
+          <Input
+            label="Replicates to create"
+            type="number"
+            min={0}
+            max={25}
+            value={String(replicateCount)}
+            onChange={(e) =>
+              onReplicateCountChange(Math.max(0, Math.min(25, Number(e.target.value) || 0)))
+            }
+            hint="0 = none. Creates lettered vials (a, b, c…) copying these conditions and additives."
+          />
         </div>
       )}
 

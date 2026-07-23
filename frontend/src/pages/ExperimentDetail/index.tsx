@@ -6,6 +6,7 @@ import { conditionsApi } from '@/api/conditions'
 import { StatusBadge, Button, Input, PageSpinner, useToast } from '@/components/ui'
 import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
+import { CreateReplicatesModal } from '@/components/experiments/CreateReplicatesModal'
 import { ConditionsTab } from './ConditionsTab'
 import { ResultsTab } from './ResultsTab'
 import { NotesTab } from './NotesTab'
@@ -29,6 +30,7 @@ export function ExperimentDetailPage() {
   const [dateDraft, setDateDraft] = useState('')
   const [editingSampleId, setEditingSampleId] = useState(false)
   const [sampleDraft, setSampleDraft] = useState('')
+  const [replicatesOpen, setReplicatesOpen] = useState(false)
 
   const { data: experiment, isLoading, error } = useQuery({
     queryKey: ['experiment', id],
@@ -195,6 +197,18 @@ export function ExperimentDetailPage() {
           </div>
         )}
 
+        {experiment.replicate_label !== null && experiment.base_experiment_id && (
+          <p className="text-xs text-ink-muted">
+            Replicate {experiment.replicate_label} of{' '}
+            <Link
+              to={`/experiments/${experiment.base_experiment_id}`}
+              className="text-red-400 hover:text-red-300 font-mono-data"
+            >
+              {experiment.base_experiment_id}
+            </Link>
+          </p>
+        )}
+
         <p className="text-xs text-ink-muted mt-0.5">
           #{experiment.experiment_number}
           {experiment.researcher && ` · ${experiment.researcher}`}
@@ -293,7 +307,17 @@ export function ExperimentDetailPage() {
         <Button variant="ghost" size="sm" onClick={() => navigate('/experiments/new')}>
           + New Experiment
         </Button>
+        {experiment.replicate_label === null && (
+          <Button variant="secondary" size="sm" onClick={() => setReplicatesOpen(true)}>
+            Create Replicates
+          </Button>
+        )}
       </div>
+      <CreateReplicatesModal
+        open={replicatesOpen}
+        onClose={() => setReplicatesOpen(false)}
+        baseExperimentId={experiment.experiment_id}
+      />
 
       {/* Tab bar */}
       <div className="border-b border-surface-border flex gap-0">
