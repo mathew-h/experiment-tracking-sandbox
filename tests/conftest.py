@@ -10,7 +10,31 @@ sys.modules['frontend.config.variable_config'] = MagicMock(
     ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mn', 'ca', 'cr', 'co', 'mg',
                                'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh',
                                'ir', 'pd', 'ru', 'os', 'tl', 'k', 'na', 's'],
-    PXRF_REQUIRED_COLUMNS={"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
+    PXRF_REQUIRED_COLUMNS={"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"},
+    # Mirrors the stub in backend/api/routers/bulk_uploads.py::upload_scalar_results
+    # (scalar_results.py imports this dict at module load time).
+    SCALAR_RESULTS_TEMPLATE_HEADERS={
+        "measurement_date": "Date",
+        "experiment_id": "Experiment ID",
+        "replicate": "Replicate",
+        "time_post_reaction": "Time (days)",
+        "description": "Description",
+        "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
+        "sampling_volume_mL": "Sampling Vol (mL)",
+        "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
+        "background_experiment_id": "Bkg Exp ID",
+        "h2_concentration": "H2 Conc (ppm)",
+        "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
+        "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
+        "final_ph": "Final pH",
+        "ferrous_iron_yield": "Fe2+ Yield (%)",
+        "final_nitrate_concentration_mM": "Final Nitrate (mM)",
+        "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
+        "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
+        "final_conductivity_mS_cm": "Conductivity (mS/cm)",
+        "final_alkalinity_mg_L": "Alkalinity (mg/L)",
+        "overwrite": "Overwrite",
+    },
 )
 
 # Stub utils.storage before any imports that depend on it

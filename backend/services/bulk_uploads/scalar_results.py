@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.services.scalar_results_service import ScalarResultsService
 from frontend.config.variable_config import SCALAR_RESULTS_TEMPLATE_HEADERS
+from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
 
 
 class ScalarResultsUploadService:
@@ -125,6 +126,8 @@ class ScalarResultsUploadService:
             "measurement_date":             "measurement_date",
             "description":                  "description",
             "overwrite":                    "overwrite",
+            "replicate":                    "replicate",
+            "replicate letter":             "replicate",
             # legacy names without trailing units
             "gross_ammonium_concentration":      "gross_ammonium_concentration_mM",
             "background_ammonium_concentration": "background_ammonium_concentration_mM",
@@ -169,6 +172,26 @@ class ScalarResultsUploadService:
 
             if not clean:
                 continue
+
+            if "replicate" in clean:
+                rep_val = clean.pop("replicate")
+                try:
+                    clean["experiment_id"] = combine_replicate_id(
+                        clean.get("experiment_id"), rep_val,
+                    )
+                except ValueError as exc:
+                    errors.append(f"Row {row_num}: {exc}")
+                    parse_feedbacks.append({
+                        "row": row_num,
+                        "experiment_id": str(clean.get("experiment_id", "")),
+                        "time_post_reaction": None,
+                        "status": "error",
+                        "fields_updated": [], "fields_preserved": [],
+                        "old_values": {}, "new_values": {},
+                        "warnings": [],
+                        "errors": [str(exc)],
+                    })
+                    continue
 
             if "measurement_date" in clean:
                 parsed_date = ScalarResultsUploadService._parse_measurement_date(
