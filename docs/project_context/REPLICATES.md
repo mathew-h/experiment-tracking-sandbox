@@ -92,3 +92,17 @@ Replicate experiments must already exist (create them with the **Create replicat
 | A replicate ID was skipped | An experiment with that exact ID already exists | Check the skipped message; rename or delete the conflicting experiment if it was a mistake |
 | Grouped results show `n=1` | This experiment has no lettered siblings yet | Use Create Replicates, or confirm you're not looking at a sequential re-run instead of a lettered set |
 | Rollup stats look wrong across a base with re-runs | The base has both lettered replicates and a sequential re-run (e.g. `HPHT_001-2`) sharing the same base ID | Rollup and grouping key don't distinguish the two — verify the group is actually a lettered set before trusting `n_replicates` |
+
+---
+
+## Flagging an outlier
+
+If one vial in a replicate set goes bad (leak, cracked septum, contamination), you can drop it from the group statistics without deleting any data:
+
+1. Open the replicate's experiment page (e.g. `SERUM_001c`).
+2. Click **Mark as outlier** in the quick-actions row. An **Outlier — excluded from group stats** badge appears next to the status.
+3. The grouped results view and the Power BI rollup (`v_results_scalar_rollup`) immediately recompute mean/median/std **and `n`** without that replicate. The flagged replicate is annotated "(outlier)" in the grouped view.
+4. All of the replicate's own data stays intact and visible on its page and in every per-row reporting view.
+5. To undo, click **Include in rollup** on the same page. Every flag change is recorded in the experiment's Entry Logs.
+
+The button appears only on experiments that belong to a replicate set (lettered members and the group parent, which is vial 0).

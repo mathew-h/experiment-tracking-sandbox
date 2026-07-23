@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from database.models.enums import ExperimentStatus
 
 
@@ -22,6 +22,14 @@ class ExperimentUpdate(BaseModel):
     researcher: Optional[str] = None
     date: Optional[datetime] = None
     status: Optional[ExperimentStatus] = None
+    is_outlier: Optional[bool] = None
+
+    @field_validator("is_outlier")
+    @classmethod
+    def _is_outlier_not_null(cls, v: Optional[bool]) -> bool:
+        if v is None:
+            raise ValueError("is_outlier cannot be null; send true or false, or omit the field")
+        return v
 
 
 class ExperimentStatusUpdate(BaseModel):
@@ -46,6 +54,7 @@ class ExperimentListItem(BaseModel):
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
+    is_outlier: bool = False
     # Joined from conditions (may be None if no conditions recorded yet)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
@@ -82,6 +91,7 @@ class ExperimentResponse(BaseModel):
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
+    is_outlier: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -117,6 +127,7 @@ class ReplicateGroupMember(BaseModel):
     experiment_id: str
     replicate_label: Optional[str] = None
     status: Optional[ExperimentStatus] = None
+    is_outlier: bool = False
 
 
 class ReplicateGroupResponse(BaseModel):

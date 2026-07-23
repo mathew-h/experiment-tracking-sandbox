@@ -170,3 +170,61 @@ class TestRollupOneRowPerBaseAndBucket:
         assert rows[0]._mapping["n_replicates"] == 2
         assert rows[1]._mapping["time_post_reaction_bucket_days"] == pytest.approx(7.0)
         assert rows[1]._mapping["n_replicates"] == 1
+
+
+class TestRollupOutlierExclusion:
+    def test_flagged_replicate_excluded_from_stats_and_n(self, view_db):
+        exp_a = _make_experiment(view_db, "ROLL_OUT_001a", 7)
+        exp_b = _make_experiment(view_db, "ROLL_OUT_001b", 8)
+        exp_c = _make_experiment(view_db, "ROLL_OUT_001c", 9)
+        for exp, nh4 in ((exp_a, 1.0), (exp_b, 2.0), (exp_c, 30.0)):
+            er = _make_result(view_db, exp, bucket_days=7.0)
+            _make_scalar(view_db, er, gross_nh4=nh4)
+        exp_c.is_outlier = True
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_replicates, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", "sd_gross_ammonium_mM"
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_OUT_001' AND time_post_reaction_bucket_days = 7.0
+            """)
+        ).fetchone()
+
+        assert row is not None
+        mapping = row._mapping
+        assert mapping["n_replicates"] == 2
+        assert mapping["mean_gross_ammonium_mM"] == pytest.approx(1.5)
+        assert mapping["median_gross_ammonium_mM"] == pytest.approx(1.5)
+        assert mapping["sd_gross_ammonium_mM"] == pytest.approx(0.70710678, abs=1e-6)
+
+    def test_flagged_replicate_remains_in_per_row_view(self, view_db):
+        exp_a = _make_experiment(view_db, "ROLL_OUT_002a", 10)
+        exp_b = _make_experiment(view_db, "ROLL_OUT_002b", 11)
+        for exp, nh4 in ((exp_a, 1.0), (exp_b, 50.0)):
+            er = _make_result(view_db, exp, bucket_days=3.0)
+            _make_scalar(view_db, er, gross_nh4=nh4)
+        exp_b.is_outlier = True
+        view_db.commit()
+
+        rows = view_db.execute(
+            text("""
+                SELECT experiment_id FROM v_results_scalar
+                WHERE experiment_id IN ('ROLL_OUT_002a', 'ROLL_OUT_002b')
+            """)
+        ).fetchall()
+        assert {r._mapping["experiment_id"] for r in rows} == {"ROLL_OUT_002a", "ROLL_OUT_002b"}
+
+    def test_group_with_all_members_flagged_has_no_rollup_row(self, view_db):
+        exp_a = _make_experiment(view_db, "ROLL_OUT_003a", 12)
+        exp_b = _make_experiment(view_db, "ROLL_OUT_003b", 13)
+        for exp in (exp_a, exp_b):
+            er = _make_result(view_db, exp, bucket_days=7.0)
+            _make_scalar(view_db, er, gross_nh4=2.0)
+            exp.is_outlier = True
+        view_db.commit()
+
+        rows = view_db.execute(
+            text("SELECT 1 FROM v_results_scalar_rollup WHERE base_experiment_id = 'ROLL_OUT_003'")
+        ).fetchall()
+        assert rows == []

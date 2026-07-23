@@ -892,3 +892,67 @@ class TestCreateReplicatesEndpoint:
                            json={"base_experiment_id": "CRE_002", "count": 0}).status_code == 422
         assert client.post("/api/experiments/replicates",
                            json={"base_experiment_id": "CRE_002", "count": 26}).status_code == 422
+
+
+from sqlalchemy import select as sa_select
+from database.models import ModificationsLog
+
+
+class TestOutlierFlagPatch:
+    def _mk(self, db_session, exp_id, number):
+        from database.models.enums import ExperimentStatus
+        exp = Experiment(experiment_id=exp_id, experiment_number=number,
+                         status=ExperimentStatus.ONGOING)
+        db_session.add(exp)
+        db_session.commit()
+        return exp
+
+    def test_patch_sets_and_clears_is_outlier(self, client, db_session):
+        self._mk(db_session, "OUTL_API_001a", 920001)
+        resp = client.patch("/api/experiments/OUTL_API_001a", json={"is_outlier": True})
+        assert resp.status_code == 200
+        assert resp.json()["is_outlier"] is True
+
+        resp = client.patch("/api/experiments/OUTL_API_001a", json={"is_outlier": False})
+        assert resp.status_code == 200
+        assert resp.json()["is_outlier"] is False
+
+    def test_get_detail_includes_is_outlier(self, client, db_session):
+        self._mk(db_session, "OUTL_API_002a", 920002)
+        client.patch("/api/experiments/OUTL_API_002a", json={"is_outlier": True})
+        data = client.get("/api/experiments/OUTL_API_002a").json()
+        assert data["is_outlier"] is True
+
+    def test_patch_is_outlier_writes_modifications_log(self, client, db_session):
+        exp = self._mk(db_session, "OUTL_API_003a", 920003)
+        client.patch("/api/experiments/OUTL_API_003a", json={"is_outlier": True})
+        db_session.expire_all()
+        logs = db_session.execute(
+            sa_select(ModificationsLog).where(ModificationsLog.experiment_fk == exp.id)
+        ).scalars().all()
+        assert any(
+            l.new_values == {"is_outlier": True} and l.old_values == {"is_outlier": False}
+            for l in logs
+        )
+
+    def test_list_items_include_is_outlier(self, client, db_session):
+        self._mk(db_session, "OUTL_API_004a", 920004)
+        client.patch("/api/experiments/OUTL_API_004a", json={"is_outlier": True})
+        data = client.get("/api/experiments", params={"search": "OUTL_API_004a"}).json()
+        assert data["items"][0]["is_outlier"] is True
+
+    def test_patch_is_outlier_explicit_null_is_422(self, client, db_session):
+        self._mk(db_session, "OUTL_API_005a", 920005)
+        resp = client.patch("/api/experiments/OUTL_API_005a", json={"is_outlier": None})
+        assert resp.status_code == 422
+
+    def test_patch_is_outlier_noop_writes_no_audit_row(self, client, db_session):
+        exp = self._mk(db_session, "OUTL_API_006a", 920006)
+        client.patch("/api/experiments/OUTL_API_006a", json={"is_outlier": False})  # already False
+        db_session.expire_all()
+        logs = db_session.execute(
+            sa_select(ModificationsLog).where(ModificationsLog.experiment_fk == exp.id)
+        ).scalars().all()
+        assert not any(
+            l.old_values is not None and "is_outlier" in (l.old_values or {}) for l in logs
+        )

@@ -46,10 +46,10 @@ beforeEach(() => {
   vi.mocked(experimentsApi.getRollup).mockResolvedValue(ROLLUP)
   vi.mocked(experimentsApi.getReplicateGroup).mockResolvedValue({
     base_experiment_id: 'SERUM_001',
-    parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING' },
+    parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING', is_outlier: false },
     members: [
-      { id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING' },
-      { id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING' },
+      { id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false },
+      { id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING', is_outlier: true },
     ],
   })
   vi.mocked(experimentsApi.getResults).mockResolvedValue([])
@@ -76,5 +76,12 @@ describe('GroupedResultsView', () => {
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/metric/i), 'ph')
     expect(screen.getByText('8.10')).toBeInTheDocument()
+  })
+
+  it('annotates outlier members in drill-in links', async () => {
+    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: /SERUM_001b.*outlier/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'SERUM_001a' })).toBeInTheDocument()
   })
 })

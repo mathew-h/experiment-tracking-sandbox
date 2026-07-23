@@ -30,8 +30,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(experimentsApi.getReplicateGroup).mockResolvedValue({
     base_experiment_id: 'SERUM_001',
-    parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING' },
-    members: [{ id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING' }],
+    parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING', is_outlier: false },
+    members: [{ id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false }],
   })
 })
 
@@ -70,7 +70,7 @@ describe('CreateReplicatesModal', () => {
     // group's actual base_experiment_id resolved from the backend.
     vi.mocked(experimentsApi.getReplicateGroup).mockResolvedValue({
       base_experiment_id: 'HPHT_001',
-      parent: { id: 1, experiment_id: 'HPHT_001', replicate_label: null, status: 'ONGOING' },
+      parent: { id: 1, experiment_id: 'HPHT_001', replicate_label: null, status: 'ONGOING', is_outlier: false },
       members: [],
     })
     render(
