@@ -7,7 +7,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, and `description` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
+| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `search` (case-insensitive partial match on `experiment_id`), `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, and `description` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |

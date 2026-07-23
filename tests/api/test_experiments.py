@@ -940,3 +940,19 @@ class TestOutlierFlagPatch:
         client.patch("/api/experiments/OUTL_API_004a", json={"is_outlier": True})
         data = client.get("/api/experiments", params={"search": "OUTL_API_004a"}).json()
         assert data["items"][0]["is_outlier"] is True
+
+    def test_patch_is_outlier_explicit_null_is_422(self, client, db_session):
+        self._mk(db_session, "OUTL_API_005a", 920005)
+        resp = client.patch("/api/experiments/OUTL_API_005a", json={"is_outlier": None})
+        assert resp.status_code == 422
+
+    def test_patch_is_outlier_noop_writes_no_audit_row(self, client, db_session):
+        exp = self._mk(db_session, "OUTL_API_006a", 920006)
+        client.patch("/api/experiments/OUTL_API_006a", json={"is_outlier": False})  # already False
+        db_session.expire_all()
+        logs = db_session.execute(
+            sa_select(ModificationsLog).where(ModificationsLog.experiment_fk == exp.id)
+        ).scalars().all()
+        assert not any(
+            l.old_values is not None and "is_outlier" in (l.old_values or {}) for l in logs
+        )

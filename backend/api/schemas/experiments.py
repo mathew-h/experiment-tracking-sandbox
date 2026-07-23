@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from database.models.enums import ExperimentStatus
 
 
@@ -23,6 +23,13 @@ class ExperimentUpdate(BaseModel):
     date: Optional[datetime] = None
     status: Optional[ExperimentStatus] = None
     is_outlier: Optional[bool] = None
+
+    @field_validator("is_outlier")
+    @classmethod
+    def _is_outlier_not_null(cls, v: Optional[bool]) -> bool:
+        if v is None:
+            raise ValueError("is_outlier cannot be null; send true or false, or omit the field")
+        return v
 
 
 class ExperimentStatusUpdate(BaseModel):

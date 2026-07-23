@@ -823,7 +823,7 @@ def update_experiment(
         ))
         log.info("experiment_date_updated", experiment_id=exp.experiment_id, user=current_user.uid)
 
-    if "is_outlier" in data:
+    if "is_outlier" in data and data["is_outlier"] != old_is_outlier:
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
