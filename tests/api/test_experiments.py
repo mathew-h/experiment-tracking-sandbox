@@ -761,3 +761,23 @@ def test_patch_sample_id_logs_modification(client, db_session):
     assert log is not None
     assert log.old_values == {"sample_id": "OLD_SAMPLE"}
     assert log.new_values == {"sample_id": "SAMPLE_LOG_001"}
+
+
+def test_create_experiment_duplicate_replicate_id_fails(client, db_session):
+    _make_experiment(db_session, "DUP_REP_001a", 8100)
+    payload = {"experiment_id": "DUP_REP_001a", "experiment_number": 8101}
+    resp = client.post("/api/experiments", json=payload)
+    assert resp.status_code == 409
+
+
+def test_create_replicate_experiment_sets_lineage(client, db_session):
+    _make_experiment(db_session, "LINE_REP_001", 8102)
+    payload = {"experiment_id": "LINE_REP_001a", "experiment_number": 8103}
+    resp = client.post("/api/experiments", json=payload)
+    assert resp.status_code == 201
+
+    created = db_session.query(Experiment).filter_by(experiment_id="LINE_REP_001a").first()
+    parent = db_session.query(Experiment).filter_by(experiment_id="LINE_REP_001").first()
+    assert created.base_experiment_id == "LINE_REP_001"
+    assert created.replicate_label == "a"
+    assert created.parent_experiment_fk == parent.id
