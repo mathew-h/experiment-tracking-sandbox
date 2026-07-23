@@ -43,6 +43,9 @@ class ExperimentListItem(BaseModel):
     date: Optional[datetime] = None
     sample_id: Optional[str] = None
     created_at: datetime
+    base_experiment_id: Optional[str] = None
+    parent_experiment_fk: Optional[int] = None
+    replicate_label: Optional[str] = None
     # Joined from conditions (may be None if no conditions recorded yet)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
@@ -50,6 +53,12 @@ class ExperimentListItem(BaseModel):
     additives_summary: Optional[str] = None
     # First note text
     condition_note: Optional[str] = None
+    # Grouped-list mode only (group_replicates=true): lettered children of this
+    # group parent, ordered by replicate_label. None in flat mode / for non-parents.
+    replicates: Optional[list["ExperimentListItem"]] = None
+
+
+ExperimentListItem.model_rebuild()
 
 
 class ExperimentListResponse(BaseModel):
@@ -72,6 +81,7 @@ class ExperimentResponse(BaseModel):
     sample_id: Optional[str] = None
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
+    replicate_label: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -99,3 +109,27 @@ class NoteResponse(BaseModel):
     note_text: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class ReplicateGroupMember(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    experiment_id: str
+    replicate_label: Optional[str] = None
+    status: Optional[ExperimentStatus] = None
+
+
+class ReplicateGroupResponse(BaseModel):
+    base_experiment_id: str
+    parent: Optional[ReplicateGroupMember] = None
+    members: list[ReplicateGroupMember] = []
+
+
+class ReplicateCreateRequest(BaseModel):
+    base_experiment_id: str
+    count: int = Field(3, ge=1, le=25)
+
+
+class ReplicateCreateResponse(BaseModel):
+    created: list[ExperimentResponse]
+    skipped: list[str] = []

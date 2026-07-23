@@ -58,3 +58,19 @@ export const statusColorMap = {
   CANCELLED: { text: 'text-status-cancelled', bg: 'bg-status-cancelled/10', dot: 'bg-status-cancelled' },
   QUEUED:    { text: 'text-status-queued',    bg: 'bg-status-queued/10',    dot: 'bg-status-queued' },
 } as const
+
+/**
+ * Chart series tokens (issue #70). Validated with the dataviz six-check
+ * palette validator on surface #05172B (dark): lightness band, chroma,
+ * CVD separation (worst adjacent dE 10.8), normal-vision floor, contrast
+ * all PASS for the order [mean, ...series]. Assign by entity in fixed
+ * order (replicate 0 -> series[0], a -> series[1], ...); never cycle hues.
+ */
+export const chartColors = {
+  mean: colors.redPrimary,           // #FD4437 — the aggregate/mean series
+  series: ['#0284c7', '#b45309', '#8b5cf6', '#059669'],
+  grid: colors.navyBorder,           // recessive gridlines
+  axis: colors.inkMuted,             // axis lines + ticks
+  label: colors.inkSecondary,        // axis/legend text
+  tooltipBg: '#0a2540',              // tooltip surface (raised navy)
+} as const

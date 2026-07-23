@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text, update
+from sqlalchemy import select, func, text, update, case, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,10 +13,12 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
-    NoteCreate, NoteResponse, NoteUpdate,
+    NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
+    ReplicateCreateRequest, ReplicateCreateResponse,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
+    RollupTimepointResponse,
 )
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
@@ -43,6 +45,35 @@ _TYPE_PREFIX: dict[str, str] = {
 }
 
 
+def _build_list_item(db: Session, exp: Experiment) -> dict:
+    """Build the ExperimentListItem payload dict for one experiment row."""
+    item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
+    cond = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+    ).scalar_one_or_none()
+    item_data["experiment_type"] = cond.experiment_type if cond else None
+    item_data["reactor_number"] = cond.reactor_number if cond else None
+    additive_row = db.execute(
+        text("""
+            SELECT string_agg(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; ')
+            FROM chemical_additives a
+            JOIN experimental_conditions ec ON ec.id = a.experiment_id
+            JOIN compounds c ON c.id = a.compound_id
+            WHERE ec.experiment_fk = :exp_fk
+        """),
+        {"exp_fk": exp.id},
+    ).fetchone()
+    item_data["additives_summary"] = additive_row[0] if additive_row else None
+    first_note = db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.experiment_fk == exp.id)
+        .order_by(ExperimentNotes.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    item_data["condition_note"] = first_note.note_text if first_note else None
+    return item_data
+
+
 @router.get("", response_model=ExperimentListResponse)
 def list_experiments(
     skip: int = Query(0, ge=0),
@@ -56,6 +87,7 @@ def list_experiments(
     date_from: str | None = None,
     date_to: str | None = None,
     description: str | None = None,
+    group_replicates: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentListResponse:
@@ -103,38 +135,52 @@ def list_experiments(
     if description:
         stmt = stmt.where(note_sq.c.note_text.ilike(f"%{description}%"))
 
-    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-    rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
+    if group_replicates:
+        # Grouped mode: paginate over "top-level rows". A matched replicate member
+        # (lettered + linked to a parent) is represented by its parent; everything
+        # else (parents, non-replicates, sequential/treatment derivations, orphan
+        # members) represents itself. Lettered children of each page row are
+        # attached in full regardless of whether they matched the filters.
+        matched_sq = stmt.subquery()
+        top_id_expr = case(
+            (
+                and_(
+                    matched_sq.c.replicate_label.isnot(None),
+                    matched_sq.c.parent_experiment_fk.isnot(None),
+                ),
+                matched_sq.c.parent_experiment_fk,
+            ),
+            else_=matched_sq.c.id,
+        )
+        top_ids_sq = select(top_id_expr.label("top_id")).distinct().subquery()
+        total = db.execute(select(func.count()).select_from(top_ids_sq)).scalar_one()
+        page_stmt = (
+            select(Experiment)
+            .where(Experiment.id.in_(select(top_ids_sq.c.top_id)))
+            .order_by(Experiment.experiment_number.desc())
+        )
+        rows = db.execute(page_stmt.offset(skip).limit(limit)).scalars().all()
+    else:
+        total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
 
     items = []
     for exp in rows:
-        item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
-        # Join conditions for experiment_type and reactor_number
-        cond = db.execute(
-            select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-        ).scalar_one_or_none()
-        item_data["experiment_type"] = cond.experiment_type if cond else None
-        item_data["reactor_number"] = cond.reactor_number if cond else None
-        # Additives summary — inline query avoids view dependency
-        additive_row = db.execute(
-            text("""
-                SELECT string_agg(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; ')
-                FROM chemical_additives a
-                JOIN experimental_conditions ec ON ec.id = a.experiment_id
-                JOIN compounds c ON c.id = a.compound_id
-                WHERE ec.experiment_fk = :exp_fk
-            """),
-            {"exp_fk": exp.id},
-        ).fetchone()
-        item_data["additives_summary"] = additive_row[0] if additive_row else None
-        # First note as condition note
-        first_note = db.execute(
-            select(ExperimentNotes)
-            .where(ExperimentNotes.experiment_fk == exp.id)
-            .order_by(ExperimentNotes.id.asc())
-            .limit(1)
-        ).scalar_one_or_none()
-        item_data["condition_note"] = first_note.note_text if first_note else None
+        item_data = _build_list_item(db, exp)
+        if group_replicates:
+            children = db.execute(
+                select(Experiment)
+                .where(
+                    Experiment.parent_experiment_fk == exp.id,
+                    Experiment.replicate_label.isnot(None),
+                )
+                .order_by(Experiment.replicate_label.asc())
+            ).scalars().all()
+            if children:
+                item_data["replicates"] = [
+                    ExperimentListItem.model_validate(_build_list_item(db, ch))
+                    for ch in children
+                ]
         items.append(ExperimentListItem.model_validate(item_data))
 
     return ExperimentListResponse(items=items, total=total, skip=skip, limit=limit)
@@ -243,6 +289,70 @@ def get_experiment_results(
             xrd_run_date=scalar.xrd_run_date if scalar else None,
         ))
     return out
+
+
+@router.get("/{experiment_id}/rollup", response_model=list[RollupTimepointResponse])
+def get_experiment_rollup(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[RollupTimepointResponse]:
+    """Cross-replicate mean/median/std per timepoint from v_results_scalar_rollup."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    base = exp.base_experiment_id or exp.experiment_id
+    rows = db.execute(
+        text("""
+            SELECT * FROM v_results_scalar_rollup
+            WHERE base_experiment_id = :base
+            ORDER BY time_post_reaction_bucket_days
+        """),
+        {"base": base},
+    ).mappings().all()
+    return [RollupTimepointResponse(**dict(r)) for r in rows]
+
+
+@router.get("/{experiment_id}/replicate-group", response_model=ReplicateGroupResponse)
+def get_replicate_group(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReplicateGroupResponse:
+    """The lettered replicate set this experiment belongs to (empty members if none)."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    base = exp.base_experiment_id or exp.experiment_id
+    parent = exp if exp.replicate_label is None else exp.parent
+    if parent is not None:
+        members = db.execute(
+            select(Experiment)
+            .where(
+                Experiment.parent_experiment_fk == parent.id,
+                Experiment.replicate_label.isnot(None),
+            )
+            .order_by(Experiment.replicate_label.asc())
+        ).scalars().all()
+    else:
+        # Orphan member: parent row doesn't exist yet; list siblings by base stem.
+        members = db.execute(
+            select(Experiment)
+            .where(
+                Experiment.base_experiment_id == base,
+                Experiment.replicate_label.isnot(None),
+            )
+            .order_by(Experiment.replicate_label.asc())
+        ).scalars().all()
+    return ReplicateGroupResponse(
+        base_experiment_id=base,
+        parent=ReplicateGroupMember.model_validate(parent) if parent else None,
+        members=[ReplicateGroupMember.model_validate(m) for m in members],
+    )
 
 
 @router.patch("/{experiment_id}/status", response_model=ExperimentResponse)
@@ -639,6 +749,41 @@ def create_experiment(
     db.refresh(exp)
     log.info("experiment_created", experiment_id=exp.experiment_id, user=current_user.email)
     return ExperimentResponse.model_validate(exp)
+
+
+@router.post("/replicates", response_model=ReplicateCreateResponse, status_code=201)
+def create_replicates(
+    payload: ReplicateCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReplicateCreateResponse:
+    """Batch-create lettered replicates copying the base experiment's setup."""
+    from database.lineage_utils import create_replicate_experiments
+
+    try:
+        created, skipped = create_replicate_experiments(
+            db, payload.base_experiment_id, payload.count
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc))
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Replicate ID conflict on creation")
+    for exp in created:
+        db.refresh(exp)
+    log.info(
+        "replicates_created",
+        base_experiment_id=payload.base_experiment_id,
+        created=[e.experiment_id for e in created],
+        skipped=skipped,
+        user=current_user.email,
+    )
+    return ReplicateCreateResponse(
+        created=[ExperimentResponse.model_validate(e) for e in created],
+        skipped=skipped,
+    )
 
 
 @router.patch("/{experiment_id}", response_model=ExperimentResponse)

@@ -4,6 +4,7 @@ import { experimentsApi, type ResultWithFlags } from '@/api/experiments'
 import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
 import { AddResultsModal } from './AddResultsModal'
+import { GroupedResultsView } from './GroupedResultsView'
 
 const DEFAULT_BACKGROUND_NH4 = 0.2
 
@@ -107,7 +108,14 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
   const [bgInput, setBgInput] = useState(false)
   const [bgValue, setBgValue] = useState(String(DEFAULT_BACKGROUND_NH4))
   const [showAddModal, setShowAddModal] = useState(false)
+  const [mode, setMode] = useState<'individual' | 'grouped'>('individual')
   const queryClient = useQueryClient()
+
+  const { data: replicateGroup } = useQuery({
+    queryKey: ['replicate-group', experimentId],
+    queryFn: () => experimentsApi.getReplicateGroup(experimentId),
+  })
+  const hasGroup = (replicateGroup?.members.length ?? 0) > 0
 
   const { data: results, isLoading } = useQuery({
     queryKey: ['experiment-results', experimentId],
@@ -183,61 +191,87 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
             </button>
           )}
         </div>
-        <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
-          + Add Results
-        </Button>
+        <div className="flex items-center gap-2">
+          {hasGroup && (
+            <div className="flex items-center rounded border border-surface-border overflow-hidden text-xs">
+              <button
+                className={`px-2.5 py-1 ${mode === 'individual' ? 'bg-surface-raised text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'}`}
+                onClick={() => setMode('individual')}
+              >
+                Individual
+              </button>
+              <button
+                className={`px-2.5 py-1 ${mode === 'grouped' ? 'bg-surface-raised text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'}`}
+                onClick={() => setMode('grouped')}
+              >
+                Grouped (n={replicateGroup!.members.length})
+              </button>
+            </div>
+          )}
+          <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
+            + Add Results
+          </Button>
+        </div>
       </div>
 
-      {/* Empty state */}
-      {!results?.length && (
-        <p className="text-sm text-ink-muted p-4 text-center">No results recorded</p>
-      )}
-
-      {results && results.length > 0 && (
+      {mode === 'grouped' && hasGroup ? (
+        <div className="p-4">
+          <GroupedResultsView experimentId={experimentId} />
+        </div>
+      ) : (
         <>
-          {/* Header row */}
-          <div className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted`}>
-            <span></span>
-            <span>Time (d)</span>
-            <span>Sample Date</span>
-            <span>Gross NH₄ (mM)</span>
-            <span>NH₄ (g/t)</span>
-            <span>Fe²⁺ NH₃ (%)</span>
-            <span>H₂ (µmol)</span>
-            <span>H₂ (g/t)</span>
-            <span>Fe²⁺ H₂ (%)</span>
-            <span>pH</span>
-            <span>Cond. (mS/cm)</span>
-            <span>ICP / XRD / MOD</span>
-            <span></span>
-          </div>
-          {results.map((r) => (
-            <div key={r.id}>
-              <div
-                className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center`}
-                onClick={() => toggle(r.id)}
-              >
-                <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
-                <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_nh3_pct)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_h2_pct)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
-                <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
-                <span className="flex items-center gap-1">
-                  {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
-                  {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
-                  {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
-                </span>
-                <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
+          {/* Empty state */}
+          {!results?.length && (
+            <p className="text-sm text-ink-muted p-4 text-center">No results recorded</p>
+          )}
+
+          {results && results.length > 0 && (
+            <>
+              {/* Header row */}
+              <div className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted`}>
+                <span></span>
+                <span>Time (d)</span>
+                <span>Sample Date</span>
+                <span>Gross NH₄ (mM)</span>
+                <span>NH₄ (g/t)</span>
+                <span>Fe²⁺ NH₃ (%)</span>
+                <span>H₂ (µmol)</span>
+                <span>H₂ (g/t)</span>
+                <span>Fe²⁺ H₂ (%)</span>
+                <span>pH</span>
+                <span>Cond. (mS/cm)</span>
+                <span>ICP / XRD / MOD</span>
+                <span></span>
               </div>
-              {expanded.has(r.id) && <ExpandedRow result={r} />}
-            </div>
-          ))}
+              {results.map((r) => (
+                <div key={r.id}>
+                  <div
+                    className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center`}
+                    onClick={() => toggle(r.id)}
+                  >
+                    <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
+                    <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.gross_ammonium_concentration_mM)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.grams_per_ton_yield)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_nh3_pct)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_h2_pct)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
+                    <span className="flex items-center gap-1">
+                      {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
+                      {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
+                      {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
+                    </span>
+                    <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
+                  </div>
+                  {expanded.has(r.id) && <ExpandedRow result={r} />}
+                </div>
+              ))}
+            </>
+          )}
         </>
       )}
 

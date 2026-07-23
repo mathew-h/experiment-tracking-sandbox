@@ -182,3 +182,29 @@ class ICPResponse(ICPCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: datetime
+
+
+class RollupTimepointResponse(BaseModel):
+    """One row of v_results_scalar_rollup: cross-replicate stats per timepoint bucket.
+
+    Field names match the view's (quoted, mixed-case) column aliases exactly.
+    """
+    base_experiment_id: str
+    time_post_reaction_bucket_days: Optional[float] = None
+    n_replicates: int
+    mean_gross_ammonium_mM: Optional[float] = None
+    median_gross_ammonium_mM: Optional[float] = None
+    sd_gross_ammonium_mM: Optional[float] = None
+    mean_net_ammonium_mM: Optional[float] = None
+    sd_net_ammonium_mM: Optional[float] = None
+    mean_h2_micromoles: Optional[float] = None
+    sd_h2_micromoles: Optional[float] = None
+    mean_h2_grams_per_ton: Optional[float] = None
+    sd_h2_grams_per_ton: Optional[float] = None
+    mean_fe_yield_h2_pct: Optional[float] = None
+    sd_fe_yield_h2_pct: Optional[float] = None
+    mean_fe_yield_nh3_pct: Optional[float] = None
+    sd_fe_yield_nh3_pct: Optional[float] = None
+    mean_grams_per_ton_yield: Optional[float] = None
+    sd_grams_per_ton_yield: Optional[float] = None
+    mean_final_ph: Optional[float] = None

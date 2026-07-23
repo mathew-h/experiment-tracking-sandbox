@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { experimentsApi } from '@/api/experiments'
+import { experimentsApi, type CreateReplicatesResponse } from '@/api/experiments'
 import { conditionsApi } from '@/api/conditions'
 import { chemicalsApi } from '@/api/chemicals'
 import { Card, CardHeader, CardBody, useToast } from '@/components/ui'
@@ -49,6 +49,7 @@ export function NewExperimentPage() {
   const [step1, setStep1] = useState(defaultStep1)
   const [step2, setStep2] = useState(defaultStep2)
   const [additives, setAdditives] = useState<AdditiveRow[]>([])
+  const [replicateCount, setReplicateCount] = useState(0)
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null)
   const [copyBannerDismissed, setCopyBannerDismissed] = useState(false)
 
@@ -165,11 +166,35 @@ export function NewExperimentPage() {
         }
       }
 
-      return exp
+      // 5. Create replicates (server-side copies conditions + additives from the parent)
+      let replicates: CreateReplicatesResponse | null = null
+      let replicateError: string | null = null
+      if (replicateCount > 0) {
+        try {
+          const res = await experimentsApi.createReplicates({
+            base_experiment_id: exp.experiment_id,
+            count: replicateCount,
+          })
+          replicates = res
+        } catch {
+          // Parent + conditions + additives already exist at this point; a replicate
+          // failure must not report the whole creation as failed.
+          replicateError =
+            'Replicates could not be created — the experiment itself was saved. Use "Create Replicates" on the experiment page.'
+        }
+      }
+      return { exp, replicates, replicateError }
     },
-    onSuccess: (exp) => {
+    onSuccess: ({ exp, replicates, replicateError }) => {
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
-      success('Experiment created', exp.experiment_id)
+      const replicaSuffix = replicates?.created.length
+        ? `, plus ${replicates.created.length} replicates`
+        : ''
+      success('Experiment created', `${exp.experiment_id}${replicaSuffix}`)
+      replicates?.skipped.forEach((msg) => toastError('Replicate skipped', msg))
+      if (replicateError) {
+        toastError('Replicate creation failed', replicateError)
+      }
       navigate(`/experiments/${exp.experiment_id}`)
     },
     onError: (err: Error) => {
@@ -204,6 +229,8 @@ export function NewExperimentPage() {
       step1={step1}
       step2={step2}
       additives={additives}
+      replicateCount={replicateCount}
+      onReplicateCountChange={setReplicateCount}
       onBack={() => setStep(2)}
       onSubmit={() => mutation.mutate()}
       isSubmitting={mutation.isPending}

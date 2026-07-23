@@ -421,9 +421,70 @@ def update_orphaned_derivations(db: Session, base_experiment_id: str):
     return count
 
 
+# Fields never copied when cloning conditions from a parent experiment.
+_CONDITIONS_COPY_RESERVED = {"id", "experiment_id", "experiment_fk", "created_at", "updated_at"}
+_CONDITIONS_COPY_BLACKLIST = {
+    "catalyst", "catalyst_mass",
+    "buffer_system", "buffer_concentration",
+    "surfactant_type", "surfactant_concentration",
+    "catalyst_percentage", "catalyst_ppm",
+    "water_to_rock_ratio",  # Calculated field
+    "ammonium_chloride_concentration",
+}
+
+# Derived/identity additive columns owned by the calc engine or the DB, never copied.
+_ADDITIVE_COPY_RESERVED = {
+    "id", "experiment_id", "created_at", "updated_at",
+    "mass_in_grams", "moles_added", "final_concentration", "concentration_units",
+    "elemental_metal_mass", "catalyst_percentage", "catalyst_ppm",
+}
+
+
+def _copy_conditions_from_parent(db: Session, parent, new_experiment, include_additives: bool):
+    """Clone parent's ExperimentalConditions (and optionally chemical additives)
+    onto new_experiment. Flushes; does not commit. Returns the new conditions
+    row or None when the parent has no conditions."""
+    from .models import ExperimentalConditions, ChemicalAdditive
+
+    if not parent.conditions:
+        return None
+
+    updatable_attrs = {
+        col.name for col in ExperimentalConditions.__table__.columns
+        if col.name not in _CONDITIONS_COPY_RESERVED
+        and col.name not in _CONDITIONS_COPY_BLACKLIST
+    }
+    new_conditions = ExperimentalConditions(
+        experiment_id=new_experiment.experiment_id,
+        experiment_fk=new_experiment.id,
+    )
+    for attr in updatable_attrs:
+        parent_value = getattr(parent.conditions, attr, None)
+        if parent_value is not None:
+            setattr(new_conditions, attr, parent_value)
+    db.add(new_conditions)
+    db.flush()
+
+    if include_additives:
+        additive_attrs = {
+            col.name for col in ChemicalAdditive.__table__.columns
+            if col.name not in _ADDITIVE_COPY_RESERVED
+        }
+        for parent_additive in parent.conditions.chemical_additives:
+            new_additive = ChemicalAdditive(experiment_id=new_conditions.id)
+            for attr in additive_attrs:
+                value = getattr(parent_additive, attr, None)
+                if value is not None:
+                    setattr(new_additive, attr, value)
+            db.add(new_additive)
+        db.flush()
+
+    return new_conditions
+
+
 def auto_create_treatment_experiment(
-    db: Session, 
-    experiment_id: str, 
+    db: Session,
+    experiment_id: str,
     initial_note: str
 ) -> Optional['Experiment']:
     """
@@ -445,9 +506,9 @@ def auto_create_treatment_experiment(
         - Sets status to COMPLETED
         - Uses current date/time
     """
-    from .models import Experiment, ExperimentNotes, ExperimentalConditions
+    from .models import Experiment, ExperimentNotes
     from datetime import datetime
-    
+
     base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(experiment_id)
 
     # Only auto-create treatment variants, not sequential experiments
@@ -487,39 +548,88 @@ def auto_create_treatment_experiment(
         db.add(note)
     
     # Copy conditions from parent
-    if parent.conditions:
-        # Define fields that should not be copied (PKs, FKs, metadata, calculated)
-        reserved = {"id", "experiment_id", "experiment_fk", "created_at", "updated_at"}
-        blacklist = {
-            "catalyst", "catalyst_mass",
-            "buffer_system", "buffer_concentration",
-            "surfactant_type", "surfactant_concentration",
-            "catalyst_percentage", "catalyst_ppm",
-            "water_to_rock_ratio",  # Calculated field
-            "ammonium_chloride_concentration",
-        }
-        updatable_attrs = {
-            col.name for col in ExperimentalConditions.__table__.columns
-            if col.name not in reserved and col.name not in blacklist
-        }
-        
-        new_conditions = ExperimentalConditions(
-            experiment_id=new_experiment.experiment_id,
-            experiment_fk=new_experiment.id,
-        )
-        
-        # Copy all updatable fields from parent
-        for attr in updatable_attrs:
-            parent_value = getattr(parent.conditions, attr, None)
-            if parent_value is not None:
-                setattr(new_conditions, attr, parent_value)
-        
-        db.add(new_conditions)
-        db.flush()
-    
+    _copy_conditions_from_parent(db, parent, new_experiment, include_additives=False)
+
     # Establish lineage
     update_experiment_lineage(db, new_experiment)
     db.flush()
-    
+
     return new_experiment
+
+
+def create_replicate_experiments(
+    db: Session, base_experiment_id: str, count: int
+) -> tuple[list['Experiment'], list[str]]:
+    """Create `count` lettered replicate experiments under a base experiment.
+
+    The base (replicate 0) experiment acts as the template: sample, researcher,
+    date, conditions, and chemical additives are copied to each new replicate;
+    per-vial actuals stay editable afterwards. Letters continue after any
+    existing members (a, b already present -> c, d, ...). Lineage fields are
+    wired by the before_flush listener. Flushes; the caller owns the commit.
+
+    Returns (created_experiments, skipped_messages). Conflicting IDs are
+    skipped with a message, not fatal (issue #70 locked decision 3).
+    Raises LookupError when no parent/template experiment exists.
+    """
+    from .models import Experiment
+
+    stem, _seq, _treat, _label = parse_experiment_id(base_experiment_id)
+    stem = stem or base_experiment_id
+
+    parent = find_replicate_group_parent(db, stem)
+    if parent is None:
+        raise LookupError(
+            f"No parent experiment found for base '{stem}' — create the base experiment first"
+        )
+
+    existing_labels = {
+        label for (label,) in db.query(Experiment.replicate_label)
+        .filter(Experiment.base_experiment_id == stem,
+                Experiment.replicate_label.isnot(None))
+        .all()
+    }
+
+    candidates = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in existing_labels]
+    created: list[Experiment] = []
+    skipped: list[str] = []
+    if len(candidates) < count:
+        skipped.append(
+            f"Only {len(candidates)} replicate letters remain for '{stem}' "
+            f"(requested {count}); creating {len(candidates)}."
+        )
+
+    last = db.query(Experiment).order_by(Experiment.experiment_number.desc()).first()
+    next_number = 1 if last is None else int(last.experiment_number or 0) + 1
+
+    for letter in candidates[:count]:
+        new_id = f"{stem}{letter}"
+        if _find_experiment_by_exact_spelling(db, new_id) is not None:
+            skipped.append(f"'{new_id}' already exists — skipped, not overwritten.")
+            continue
+        new_experiment = Experiment(
+            experiment_number=next_number,
+            experiment_id=new_id,
+            sample_id=parent.sample_id,
+            researcher=parent.researcher,
+            status=parent.status,
+            date=parent.date,
+        )
+        next_number += 1
+        db.add(new_experiment)
+        db.flush()  # assigns PK + triggers lineage wiring via before_flush
+
+        new_conditions = _copy_conditions_from_parent(
+            db, parent, new_experiment, include_additives=True
+        )
+        if new_conditions is not None:
+            from backend.services.calculations.registry import recalculate
+            recalculate(new_conditions, db)
+            for additive in new_conditions.chemical_additives:
+                recalculate(additive, db)
+            db.flush()
+
+        created.append(new_experiment)
+
+    return created, skipped
 

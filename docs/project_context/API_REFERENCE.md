@@ -7,12 +7,15 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column). `experiment_type`, `reactor_number`, and `description` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
+| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, and `description` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags |
+| GET | `/api/experiments/{experiment_id}/rollup` | Cross-replicate mean/median/std per timepoint bucket from `v_results_scalar_rollup` |
+| GET | `/api/experiments/{experiment_id}/replicate-group` | The lettered replicate set (parent + members) this experiment belongs to |
 | POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
+| POST | `/api/experiments/replicates` | Batch-create lettered replicates copying a base experiment's setup |
 | PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, and experiment_id (rename) |
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
@@ -41,6 +44,107 @@ or
 ```
 
 **Usage:** Called by the frontend on a 300 ms debounce while the user types a custom ID, to show real-time availability feedback without submitting the form.
+
+### GET /api/experiments — `group_replicates`
+
+When `group_replicates=true`, pagination runs over **top-level rows** instead of raw experiment rows:
+
+- A row is top-level when `replicate_label IS NULL OR parent_experiment_fk IS NULL`.
+- A lettered replicate that matches the active filters is represented by its parent row instead of itself — i.e. filtering that matches only `SERUM_001b` still pulls `SERUM_001` (the parent) into the page, with `b` attached as a child.
+- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, and `replicate_label`.
+- In grouped mode, each parent row additionally gets a `replicates` array: its lettered children (`replicate_label IS NOT NULL`, `parent_experiment_fk` pointing at this row), ordered by letter. Children are attached in full regardless of whether they individually matched the filters — that's the point of grouping. Non-parent items have `replicates: null`.
+- `total` counts top-level rows, not raw experiment rows.
+- Flat mode (`group_replicates=false`, the default) is unchanged — every experiment row is returned individually.
+
+Example grouped item:
+```json
+{
+  "id": 210,
+  "experiment_id": "SERUM_001",
+  "base_experiment_id": null,
+  "parent_experiment_fk": null,
+  "replicate_label": null,
+  "replicates": [
+    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "parent_experiment_fk": 210, "replicates": null },
+    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "replicates": null }
+  ]
+}
+```
+
+### GET /api/experiments/{experiment_id}/rollup
+
+Cross-replicate mean/median/std per timepoint bucket, sourced from the `v_results_scalar_rollup` reporting view (see `MODELS.md`).
+
+**Auth:** Required (Firebase token)
+
+**Path params:**
+- `experiment_id` — any member of the group (base, parent, or a lettered replicate) — the endpoint resolves the group key itself.
+
+**Grouping key:** `COALESCE(base_experiment_id, experiment_id)` for the given experiment — i.e. its `base_experiment_id` if set, else its own `experiment_id`.
+
+**Response `200`:** array of rows, one per `time_post_reaction_bucket_days`, ordered ascending. 19 fields per row:
+`base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`.
+
+**Errors:**
+- `404 Not Found` — no experiment matches `experiment_id`
+
+**Caveat (MODELS.md):** the grouping key does not distinguish a lettered replicate set from an ordinary sequential re-run sharing the same `base_experiment_id` (e.g. `HPHT_001` + `HPHT_001-2`). `n_replicates >= 2` on this endpoint does not by itself confirm the group is a lettered replicate set — check case-by-case.
+
+### GET /api/experiments/{experiment_id}/replicate-group
+
+The lettered replicate set (if any) that `experiment_id` belongs to.
+
+**Auth:** Required (Firebase token)
+
+**Response `200`:**
+```json
+{
+  "base_experiment_id": "SERUM_001",
+  "parent": { "id": 210, "experiment_id": "SERUM_001", "replicate_label": null, "status": "ONGOING" },
+  "members": [
+    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "status": "ONGOING" },
+    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING" }
+  ]
+}
+```
+
+**Semantics:**
+- `members` is `[]` for a non-replicate solo experiment (no lettered children, no parent).
+- **Orphan members:** if a lettered member's parent row doesn't exist (or was deleted), `parent` is `null` and `members` still lists the siblings, resolved by matching `base_experiment_id` directly rather than via the parent FK.
+
+**Errors:**
+- `404 Not Found` — no experiment matches `experiment_id`
+
+### POST /api/experiments/replicates
+
+Batch-create lettered replicates copying a base experiment's setup.
+
+**Auth:** Required (Firebase token)
+
+**Request body:**
+```json
+{ "base_experiment_id": "SERUM_001", "count": 3 }
+```
+- `base_experiment_id` (string, required) — the stem; either the bare base or an explicit `S-0`/`S-1` group-parent spelling resolves to the same parent.
+- `count` (int, 1–25, default 3)
+
+**Response `201`:**
+```json
+{
+  "created": [ /* ExperimentResponse-shaped objects, one per new replicate */ ],
+  "skipped": [ "'SERUM_001a' already exists — skipped, not overwritten." ]
+}
+```
+
+**Copy semantics:** each new replicate copies the base (parent) experiment's `sample_id`, `researcher`, `status`, `date`, its `ExperimentalConditions` row, and all `ChemicalAdditive` rows; the calc engine re-runs on the copied conditions and additives. Per-vial actuals (e.g. measured mass, actual reactor) are left as copies and are expected to be edited per replicate afterwards.
+
+**Letter assignment:** continues after any existing lettered members for the base (e.g. `a`, `b` already present → new replicates get `c`, `d`, ...).
+
+**Conflict handling:** a per-letter ID collision (an experiment already exists at that exact ID) is skipped with a message in `skipped` — it is never fatal; other requested replicates in the same call still get created. If fewer free letters remain than `count`, a message is added to `skipped` and only the available letters are created.
+
+**Errors:**
+- `404 Not Found` — no base/parent experiment exists for `base_experiment_id` (create the base experiment first)
+- `409 Conflict` — unexpected IntegrityError on creation (distinct from the normal skip path above)
 
 ### PATCH /api/experiments/{experiment_id}
 
