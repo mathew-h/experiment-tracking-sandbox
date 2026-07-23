@@ -64,7 +64,7 @@ class TestExperimentLineageMigration:
             # Derivations with existing parents
             ("HPHT_MH_001-2", 4, "First derivation of HPHT_MH_001"),
             ("HPHT_MH_001-3", 5, "Second derivation of HPHT_MH_001"),
-            ("HPHT_MH_002-1", 6, "First derivation of HPHT_MH_002"),
+            ("HPHT_MH_002-2", 6, "First derivation of HPHT_MH_002"),
             
             # Orphaned derivation (parent doesn't exist)
             ("ORPHANED_EXP_001-1", 7, "Derivation with no parent"),
@@ -136,44 +136,53 @@ class TestExperimentLineageMigration:
     def test_parse_experiment_id(self):
         """Test parsing of experiment IDs to identify derivations and treatments."""
         # Base experiments — underscore-index format
-        assert parse_experiment_id("HPHT_MH_001") == ("HPHT_MH_001", None, None)
-        assert parse_experiment_id("LEACH_TEST") == ("LEACH_TEST", None, None)
+        assert parse_experiment_id("HPHT_MH_001") == ("HPHT_MH_001", None, None, None)
+        assert parse_experiment_id("LEACH_TEST") == ("LEACH_TEST", None, None, None)
 
         # Sequential derivations — prefix must end in _digits or -digits
-        assert parse_experiment_id("HPHT_MH_001-2") == ("HPHT_MH_001", 2, None)
-        assert parse_experiment_id("HPHT_MH_001-10") == ("HPHT_MH_001", 10, None)
-        assert parse_experiment_id("HPHT_001-2") == ("HPHT_001", 2, None)
+        assert parse_experiment_id("HPHT_MH_001-2") == ("HPHT_MH_001", 2, None, None)
+        assert parse_experiment_id("HPHT_MH_001-10") == ("HPHT_MH_001", 10, None, None)
+        assert parse_experiment_id("HPHT_001-2") == ("HPHT_001", 2, None, None)
 
         # CF-style IDs: TYPE-NNN — the prefix ("CF") does NOT end in digits,
         # so these are standalone base experiments, not derivations.
-        assert parse_experiment_id("CF-015") == ("CF-015", None, None)
-        assert parse_experiment_id("CF-12") == ("CF-12", None, None)
-        assert parse_experiment_id("CF-04") == ("CF-04", None, None)
+        assert parse_experiment_id("CF-015") == ("CF-015", None, None, None)
+        assert parse_experiment_id("CF-12") == ("CF-12", None, None, None)
+        assert parse_experiment_id("CF-04") == ("CF-04", None, None, None)
 
         # CF-015-2 IS a derivation because its prefix "CF-015" ends in -015 (digits)
-        assert parse_experiment_id("CF-015-2") == ("CF-015", 2, None)
+        assert parse_experiment_id("CF-015-2") == ("CF-015", 2, None, None)
 
         # Former synthetic test cases — now recognised as base experiments
         # (their prefixes don't end in digits, so trailing -N is not a derivation)
-        assert parse_experiment_id("COMPLEX-ID-TEST-3") == ("COMPLEX-ID-TEST-3", None, None)
-        assert parse_experiment_id("TEST-SAMPLE-001") == ("TEST-SAMPLE-001", None, None)
+        assert parse_experiment_id("COMPLEX-ID-TEST-3") == ("COMPLEX-ID-TEST-3", None, None, None)
+        assert parse_experiment_id("TEST-SAMPLE-001") == ("TEST-SAMPLE-001", None, None, None)
 
         # Non-derivations with hyphens (last part is NOT numeric)
-        assert parse_experiment_id("TEST-SAMPLE-ABC") == ("TEST-SAMPLE-ABC", None, None)
-        assert parse_experiment_id("HPHT-HIGH-TEMP") == ("HPHT-HIGH-TEMP", None, None)
+        assert parse_experiment_id("TEST-SAMPLE-ABC") == ("TEST-SAMPLE-ABC", None, None, None)
+        assert parse_experiment_id("HPHT-HIGH-TEMP") == ("HPHT-HIGH-TEMP", None, None, None)
 
         # Treatment variants (underscore-TEXT suffix)
-        assert parse_experiment_id("HPHT_MH_001_Desorption") == ("HPHT_MH_001", None, "Desorption")
-        assert parse_experiment_id("Serum_MH_101_Annealing") == ("Serum_MH_101", None, "Annealing")
+        assert parse_experiment_id("HPHT_MH_001_Desorption") == ("HPHT_MH_001", None, "Desorption", None)
+        assert parse_experiment_id("Serum_MH_101_Annealing") == ("Serum_MH_101", None, "Annealing", None)
 
         # Combined sequential + treatment — treatment stripped first, then sequential detected
-        assert parse_experiment_id("HPHT_MH_001-2_Desorption") == ("HPHT_MH_001", 2, "Desorption")
-        assert parse_experiment_id("Serum_MH_101-3_Annealing") == ("Serum_MH_101", 3, "Annealing")
+        assert parse_experiment_id("HPHT_MH_001-2_Desorption") == ("HPHT_MH_001", 2, "Desorption", None)
+        assert parse_experiment_id("Serum_MH_101-3_Annealing") == ("Serum_MH_101", 3, "Annealing", None)
+
+        # Explicit parent spellings (issue #69)
+        assert parse_experiment_id("HPHT_MH_001-0") == ("HPHT_MH_001", 0, None, None)
+        assert parse_experiment_id("HPHT_MH_001-1") == ("HPHT_MH_001", 1, None, None)
+
+        # Replicate letters (issue #69)
+        assert parse_experiment_id("SERUM_001a") == ("SERUM_001", None, None, "a")
+        assert parse_experiment_id("Serum_MH_101a") == ("Serum_MH_101", None, None, "a")
+        assert parse_experiment_id("SERUM_001a-2") == ("SERUM_001", 2, None, "a")
 
         # Edge cases
-        assert parse_experiment_id("") == (None, None, None)
-        assert parse_experiment_id(None) == (None, None, None)
-        assert parse_experiment_id("   ") == (None, None, None)
+        assert parse_experiment_id("") == (None, None, None, None)
+        assert parse_experiment_id(None) == (None, None, None, None)
+        assert parse_experiment_id("   ") == (None, None, None, None)
     
     def test_get_or_find_parent_experiment(self, test_db_session, sample_experiments):
         """Test finding parent experiments for derivations."""
@@ -248,7 +257,7 @@ class TestExperimentLineageMigration:
             # Verify summary statistics
             assert summary['experiments_scanned'] == 8
             assert summary['derivations_found'] == 4
-            assert summary['parents_linked'] == 3  # HPHT_MH_001-2, HPHT_MH_001-3, HPHT_MH_002-1
+            assert summary['parents_linked'] == 3  # HPHT_MH_001-2, HPHT_MH_001-3, HPHT_MH_002-2
             assert summary['orphaned_derivations'] == 1  # ORPHANED_EXP_001-1
             assert summary['errors'] == 0
             

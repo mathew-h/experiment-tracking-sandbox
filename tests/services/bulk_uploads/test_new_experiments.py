@@ -154,3 +154,47 @@ def test_new_experiment_creation_path_unaffected(db_session: Session):
     assert exp is not None
     assert exp.status == ExperimentStatus.ONGOING
     assert exp.researcher == "AB"
+
+
+def test_duplicate_replicate_id_skips_with_clear_warning_not_crash(db_session: Session):
+    """Creating a replicate ID that already exists (overwrite=False) must produce a
+    clear warning and skip the row — never raise or silently overwrite."""
+    _seed_experiment(db_session, "HPHT_I69_001a", 69001, status=ExperimentStatus.ONGOING)
+
+    xlsx = _experiments_excel([
+        ["HPHT_I69_001a", None, None, "MH", "2026-02-01", "ONGOING", None, False],
+    ])
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == []
+    assert created == 0
+    assert updated == 0
+    assert any("already exists" in w and "HPHT_I69_001a" in w for w in warnings), (
+        f"expected a clear conflict warning naming the ID, got: {warnings}"
+    )
+
+
+def test_creating_three_replicates_via_bulk_upload(db_session: Session):
+    """Creating SERUM_001a/b/c in one upload yields three experiments sharing a base."""
+    xlsx = _experiments_excel([
+        ["HPHT_I69_010a", None, None, "MH", "2026-02-01", "ONGOING", "Replicate a", False],
+        ["HPHT_I69_010b", None, None, "MH", "2026-02-01", "ONGOING", "Replicate b", False],
+        ["HPHT_I69_010c", None, None, "MH", "2026-02-01", "ONGOING", "Replicate c", False],
+    ])
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == []
+    assert created == 3
+
+    rep_a = db_session.query(Experiment).filter_by(experiment_id="HPHT_I69_010a").first()
+    rep_b = db_session.query(Experiment).filter_by(experiment_id="HPHT_I69_010b").first()
+    rep_c = db_session.query(Experiment).filter_by(experiment_id="HPHT_I69_010c").first()
+
+    assert rep_a.base_experiment_id == "HPHT_I69_010"
+    assert rep_b.base_experiment_id == "HPHT_I69_010"
+    assert rep_c.base_experiment_id == "HPHT_I69_010"
+    assert {rep_a.replicate_label, rep_b.replicate_label, rep_c.replicate_label} == {"a", "b", "c"}

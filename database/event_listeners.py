@@ -488,7 +488,7 @@ _VIEWS = [
             sr.ferrous_iron_yield,
             sr.ferrous_iron_yield_h2_pct,
             SUM(COALESCE(sr.ferrous_iron_yield_h2_pct, 0)) OVER (
-                PARTITION BY COALESCE(e.base_experiment_id, e.experiment_id)
+                PARTITION BY e.experiment_id
                 ORDER BY er.cumulative_time_post_reaction_days, er.id
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
             ) AS cumulative_ferrous_iron_yield_h2_pct,
@@ -507,6 +507,46 @@ _VIEWS = [
         JOIN experiments e        ON e.id  = er.experiment_fk
         LEFT JOIN scalar_results sr ON sr.result_id = er.id
         WHERE er.is_primary_timepoint_result = TRUE
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_scalar_rollup
+    # One row per (base_experiment_id, timepoint bucket). Cross-replicate
+    # mean/median/std for a replicate set (or a single non-replicate
+    # experiment, which yields n_replicates=1 and NULL std). No outlier
+    # filter and no ICP aggregation in P1 (see issue #69 P4).
+    # ------------------------------------------------------------------
+    ("v_results_scalar_rollup", """
+        CREATE VIEW v_results_scalar_rollup AS
+        SELECT
+            COALESCE(e.base_experiment_id, e.experiment_id)              AS base_experiment_id,
+            er.time_post_reaction_bucket_days,
+            COUNT(sr.result_id)                                          AS n_replicates,
+            AVG(sr."gross_ammonium_concentration_mM")                   AS "mean_gross_ammonium_mM",
+            percentile_cont(0.5) WITHIN GROUP (
+                ORDER BY sr."gross_ammonium_concentration_mM")          AS "median_gross_ammonium_mM",
+            stddev_samp(sr."gross_ammonium_concentration_mM")           AS "sd_gross_ammonium_mM",
+            AVG(GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM"))
+                                                                        AS "mean_net_ammonium_mM",
+            stddev_samp(GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM"))
+                                                                        AS "sd_net_ammonium_mM",
+            AVG(sr.h2_micromoles)                                       AS mean_h2_micromoles,
+            stddev_samp(sr.h2_micromoles)                               AS sd_h2_micromoles,
+            AVG(sr.h2_grams_per_ton_yield)                              AS mean_h2_grams_per_ton,
+            stddev_samp(sr.h2_grams_per_ton_yield)                      AS sd_h2_grams_per_ton,
+            AVG(sr.ferrous_iron_yield_h2_pct)                           AS mean_fe_yield_h2_pct,
+            stddev_samp(sr.ferrous_iron_yield_h2_pct)                   AS sd_fe_yield_h2_pct,
+            AVG(sr.ferrous_iron_yield_nh3_pct)                          AS mean_fe_yield_nh3_pct,
+            stddev_samp(sr.ferrous_iron_yield_nh3_pct)                  AS sd_fe_yield_nh3_pct,
+            AVG(sr.grams_per_ton_yield)                                 AS mean_grams_per_ton_yield,
+            stddev_samp(sr.grams_per_ton_yield)                         AS sd_grams_per_ton_yield,
+            AVG(sr.final_ph)                                            AS mean_final_ph
+        FROM experimental_results er
+        JOIN experiments e         ON e.id  = er.experiment_fk
+        LEFT JOIN scalar_results sr ON sr.result_id = er.id
+        WHERE er.is_primary_timepoint_result = TRUE
+        GROUP BY COALESCE(e.base_experiment_id, e.experiment_id),
+                 er.time_post_reaction_bucket_days
     """),
 
     # ------------------------------------------------------------------
@@ -637,30 +677,37 @@ def calculate_additive_derived_values(mapper, connection, target):
 def update_experiment_lineage_on_flush(session, flush_context, instances):
     """
     Automatically update experiment lineage fields before flushing.
-    
+
     This listener:
     1. Parses experiment IDs for new experiments
-    2. Sets base_experiment_id and parent_experiment_fk
-    3. Updates orphaned derivations when a base experiment is created
+    2. Sets base_experiment_id, parent_experiment_fk, and replicate_label
+    3. Updates orphaned derivations when a group parent (bare stem, or an
+       explicit -0/-1 spelling) is created
     """
     from .models import Experiment
-    
-    # Track base experiments being inserted to update their derivations
-    new_base_experiments = []
-    
+    from .lineage_utils import parse_experiment_id
+
+    # Track group-parent stems being inserted, to update their derivations
+    new_parent_stems = []
+
     # Process new experiments
     for obj in session.new:
         if isinstance(obj, Experiment) and obj.experiment_id:
             # Update lineage for this experiment
             update_experiment_lineage(session, obj)
-            
-            # Track if this is a potential base experiment (no derivation number)
-            from .lineage_utils import parse_experiment_id
-            _, derivation_num, _ = parse_experiment_id(obj.experiment_id)
-            if derivation_num is None:
-                new_base_experiments.append(obj.experiment_id)
-    
+
+            # Track if this row is a group parent (bare stem, or explicit -0/-1
+            # spelling) so any pre-existing orphaned derivations can be linked.
+            base_id, derivation_num, treatment_variant, replicate_label = parse_experiment_id(obj.experiment_id)
+            is_parent_row = (
+                treatment_variant is None
+                and replicate_label is None
+                and (derivation_num is None or derivation_num in (0, 1))
+            )
+            if is_parent_row:
+                new_parent_stems.append(base_id or obj.experiment_id)
+
     # After processing new experiments, update any orphaned derivations
-    # This handles the case where a derivation was created before its base
-    for base_exp_id in new_base_experiments:
-        update_orphaned_derivations(session, base_exp_id) 
+    # This handles the case where a derivation was created before its parent
+    for stem in new_parent_stems:
+        update_orphaned_derivations(session, stem) 

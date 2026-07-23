@@ -160,9 +160,10 @@ class TestSimpleRename:
         
         assert renamed.experiment_id == 'HPHT_MH_036_Desorption'
         # Lineage should be recalculated: treatment variant of base
-        base_id, deriv_num, treatment = parse_experiment_id(renamed.experiment_id)
+        base_id, deriv_num, treatment, replicate_label = parse_experiment_id(renamed.experiment_id)
         assert base_id == "HPHT_MH_036"
         assert deriv_num is None
+        assert replicate_label is None
         assert treatment == "Desorption"
         
         db_session.rollback()
