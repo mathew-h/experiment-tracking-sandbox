@@ -781,3 +781,28 @@ def test_create_replicate_experiment_sets_lineage(client, db_session):
     assert created.base_experiment_id == "LINE_REP_001"
     assert created.replicate_label == "a"
     assert created.parent_experiment_fk == parent.id
+
+
+class TestReplicateFieldsExposed:
+    def test_list_items_include_replicate_lineage_fields(self, client, db_session):
+        parent = _make_experiment(db_session, experiment_id="RFLD_001", number=9700)
+        db_session.add(Experiment(experiment_id="RFLD_001a", experiment_number=9701,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?search=RFLD_001")
+        assert resp.status_code == 200
+        by_id = {i["experiment_id"]: i for i in resp.json()["items"]}
+        member = by_id["RFLD_001a"]
+        assert member["replicate_label"] == "a"
+        assert member["base_experiment_id"] == "RFLD_001"
+        assert member["parent_experiment_fk"] == parent.id
+        assert by_id["RFLD_001"]["replicate_label"] is None
+
+    def test_detail_includes_replicate_label(self, client, db_session):
+        _make_experiment(db_session, experiment_id="RFLD_002", number=9702)
+        db_session.add(Experiment(experiment_id="RFLD_002a", experiment_number=9703,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments/RFLD_002a")
+        assert resp.status_code == 200
+        assert resp.json()["replicate_label"] == "a"

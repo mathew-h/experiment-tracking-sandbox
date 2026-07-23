@@ -43,6 +43,9 @@ class ExperimentListItem(BaseModel):
     date: Optional[datetime] = None
     sample_id: Optional[str] = None
     created_at: datetime
+    base_experiment_id: Optional[str] = None
+    parent_experiment_fk: Optional[int] = None
+    replicate_label: Optional[str] = None
     # Joined from conditions (may be None if no conditions recorded yet)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
@@ -72,6 +75,7 @@ class ExperimentResponse(BaseModel):
     sample_id: Optional[str] = None
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
+    replicate_label: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
