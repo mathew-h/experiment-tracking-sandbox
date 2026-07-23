@@ -513,8 +513,10 @@ _VIEWS = [
     # v_results_scalar_rollup
     # One row per (base_experiment_id, timepoint bucket). Cross-replicate
     # mean/median/std for a replicate set (or a single non-replicate
-    # experiment, which yields n_replicates=1 and NULL std). No outlier
-    # filter and no ICP aggregation in P1 (see issue #69 P4).
+    # experiment, which yields n_replicates=1 and NULL std). Experiments
+    # flagged is_outlier are excluded from all aggregates including
+    # n_replicates (issue #70 P4) but stay in every per-row view.
+    # No ICP aggregation (permanently out of scope).
     # ------------------------------------------------------------------
     ("v_results_scalar_rollup", """
         CREATE VIEW v_results_scalar_rollup AS
@@ -545,6 +547,7 @@ _VIEWS = [
         JOIN experiments e         ON e.id  = er.experiment_fk
         LEFT JOIN scalar_results sr ON sr.result_id = er.id
         WHERE er.is_primary_timepoint_result = TRUE
+          AND NOT COALESCE(e.is_outlier, false)
         GROUP BY COALESCE(e.base_experiment_id, e.experiment_id),
                  er.time_post_reaction_bucket_days
     """),

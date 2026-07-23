@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text, Boolean, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -22,6 +22,7 @@ class Experiment(Base):
     base_experiment_id = Column(String, nullable=True, index=True)  # Base experiment ID (e.g., "HPHT_MH_001" for "HPHT_MH_001-2")
     parent_experiment_fk = Column(Integer, ForeignKey("experiments.id", ondelete="SET NULL"), nullable=True)  # FK to parent experiment
     replicate_label = Column(String, nullable=True, index=True)  # "a", "b", "c"; NULL = not a replicate. is_replicate == (replicate_label IS NOT NULL)
+    is_outlier = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # True = bad vial (leak, cracked septum): excluded from v_results_scalar_rollup aggregates incl. n_replicates; per-row views and own pages unaffected
 
     conditions = relationship("ExperimentalConditions", back_populates="experiment", uselist=False, cascade="all, delete-orphan")
     notes = relationship("ExperimentNotes", back_populates="experiment", cascade="all, delete-orphan", order_by="ExperimentNotes.created_at")
