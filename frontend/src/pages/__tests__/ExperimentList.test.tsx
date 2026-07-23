@@ -201,3 +201,56 @@ describe('ExperimentListPage — pagination reset on filter', () => {
     expect(lastCall?.skip).toBe(25)
   })
 }) // closes describe block
+
+function makeGroupedItem(): ExperimentListItem {
+  const base = {
+    status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
+    created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
+    additives_summary: null, condition_note: null,
+    base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
+    replicate_label: null as string | null,
+  }
+  return {
+    ...base, id: 1, experiment_id: 'SERUM_001', experiment_number: 100,
+    replicates: ['a', 'b', 'c'].map((letter, i) => ({
+      ...base, id: 10 + i, experiment_id: `SERUM_001${letter}`, experiment_number: 101 + i,
+      base_experiment_id: 'SERUM_001', parent_experiment_fk: 1, replicate_label: letter,
+    })),
+  }
+}
+
+describe('ExperimentListPage — replicate grouping', () => {
+  beforeEach(() => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [makeGroupedItem()], total: 1, skip: 0, limit: 25,
+    })
+  })
+  afterEach(() => { vi.clearAllMocks() })
+
+  it('sends group_replicates=true by default and renders the group summary', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    expect(vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]?.group_replicates).toBe(true)
+    expect(screen.getByText('3 replicates: a, b, c')).toBeInTheDocument()
+    expect(screen.queryByText('SERUM_001a')).not.toBeInTheDocument()
+  })
+
+  it('expands a group to show child rows', async () => {
+    const user = userEvent.setup()
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /expand replicates/i }))
+    expect(screen.getByText('SERUM_001a')).toBeInTheDocument()
+    expect(screen.getByText('SERUM_001c')).toBeInTheDocument()
+  })
+
+  it('turning the toggle off sends group_replicates undefined', async () => {
+    const user = userEvent.setup()
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    await user.click(screen.getByRole('checkbox', { name: /group replicates/i }))
+    await waitFor(() => {
+      expect(vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]?.group_replicates).toBeUndefined()
+    })
+  })
+})

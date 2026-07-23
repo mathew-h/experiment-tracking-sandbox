@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
+import { experimentsApi, type ExperimentListItem, type ExperimentStatus } from '@/api/experiments'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
   Button, Input, Select, PageSpinner,
@@ -31,7 +31,6 @@ const PAGE_SIZES = [25, 50, 100]
 /** Paginated, filterable experiment list with status badges and quick-nav links. */
 export function ExperimentListPage() {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
 
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -43,8 +42,10 @@ export function ExperimentListPage() {
   const [dateTo, setDateTo] = useState('')
   const [skip, setSkip] = useState(0)
   const [limit, setLimit] = useState(25)
+  const [groupReplicates, setGroupReplicates] = useState(true)
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
 
-  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, skip, limit]
+  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, skip, limit, groupReplicates]
   const { data, isLoading, error } = useQuery({
     queryKey,
     queryFn: () => experimentsApi.list({
@@ -58,13 +59,8 @@ export function ExperimentListPage() {
       date_to: dateTo || undefined,
       skip,
       limit,
+      group_replicates: groupReplicates || undefined,
     }),
-  })
-
-  const statusMutation = useMutation({
-    mutationFn: ({ experimentId, status }: { experimentId: string; status: ExperimentStatus }) =>
-      experimentsApi.patchStatus(experimentId, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['experiments'] }),
   })
 
   const resetPage = () => setSkip(0)
@@ -161,6 +157,16 @@ export function ExperimentListPage() {
             onChange={(e) => { setDateTo(e.target.value); resetPage() }}
           />
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-ink-secondary pb-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            aria-label="Group replicates"
+            checked={groupReplicates}
+            onChange={(e) => { setGroupReplicates(e.target.checked); resetPage() }}
+            className="accent-brand-red"
+          />
+          Group replicates
+        </label>
         {hasActiveFilters && (
           <Button
             variant="ghost"
@@ -200,55 +206,39 @@ export function ExperimentListPage() {
                   <Td colSpan={8} className="text-center py-8 text-ink-muted">No experiments found</Td>
                 </TableRow>
               ) : (
-                data.items.map((exp) => (
-                  <TableRow
-                    key={exp.id}
-                    className="cursor-pointer"
-                    onClick={() => navigate(`/experiments/${exp.experiment_id}`)}
-                  >
-                    <Td className="font-mono-data text-ink-muted">{exp.experiment_number}</Td>
-                    <Td>
-                      <span className="font-mono-data text-red-400 hover:text-red-300">
-                        {exp.experiment_id}
-                      </span>
-                    </Td>
-                    <Td className="text-xs text-ink-secondary max-w-48 truncate">
-                      {exp.condition_note ?? <span className="text-ink-muted">—</span>}
-                    </Td>
-                    <Td className="font-mono-data text-xs">
-                      {exp.sample_id ?? <span className="text-ink-muted">—</span>}
-                    </Td>
-                    <Td className="font-mono-data text-xs">
-                      {exp.reactor_number ?? <span className="text-ink-muted">—</span>}
-                    </Td>
-                    <Td onClick={(e) => e.stopPropagation()}>
-                      <div className="relative inline-block">
-                        <select
-                          className={[
-                            'appearance-none bg-surface-overlay border border-surface-border rounded',
-                            'pl-2 pr-6 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-red/50',
-                            STATUS_TEXT_CLASS[exp.status ?? ''] ?? 'text-ink-secondary',
-                          ].join(' ')}
-                          value={exp.status ?? ''}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value as ExperimentStatus })
-                          }
-                        >
-                          {STATUS_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                        <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-ink-muted text-2xs">▾</span>
-                      </div>
-                    </Td>
-                    <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? exp.date.slice(0, 10) : '—'}</Td>
-                    <Td className="text-xs text-ink-secondary max-w-48 truncate">
-                      {exp.additives_summary ?? <span className="text-ink-muted">—</span>}
-                    </Td>
-                  </TableRow>
-                ))
+                data.items.map((exp) => {
+                  const hasReplicates = !!exp.replicates?.length
+                  const expanded = expandedGroups.has(exp.id)
+                  return (
+                    <Fragment key={exp.id}>
+                      <ExperimentRow
+                        exp={exp}
+                        groupBadge={
+                          hasReplicates ? (
+                            <button
+                              aria-label="Expand replicates"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setExpandedGroups((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(exp.id)) next.delete(exp.id)
+                                  else next.add(exp.id)
+                                  return next
+                                })
+                              }}
+                              className="ml-2 inline-flex items-center gap-1 rounded bg-surface-raised px-1.5 py-0.5 text-2xs text-ink-secondary hover:text-ink-primary"
+                            >
+                              <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+                              {exp.replicates!.length} replicates: {exp.replicates!.map((r) => r.replicate_label).join(', ')}
+                            </button>
+                          ) : null
+                        }
+                      />
+                      {hasReplicates && expanded &&
+                        exp.replicates!.map((rep) => <ExperimentRow key={rep.id} exp={rep} child />)}
+                    </Fragment>
+                  )
+                })
               )}
             </TableBody>
           </Table>
@@ -290,5 +280,68 @@ export function ExperimentListPage() {
         </>
       )}
     </div>
+  )
+}
+
+/** A single experiment row; shared by group-parent and expanded-child rendering. */
+function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; child?: boolean; groupBadge?: ReactNode }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const statusMutation = useMutation({
+    mutationFn: ({ experimentId, status }: { experimentId: string; status: ExperimentStatus }) =>
+      experimentsApi.patchStatus(experimentId, status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['experiments'] }),
+  })
+
+  return (
+    <TableRow
+      className="cursor-pointer"
+      onClick={() => navigate(`/experiments/${exp.experiment_id}`)}
+    >
+      <Td className={`font-mono-data text-ink-muted ${child ? 'pl-6' : ''}`}>{exp.experiment_number}</Td>
+      <Td>
+        <span className={`font-mono-data text-red-400 hover:text-red-300 ${child ? 'pl-6 inline-flex items-center gap-1' : ''}`}>
+          {child && <span className="text-ink-muted">↳ {exp.replicate_label}</span>}
+          {exp.experiment_id}
+        </span>
+        {groupBadge}
+      </Td>
+      <Td className="text-xs text-ink-secondary max-w-48 truncate">
+        {exp.condition_note ?? <span className="text-ink-muted">—</span>}
+      </Td>
+      <Td className="font-mono-data text-xs">
+        {exp.sample_id ?? <span className="text-ink-muted">—</span>}
+      </Td>
+      <Td className="font-mono-data text-xs">
+        {exp.reactor_number ?? <span className="text-ink-muted">—</span>}
+      </Td>
+      <Td onClick={(e) => e.stopPropagation()}>
+        <div className="relative inline-block">
+          <select
+            className={[
+              'appearance-none bg-surface-overlay border border-surface-border rounded',
+              'pl-2 pr-6 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-red/50',
+              STATUS_TEXT_CLASS[exp.status ?? ''] ?? 'text-ink-secondary',
+            ].join(' ')}
+            value={exp.status ?? ''}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) =>
+              statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value as ExperimentStatus })
+            }
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-ink-muted text-2xs">▾</span>
+        </div>
+      </Td>
+      <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? exp.date.slice(0, 10) : '—'}</Td>
+      <Td className="text-xs text-ink-secondary max-w-48 truncate">
+        {exp.additives_summary ?? <span className="text-ink-muted">—</span>}
+      </Td>
+    </TableRow>
   )
 }
