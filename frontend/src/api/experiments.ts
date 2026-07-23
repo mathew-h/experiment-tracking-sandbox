@@ -156,8 +156,25 @@ export interface ReplicateGroup {
   members: ReplicateGroupMember[]
 }
 
+/** Mirrors backend ReplicateCreateResponse: created items are ExperimentResponse-shaped
+ *  (no conditions/notes/modifications). */
+export interface CreatedReplicate {
+  id: number
+  experiment_id: string
+  experiment_number: number
+  status: ExperimentStatus | null
+  researcher: string | null
+  date: string | null
+  sample_id: string | null
+  base_experiment_id: string | null
+  parent_experiment_fk: number | null
+  replicate_label: string | null
+  created_at: string
+  updated_at: string | null
+}
+
 export interface CreateReplicatesResponse {
-  created: ExperimentDetail[]
+  created: CreatedReplicate[]
   skipped: string[]
 }
 
