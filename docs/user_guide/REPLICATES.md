@@ -71,6 +71,19 @@ failing the whole batch — check the toast/response for any skipped IDs.
 
 ---
 
+## Uploading replicate results
+
+Both the Solution Chemistry upload and the Master Results sync can load one sheet holding all replicates for a timepoint. Two row formats work:
+
+1. **Full replicate IDs** — put the lettered ID (`SERUM_001a`) in the Experiment ID column, exactly as for any other experiment.
+2. **Base ID + Replicate column** — put the bare base (`SERUM_001`) in Experiment ID and the letter (`a`, `b`, `c`) in the optional `Replicate` column. `0` or a blank cell means the group parent itself.
+
+Each row lands as its own result on the matching sibling experiment, so the grouped (mean ± std) view aggregates automatically. Rows that cannot be resolved — a letter with no matching replicate experiment, a Replicate value that is not a single letter, or a letter that conflicts with one already in the ID — are skipped with a per-row error message; the rest of the file still uploads.
+
+Replicate experiments must already exist (create them with the **Create replicates** button or the New Experiments upload) — result uploads never auto-create replicate siblings.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

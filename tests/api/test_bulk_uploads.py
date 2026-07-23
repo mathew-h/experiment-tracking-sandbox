@@ -504,6 +504,18 @@ def test_template_download_unknown_type_returns_404(client):
     assert resp.status_code == 404
 
 
+def test_scalar_template_includes_replicate_column():
+    """Issue #70 P3: the Solution Chemistry template carries an optional Replicate column."""
+    import openpyxl  # noqa: PLC0415
+
+    from backend.api.routers.bulk_uploads import _get_template_bytes  # noqa: PLC0415
+
+    wb = openpyxl.load_workbook(io.BytesIO(_get_template_bytes("scalar-results")))
+    headers = [c.value for c in wb.active[1]]
+    assert "Replicate" in headers
+    assert headers.index("Replicate") == headers.index("Experiment ID") + 1
+
+
 def test_xrd_template_experiment_mode(client):
     """XRD template accepts ?mode=experiment and returns an Excel file."""
     resp = client.get("/api/bulk-uploads/templates/xrd-mineralogy?mode=experiment")

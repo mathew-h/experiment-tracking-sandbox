@@ -446,3 +446,73 @@ def test_xrd_run_date_parsed_and_stored(db_session: Session):
     assert scalar.xrd_run_date.year == 2026
     assert scalar.xrd_run_date.month == 4
     assert scalar.xrd_run_date.day == 15
+
+
+# ---------------------------------------------------------------------------
+# Replicate routing (issue #70 P3)
+# ---------------------------------------------------------------------------
+
+def _master_excel_with_replicate(rows: list[list]) -> bytes:
+    headers = [
+        "Experiment ID", "Replicate", "Duration (Days)", "Description", "Sample Date",
+        "NMR Run Date", "ICP Run Date", "GC Run Date",
+        "NH4 (mM)", "H2 (ppm)", "Gas Volume (mL)", "Gas Pressure (psi)",
+        "Sample pH", "Sample Conductivity (mS/cm)", "Modification", "Overwrite",
+    ]
+    return make_excel_multisheet({"Dashboard": (headers, rows)})
+
+
+def test_replicate_column_routes_to_sibling(db_session: Session):
+    """A base ID + Replicate letter lands the row on the lettered sibling."""
+    _seed_experiment(db_session, "P3MAST_701", 7901)
+    _seed_experiment(db_session, "P3MAST_701a", 7902)
+
+    xlsx = _master_excel_with_replicate([
+        ["P3MAST_701", "a", 7.0, "Day 7", None, None, None, None,
+         5.2, None, None, None, 7.1, None, None, "FALSE"],
+        ["P3MAST_701", None, 7.0, "Day 7 parent", None, None, None, None,
+         4.0, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 2
+    assert feedbacks[0]["experiment_id"] == "P3MAST_701a"
+
+    sibling_result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "P3MAST_701a")
+        .one()
+    )
+    assert sibling_result.scalar_data.gross_ammonium_concentration_mM == 5.2
+
+    parent_result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "P3MAST_701")
+        .one()
+    )
+    assert parent_result.scalar_data.gross_ammonium_concentration_mM == 4.0
+
+
+def test_invalid_replicate_is_per_row_error(db_session: Session):
+    """A malformed Replicate value skips that row only; the rest still upload."""
+    _seed_experiment(db_session, "P3MAST_702", 7911)
+    _seed_experiment(db_session, "P3MAST_702a", 7912)
+
+    xlsx = _master_excel_with_replicate([
+        ["P3MAST_702", "ab", 7.0, "bad", None, None, None, None,
+         5.0, None, None, None, None, None, None, "FALSE"],
+        ["P3MAST_702", "a", 7.0, "good", None, None, None, None,
+         6.0, None, None, None, None, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert created == 1
+    assert any("single letter" in e for e in errors)
+    assert feedbacks[0]["experiment_id"] == "P3MAST_702a"

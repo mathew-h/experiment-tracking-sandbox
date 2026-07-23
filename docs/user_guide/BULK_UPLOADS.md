@@ -55,6 +55,8 @@ Two modes:
 Rows where both Experiment ID and Duration (Days) are present create or update a
 `ScalarResults` record. The calc engine re-runs for every affected row.
 
+**Replicates:** rows may carry either a full lettered ID (`SERUM_001a`) in Experiment ID, or the bare base ID plus the optional `Replicate` column (`a`–`z`; `0` or blank = the group parent). Base + letter is resolved to the sibling experiment before upsert. Unresolved or conflicting rows are skipped with a per-row error — the rest of the file still uploads. See the [Replicates guide](REPLICATES.md#uploading-replicate-results).
+
 ---
 
 ## 2 — ICP-OES Data
@@ -121,6 +123,8 @@ Bulk-creates or updates `ScalarResults` rows (solution chemistry measurements).
 | overwrite | | `TRUE` overwrites an existing row at the same timepoint |
 
 The calc engine recalculates H₂ yield, g/t yield, and ammonium yield after each write.
+
+**Replicates:** rows may carry either a full lettered ID (`SERUM_001a`) in Experiment ID, or the bare base ID plus the optional `Replicate` column (`a`–`z`; `0` or blank = the group parent). Base + letter is resolved to the sibling experiment before upsert. Unresolved or conflicting rows are skipped with a per-row error — the rest of the file still uploads. See the [Replicates guide](REPLICATES.md#uploading-replicate-results).
 
 ---
 

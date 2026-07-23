@@ -194,7 +194,7 @@ export function BulkUploadsPage() {
           id="master-results"
           title="Master Results Sync"
           description="Sync from SharePoint or upload the master tracking spreadsheet"
-          helpText="Reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). Sync reads from the configured SharePoint path; upload allows a manual override."
+          helpText="Reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). Sync reads from the configured SharePoint path; upload allows a manual override. Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent."
           accept=".xlsx,.xls"
           uploadFn={(file) => bulkUploadsApi.uploadMasterResults(file)}
           syncFn={() => bulkUploadsApi.triggerMasterSync()}
@@ -249,7 +249,7 @@ export function BulkUploadsPage() {
           id="scalar-results"
           title="Solution Chemistry"
           description="Upload solution chemistry measurements (pH, NH₄, H₂, conductivity)"
-          helpText="Required columns: Experiment ID, Time (days). All other fields are optional. Set Overwrite=TRUE to replace existing values."
+          helpText="Required columns: Experiment ID, Time (days). All other fields are optional. Set Overwrite=TRUE to replace existing values. Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent."
           accept=".xlsx,.xls,.csv"
           uploadFn={(file) => bulkUploadsApi.uploadScalarResults(file)}
           templateType="scalar-results"

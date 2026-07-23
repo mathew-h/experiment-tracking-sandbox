@@ -18,7 +18,7 @@ This service parses the Solution Chemistry Excel template and delegates the crea
 - `measurement_date` (when provided, parsed into a valid date/time)
 
 ### Optional Columns
-Date, Description, Gross Ammonium (mM), Bkg Ammonium (mM), Bkg Exp ID, H2 Conc (ppm), Gas Sample Vol (mL), Gas Pressure (MPa), Final pH, Fe2+ Yield (%), Final DO (mg/L), Conductivity (mS/cm), Sampling Vol (mL), Overwrite.
+Date, Description, Replicate, Gross Ammonium (mM), Bkg Ammonium (mM), Bkg Exp ID, H2 Conc (ppm), Gas Sample Vol (mL), Gas Pressure (MPa), Final pH, Fe2+ Yield (%), Final DO (mg/L), Conductivity (mS/cm), Sampling Vol (mL), Overwrite.
 
 ## Parsing Logic
 - **Header Normalization:** Performs case-insensitive lookups and supports legacy aliases (e.g., `time (days)`, `experimentid`) to ensure backward compatibility with older templates.
@@ -26,6 +26,12 @@ Date, Description, Gross Ammonium (mM), Bkg Ammonium (mM), Bkg Exp ID, H2 Conc (
 - **Time Post Reaction (`time_post_reaction`):** Must be a numeric value (float). A value of `0` should be used for pre-reaction baselines.
 - **Overwrite Behavior:** A per-row `overwrite` column or a global `overwrite_all` flag controls whether existing data in the database should be updated or preserved.
 - **Data Cleaning:** Empty rows are skipped, and `NaN` or blank string values are excluded from the parsed records.
+
+## Replicate Routing (Issue #70 P3)
+- An optional `Replicate` column (aliases: `Replicate`, `Replicate Letter`, case-insensitive) routes rows carrying a base ID to lettered sibling experiments: `SERUM_001` + `b` upserts to `SERUM_001b`.
+- `0` or a blank cell routes to the base experiment itself (replicate 0 = group parent).
+- Combination happens at parse time via `backend/services/bulk_uploads/replicate_routing.py::combine_replicate_id`; conflicting or malformed combinations (different letter than the ID already carries, derivation/treatment suffixes, IDs without a numeric index, multi-character values) produce a per-row error and the row is skipped without aborting the upload.
+- Missing siblings are **not** auto-created; the row errors with the standard "not found" message.
 
 ## Output and Data Flow
 The cleaned records are passed to `ScalarResultsService.bulk_create_scalar_results_ex(db, cleaned_records)`. The service returns a tuple containing:

@@ -371,8 +371,8 @@ All endpoints return `UploadResponse`:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/bulk-uploads/master-results` | Master Results sync. `file` optional — if omitted, reads from configured SharePoint path. Runs calc engine on affected `ScalarResults`. |
-| POST | `/api/bulk-uploads/scalar-results` | Bulk-create/update `ScalarResults` rows from Excel template. Runs calc engine. |
+| POST | `/api/bulk-uploads/master-results` | Master Results sync. `file` optional — if omitted, reads from configured SharePoint path. Runs calc engine on affected `ScalarResults`. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
+| POST | `/api/bulk-uploads/scalar-results` | Bulk-create/update `ScalarResults` rows from Excel template. Runs calc engine. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
 | POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. |
 | POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. |
 | POST | `/api/bulk-uploads/xrd-mineralogy` | Unified XRD upload — auto-detects Aeris or ActLabs format. |
@@ -385,20 +385,6 @@ All endpoints return `UploadResponse`:
 | POST | `/api/bulk-uploads/pxrf` | Import pXRF readings from instrument export. |
 | GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`. Returns 404 for types with no template. |
 | GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
-
-## Bulk Uploads
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/bulk-uploads/scalar-results` | Solution Chemistry Excel upload |
-| POST | `/api/bulk-uploads/new-experiments` | New Experiments Excel upload |
-| POST | `/api/bulk-uploads/pxrf` | pXRF data file upload |
-| POST | `/api/bulk-uploads/aeris-xrd` | Aeris XRD file upload |
-
-All bulk upload endpoints return:
-```json
-{"created": 5, "updated": 2, "skipped": 0, "errors": [], "message": "..."}
-```
 
 ## Interactive Docs
 

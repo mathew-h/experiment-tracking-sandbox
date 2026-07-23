@@ -42,6 +42,7 @@ async def upload_scalar_results(
         _vc.SCALAR_RESULTS_TEMPLATE_HEADERS = {
             "measurement_date": "Date",
             "experiment_id": "Experiment ID",
+            "replicate": "Replicate",
             "time_post_reaction": "Time (days)",
             "description": "Description",
             "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
@@ -736,14 +737,14 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
     if upload_type == "scalar-results":
         return _simple_template(
             headers=[
-                "Experiment ID", "Time (days)", "Description", "Date",
+                "Experiment ID", "Replicate", "Time (days)", "Description", "Date",
                 "Gross Ammonium (mM)", "Sampling Vol (mL)", "Bkg Ammonium (mM)", "Bkg Exp ID",
                 "H2 Conc (ppm)", "Gas Sample Vol (mL)", "Gas Pressure (MPa)",
                 "Final pH", "Fe2+ Yield (%)", "Final DO (mg/L)",
                 "Conductivity (mS/cm)", "Overwrite",
             ],
             required={"Experiment ID", "Time (days)"},
-            example_row=["HPHT_001", 7.0, "Day 7 sample", None, 5.2, 2.0, 0.3, None,
+            example_row=["HPHT_001", None, 7.0, "Day 7 sample", None, 5.2, 2.0, 0.3, None,
                          120.0, 5.0, 0.5, 7.2, None, None, 12.5, "FALSE"],
         )
 
