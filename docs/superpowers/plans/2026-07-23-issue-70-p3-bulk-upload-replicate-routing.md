@@ -232,42 +232,58 @@ git commit -m "[#70] Add replicate-column ID combiner
 **Files:**
 - Modify: `backend/services/bulk_uploads/scalar_results.py` (top imports ~line 11; `LEGACY_ALIASES` ~line 127; cleaning loop after ~line 171)
 - Modify: `backend/api/routers/bulk_uploads.py` (stub dict ~line 44; `_get_template_bytes` scalar branch ~line 736)
+- Modify: `tests/conftest.py` (add `SCALAR_RESULTS_TEMPLATE_HEADERS` kwarg to the `variable_config` MagicMock, lines 9–14)
 - Test: `tests/services/bulk_uploads/test_scalar_results_replicates.py` (new)
 - Test: `tests/api/test_bulk_uploads.py` (template header assertion, in the "Template download tests" section ~line 463)
+
+> **Amendment (2026-07-23, during execution):** the original Step 1 had the new test file install a `sys.modules` stub guarded by `hasattr`. That cannot work: `tests/conftest.py` already stubs `frontend.config.variable_config` as a `MagicMock` for every test run, and `hasattr` on a `MagicMock` is always `True`, so the real header dict never installed and `scalar_results.py`'s module-level import bound a Mock. Fix: carry the real `SCALAR_RESULTS_TEMPLATE_HEADERS` dict on the conftest MagicMock (the file's established pattern — it already carries real `ICP_FIXED_ELEMENT_FIELDS` and `PXRF_REQUIRED_COLUMNS` values for the same reason), and drop the stub block from the test file.
 
 **Interfaces:**
 - Consumes: `combine_replicate_id(experiment_id, replicate)` from Task 1 (raises `ValueError`); `ScalarResultsUploadService.bulk_upsert_from_excel_ex(db, file_bytes, overwrite_all=False, dry_run=False) -> (created, updated, skipped, errors, row_feedbacks)` (unchanged signature).
 - Produces: the Solution Chemistry upload accepts an optional `Replicate` column (header aliases: `Replicate`, `Replicate Letter`, case-insensitive); the downloadable `scalar-results` template contains the column. No signature changes — Tasks 3–4 don't depend on this task's code, only on the same helper.
 
-- [ ] **Step 1: Write the failing service-level tests**
+- [ ] **Step 1: Wire the real header dict into the test stub, then write the failing service-level tests**
 
-Create `tests/services/bulk_uploads/test_scalar_results_replicates.py`:
+First, in `tests/conftest.py`, extend the existing `variable_config` MagicMock (lines 9–14) with the real scalar header dict — same pattern as the `ICP_FIXED_ELEMENT_FIELDS` / `PXRF_REQUIRED_COLUMNS` kwargs already there. `scalar_results.py` binds `SCALAR_RESULTS_TEMPLATE_HEADERS` at module import time, so the conftest stub (loaded before any test) must carry a real dict:
 
 ```python
-"""End-to-end replicate routing through the Solution Chemistry upload (issue #70 P3)."""
-from __future__ import annotations
-
-import sys
-from types import ModuleType
-
-# scalar_results.py imports frontend.config.variable_config at module load time.
-# The real module only exists in the legacy Streamlit app, so stub it exactly as
-# backend/api/routers/bulk_uploads.py::upload_scalar_results does.
-if "frontend.config.variable_config" not in sys.modules:
-    _stub = ModuleType("frontend.config.variable_config")
-    sys.modules.setdefault("frontend", ModuleType("frontend"))
-    sys.modules.setdefault("frontend.config", ModuleType("frontend.config"))
-    sys.modules["frontend.config.variable_config"] = _stub
-_vc = sys.modules["frontend.config.variable_config"]
-if not hasattr(_vc, "SCALAR_RESULTS_TEMPLATE_HEADERS"):
-    _vc.SCALAR_RESULTS_TEMPLATE_HEADERS = {
+sys.modules['frontend.config.variable_config'] = MagicMock(
+    ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mn', 'ca', 'cr', 'co', 'mg',
+                               'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh',
+                               'ir', 'pd', 'ru', 'os', 'tl', 'k', 'na', 's'],
+    PXRF_REQUIRED_COLUMNS={"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"},
+    # Mirrors the stub in backend/api/routers/bulk_uploads.py::upload_scalar_results
+    # (scalar_results.py imports this dict at module load time).
+    SCALAR_RESULTS_TEMPLATE_HEADERS={
         "measurement_date": "Date",
         "experiment_id": "Experiment ID",
         "replicate": "Replicate",
         "time_post_reaction": "Time (days)",
         "description": "Description",
         "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
-    }
+        "sampling_volume_mL": "Sampling Vol (mL)",
+        "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
+        "background_experiment_id": "Bkg Exp ID",
+        "h2_concentration": "H2 Conc (ppm)",
+        "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
+        "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
+        "final_ph": "Final pH",
+        "ferrous_iron_yield": "Fe2+ Yield (%)",
+        "final_nitrate_concentration_mM": "Final Nitrate (mM)",
+        "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
+        "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
+        "final_conductivity_mS_cm": "Conductivity (mS/cm)",
+        "final_alkalinity_mg_L": "Alkalinity (mg/L)",
+        "overwrite": "Overwrite",
+    },
+)
+```
+
+Then create `tests/services/bulk_uploads/test_scalar_results_replicates.py` (no sys.modules stub of its own — conftest provides it):
+
+```python
+"""End-to-end replicate routing through the Solution Chemistry upload (issue #70 P3)."""
+from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
@@ -498,7 +514,7 @@ Expected: all PASS (the new template test plus every pre-existing test)
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/services/bulk_uploads/scalar_results.py backend/api/routers/bulk_uploads.py tests/services/bulk_uploads/test_scalar_results_replicates.py tests/api/test_bulk_uploads.py
+git add backend/services/bulk_uploads/scalar_results.py backend/api/routers/bulk_uploads.py tests/conftest.py tests/services/bulk_uploads/test_scalar_results_replicates.py tests/api/test_bulk_uploads.py
 git commit -m "[#70] Route Replicate column in scalar upload
 
 - Optional Replicate column resolves base+letter to sibling before upsert
