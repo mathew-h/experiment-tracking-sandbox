@@ -53,6 +53,12 @@ class ExperimentListItem(BaseModel):
     additives_summary: Optional[str] = None
     # First note text
     condition_note: Optional[str] = None
+    # Grouped-list mode only (group_replicates=true): lettered children of this
+    # group parent, ordered by replicate_label. None in flat mode / for non-parents.
+    replicates: Optional[list["ExperimentListItem"]] = None
+
+
+ExperimentListItem.model_rebuild()
 
 
 class ExperimentListResponse(BaseModel):

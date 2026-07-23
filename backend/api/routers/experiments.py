@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text, update
+from sqlalchemy import select, func, text, update, case, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -43,6 +43,35 @@ _TYPE_PREFIX: dict[str, str] = {
 }
 
 
+def _build_list_item(db: Session, exp: Experiment) -> dict:
+    """Build the ExperimentListItem payload dict for one experiment row."""
+    item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
+    cond = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+    ).scalar_one_or_none()
+    item_data["experiment_type"] = cond.experiment_type if cond else None
+    item_data["reactor_number"] = cond.reactor_number if cond else None
+    additive_row = db.execute(
+        text("""
+            SELECT string_agg(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; ')
+            FROM chemical_additives a
+            JOIN experimental_conditions ec ON ec.id = a.experiment_id
+            JOIN compounds c ON c.id = a.compound_id
+            WHERE ec.experiment_fk = :exp_fk
+        """),
+        {"exp_fk": exp.id},
+    ).fetchone()
+    item_data["additives_summary"] = additive_row[0] if additive_row else None
+    first_note = db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.experiment_fk == exp.id)
+        .order_by(ExperimentNotes.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    item_data["condition_note"] = first_note.note_text if first_note else None
+    return item_data
+
+
 @router.get("", response_model=ExperimentListResponse)
 def list_experiments(
     skip: int = Query(0, ge=0),
@@ -56,6 +85,7 @@ def list_experiments(
     date_from: str | None = None,
     date_to: str | None = None,
     description: str | None = None,
+    group_replicates: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentListResponse:
@@ -103,38 +133,52 @@ def list_experiments(
     if description:
         stmt = stmt.where(note_sq.c.note_text.ilike(f"%{description}%"))
 
-    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-    rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
+    if group_replicates:
+        # Grouped mode: paginate over "top-level rows". A matched replicate member
+        # (lettered + linked to a parent) is represented by its parent; everything
+        # else (parents, non-replicates, sequential/treatment derivations, orphan
+        # members) represents itself. Lettered children of each page row are
+        # attached in full regardless of whether they matched the filters.
+        matched_sq = stmt.subquery()
+        top_id_expr = case(
+            (
+                and_(
+                    matched_sq.c.replicate_label.isnot(None),
+                    matched_sq.c.parent_experiment_fk.isnot(None),
+                ),
+                matched_sq.c.parent_experiment_fk,
+            ),
+            else_=matched_sq.c.id,
+        )
+        top_ids_sq = select(top_id_expr.label("top_id")).distinct().subquery()
+        total = db.execute(select(func.count()).select_from(top_ids_sq)).scalar_one()
+        page_stmt = (
+            select(Experiment)
+            .where(Experiment.id.in_(select(top_ids_sq.c.top_id)))
+            .order_by(Experiment.experiment_number.desc())
+        )
+        rows = db.execute(page_stmt.offset(skip).limit(limit)).scalars().all()
+    else:
+        total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
 
     items = []
     for exp in rows:
-        item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
-        # Join conditions for experiment_type and reactor_number
-        cond = db.execute(
-            select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-        ).scalar_one_or_none()
-        item_data["experiment_type"] = cond.experiment_type if cond else None
-        item_data["reactor_number"] = cond.reactor_number if cond else None
-        # Additives summary — inline query avoids view dependency
-        additive_row = db.execute(
-            text("""
-                SELECT string_agg(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; ')
-                FROM chemical_additives a
-                JOIN experimental_conditions ec ON ec.id = a.experiment_id
-                JOIN compounds c ON c.id = a.compound_id
-                WHERE ec.experiment_fk = :exp_fk
-            """),
-            {"exp_fk": exp.id},
-        ).fetchone()
-        item_data["additives_summary"] = additive_row[0] if additive_row else None
-        # First note as condition note
-        first_note = db.execute(
-            select(ExperimentNotes)
-            .where(ExperimentNotes.experiment_fk == exp.id)
-            .order_by(ExperimentNotes.id.asc())
-            .limit(1)
-        ).scalar_one_or_none()
-        item_data["condition_note"] = first_note.note_text if first_note else None
+        item_data = _build_list_item(db, exp)
+        if group_replicates:
+            children = db.execute(
+                select(Experiment)
+                .where(
+                    Experiment.parent_experiment_fk == exp.id,
+                    Experiment.replicate_label.isnot(None),
+                )
+                .order_by(Experiment.replicate_label.asc())
+            ).scalars().all()
+            if children:
+                item_data["replicates"] = [
+                    ExperimentListItem.model_validate(_build_list_item(db, ch))
+                    for ch in children
+                ]
         items.append(ExperimentListItem.model_validate(item_data))
 
     return ExperimentListResponse(items=items, total=total, skip=skip, limit=limit)

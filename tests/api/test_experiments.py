@@ -806,3 +806,63 @@ class TestReplicateFieldsExposed:
         resp = client.get("/api/experiments/RFLD_002a")
         assert resp.status_code == 200
         assert resp.json()["replicate_label"] == "a"
+
+
+class TestGroupedListMode:
+    def _make_set(self, db):
+        parent = _make_experiment(db, experiment_id="GRP_001", number=9710)
+        for i, letter in enumerate("abc"):
+            db.add(Experiment(experiment_id=f"GRP_001{letter}", experiment_number=9711 + i,
+                              status=ExperimentStatus.ONGOING))
+        db.commit()
+        return parent
+
+    def test_grouped_collapses_lettered_set(self, client, db_session):
+        self._make_set(db_session)
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["experiment_id"] == "GRP_001"
+        assert [r["replicate_label"] for r in item["replicates"]] == ["a", "b", "c"]
+
+    def test_flat_mode_unchanged(self, client, db_session):
+        self._make_set(db_session)
+        resp = client.get("/api/experiments?search=GRP_001")
+        assert resp.json()["total"] == 4
+        assert all(i.get("replicates") is None for i in resp.json()["items"])
+
+    def test_filter_matching_only_member_pulls_group(self, client, db_session):
+        self._make_set(db_session)
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_001b")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["experiment_id"] == "GRP_001"
+        assert len(data["items"][0]["replicates"]) == 3
+
+    def test_orphan_member_stays_top_level(self, client, db_session):
+        db_session.add(Experiment(experiment_id="GRP_ORPH_001a", experiment_number=9720,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_ORPH_001a")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["experiment_id"] == "GRP_ORPH_001a"
+        assert data["items"][0]["replicates"] is None
+
+    def test_sequential_derivation_stays_flat_in_grouped_mode(self, client, db_session):
+        _make_experiment(db_session, experiment_id="GRPSEQ_001", number=9730)
+        db_session.add(Experiment(experiment_id="GRPSEQ_001-2", experiment_number=9731,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=GRPSEQ_001")
+        assert resp.json()["total"] == 2  # base and -2 are separate top-level rows
+
+    def test_grouped_pagination_counts_groups(self, client, db_session):
+        self._make_set(db_session)                                    # 1 group
+        _make_experiment(db_session, experiment_id="GRP_SOLO_001", number=9740)  # 1 flat
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_&limit=1")
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["items"]) == 1
