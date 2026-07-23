@@ -386,20 +386,6 @@ All endpoints return `UploadResponse`:
 | GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`. Returns 404 for types with no template. |
 | GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
 
-## Bulk Uploads
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/bulk-uploads/scalar-results` | Solution Chemistry Excel upload |
-| POST | `/api/bulk-uploads/new-experiments` | New Experiments Excel upload |
-| POST | `/api/bulk-uploads/pxrf` | pXRF data file upload |
-| POST | `/api/bulk-uploads/aeris-xrd` | Aeris XRD file upload |
-
-All bulk upload endpoints return:
-```json
-{"created": 5, "updated": 2, "skipped": 0, "errors": [], "message": "..."}
-```
-
 ## Interactive Docs
 
 - Swagger UI: `http://localhost:8000/docs`

@@ -63,3 +63,12 @@ def test_replicate_without_experiment_id_raises():
         combine_replicate_id(None, "a")
     with pytest.raises(ValueError, match="without an Experiment ID"):
         combine_replicate_id("   ", "a")
+
+
+def test_letter_plus_derivation_id_with_same_letter_is_noop():
+    assert combine_replicate_id("SERUM_001b-2", "b") == "SERUM_001b-2"
+
+
+def test_letter_plus_derivation_id_with_different_letter_raises():
+    with pytest.raises(ValueError, match="conflicts"):
+        combine_replicate_id("SERUM_001b-2", "c")

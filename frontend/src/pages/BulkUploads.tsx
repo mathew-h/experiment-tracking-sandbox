@@ -194,7 +194,7 @@ export function BulkUploadsPage() {
           id="master-results"
           title="Master Results Sync"
           description="Sync from SharePoint or upload the master tracking spreadsheet"
-          helpText="Reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). Sync reads from the configured SharePoint path; upload allows a manual override."
+          helpText="Reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). Sync reads from the configured SharePoint path; upload allows a manual override. Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent."
           accept=".xlsx,.xls"
           uploadFn={(file) => bulkUploadsApi.uploadMasterResults(file)}
           syncFn={() => bulkUploadsApi.triggerMasterSync()}
