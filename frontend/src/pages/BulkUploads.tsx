@@ -262,7 +262,7 @@ export function BulkUploadsPage() {
           id="new-experiments"
           title="New Experiments"
           description="Bulk-create experiments from a structured Excel template"
-          helpText="Use the template for correct column formatting. The file must have an 'experiments' sheet; a 'conditions' sheet is optional."
+          helpText="Use the template for correct column formatting. The file must have an 'experiments' sheet; a 'conditions' sheet is optional. Replicates: write a lowercase letter after the number (SERUM_001a, _001b, _001c) — the bare SERUM_001 (or SERUM_001-0) is replicate 0, the group parent."
           accept=".xlsx,.xls"
           uploadFn={(file) => bulkUploadsApi.uploadNewExperiments(file)}
           templateType="new-experiments"

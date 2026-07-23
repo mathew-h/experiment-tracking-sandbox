@@ -84,7 +84,7 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
         error={idValidation.status === 'taken' ? idValidation.message : undefined}
         hint={
           idValidation.status !== 'taken'
-            ? 'Auto-generated. Edit to use a custom ID (e.g., HPHT_100-2, HPHT_100_Desorption).'
+            ? 'Auto-generated. Edit to use a custom ID (e.g., HPHT_100-2, HPHT_100_Desorption, or a replicate letter like SERUM_001a/b/c — the bare SERUM_001 is replicate 0, the parent).'
             : undefined
         }
         rightElement={idRightElement}
