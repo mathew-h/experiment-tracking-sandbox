@@ -36,7 +36,7 @@ def check_lineage_integrity():
                 continue
             
             # Parse the ID
-            base_id, derivation_num, treatment_variant = parse_experiment_id(exp.experiment_id)
+            base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(exp.experiment_id)
             
             # Check 1: For non-derivations, base_experiment_id should equal experiment_id
             if derivation_num is None and treatment_variant is None:

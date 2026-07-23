@@ -67,8 +67,8 @@ def establish_experiment_lineage(dry_run: bool = False) -> dict:
                 if not exp.experiment_id:
                     continue
                 
-                base_id, derivation_num, treatment_variant = parse_experiment_id(exp.experiment_id)
-                
+                base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(exp.experiment_id)
+
                 if derivation_num is not None:
                     # This is a derivation (sequential run)
                     summary["derivations_found"] += 1
@@ -179,7 +179,7 @@ def fix_stale_lineage(dry_run: bool = False) -> dict:
             if not exp.experiment_id:
                 continue
             try:
-                base_id, derivation_num, treatment_variant = parse_experiment_id(exp.experiment_id)
+                base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(exp.experiment_id)
                 expected_base = base_id or exp.experiment_id
 
                 if exp.base_experiment_id != expected_base:

@@ -268,7 +268,7 @@ def get_or_find_parent_experiment(db: Session, experiment_id: str):
         best_seq_num = -1
         
         for candidate in candidates:
-            cand_base, cand_seq, cand_treatment = parse_experiment_id(candidate.experiment_id)
+            cand_base, cand_seq, cand_treatment, _cand_replicate_label = parse_experiment_id(candidate.experiment_id)
             
             # Skip if this is a treatment variant (we only want sequential or base)
             if cand_treatment is not None:

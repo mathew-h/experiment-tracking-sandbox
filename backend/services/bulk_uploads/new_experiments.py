@@ -40,7 +40,7 @@ def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment
     Returns:
         Parent Experiment object if found, None otherwise
     """
-    base_id, sequential_num, treatment_variant = extract_lineage_info(experiment_id)
+    base_id, sequential_num, treatment_variant, _replicate_label = extract_lineage_info(experiment_id)
     
     # No sequential or treatment? Not a derived experiment
     if sequential_num is None and treatment_variant is None:
