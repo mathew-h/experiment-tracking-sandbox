@@ -488,7 +488,7 @@ _VIEWS = [
             sr.ferrous_iron_yield,
             sr.ferrous_iron_yield_h2_pct,
             SUM(COALESCE(sr.ferrous_iron_yield_h2_pct, 0)) OVER (
-                PARTITION BY COALESCE(e.base_experiment_id, e.experiment_id)
+                PARTITION BY e.experiment_id
                 ORDER BY er.cumulative_time_post_reaction_days, er.id
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
             ) AS cumulative_ferrous_iron_yield_h2_pct,
@@ -507,6 +507,46 @@ _VIEWS = [
         JOIN experiments e        ON e.id  = er.experiment_fk
         LEFT JOIN scalar_results sr ON sr.result_id = er.id
         WHERE er.is_primary_timepoint_result = TRUE
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_scalar_rollup
+    # One row per (base_experiment_id, timepoint bucket). Cross-replicate
+    # mean/median/std for a replicate set (or a single non-replicate
+    # experiment, which yields n_replicates=1 and NULL std). No outlier
+    # filter and no ICP aggregation in P1 (see issue #69 P4).
+    # ------------------------------------------------------------------
+    ("v_results_scalar_rollup", """
+        CREATE VIEW v_results_scalar_rollup AS
+        SELECT
+            COALESCE(e.base_experiment_id, e.experiment_id)              AS base_experiment_id,
+            er.time_post_reaction_bucket_days,
+            COUNT(sr.result_id)                                          AS n_replicates,
+            AVG(sr."gross_ammonium_concentration_mM")                   AS "mean_gross_ammonium_mM",
+            percentile_cont(0.5) WITHIN GROUP (
+                ORDER BY sr."gross_ammonium_concentration_mM")          AS "median_gross_ammonium_mM",
+            stddev_samp(sr."gross_ammonium_concentration_mM")           AS "sd_gross_ammonium_mM",
+            AVG(GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM"))
+                                                                        AS "mean_net_ammonium_mM",
+            stddev_samp(GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM"))
+                                                                        AS "sd_net_ammonium_mM",
+            AVG(sr.h2_micromoles)                                       AS mean_h2_micromoles,
+            stddev_samp(sr.h2_micromoles)                               AS sd_h2_micromoles,
+            AVG(sr.h2_grams_per_ton_yield)                              AS mean_h2_grams_per_ton,
+            stddev_samp(sr.h2_grams_per_ton_yield)                      AS sd_h2_grams_per_ton,
+            AVG(sr.ferrous_iron_yield_h2_pct)                           AS mean_fe_yield_h2_pct,
+            stddev_samp(sr.ferrous_iron_yield_h2_pct)                   AS sd_fe_yield_h2_pct,
+            AVG(sr.ferrous_iron_yield_nh3_pct)                          AS mean_fe_yield_nh3_pct,
+            stddev_samp(sr.ferrous_iron_yield_nh3_pct)                  AS sd_fe_yield_nh3_pct,
+            AVG(sr.grams_per_ton_yield)                                 AS mean_grams_per_ton_yield,
+            stddev_samp(sr.grams_per_ton_yield)                         AS sd_grams_per_ton_yield,
+            AVG(sr.final_ph)                                            AS mean_final_ph
+        FROM experimental_results er
+        JOIN experiments e         ON e.id  = er.experiment_fk
+        LEFT JOIN scalar_results sr ON sr.result_id = er.id
+        WHERE er.is_primary_timepoint_result = TRUE
+        GROUP BY COALESCE(e.base_experiment_id, e.experiment_id),
+                 er.time_post_reaction_bucket_days
     """),
 
     # ------------------------------------------------------------------

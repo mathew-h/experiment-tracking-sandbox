@@ -222,9 +222,39 @@ class TestChainPartitioning:
         ).fetchall()
 
         assert len(rows) == 2
-        # Root timepoint: cumulative = 10.0 (first in partition)
+        # Root timepoint: cumulative = 10.0 (only timepoint for CTEST_001)
         assert rows[0][0] == "CTEST_001"
         assert rows[0][1] == pytest.approx(10.0)
-        # Derived timepoint: cumulative = 10.0 + 5.0 = 15.0 (same partition)
+        # Derived timepoint: partitioned by its OWN experiment_id (not the shared base),
+        # so it does NOT accumulate the root's 10.0 — cumulative = 5.0, not 15.0.
         assert rows[1][0] == "CTEST_001-2"
-        assert rows[1][1] == pytest.approx(15.0)
+        assert rows[1][1] == pytest.approx(5.0)
+
+    def test_replicate_set_does_not_cross_sum(self, view_db):
+        """Three replicates sharing a base_experiment_id each accumulate independently."""
+        exp_a = _make_experiment(view_db, "REPCUM_001a", 22, base_id="REPCUM_001")
+        exp_b = _make_experiment(view_db, "REPCUM_001b", 23, base_id="REPCUM_001")
+        exp_c = _make_experiment(view_db, "REPCUM_001c", 24, base_id="REPCUM_001")
+
+        er_a = _make_result(view_db, exp_a, cumulative_days=7.0)
+        er_b = _make_result(view_db, exp_b, cumulative_days=7.0)
+        er_c = _make_result(view_db, exp_c, cumulative_days=7.0)
+
+        _make_scalar(view_db, er_a, fe_h2_pct=10.0)
+        _make_scalar(view_db, er_b, fe_h2_pct=20.0)
+        _make_scalar(view_db, er_c, fe_h2_pct=30.0)
+        view_db.commit()
+
+        rows = view_db.execute(
+            text("""
+                SELECT experiment_id, cumulative_ferrous_iron_yield_h2_pct
+                FROM v_results_scalar
+                WHERE experiment_id IN ('REPCUM_001a', 'REPCUM_001b', 'REPCUM_001c')
+                ORDER BY experiment_id
+            """)
+        ).fetchall()
+
+        by_exp = {r[0]: r[1] for r in rows}
+        assert by_exp["REPCUM_001a"] == pytest.approx(10.0)
+        assert by_exp["REPCUM_001b"] == pytest.approx(20.0)
+        assert by_exp["REPCUM_001c"] == pytest.approx(30.0)
