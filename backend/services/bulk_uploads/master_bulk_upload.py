@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
+
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
 
@@ -112,6 +114,11 @@ def _process_bytes(
         "Sampled Solution Volume (mL)" if c.lower() == "sampled solution volume (ml)" else c
         for c in df.columns
     ]
+    # Normalise the optional replicate column header to canonical casing.
+    df.columns = [
+        "Replicate" if c.lower() == "replicate" else c
+        for c in df.columns
+    ]
 
     # Validate required columns
     required = {"Experiment ID", "Duration (Days)"}
@@ -132,6 +139,14 @@ def _process_bytes(
         # Skip calibration-standard rows (Issue #39)
         if "standard" in exp_id.lower():
             skipped += 1
+            continue
+
+        # Optional replicate column: resolve base + letter to the sibling ID
+        # before anything downstream sees exp_id (issue #70 P3).
+        try:
+            exp_id = combine_replicate_id(exp_id, row.get("Replicate"))
+        except ValueError as exc:
+            errors.append(f"Row {row_num} ({exp_id}): {exc}")
             continue
 
         duration_raw = row.get("Duration (Days)")
