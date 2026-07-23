@@ -473,7 +473,10 @@ class NewExperimentsUploadService:
         else:
             errors.append("Missing required 'experiments' sheet")
 
-        # Expire session cache to ensure conditions/additives sheets see renamed experiments
+        # Flush pending experiments-sheet field updates (status/sample_id/researcher/date,
+        # renames) before expiring the session, so expire_all() reloads the NEW values
+        # instead of discarding them. See issue #68.
+        db.flush()
         db.expire_all()
 
         # === Process conditions sheet (optional but recommended) ===
