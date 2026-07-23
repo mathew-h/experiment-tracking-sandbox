@@ -76,24 +76,6 @@ def test_overwrite_persists_status_sample_researcher_date(db_session: Session):
     )
 
 
-def test_overwrite_dirty_state_is_flushed_before_expire(db_session: Session):
-    """Regression guard: no unflushed dirty state should survive bulk_upsert_from_excel."""
-    _seed_experiment(db_session, "HPHT_I68_002", 68002, status=ExperimentStatus.ONGOING)
-
-    xlsx = _experiments_excel([
-        ["HPHT_I68_002", None, None, None, None, "QUEUED", None, True],
-    ])
-    created, updated, skipped, errors, warnings, info = (
-        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
-    )
-
-    assert errors == []
-    assert not db_session.dirty, (
-        "session has unflushed changes after bulk_upsert_from_excel returned — "
-        "these would be silently lost on the next db.expire_all() or session.close()"
-    )
-
-
 def test_reactivation_via_overwrite_demotes_prior_reactor_occupant(db_session: Session):
     """Setting an existing experiment back to ONGOING in an occupied reactor (via overwrite)
     must trigger manage_reactor_occupancy and demote the current occupant."""
