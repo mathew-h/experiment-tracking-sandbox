@@ -851,6 +851,7 @@ EOF
 ### Task 4: Mechanical 3→4 tuple-unpack fixes elsewhere
 
 **Files:**
+- Modify: `database/lineage_utils.py:271` (`get_or_find_parent_experiment`'s candidate-matching loop — missed by the original Task 3 file list; discovered during Task 3's review)
 - Modify: `database/data_migrations/establish_experiment_lineage_006.py:70,182`
 - Modify: `tests/check_lineage_integrity.py:39`
 - Modify: `tests/test_lineage_migration.py:139-176`
@@ -864,9 +865,25 @@ EOF
 - [ ] **Step 1: Confirm these are the only remaining broken call sites**
 
 Run: `.venv/Scripts/python -m pytest tests/ -q 2>&1 | tail -60`
-Expected: failures only in the 4 files listed above (plus whatever Tasks 2/3 already added, which now pass). Note the exact error for each (`ValueError: too many values to unpack (expected 3)` or `AssertionError` on tuple equality) to confirm scope before editing.
+Expected: failures only in the 5 files listed above (plus whatever Tasks 2/3 already added, which now pass). Note the exact error for each (`ValueError: too many values to unpack (expected 3)` or `AssertionError` on tuple equality) to confirm scope before editing.
 
-- [ ] **Step 2: Fix `database/data_migrations/establish_experiment_lineage_006.py`**
+- [ ] **Step 2: Fix `database/lineage_utils.py::get_or_find_parent_experiment`'s second unpack site**
+
+This function has TWO `parse_experiment_id` call sites. Task 3 already fixed the top-level one (`base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(experiment_id)`). This step fixes the second one, inside the candidate-matching loop in the sequential-derivation branch. Find:
+
+```python
+        for candidate in candidates:
+            cand_base, cand_seq, cand_treatment = parse_experiment_id(candidate.experiment_id)
+```
+
+Replace with:
+
+```python
+        for candidate in candidates:
+            cand_base, cand_seq, cand_treatment, _cand_replicate_label = parse_experiment_id(candidate.experiment_id)
+```
+
+- [ ] **Step 3: Fix `database/data_migrations/establish_experiment_lineage_006.py`**
 
 Line ~70, inside `establish_experiment_lineage`, replace:
 
@@ -894,7 +911,7 @@ with:
 
 (This is a mechanical arity fix only — this legacy one-off backfill/repair script's classification logic is not made replicate-aware; that is out of scope for P1 per the issue's file list, which calls for exactly this unpack fix.)
 
-- [ ] **Step 3: Fix `tests/check_lineage_integrity.py`**
+- [ ] **Step 4: Fix `tests/check_lineage_integrity.py`**
 
 Line 39, replace:
 
@@ -908,7 +925,7 @@ with:
             base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(exp.experiment_id)
 ```
 
-- [ ] **Step 4: Fix `tests/test_lineage_migration.py::test_parse_experiment_id`**
+- [ ] **Step 5: Fix `tests/test_lineage_migration.py::test_parse_experiment_id`**
 
 Replace the entire method body (lines 136-176) with:
 
@@ -965,7 +982,7 @@ Replace the entire method body (lines 136-176) with:
         assert parse_experiment_id("   ") == (None, None, None, None)
 ```
 
-- [ ] **Step 5: Fix `tests/test_experiment_rename.py`**
+- [ ] **Step 6: Fix `tests/test_experiment_rename.py`**
 
 Line 163-165, replace:
 
@@ -984,7 +1001,7 @@ with:
         assert replicate_label is None
 ```
 
-- [ ] **Step 6: Fix `backend/services/bulk_uploads/new_experiments.py::find_parent_for_copy`**
+- [ ] **Step 7: Fix `backend/services/bulk_uploads/new_experiments.py::find_parent_for_copy`**
 
 Line 43, replace:
 
@@ -1000,15 +1017,15 @@ with:
 
 Note: `extract_lineage_info`'s arity change lands in Task 5 below — this line must be updated in the same commit as Task 5, or the import will succeed but this line will raise `ValueError: too many values to unpack` the moment `extract_lineage_info` starts returning 4 values. Since this task runs before Task 5, this specific edit will not yet be exercised correctly until Task 5 lands; that is expected — do not run the full suite as a completion gate for *this* task alone, only `tests/test_lineage_migration.py`, `tests/test_experiment_rename.py`, `tests/check_lineage_integrity.py`-adjacent tests, and the data-migration test.
 
-- [ ] **Step 7: Run the affected test files to verify they pass**
+- [ ] **Step 8: Run the affected test files to verify they pass**
 
 Run: `.venv/Scripts/python -m pytest tests/test_lineage_migration.py tests/test_experiment_rename.py tests/test_replicate_lineage.py -v`
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add database/data_migrations/establish_experiment_lineage_006.py tests/check_lineage_integrity.py tests/test_lineage_migration.py tests/test_experiment_rename.py backend/services/bulk_uploads/new_experiments.py
+git add database/lineage_utils.py database/data_migrations/establish_experiment_lineage_006.py tests/check_lineage_integrity.py tests/test_lineage_migration.py tests/test_experiment_rename.py backend/services/bulk_uploads/new_experiments.py
 git commit -m "$(cat <<'EOF'
 [#69] Fix remaining 3-tuple unpack sites for parse_experiment_id
 
