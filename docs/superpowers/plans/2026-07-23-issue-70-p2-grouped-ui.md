@@ -1980,16 +1980,29 @@ In `frontend/src/pages/NewExperiment/index.tsx`:
 
 ```ts
 if (replicateCount > 0) {
-  const res = await experimentsApi.createReplicates({
-    base_experiment_id: exp.experiment_id,
-    count: replicateCount,
-  })
-  return { exp, replicates: res }
+  try {
+    const res = await experimentsApi.createReplicates({
+      base_experiment_id: exp.experiment_id,
+      count: replicateCount,
+    })
+    return { exp, replicates: res, replicateError: null }
+  } catch {
+    // Parent + conditions + additives already exist at this point; a replicate
+    // failure must not report the whole creation as failed (locked decision 3:
+    // creation problems are non-fatal and clearly messaged) — a blanket failure
+    // toast here invites a duplicate-ID retry of an experiment that exists.
+    return {
+      exp,
+      replicates: null,
+      replicateError:
+        'Replicates could not be created — the experiment itself was saved. Use "Create Replicates" on the experiment page.',
+    }
+  }
 }
-return { exp, replicates: null }
+return { exp, replicates: null, replicateError: null }
 ```
 
-3. Adjust `onSuccess` to the new return shape; extend the success toast with `, plus ${replicates.created.length} replicates` when present, and surface `replicates.skipped` messages as warning/error toasts. Navigation stays to the parent detail page.
+3. Adjust `onSuccess` to the new return shape; extend the success toast with `, plus ${replicates.created.length} replicates` when present, surface `replicates.skipped` messages as warning/error toasts, and surface `replicateError` as an error toast while still navigating to the parent detail page. [Amended during Task 8 review — the original snippet let a replicate-creation failure reject the whole mutation and misreport the already-created experiment as failed.]
 4. Pass `replicateCount`/`setReplicateCount` to `Step4Review` and render there, near the submit summary — hidden when the entered ID itself is lettered:
 
 ```tsx
