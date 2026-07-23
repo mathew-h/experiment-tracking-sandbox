@@ -1,7 +1,18 @@
 """Tests for replicate-letter support in experiment ID lineage parsing (issue #69)."""
-import pytest
+import os
+import sys
+import datetime
 
-from database.lineage_utils import parse_experiment_id
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from database import Base
+from database.models import Experiment
+from database.models.enums import ExperimentStatus
+from database.lineage_utils import parse_experiment_id, find_replicate_group_parent
 
 
 class TestParseExperimentIdReplicateGrammar:
@@ -47,21 +58,6 @@ class TestParseExperimentIdReplicateGrammar:
         assert parse_experiment_id("") == (None, None, None, None)
         assert parse_experiment_id(None) == (None, None, None, None)
         assert parse_experiment_id("   ") == (None, None, None, None)
-
-
-import os
-import sys
-import datetime
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from database import Base
-from database.models import Experiment
-from database.models.enums import ExperimentStatus
-from database.lineage_utils import update_experiment_lineage, find_replicate_group_parent
 
 
 @pytest.fixture
