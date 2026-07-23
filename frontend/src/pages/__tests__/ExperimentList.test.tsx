@@ -34,6 +34,9 @@ function makeItems(skip: number, limit: number): ExperimentListItem[] {
     reactor_number: null,
     additives_summary: null,
     condition_note: null,
+    base_experiment_id: null,
+    parent_experiment_fk: null,
+    replicate_label: null,
   }))
 }
 

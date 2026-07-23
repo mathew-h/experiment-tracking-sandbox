@@ -15,6 +15,11 @@ export interface ExperimentListItem {
   reactor_number: number | null
   additives_summary: string | null
   condition_note: string | null
+  base_experiment_id: string | null
+  parent_experiment_fk: number | null
+  replicate_label: string | null
+  /** Grouped-list mode only: lettered children of this group parent. */
+  replicates?: ExperimentListItem[] | null
 }
 
 export interface ExperimentListResponse {
@@ -34,6 +39,7 @@ export interface ExperimentDetail {
   sample_id: string | null
   base_experiment_id: string | null
   parent_experiment_fk: number | null
+  replicate_label: string | null
   created_at: string
   updated_at: string | null
   conditions: Record<string, unknown> | null
@@ -66,6 +72,7 @@ export interface ResultWithFlags {
   h2_grams_per_ton_yield: number | null
   h2_micromoles: number | null
   gross_ammonium_concentration_mM: number | null
+  background_ammonium_concentration_mM: number | null
   final_conductivity_mS_cm: number | null
   final_ph: number | null
   scalar_measurement_date: string | null
@@ -86,6 +93,7 @@ export interface ExperimentListParams {
   description?: string
   skip?: number
   limit?: number
+  group_replicates?: boolean
 }
 
 export interface CreateExperimentPayload {
@@ -111,6 +119,46 @@ export interface ChangeRequestEntry {
 export interface RecentChangeRequestsResponse {
   selected: ChangeRequestEntry | null
   previous: ChangeRequestEntry | null
+}
+
+export interface RollupTimepoint {
+  base_experiment_id: string
+  time_post_reaction_bucket_days: number | null
+  n_replicates: number
+  mean_gross_ammonium_mM: number | null
+  median_gross_ammonium_mM: number | null
+  sd_gross_ammonium_mM: number | null
+  mean_net_ammonium_mM: number | null
+  sd_net_ammonium_mM: number | null
+  mean_h2_micromoles: number | null
+  sd_h2_micromoles: number | null
+  mean_h2_grams_per_ton: number | null
+  sd_h2_grams_per_ton: number | null
+  mean_fe_yield_h2_pct: number | null
+  sd_fe_yield_h2_pct: number | null
+  mean_fe_yield_nh3_pct: number | null
+  sd_fe_yield_nh3_pct: number | null
+  mean_grams_per_ton_yield: number | null
+  sd_grams_per_ton_yield: number | null
+  mean_final_ph: number | null
+}
+
+export interface ReplicateGroupMember {
+  id: number
+  experiment_id: string
+  replicate_label: string | null
+  status: ExperimentStatus | null
+}
+
+export interface ReplicateGroup {
+  base_experiment_id: string
+  parent: ReplicateGroupMember | null
+  members: ReplicateGroupMember[]
+}
+
+export interface CreateReplicatesResponse {
+  created: ExperimentDetail[]
+  skipped: string[]
 }
 
 export const experimentsApi = {
@@ -185,4 +233,13 @@ export const experimentsApi = {
 
   delete: (experimentId: string) =>
     apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),
+
+  getRollup: (experimentId: string) =>
+    apiClient.get<RollupTimepoint[]>(`/experiments/${experimentId}/rollup`).then((r) => r.data),
+
+  getReplicateGroup: (experimentId: string) =>
+    apiClient.get<ReplicateGroup>(`/experiments/${experimentId}/replicate-group`).then((r) => r.data),
+
+  createReplicates: (payload: { base_experiment_id: string; count: number }) =>
+    apiClient.post<CreateReplicatesResponse>('/experiments/replicates', payload).then((r) => r.data),
 }
