@@ -167,22 +167,34 @@ export function NewExperimentPage() {
       }
 
       // 5. Create replicates (server-side copies conditions + additives from the parent)
+      let replicates: CreateReplicatesResponse | null = null
+      let replicateError: string | null = null
       if (replicateCount > 0) {
-        const res = await experimentsApi.createReplicates({
-          base_experiment_id: exp.experiment_id,
-          count: replicateCount,
-        })
-        return { exp, replicates: res }
+        try {
+          const res = await experimentsApi.createReplicates({
+            base_experiment_id: exp.experiment_id,
+            count: replicateCount,
+          })
+          replicates = res
+        } catch {
+          // Parent + conditions + additives already exist at this point; a replicate
+          // failure must not report the whole creation as failed.
+          replicateError =
+            'Replicates could not be created — the experiment itself was saved. Use "Create Replicates" on the experiment page.'
+        }
       }
-      return { exp, replicates: null as CreateReplicatesResponse | null }
+      return { exp, replicates, replicateError }
     },
-    onSuccess: ({ exp, replicates }) => {
+    onSuccess: ({ exp, replicates, replicateError }) => {
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
       const replicaSuffix = replicates?.created.length
         ? `, plus ${replicates.created.length} replicates`
         : ''
       success('Experiment created', `${exp.experiment_id}${replicaSuffix}`)
       replicates?.skipped.forEach((msg) => toastError('Replicate skipped', msg))
+      if (replicateError) {
+        toastError('Replicate creation failed', replicateError)
+      }
       navigate(`/experiments/${exp.experiment_id}`)
     },
     onError: (err: Error) => {
