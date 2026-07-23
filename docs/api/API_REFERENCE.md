@@ -16,7 +16,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/{experiment_id}/replicate-group` | The lettered replicate set (parent + members) this experiment belongs to |
 | POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
 | POST | `/api/experiments/replicates` | Batch-create lettered replicates copying a base experiment's setup |
-| PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, and experiment_id (rename) |
+| PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), and is_outlier |
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a note |
@@ -51,7 +51,7 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
 
 - A row is top-level when `replicate_label IS NULL OR parent_experiment_fk IS NULL`.
 - A lettered replicate that matches the active filters is represented by its parent row instead of itself — i.e. filtering that matches only `SERUM_001b` still pulls `SERUM_001` (the parent) into the page, with `b` attached as a child.
-- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, and `replicate_label`.
+- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, and `is_outlier`.
 - In grouped mode, each parent row additionally gets a `replicates` array: its lettered children (`replicate_label IS NOT NULL`, `parent_experiment_fk` pointing at this row), ordered by letter. Children are attached in full regardless of whether they individually matched the filters — that's the point of grouping. Non-parent items have `replicates: null`.
 - `total` counts top-level rows, not raw experiment rows.
 - Flat mode (`group_replicates=false`, the default) is unchanged — every experiment row is returned individually.
@@ -64,9 +64,10 @@ Example grouped item:
   "base_experiment_id": null,
   "parent_experiment_fk": null,
   "replicate_label": null,
+  "is_outlier": false,
   "replicates": [
-    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "parent_experiment_fk": 210, "replicates": null },
-    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "replicates": null }
+    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "replicates": null },
+    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "replicates": null }
   ]
 }
 ```
@@ -88,6 +89,8 @@ Cross-replicate mean/median/std per timepoint bucket, sourced from the `v_result
 **Errors:**
 - `404 Not Found` — no experiment matches `experiment_id`
 
+**Outlier exclusion (P4):** experiments with `is_outlier = true` are excluded from every statistic in this response, including `n_replicates` — a flagged replicate never contributes to the mean/median/std or the count, though its own data remains queryable via the per-row endpoints/views.
+
 **Caveat (MODELS.md):** the grouping key does not distinguish a lettered replicate set from an ordinary sequential re-run sharing the same `base_experiment_id` (e.g. `HPHT_001` + `HPHT_001-2`). `n_replicates >= 2` on this endpoint does not by itself confirm the group is a lettered replicate set — check case-by-case.
 
 ### GET /api/experiments/{experiment_id}/replicate-group
@@ -100,10 +103,10 @@ The lettered replicate set (if any) that `experiment_id` belongs to.
 ```json
 {
   "base_experiment_id": "SERUM_001",
-  "parent": { "id": 210, "experiment_id": "SERUM_001", "replicate_label": null, "status": "ONGOING" },
+  "parent": { "id": 210, "experiment_id": "SERUM_001", "replicate_label": null, "status": "ONGOING", "is_outlier": false },
   "members": [
-    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "status": "ONGOING" },
-    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING" }
+    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "status": "ONGOING", "is_outlier": false },
+    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING", "is_outlier": true }
   ]
 }
 ```
@@ -164,8 +167,9 @@ Update experiment properties.
 | `date` | string (ISO 8601) | No | Experiment start date |
 | `sample_id` | string | No | Reference to `SampleInfo.sample_id` |
 | `experiment_id` | string | No | Rename: must be unique; max 100 chars; whitespace stripped before validation |
+| `is_outlier` | boolean | No | Flags/unflags a bad vial (see `MODELS.md`). Writing it appends a `ModificationsLog` audit entry. |
 
-**Response `200`:** Updated experiment object with all fields.
+**Response `200`:** Updated experiment object with all fields, including `is_outlier`.
 
 **Errors:**
 - `409 Conflict` — `experiment_id` is already in use by another experiment; `sample_id` FK constraint fails
@@ -173,6 +177,7 @@ Update experiment properties.
 
 **Side effects:**
 - On rename, `ExperimentalConditions.experiment_id` is updated and a `ModificationsLog` entry is written.
+- On `is_outlier` change, a `ModificationsLog` entry is written recording the old/new value.
 
 ## Conditions
 

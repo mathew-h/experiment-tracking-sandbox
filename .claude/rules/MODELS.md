@@ -18,6 +18,7 @@ The central hub for all experimental data.
   - `status`: Enum (`ONGOING`, `COMPLETED`, `CANCELLED`).
   - `sample_id`: FK to `SampleInfo`.
   - `researcher`, `date` (optional).
+  - `is_outlier` (Boolean, non-null, default `false`): flags a bad vial (leak, cracked septum). Flagged experiments are excluded from `v_results_scalar_rollup` aggregates **including `n_replicates`**, but remain fully visible in all per-row views (`v_results_scalar`, `v_results_h2`, `v_results_icp`, `v_primary_experiment_results`) and on their own pages.
 - **Lineage Tracking**:
   - `base_experiment_id`: Tracks the root of a series (e.g., "HPHT_001" for "HPHT_001-2").
   - `parent_experiment_fk`: FK to the immediate parent experiment.
@@ -221,7 +222,8 @@ One row per `(base_experiment_id, time_post_reaction_bucket_days)`: cross-replic
 - **Purpose:** Power BI dashboards can show replicate-set statistics (e.g. mean +/- std NH₄⁺ across `SERUM_001a/b/c`) without an application-layer aggregation step.
 - **Grouping key:** `COALESCE(e.base_experiment_id, e.experiment_id)`, matching the existing pattern in `v_results_scalar` and `v_experiment_additives_summary`.
 - **Statistics:** `stddev_samp` (n-1); returns `NULL` for `n_replicates = 1`. Median via `percentile_cont(0.5) WITHIN GROUP`.
-- **Scope:** gross/net ammonium, H2 (micromoles, grams/ton), ferrous iron yield (H2% and NH3%), grams/ton yield, final pH. No outlier filter (P4) and no ICP element aggregation (permanently out of scope).
+- **Scope:** gross/net ammonium, H2 (micromoles, grams/ton), ferrous iron yield (H2% and NH3%), grams/ton yield, final pH. No ICP element aggregation (permanently out of scope).
+- **Outlier filter (P4):** rows from experiments with `is_outlier = true` are excluded from all aggregates including `n_replicates` (`WHERE … AND NOT COALESCE(e.is_outlier, false)`). Flagged experiments stay present in every per-row view.
 - **Columns:** `base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`.
 - **Note:** the grouping key (`COALESCE(base_experiment_id, experiment_id)`) does not distinguish letter-suffixed replicates from ordinary sequential derivations — a base experiment with sequential re-runs (e.g. `HPHT_001`, `HPHT_001-2`) but no lettered replicates will still produce `n_replicates >= 2` here, since both share `base_experiment_id`. Only treat this view's stats as "replicate statistics" when you know the group in question is actually a lettered replicate set.
 
