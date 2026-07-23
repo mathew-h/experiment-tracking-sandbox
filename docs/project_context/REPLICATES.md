@@ -1,0 +1,81 @@
+# Replicates User Guide
+
+Replicates are lettered "sister" vials of the same experiment setup — e.g. `SERUM_001a`,
+`SERUM_001b`, `SERUM_001c` — run side by side so results can be reported as a mean ± std
+instead of a single number.
+
+---
+
+## What a replicate ID looks like
+
+- The bare base ID (`SERUM_001`) is **replicate 0**, the group parent. It has no letter
+  suffix. An explicit `SERUM_001-0` or `SERUM_001-1` spelling is treated the same way.
+- Lettered members (`a`, `b`, `c`, …) are the replicate siblings, each its own full
+  `Experiment` row with its own conditions, additives, and results.
+- A base experiment can have sequential re-runs (`HPHT_001-2`) that are **not**
+  replicates — those stay flat in the list and are never grouped into a replicate set.
+
+---
+
+## Grouped experiments list
+
+The Experiments list has a **Group replicates** toggle (on by default). When on:
+
+- Lettered sets collapse into a single row for the parent, with a `▸` disclosure arrow.
+- Click the arrow to expand and see each lettered member indented underneath.
+- Pagination counts collapsed groups as one row, so page size and totals stay stable
+  as you expand/collapse — expanding a row never changes what page you're on.
+- Turn the toggle off to see every experiment row flat, one per line, as before.
+
+---
+
+## Grouped results (mean ± std)
+
+On an experiment's **Results** tab, if the experiment belongs to a replicate set, a
+**Grouped (n=N)** mode appears alongside the normal per-vial view. It shows:
+
+- A chart of the selected metric (gross/net NH₄, NH₄ or H₂ g/t, H₂ µmol, Fe²⁺ yield, pH)
+  with the cross-replicate mean line and error bars (± 1 std) per timepoint, plus each
+  individual replicate's series overlaid (toggle-able) so you can spot an outlier vial.
+- A table with the same mean/median/std/n columns per timepoint.
+- Click through from an individual series or table row to that replicate's own
+  detail page to inspect its raw data.
+
+Individual series overlays are capped at 4 lines on the chart — in practice replicate
+sets are a/b/c, well under that cap.
+
+---
+
+## Creating replicates
+
+Two ways to create lettered replicates of an existing experiment:
+
+1. **From the experiment detail page** — on any non-replicate experiment (one that
+   isn't itself a lettered member of a set), use the **Create Replicates** button to
+   open a modal. Enter how many replicates you want (default 3); the modal previews
+   the IDs it will create, continuing the alphabet after any letters already in use.
+2. **From the New Experiment wizard** — on the final review step, set a "replicates to
+   create" count before submitting. The base experiment is created first regardless of
+   what happens next; if replicate creation fails, that failure is **non-fatal** — you'll
+   be pointed to the Create Replicates action on the new experiment's detail page to
+   retry.
+
+Either way, each new replicate copies the base experiment's sample, researcher, status,
+date, reactor conditions, and chemical additives. **Per-vial actuals — anything that
+differs vial to vial (e.g. actual rock mass weighed in, actual reactor number, actual
+pH) — are not unique per replicate at creation time and must be edited on each
+replicate individually afterward.**
+
+A conflicting ID (one that already exists) is skipped with a message rather than
+failing the whole batch — check the toast/response for any skipped IDs.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| "No parent experiment found" on Create Replicates | The base experiment doesn't exist yet | Create the base experiment first, then create replicates |
+| A replicate ID was skipped | An experiment with that exact ID already exists | Check the skipped message; rename or delete the conflicting experiment if it was a mistake |
+| Grouped results show `n=1` | This experiment has no lettered siblings yet | Use Create Replicates, or confirm you're not looking at a sequential re-run instead of a lettered set |
+| Rollup stats look wrong across a base with re-runs | The base has both lettered replicates and a sequential re-run (e.g. `HPHT_001-2`) sharing the same base ID | Rollup and grouping key don't distinguish the two — verify the group is actually a lettered set before trusting `n_replicates` |
