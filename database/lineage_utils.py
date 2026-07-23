@@ -19,51 +19,72 @@ if TYPE_CHECKING:
     from .models import Experiment
 
 
-def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+_REPLICATE_LETTER_RE = re.compile(r'^(\d+)([a-z])$')
+_REPLICATE_GUARD_RE = re.compile(r'^\d+[a-z]$')
+
+
+def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str]]:
     """
-    Parse an experiment ID to extract the base ID, derivation number, and treatment variant.
+    Parse an experiment ID to extract the base ID, derivation number, treatment variant,
+    and replicate label.
 
     Uses hybrid delimiter system:
     - Hyphen-NUMBER for sequential lineage (e.g., -2, -3), but ONLY when the prefix
-      itself ends in a numeric segment (_NNN or -NNN).
+      itself ends in a numeric segment (_NNN or -NNN, optionally letter-suffixed).
     - Underscore-TEXT for treatment variants (e.g., _Desorption).
+    - A single trailing lowercase letter bound to the numeric index for replicates
+      (e.g., _001a). Extracted last so a letter-suffixed index is never mistaken
+      for a treatment name.
 
     TYPE-NNN IDs (e.g., CF-015, CF-04) are treated as standalone base experiments
     because their prefix ("CF") does not end in digits.
+
+    -0 and -1 are valid derivation numbers (they denote the explicit "group parent"
+    spelling of a replicate set — see database/lineage_utils.py::update_experiment_lineage).
 
     Args:
         experiment_id: The experiment ID to parse
 
     Returns:
-        A tuple of (base_experiment_id, derivation_number, treatment_variant)
+        A tuple of (base_experiment_id, derivation_number, treatment_variant, replicate_label)
 
     Examples:
         >>> parse_experiment_id("CF-015")
-        ("CF-015", None, None)
+        ("CF-015", None, None, None)
         >>> parse_experiment_id("CF-015-2")
-        ("CF-015", 2, None)
+        ("CF-015", 2, None, None)
         >>> parse_experiment_id("HPHT_MH_001-2")
-        ("HPHT_MH_001", 2, None)
+        ("HPHT_MH_001", 2, None, None)
         >>> parse_experiment_id("HPHT_MH_001-2_Desorption")
-        ("HPHT_MH_001", 2, "Desorption")
+        ("HPHT_MH_001", 2, "Desorption", None)
         >>> parse_experiment_id("HPHT_MH_001")
-        ("HPHT_MH_001", None, None)
+        ("HPHT_MH_001", None, None, None)
         >>> parse_experiment_id("HPHT_MH_001_Desorption")
-        ("HPHT_MH_001", None, "Desorption")
+        ("HPHT_MH_001", None, "Desorption", None)
+        >>> parse_experiment_id("SERUM_001-0")
+        ("SERUM_001", 0, None, None)
+        >>> parse_experiment_id("SERUM_001a")
+        ("SERUM_001", None, None, "a")
+        >>> parse_experiment_id("Serum_MH_101a")
+        ("Serum_MH_101", None, None, "a")
+        >>> parse_experiment_id("SERUM_001a-2")
+        ("SERUM_001", 2, None, "a")
     """
     if not experiment_id or not isinstance(experiment_id, str):
-        return None, None, None
+        return None, None, None, None
 
     experiment_id = experiment_id.strip()
     if not experiment_id:
-        return None, None, None
+        return None, None, None, None
 
     treatment_variant = None
     derivation_num = None
+    replicate_label = None
     base_id = experiment_id
 
     # Step 1: Extract treatment variant (trailing _TEXT segment).
     # A trailing underscore segment is a treatment only when:
+    #   - it is not a letter-suffixed numeric index (e.g. "101a") — replicate guard
     #   - it contains no hyphens (so "001-2" is not mistaken for a treatment)
     #   - it is not all digits (so "001" index segments are left alone)
     #   - removing it still leaves a structured ID with >= 2 underscore-segments
@@ -71,23 +92,33 @@ def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int
     parts = experiment_id.split('_')
     if len(parts) >= 2:
         last = parts[-1]
-        if not last.isdigit() and '-' not in last:  # hyphen means it contains index info, not a treatment name
+        if not _REPLICATE_GUARD_RE.match(last) and not last.isdigit() and '-' not in last:
             remaining = '_'.join(parts[:-1])
             if len(remaining.split('_')) >= 2:
                 treatment_variant = last
                 base_id = remaining
 
     # Step 2: Extract sequential derivation number (trailing -N).
-    # Only treat -N as a derivation when the prefix already ends in _NNN or -NNN,
-    # confirming it carries a numeric index (e.g. HPHT_MH_001, CF-015).
+    # Only treat -N as a derivation when the prefix already ends in _NNN or -NNN
+    # (optionally letter-suffixed, e.g. "_001a"), confirming it carries a numeric index.
     # This prevents TYPE-NNN IDs like CF-015 from being parsed as deriv=15 of "CF".
+    # -0 and -1 are valid derivation numbers (see docstring).
     if '-' in base_id:
         prefix, _, suffix = base_id.rpartition('-')
-        if suffix.isdigit() and re.search(r'[_-]\d+$', prefix):
+        if suffix.isdigit() and re.search(r'[_-]\d+[a-z]?$', prefix):
             derivation_num = int(suffix)
             base_id = prefix
 
-    return base_id, derivation_num, treatment_variant
+    # Step 3: Extract the replicate letter bound to the numeric index and rebuild
+    # base_id with the numeric-only index (e.g. "SERUM_001a" -> "SERUM_001").
+    id_parts = base_id.split('_')
+    letter_match = _REPLICATE_LETTER_RE.match(id_parts[-1])
+    if letter_match:
+        replicate_label = letter_match.group(2)
+        id_parts[-1] = letter_match.group(1)
+        base_id = '_'.join(id_parts)
+
+    return base_id, derivation_num, treatment_variant, replicate_label
 
 
 def get_or_find_parent_experiment(db: Session, experiment_id: str):
