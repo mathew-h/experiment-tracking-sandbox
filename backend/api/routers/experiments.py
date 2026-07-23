@@ -14,6 +14,7 @@ from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
+    ReplicateCreateRequest, ReplicateCreateResponse,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
@@ -748,6 +749,41 @@ def create_experiment(
     db.refresh(exp)
     log.info("experiment_created", experiment_id=exp.experiment_id, user=current_user.email)
     return ExperimentResponse.model_validate(exp)
+
+
+@router.post("/replicates", response_model=ReplicateCreateResponse, status_code=201)
+def create_replicates(
+    payload: ReplicateCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReplicateCreateResponse:
+    """Batch-create lettered replicates copying the base experiment's setup."""
+    from database.lineage_utils import create_replicate_experiments
+
+    try:
+        created, skipped = create_replicate_experiments(
+            db, payload.base_experiment_id, payload.count
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc))
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Replicate ID conflict on creation")
+    for exp in created:
+        db.refresh(exp)
+    log.info(
+        "replicates_created",
+        base_experiment_id=payload.base_experiment_id,
+        created=[e.experiment_id for e in created],
+        skipped=skipped,
+        user=current_user.email,
+    )
+    return ReplicateCreateResponse(
+        created=[ExperimentResponse.model_validate(e) for e in created],
+        skipped=skipped,
+    )
 
 
 @router.patch("/{experiment_id}", response_model=ExperimentResponse)

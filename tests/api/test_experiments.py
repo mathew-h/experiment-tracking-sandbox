@@ -866,3 +866,29 @@ class TestGroupedListMode:
         data = resp.json()
         assert data["total"] == 2
         assert len(data["items"]) == 1
+
+
+class TestCreateReplicatesEndpoint:
+    def test_create_replicates_batch(self, client, db_session):
+        _make_experiment(db_session, experiment_id="CRE_001", number=9850)
+        db_session.commit()
+        resp = client.post("/api/experiments/replicates",
+                           json={"base_experiment_id": "CRE_001", "count": 3})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert [e["experiment_id"] for e in data["created"]] == ["CRE_001a", "CRE_001b", "CRE_001c"]
+        assert all(e["replicate_label"] in ("a", "b", "c") for e in data["created"])
+        assert data["skipped"] == []
+
+    def test_create_replicates_404_without_parent(self, client, db_session):
+        resp = client.post("/api/experiments/replicates",
+                           json={"base_experiment_id": "CRE_MISSING_001", "count": 3})
+        assert resp.status_code == 404
+
+    def test_create_replicates_count_bounds(self, client, db_session):
+        _make_experiment(db_session, experiment_id="CRE_002", number=9860)
+        db_session.commit()
+        assert client.post("/api/experiments/replicates",
+                           json={"base_experiment_id": "CRE_002", "count": 0}).status_code == 422
+        assert client.post("/api/experiments/replicates",
+                           json={"base_experiment_id": "CRE_002", "count": 26}).status_code == 422

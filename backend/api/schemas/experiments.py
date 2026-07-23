@@ -123,3 +123,13 @@ class ReplicateGroupResponse(BaseModel):
     base_experiment_id: str
     parent: Optional[ReplicateGroupMember] = None
     members: list[ReplicateGroupMember] = []
+
+
+class ReplicateCreateRequest(BaseModel):
+    base_experiment_id: str
+    count: int = Field(3, ge=1, le=25)
+
+
+class ReplicateCreateResponse(BaseModel):
+    created: list[ExperimentResponse]
+    skipped: list[str] = []
