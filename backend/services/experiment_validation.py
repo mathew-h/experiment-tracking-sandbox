@@ -51,6 +51,7 @@ class ParsedExperimentID:
     original_id: str
     is_valid: bool
     warnings: List[str]
+    replicate_label: Optional[str] = None  # "a", "b", "c"; None = not a replicate
 
 
 def get_experiment_type_from_id(type_text: str) -> Optional[ExperimentType]:
@@ -78,47 +79,58 @@ def get_experiment_type_from_id(type_text: str) -> Optional[ExperimentType]:
     return EXPERIMENT_TYPE_ABBREVIATIONS.get(normalized)
 
 
-def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Optional[str]]:
+def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Optional[str], Optional[str]]:
     """
-    Extract base ID, sequential number, and treatment variant from experiment ID.
-    
+    Extract base ID, sequential number, treatment variant, and replicate label from
+    experiment ID.
+
     Uses hybrid delimiter system:
     - Hyphen-NUMBER for sequential lineage (e.g., -2, -3)
     - Underscore-TEXT for treatment variants (e.g., _Desorption)
-    
+    - A single trailing lowercase letter bound to the numeric index for replicates
+      (e.g., _001a), extracted before treatment detection so a letter-suffixed
+      index is never mistaken for a treatment name.
+
     Supports both 2-part (TYPE_INDEX) and 3-part (TYPE_INITIALS_INDEX) formats.
-    
+
     Args:
         experiment_id: The full experiment ID
-        
+
     Returns:
-        Tuple of (base_id, sequential_number, treatment_variant)
-        
+        Tuple of (base_id, sequential_number, treatment_variant, replicate_label)
+
     Examples:
         >>> extract_lineage_info("Serum_MH_101")
-        ("Serum_MH_101", None, None)
+        ("Serum_MH_101", None, None, None)
         >>> extract_lineage_info("HPHT_001")
-        ("HPHT_001", None, None)
+        ("HPHT_001", None, None, None)
         >>> extract_lineage_info("Serum_MH_101-2")
-        ("Serum_MH_101", 2, None)
+        ("Serum_MH_101", 2, None, None)
         >>> extract_lineage_info("HPHT_001-2")
-        ("HPHT_001", 2, None)
+        ("HPHT_001", 2, None, None)
         >>> extract_lineage_info("Serum_MH_101_Desorption")
-        ("Serum_MH_101", None, "Desorption")
+        ("Serum_MH_101", None, "Desorption", None)
         >>> extract_lineage_info("HPHT_001_Desorption")
-        ("HPHT_001", None, "Desorption")
+        ("HPHT_001", None, "Desorption", None)
         >>> extract_lineage_info("Serum_MH_101-2_Desorption")
-        ("Serum_MH_101", 2, "Desorption")
+        ("Serum_MH_101", 2, "Desorption", None)
         >>> extract_lineage_info("HPHT_001-2_Desorption")
-        ("HPHT_001", 2, "Desorption")
+        ("HPHT_001", 2, "Desorption", None)
+        >>> extract_lineage_info("SERUM_001a")
+        ("SERUM_001", None, None, "a")
+        >>> extract_lineage_info("Serum_MH_101a")
+        ("Serum_MH_101", None, None, "a")
+        >>> extract_lineage_info("SERUM_001a-2")
+        ("SERUM_001", 2, None, "a")
     """
     if not experiment_id:
-        return "", None, None
-    
+        return "", None, None, None
+
     treatment_variant = None
     sequential_number = None
+    replicate_label = None
     base_id = experiment_id
-    
+
     # First, extract sequential number (hyphen-NUMBER pattern from the end)
     # This must be done before treatment detection to avoid confusion
     if '-' in experiment_id:
@@ -126,11 +138,21 @@ def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Option
         if len(hyphen_parts) == 2 and hyphen_parts[-1].isdigit():
             sequential_number = int(hyphen_parts[-1])
             base_id = hyphen_parts[0]
-    
+
+    # Extract the replicate letter bound to the numeric index (e.g. "101a" -> "101" + "a").
+    # Must run before treatment detection below, or a letter-suffixed index would be
+    # mistaken for a treatment name (e.g. "Serum_MH_101a" -> base "Serum_MH", treatment "101a").
+    parts = base_id.split('_')
+    letter_match = re.match(r'^(\d+)([a-z])$', parts[-1])
+    if letter_match:
+        replicate_label = letter_match.group(2)
+        parts[-1] = letter_match.group(1)
+        base_id = '_'.join(parts)
+
     # Now check for treatment variant in the remaining base_id
     # Split by underscore to detect if last part is a treatment
     parts = base_id.split('_')
-    
+
     # Determine expected base format by checking part count
     # After removing sequential, we should have:
     # - 2 parts for TYPE_INDEX format (e.g., HPHT_001)
@@ -160,8 +182,8 @@ def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Option
                 base_id = '_'.join(parts[:-1])
         # If last part is numeric and we have exactly 3 parts, it's TYPE_INITIALS_INDEX base format
         # If last part is numeric and we have exactly 2 parts, it's TYPE_INDEX base format
-    
-    return base_id, sequential_number, treatment_variant
+
+    return base_id, sequential_number, treatment_variant, replicate_label
 
 
 def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
@@ -212,7 +234,7 @@ def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
     original_id = experiment_id.strip()
     
     # Extract lineage info first
-    base_id, sequential_number, treatment_variant = extract_lineage_info(original_id)
+    base_id, sequential_number, treatment_variant, replicate_label = extract_lineage_info(original_id)
     
     # Parse base_id - support both 2-part and 3-part formats
     parts = base_id.split('_')
@@ -281,7 +303,8 @@ def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
         base_id=base_id,
         original_id=original_id,
         is_valid=is_valid,
-        warnings=warnings
+        warnings=warnings,
+        replicate_label=replicate_label,
     )
 
 
