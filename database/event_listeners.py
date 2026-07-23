@@ -637,30 +637,37 @@ def calculate_additive_derived_values(mapper, connection, target):
 def update_experiment_lineage_on_flush(session, flush_context, instances):
     """
     Automatically update experiment lineage fields before flushing.
-    
+
     This listener:
     1. Parses experiment IDs for new experiments
-    2. Sets base_experiment_id and parent_experiment_fk
-    3. Updates orphaned derivations when a base experiment is created
+    2. Sets base_experiment_id, parent_experiment_fk, and replicate_label
+    3. Updates orphaned derivations when a group parent (bare stem, or an
+       explicit -0/-1 spelling) is created
     """
     from .models import Experiment
-    
-    # Track base experiments being inserted to update their derivations
-    new_base_experiments = []
-    
+    from .lineage_utils import parse_experiment_id
+
+    # Track group-parent stems being inserted, to update their derivations
+    new_parent_stems = []
+
     # Process new experiments
     for obj in session.new:
         if isinstance(obj, Experiment) and obj.experiment_id:
             # Update lineage for this experiment
             update_experiment_lineage(session, obj)
-            
-            # Track if this is a potential base experiment (no derivation number)
-            from .lineage_utils import parse_experiment_id
-            _, derivation_num, _ = parse_experiment_id(obj.experiment_id)
-            if derivation_num is None:
-                new_base_experiments.append(obj.experiment_id)
-    
+
+            # Track if this row is a group parent (bare stem, or explicit -0/-1
+            # spelling) so any pre-existing orphaned derivations can be linked.
+            base_id, derivation_num, treatment_variant, replicate_label = parse_experiment_id(obj.experiment_id)
+            is_parent_row = (
+                treatment_variant is None
+                and replicate_label is None
+                and (derivation_num is None or derivation_num in (0, 1))
+            )
+            if is_parent_row:
+                new_parent_stems.append(base_id or obj.experiment_id)
+
     # After processing new experiments, update any orphaned derivations
-    # This handles the case where a derivation was created before its base
-    for base_exp_id in new_base_experiments:
-        update_orphaned_derivations(session, base_exp_id) 
+    # This handles the case where a derivation was created before its parent
+    for stem in new_parent_stems:
+        update_orphaned_derivations(session, stem) 

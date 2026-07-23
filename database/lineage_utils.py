@@ -121,6 +121,72 @@ def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int
     return base_id, derivation_num, treatment_variant, replicate_label
 
 
+def _normalize_experiment_id(value: str) -> str:
+    """Lowercase and strip hyphens/underscores/spaces for loose experiment_id matching."""
+    return ''.join(ch for ch in value.lower() if ch not in ['-', '_', ' '])
+
+
+def _find_experiment_by_exact_spelling(db: Session, candidate_id: str):
+    """
+    Resolve a single experiment_id spelling to its Experiment row.
+
+    Checks the session's pending, not-yet-flushed new objects first. This matters
+    because callers of this helper (find_replicate_group_parent, and in turn
+    update_orphaned_derivations) run from the `before_flush` event listener: at that
+    point in the flush lifecycle, a brand-new group-parent row being inserted in the
+    SAME flush has no primary key yet and is invisible to a plain `db.query(...)`
+    SELECT (autoflush is off, and the INSERT hasn't executed yet). Without this check,
+    creating a group parent for pre-existing orphaned replicates would silently fail
+    to back-link them, because the parent could never resolve to itself mid-flush.
+    Falls back to a normal DB query for already-persisted rows (the common case).
+    """
+    from .models import Experiment
+
+    candidate_norm = _normalize_experiment_id(candidate_id)
+
+    for obj in db.new:
+        if (
+            isinstance(obj, Experiment)
+            and obj.experiment_id
+            and _normalize_experiment_id(obj.experiment_id) == candidate_norm
+        ):
+            return obj
+
+    return db.query(Experiment).filter(
+        func.lower(
+            func.replace(
+                func.replace(
+                    func.replace(Experiment.experiment_id, '-', ''),
+                    '_', ''
+                ),
+                ' ', ''
+            )
+        ) == candidate_norm
+    ).first()
+
+
+def find_replicate_group_parent(db: Session, base_id: str):
+    """
+    Resolve the group parent for a replicate member, in precedence order:
+    bare stem (S), then the explicit parent spellings S-0 and S-1.
+
+    Args:
+        db: Database session
+        base_id: The stem (e.g. "SERUM_001") to resolve a parent for
+
+    Returns:
+        The parent Experiment object if found, None otherwise
+    """
+    if not base_id:
+        return None
+
+    for candidate_id in (base_id, f"{base_id}-0", f"{base_id}-1"):
+        parent = _find_experiment_by_exact_spelling(db, candidate_id)
+        if parent:
+            return parent
+    return None
+
+
 def get_or_find_parent_experiment(db: Session, experiment_id: str):
     """
     Find the parent experiment for a given experiment ID.
@@ -144,8 +210,8 @@ def get_or_find_parent_experiment(db: Session, experiment_id: str):
     """
     from .models import Experiment
     
-    base_id, derivation_num, treatment_variant = parse_experiment_id(experiment_id)
-    
+    base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(experiment_id)
+
     # For treatment variants: find the direct parent (base with or without sequential)
     if treatment_variant is not None and derivation_num is None:
         # Simple treatment: EXP-001_Desorption -> find EXP-001
@@ -226,27 +292,46 @@ def get_or_find_parent_experiment(db: Session, experiment_id: str):
 
 def update_experiment_lineage(db: Session, experiment):
     """
-    Update the lineage fields (base_experiment_id, parent_experiment_fk) for an experiment.
-    
+    Update the lineage fields (base_experiment_id, parent_experiment_fk, replicate_label)
+    for an experiment.
+
     Args:
         db: Database session
         experiment: The Experiment object to update
-        
+
     Returns:
         True if lineage was updated, False if no update was needed
-        
+
     Note:
         This function modifies the experiment object but does not commit the session.
         Treatment variants are tracked in the experiment_id but do not affect parent relationships.
+
+        Classification:
+        - Bare stem, or explicit "-0"/"-1" parent spelling (no treatment, no replicate
+          letter): this row IS a group parent. base_experiment_id = stem,
+          parent_experiment_fk = NULL.
+        - Replicate member (replicate_label set): base_experiment_id = stem, parent
+          resolved via find_replicate_group_parent (bare stem, then -0, then -1).
+        - Everything else (sequential >= 2, treatment variants): unchanged existing
+          behavior via get_or_find_parent_experiment.
     """
     if not experiment or not experiment.experiment_id:
         return False
-    
-    base_id, derivation_num, treatment_variant = parse_experiment_id(experiment.experiment_id)
-    
-    # If this is not a derivation (no sequential AND no treatment), ensure base_experiment_id references itself
-    if derivation_num is None and treatment_variant is None:
-        updated = False
+
+    base_id, derivation_num, treatment_variant, replicate_label = parse_experiment_id(experiment.experiment_id)
+
+    updated = False
+    if experiment.replicate_label != replicate_label:
+        experiment.replicate_label = replicate_label
+        updated = True
+
+    is_parent_row = (
+        treatment_variant is None
+        and replicate_label is None
+        and (derivation_num is None or derivation_num in (0, 1))
+    )
+
+    if is_parent_row:
         self_base_id = base_id or experiment.experiment_id
         if experiment.base_experiment_id != self_base_id:
             experiment.base_experiment_id = self_base_id
@@ -255,68 +340,84 @@ def update_experiment_lineage(db: Session, experiment):
             experiment.parent_experiment_fk = None
             updated = True
         return updated
-    
-    # This is a derivation (has sequential OR treatment), set base_experiment_id
+
+    # This is a derivation (sequential, treatment, and/or replicate)
     experiment.base_experiment_id = base_id
-    
-    # Try to find and set the parent
-    parent = get_or_find_parent_experiment(db, experiment.experiment_id)
-    if parent:
-        experiment.parent_experiment_fk = parent.id
+
+    if replicate_label is not None:
+        parent = find_replicate_group_parent(db, base_id)
+        # Assign via the relationship (not a raw `.id`): find_replicate_group_parent
+        # can resolve a group-parent row that is itself still pending in the current
+        # flush (no primary key yet) — see _find_experiment_by_exact_spelling.
+        experiment.parent = parent
     else:
-        # Parent doesn't exist yet, leave parent_experiment_fk as None
-        experiment.parent_experiment_fk = None
-    
+        parent = get_or_find_parent_experiment(db, experiment.experiment_id)
+        experiment.parent_experiment_fk = parent.id if parent else None
+
     return True
 
 
 def update_orphaned_derivations(db: Session, base_experiment_id: str):
     """
     Update any derivations that reference this base experiment but don't have parent_experiment_fk set.
-    
-    This is called after a base experiment is inserted to link any pre-existing derivations.
-    
+
+    This is called after a group parent is inserted (bare stem, or explicit -0/-1 spelling)
+    to link any pre-existing derivations, including lettered replicates.
+
     Args:
         db: Database session
-        base_experiment_id: The experiment_id of the newly created base experiment
-        
+        base_experiment_id: The stem (e.g. "HPHT_MH_001") of the newly created group parent
+
     Returns:
         The number of derivations updated
     """
     from .models import Experiment
-    
+
     if not base_experiment_id:
         return 0
-    
-    # Find the base experiment
-    base_id_norm = ''.join(ch for ch in base_experiment_id.lower() if ch not in ['-', '_', ' '])
-    base_experiment = db.query(Experiment).filter(
-        func.lower(
-            func.replace(
-                func.replace(
-                    func.replace(Experiment.experiment_id, '-', ''),
-                    '_', ''
-                ),
-                ' ', ''
-            )
-        ) == base_id_norm
-    ).first()
-    
+
+    base_experiment = find_replicate_group_parent(db, base_experiment_id)
     if not base_experiment:
         return 0
-    
-    # Find orphaned derivations (those with base_experiment_id matching but parent_experiment_fk is NULL)
-    orphaned = db.query(Experiment).filter(
+
+    # A stem can have up to three parent spellings (bare, -0, -1) that may all
+    # exist simultaneously. Whichever one wins precedence in find_replicate_group_parent
+    # must not cause the OTHER spellings to be back-linked as if they were orphaned
+    # children — they are all "the group parent", just written differently.
+    #
+    # Tracked by object (not just id): the row that triggered this call may itself
+    # still be pending in the current flush (see _find_experiment_by_exact_spelling)
+    # and so may not have a primary key yet. Filtering the SQL query by a bare id set
+    # would silently break if that set ever contained a None id (SQL's three-valued
+    # NOT IN logic treats a NULL member as "unknown" for every row, excluding
+    # everything) — building the exclusion from real ids only, plus a Python-level
+    # identity check below, avoids that trap.
+    parent_alias_objs = {base_experiment}
+    for alias_id in (base_experiment_id, f"{base_experiment_id}-0", f"{base_experiment_id}-1"):
+        alias_row = _find_experiment_by_exact_spelling(db, alias_id)
+        if alias_row:
+            parent_alias_objs.add(alias_row)
+
+    parent_alias_ids = {obj.id for obj in parent_alias_objs if obj.id is not None}
+
+    # Find orphaned derivations (those with base_experiment_id matching but parent_experiment_fk
+    # is NULL), excluding every parent-alias row for this stem.
+    query = db.query(Experiment).filter(
         Experiment.base_experiment_id == base_experiment_id,
         Experiment.parent_experiment_fk.is_(None),
-        Experiment.id != base_experiment.id
-    ).all()
-    
+    )
+    if parent_alias_ids:
+        query = query.filter(Experiment.id.notin_(parent_alias_ids))
+    orphaned = [row for row in query.all() if row not in parent_alias_objs]
+
     count = 0
     for derivation in orphaned:
-        derivation.parent_experiment_fk = base_experiment.id
+        # Assign via the ORM relationship, not a raw `.id`, so SQLAlchemy's
+        # dependency-ordered flush can back-fill the FK even when base_experiment
+        # is itself still pending (no primary key yet) in the current flush.
+        derivation.parent = base_experiment
         count += 1
-    
+
     return count
 
 
@@ -347,8 +448,8 @@ def auto_create_treatment_experiment(
     from .models import Experiment, ExperimentNotes, ExperimentalConditions
     from datetime import datetime
     
-    base_id, derivation_num, treatment_variant = parse_experiment_id(experiment_id)
-    
+    base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(experiment_id)
+
     # Only auto-create treatment variants, not sequential experiments
     if treatment_variant is None:
         return None
