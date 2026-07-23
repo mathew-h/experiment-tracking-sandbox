@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { conditionsApi } from '@/api/conditions'
-import { StatusBadge, Button, Input, PageSpinner, useToast } from '@/components/ui'
+import { StatusBadge, Badge, Button, Input, PageSpinner, useToast } from '@/components/ui'
 import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { CreateReplicatesModal } from '@/components/experiments/CreateReplicatesModal'
@@ -43,6 +43,12 @@ export function ExperimentDetailPage() {
     queryFn: () => conditionsApi.getByExperiment(id!),
     enabled: Boolean(id),
     retry: false,
+  })
+
+  const { data: replicateGroup } = useQuery({
+    queryKey: ['replicate-group', id],
+    queryFn: () => experimentsApi.getReplicateGroup(id!),
+    enabled: Boolean(id),
   })
 
   const renameValidation = useExperimentIdValidation(idDraft, experiment?.experiment_id)
@@ -99,6 +105,20 @@ export function ExperimentDetailPage() {
     },
   })
 
+  const outlierMutation = useMutation({
+    mutationFn: (isOutlier: boolean) => experimentsApi.patch(id!, { is_outlier: isOutlier }),
+    onSuccess: (_updated, isOutlier) => {
+      queryClient.invalidateQueries({ queryKey: ['experiment'] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      queryClient.invalidateQueries({ queryKey: ['rollup'] })
+      queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
+      success(isOutlier ? 'Marked as outlier — excluded from group stats' : 'Outlier flag removed')
+    },
+    onError: (err: unknown) => {
+      toastError('Update failed', String(err))
+    },
+  })
+
   function startDateEdit() {
     setDateDraft(experiment!.date?.slice(0, 10) ?? '')
     setEditingDate(true)
@@ -129,6 +149,9 @@ export function ExperimentDetailPage() {
 
   if (isLoading) return <PageSpinner />
   if (error || !experiment) return <p className="text-red-400 text-sm p-6">Experiment not found</p>
+
+  const inReplicateSet =
+    experiment.replicate_label !== null || (replicateGroup?.members.length ?? 0) > 0
 
   const idRightElement =
     renameValidation.status === 'checking' ? (
@@ -191,6 +214,9 @@ export function ExperimentDetailPage() {
               ✎
             </button>
             <StatusBadge status={experiment.status} />
+            {experiment.is_outlier && (
+              <Badge variant="warning">Outlier — excluded from group stats</Badge>
+            )}
             {conditions?.experiment_type && (
               <span className="text-xs text-ink-muted">{conditions.experiment_type}</span>
             )}
@@ -310,6 +336,16 @@ export function ExperimentDetailPage() {
         {experiment.replicate_label === null && experiment.parent_experiment_fk === null && (
           <Button variant="secondary" size="sm" onClick={() => setReplicatesOpen(true)}>
             Create Replicates
+          </Button>
+        )}
+        {inReplicateSet && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => outlierMutation.mutate(!experiment.is_outlier)}
+            disabled={outlierMutation.isPending}
+          >
+            {experiment.is_outlier ? 'Include in rollup' : 'Mark as outlier'}
           </Button>
         )}
       </div>

@@ -37,6 +37,7 @@ function makeItems(skip: number, limit: number): ExperimentListItem[] {
     base_experiment_id: null,
     parent_experiment_fk: null,
     replicate_label: null,
+    is_outlier: false,
   }))
 }
 
@@ -208,7 +209,7 @@ function makeGroupedItem(): ExperimentListItem {
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
     additives_summary: null, condition_note: null,
     base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
-    replicate_label: null as string | null,
+    replicate_label: null as string | null, is_outlier: false,
   }
   return {
     ...base, id: 1, experiment_id: 'SERUM_001', experiment_number: 100,

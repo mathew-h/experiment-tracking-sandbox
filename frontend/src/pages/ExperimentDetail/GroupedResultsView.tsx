@@ -133,9 +133,10 @@ export function GroupedResultsView({ experimentId }: GroupedResultsViewProps) {
             <Link
               key={m.id}
               to={`/experiments/${m.experiment_id}`}
-              className="font-mono-data text-red-400 hover:text-red-300"
+              className={`font-mono-data ${m.is_outlier ? 'text-ink-muted line-through hover:text-ink-secondary' : 'text-red-400 hover:text-red-300'}`}
             >
               {m.experiment_id}
+              {m.is_outlier ? ' (outlier)' : ''}
             </Link>
           ))}
         </div>
@@ -164,7 +165,7 @@ export function GroupedResultsView({ experimentId }: GroupedResultsViewProps) {
               seriesEntities.map((m, i) => (
                 <Line
                   key={m.id} dataKey={m.experiment_id}
-                  name={m.replicate_label ? `replicate ${m.replicate_label}` : 'replicate 0'}
+                  name={`${m.replicate_label ? `replicate ${m.replicate_label}` : 'replicate 0'}${m.is_outlier ? ' (outlier)' : ''}`}
                   stroke={chartColors.series[i]} strokeWidth={1.5}
                   dot={{ r: 4, fill: chartColors.series[i] }} connectNulls
                 />

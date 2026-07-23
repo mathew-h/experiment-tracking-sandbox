@@ -18,6 +18,7 @@ export interface ExperimentListItem {
   base_experiment_id: string | null
   parent_experiment_fk: number | null
   replicate_label: string | null
+  is_outlier: boolean
   /** Grouped-list mode only: lettered children of this group parent. */
   replicates?: ExperimentListItem[] | null
 }
@@ -40,6 +41,7 @@ export interface ExperimentDetail {
   base_experiment_id: string | null
   parent_experiment_fk: number | null
   replicate_label: string | null
+  is_outlier: boolean
   created_at: string
   updated_at: string | null
   conditions: Record<string, unknown> | null
@@ -148,6 +150,7 @@ export interface ReplicateGroupMember {
   experiment_id: string
   replicate_label: string | null
   status: ExperimentStatus | null
+  is_outlier: boolean
 }
 
 export interface ReplicateGroup {
@@ -169,6 +172,7 @@ export interface CreatedReplicate {
   base_experiment_id: string | null
   parent_experiment_fk: number | null
   replicate_label: string | null
+  is_outlier: boolean
   created_at: string
   updated_at: string | null
 }
@@ -196,6 +200,7 @@ export const experimentsApi = {
       date?: string
       experiment_id?: string
       sample_id?: string
+      is_outlier?: boolean
     },
   ) =>
     apiClient
