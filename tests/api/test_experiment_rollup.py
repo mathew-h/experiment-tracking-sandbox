@@ -70,6 +70,19 @@ class TestRollupEndpoint:
     def test_rollup_404_unknown_experiment(self, client, db_session, reporting_views):
         assert client.get("/api/experiments/NOPE_999/rollup").status_code == 404
 
+    def test_rollup_excludes_outlier_flagged_member(self, client, db_session, reporting_views):
+        _make_experiment(db_session, "RUP_003", 9765)
+        members = []
+        for i, letter in enumerate("abc"):
+            member = _make_experiment(db_session, f"RUP_003{letter}", 9766 + i)
+            _add_primary_scalar(db_session, member, 7.0, float(i + 1))  # 1, 2, 3
+            members.append(member)
+        members[2].is_outlier = True
+        db_session.commit()
+        (row,) = client.get("/api/experiments/RUP_003a/rollup").json()
+        assert row["n_replicates"] == 2
+        assert row["mean_gross_ammonium_mM"] == pytest.approx(1.5)
+
 
 class TestReplicateGroupEndpoint:
     def test_group_from_parent_and_member(self, client, db_session):
@@ -97,3 +110,12 @@ class TestReplicateGroupEndpoint:
         data = client.get("/api/experiments/RGRP_ORPH_001a/replicate-group").json()
         assert data["parent"] is None
         assert [m["replicate_label"] for m in data["members"]] == ["a", "b"]
+
+    def test_replicate_group_exposes_is_outlier(self, client, db_session):
+        _make_experiment(db_session, "RGRP_OUT_001", 9795)
+        flagged = _make_experiment(db_session, "RGRP_OUT_001a", 9796)
+        flagged.is_outlier = True
+        db_session.commit()
+        data = client.get("/api/experiments/RGRP_OUT_001/replicate-group").json()
+        assert data["parent"]["is_outlier"] is False
+        assert data["members"][0]["is_outlier"] is True

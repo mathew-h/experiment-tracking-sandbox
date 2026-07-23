@@ -22,6 +22,7 @@ class ExperimentUpdate(BaseModel):
     researcher: Optional[str] = None
     date: Optional[datetime] = None
     status: Optional[ExperimentStatus] = None
+    is_outlier: Optional[bool] = None
 
 
 class ExperimentStatusUpdate(BaseModel):
@@ -46,6 +47,7 @@ class ExperimentListItem(BaseModel):
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
+    is_outlier: bool = False
     # Joined from conditions (may be None if no conditions recorded yet)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
@@ -82,6 +84,7 @@ class ExperimentResponse(BaseModel):
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
+    is_outlier: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -117,6 +120,7 @@ class ReplicateGroupMember(BaseModel):
     experiment_id: str
     replicate_label: Optional[str] = None
     status: Optional[ExperimentStatus] = None
+    is_outlier: bool = False
 
 
 class ReplicateGroupResponse(BaseModel):

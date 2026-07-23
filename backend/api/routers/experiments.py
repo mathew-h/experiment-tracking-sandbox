@@ -806,6 +806,7 @@ def update_experiment(
     new_id = data.pop("experiment_id", None)
     new_sample_id = data.pop("sample_id", None)
     old_date = exp.date  # capture before mutation
+    old_is_outlier = exp.is_outlier  # capture before mutation
 
     for field, value in data.items():
         setattr(exp, field, value)
@@ -821,6 +822,19 @@ def update_experiment(
             new_values={"date": data["date"].isoformat() if data["date"] else None},
         ))
         log.info("experiment_date_updated", experiment_id=exp.experiment_id, user=current_user.uid)
+
+    if "is_outlier" in data:
+        db.add(ModificationsLog(
+            experiment_id=exp.experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type="update",
+            modified_table="experiments",
+            old_values={"is_outlier": old_is_outlier},
+            new_values={"is_outlier": data["is_outlier"]},
+        ))
+        log.info("experiment_outlier_updated", experiment_id=exp.experiment_id,
+                 is_outlier=data["is_outlier"], user=current_user.uid)
 
     if new_id is not None:
         new_id = new_id.strip()
