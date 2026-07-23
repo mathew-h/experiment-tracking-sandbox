@@ -72,4 +72,5 @@ export const chartColors = {
   grid: colors.navyBorder,           // recessive gridlines
   axis: colors.inkMuted,             // axis lines + ticks
   label: colors.inkSecondary,        // axis/legend text
+  tooltipBg: '#0a2540',              // tooltip surface (raised navy)
 } as const

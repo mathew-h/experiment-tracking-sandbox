@@ -156,7 +156,7 @@ export function GroupedResultsView({ experimentId }: GroupedResultsViewProps) {
               width={56}
             />
             <Tooltip
-              contentStyle={{ backgroundColor: '#0a2540', border: `1px solid ${chartColors.grid}`, fontSize: 12 }}
+              contentStyle={{ backgroundColor: chartColors.tooltipBg, border: `1px solid ${chartColors.grid}`, fontSize: 12 }}
               labelFormatter={(v) => `Day ${v}`}
             />
             <Legend wrapperStyle={{ fontSize: 11, color: chartColors.label }} />
