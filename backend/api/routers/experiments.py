@@ -13,10 +13,11 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
-    NoteCreate, NoteResponse, NoteUpdate,
+    NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
+    RollupTimepointResponse,
 )
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
@@ -287,6 +288,70 @@ def get_experiment_results(
             xrd_run_date=scalar.xrd_run_date if scalar else None,
         ))
     return out
+
+
+@router.get("/{experiment_id}/rollup", response_model=list[RollupTimepointResponse])
+def get_experiment_rollup(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[RollupTimepointResponse]:
+    """Cross-replicate mean/median/std per timepoint from v_results_scalar_rollup."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    base = exp.base_experiment_id or exp.experiment_id
+    rows = db.execute(
+        text("""
+            SELECT * FROM v_results_scalar_rollup
+            WHERE base_experiment_id = :base
+            ORDER BY time_post_reaction_bucket_days
+        """),
+        {"base": base},
+    ).mappings().all()
+    return [RollupTimepointResponse(**dict(r)) for r in rows]
+
+
+@router.get("/{experiment_id}/replicate-group", response_model=ReplicateGroupResponse)
+def get_replicate_group(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReplicateGroupResponse:
+    """The lettered replicate set this experiment belongs to (empty members if none)."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    base = exp.base_experiment_id or exp.experiment_id
+    parent = exp if exp.replicate_label is None else exp.parent
+    if parent is not None:
+        members = db.execute(
+            select(Experiment)
+            .where(
+                Experiment.parent_experiment_fk == parent.id,
+                Experiment.replicate_label.isnot(None),
+            )
+            .order_by(Experiment.replicate_label.asc())
+        ).scalars().all()
+    else:
+        # Orphan member: parent row doesn't exist yet; list siblings by base stem.
+        members = db.execute(
+            select(Experiment)
+            .where(
+                Experiment.base_experiment_id == base,
+                Experiment.replicate_label.isnot(None),
+            )
+            .order_by(Experiment.replicate_label.asc())
+        ).scalars().all()
+    return ReplicateGroupResponse(
+        base_experiment_id=base,
+        parent=ReplicateGroupMember.model_validate(parent) if parent else None,
+        members=[ReplicateGroupMember.model_validate(m) for m in members],
+    )
 
 
 @router.patch("/{experiment_id}/status", response_model=ExperimentResponse)

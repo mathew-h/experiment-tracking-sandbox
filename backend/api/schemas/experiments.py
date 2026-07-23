@@ -109,3 +109,17 @@ class NoteResponse(BaseModel):
     note_text: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class ReplicateGroupMember(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    experiment_id: str
+    replicate_label: Optional[str] = None
+    status: Optional[ExperimentStatus] = None
+
+
+class ReplicateGroupResponse(BaseModel):
+    base_experiment_id: str
+    parent: Optional[ReplicateGroupMember] = None
+    members: list[ReplicateGroupMember] = []
