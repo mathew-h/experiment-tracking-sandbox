@@ -24,14 +24,20 @@ export function CreateReplicatesModal({ open, onClose, baseExperimentId }: Creat
     enabled: open,
   })
 
+  const resolvedBase = group?.base_experiment_id ?? baseExperimentId
+
   const previewIds = useMemo(() => {
     const existing = new Set((group?.members ?? []).map((m) => m.replicate_label))
-    const base = group?.base_experiment_id ?? baseExperimentId
     return LETTERS.split('')
       .filter((l) => !existing.has(l))
       .slice(0, count)
-      .map((l) => `${base}${l}`)
-  }, [group, baseExperimentId, count])
+      .map((l) => `${resolvedBase}${l}`)
+  }, [group, resolvedBase, count])
+
+  function resetAndClose() {
+    setCount(3)
+    onClose()
+  }
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -42,21 +48,21 @@ export function CreateReplicatesModal({ open, onClose, baseExperimentId }: Creat
       data.skipped.forEach((msg) => toastError('Skipped', msg))
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
       queryClient.invalidateQueries({ queryKey: ['replicate-group', baseExperimentId] })
-      onClose()
+      resetAndClose()
     },
-    onError: () => toastError('Failed to create replicates'),
+    onError: (err: Error) => toastError('Failed to create replicates', err.message),
   })
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={resetAndClose}
       title="Create Replicates"
       description="Copies this experiment's conditions and additives to new lettered replicate vials. Per-vial actuals (e.g. actual rock mass) stay editable on each replicate."
       size="sm"
       footer={
         <>
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={mutation.isPending}>
+          <Button variant="ghost" size="sm" onClick={resetAndClose} disabled={mutation.isPending}>
             Cancel
           </Button>
           <Button
@@ -72,6 +78,11 @@ export function CreateReplicatesModal({ open, onClose, baseExperimentId }: Creat
       }
     >
       <div className="space-y-3">
+        <p className="text-xs text-ink-secondary">
+          Replicates are created under{' '}
+          <span className="font-mono-data text-ink-primary">{resolvedBase}</span>, copying its
+          conditions and additives.
+        </p>
         <div className="w-28">
           <Input
             label="How many?"

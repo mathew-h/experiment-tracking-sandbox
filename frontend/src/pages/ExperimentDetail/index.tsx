@@ -307,7 +307,7 @@ export function ExperimentDetailPage() {
         <Button variant="ghost" size="sm" onClick={() => navigate('/experiments/new')}>
           + New Experiment
         </Button>
-        {experiment.replicate_label === null && (
+        {experiment.replicate_label === null && experiment.parent_experiment_fk === null && (
           <Button variant="secondary" size="sm" onClick={() => setReplicatesOpen(true)}>
             Create Replicates
           </Button>
