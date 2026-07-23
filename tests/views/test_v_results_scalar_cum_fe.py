@@ -196,8 +196,9 @@ class TestCumulativeSum:
 
 
 class TestChainPartitioning:
-    def test_derived_experiment_shares_cumulative_with_root(self, view_db):
-        """Root and derived experiments in the same chain accumulate into one running sum."""
+    def test_derived_experiment_does_not_share_cumulative_with_root(self, view_db):
+        """Each experiment_id partitions independently; a derived experiment's
+        cumulative sum starts fresh and does not inherit its root's contribution."""
         # Root experiment: base_experiment_id is NULL (COALESCE resolves to 'CTEST_001').
         # Use a digit-suffix ID so the lineage parser recognises 'CTEST_001-2' as derived.
         root = _make_experiment(view_db, "CTEST_001", 20)

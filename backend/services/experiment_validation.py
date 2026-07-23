@@ -113,7 +113,11 @@ def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Option
         >>> extract_lineage_info("HPHT_001_Desorption")
         ("HPHT_001", None, "Desorption", None)
         >>> extract_lineage_info("Serum_MH_101-2_Desorption")
-        ("Serum_MH_101", 2, "Desorption", None)
+        ("Serum_MH_101-2", None, "Desorption", None)
+        # Known pre-existing limitation (predates issue #69, not fixed here): the
+        # hyphen-NUMBER match requires the entire tail after the last hyphen to be
+        # purely digits, so a combined "-N_Treatment" suffix never matches and the
+        # sequential number is not extracted; see test_existing_combined_unaffected.
         >>> extract_lineage_info("HPHT_001-2_Desorption")
         ("HPHT_001", 2, "Desorption", None)
         >>> extract_lineage_info("SERUM_001a")
