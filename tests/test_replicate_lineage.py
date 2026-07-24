@@ -186,3 +186,86 @@ class TestReplicateLineageWiring:
             "a '-1' parent-alias row must never be back-linked to the bare-stem parent"
         )
         assert bare_parent.parent_experiment_fk is None
+
+
+class TestLetterSequentialParentWiring:
+    """P5 (issue #70): SERUM_001a-2 links to SERUM_001a as parent.
+
+    P1 parsed letter+sequential IDs but deliberately did not wire the parent;
+    this is the one sanctioned behavior change in P5. Locked interpretation:
+    any -N on a lettered ID links to the lettered sibling itself (a-3 -> a),
+    and treatment combos keep the pre-P5 group-parent link.
+    """
+
+    def test_letter_seq_links_to_lettered_sibling(self, sqlite_session):
+        stem = _make_exp(sqlite_session, "REP20_001", 920001)
+        rep_a = _make_exp(sqlite_session, "REP20_001a", 920002)
+        rerun = _make_exp(sqlite_session, "REP20_001a-2", 920003)
+        assert rerun.parent_experiment_fk == rep_a.id
+        assert rerun.parent_experiment_fk != stem.id
+        assert rerun.base_experiment_id == "REP20_001"
+        assert rerun.replicate_label == "a"
+
+    def test_letter_seq_falls_back_to_group_parent_when_sibling_missing(self, sqlite_session):
+        # Pre-P5 behavior pinned: without the lettered sibling, a-2 still
+        # links to the group parent (stem), exactly as before.
+        stem = _make_exp(sqlite_session, "REP21_001", 920010)
+        rerun = _make_exp(sqlite_session, "REP21_001a-2", 920011)
+        assert rerun.parent_experiment_fk == stem.id
+
+    def test_letter_seq_orphan_when_nothing_exists(self, sqlite_session):
+        rerun = _make_exp(sqlite_session, "REP22_001a-2", 920020)
+        assert rerun.parent_experiment_fk is None
+        assert rerun.base_experiment_id == "REP22_001"
+        assert rerun.replicate_label == "a"
+
+    def test_higher_seq_links_to_letter_itself_not_previous_rerun(self, sqlite_session):
+        rep_a = _make_exp(sqlite_session, "REP23_001a", 920030)
+        rerun2 = _make_exp(sqlite_session, "REP23_001a-2", 920031)
+        rerun3 = _make_exp(sqlite_session, "REP23_001a-3", 920032)
+        assert rerun2.parent_experiment_fk == rep_a.id
+        assert rerun3.parent_experiment_fk == rep_a.id  # a-3 -> a, NOT a-2
+
+    def test_same_flush_creation_wires_parent(self, sqlite_session):
+        # The lettered sibling is pending in the SAME flush (no PK yet);
+        # _find_experiment_by_exact_spelling's session.new scan must resolve it.
+        rep_a = Experiment(
+            experiment_id="REP24_001a", experiment_number=920040,
+            status=ExperimentStatus.ONGOING, date=datetime.date(2026, 1, 1),
+        )
+        rerun = Experiment(
+            experiment_id="REP24_001a-2", experiment_number=920041,
+            status=ExperimentStatus.ONGOING, date=datetime.date(2026, 1, 1),
+        )
+        sqlite_session.add_all([rep_a, rerun])
+        sqlite_session.flush()
+        assert rep_a.id is not None
+        assert rerun.parent_experiment_fk == rep_a.id
+
+    def test_letter_seq_treatment_combo_keeps_group_parent(self, sqlite_session):
+        # Pre-P5 behavior pinned: a treatment on a lettered re-run
+        # (parses to base/seq/treatment/letter all set) is OUT of the
+        # sanctioned wiring — it keeps linking to the group parent.
+        stem = _make_exp(sqlite_session, "REP25_001", 920050)
+        rep_a = _make_exp(sqlite_session, "REP25_001a", 920051)
+        combo = _make_exp(sqlite_session, "REP25_001a-2_Desorption", 920052)
+        assert combo.parent_experiment_fk == stem.id
+
+    def test_plain_replicate_wiring_unchanged(self, sqlite_session):
+        # Regression guard: plain lettered replicates (no -N) still link to
+        # the group parent exactly as in P1.
+        stem = _make_exp(sqlite_session, "REP26_001", 920060)
+        rep_a = _make_exp(sqlite_session, "REP26_001a", 920061)
+        assert rep_a.parent_experiment_fk == stem.id
+
+    def test_letter_seq_zero_and_one_also_link_to_letter_itself(self, sqlite_session):
+        # Pin for the locked "any -N" interpretation (issue #70 P5): explicit
+        # a-0/a-1 spellings on a lettered ID link to the lettered sibling,
+        # not the group parent — -0/-1 are parent aliases only at group level.
+        stem = _make_exp(sqlite_session, "REP27_001", 920070)
+        rep_a = _make_exp(sqlite_session, "REP27_001a", 920071)
+        rerun0 = _make_exp(sqlite_session, "REP27_001a-0", 920072)
+        rerun1 = _make_exp(sqlite_session, "REP27_001a-1", 920073)
+        assert rerun0.parent_experiment_fk == rep_a.id
+        assert rerun1.parent_experiment_fk == rep_a.id
+        assert rerun0.parent_experiment_fk != stem.id

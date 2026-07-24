@@ -9,116 +9,32 @@ and establish parent-child relationships between experiments.
 Supports hybrid delimiter system:
 - Hyphen-NUMBER for sequential lineage (e.g., -2, -3)
 - Underscore-TEXT for treatment variants (e.g., _Desorption)
+
+The experiment ID grammar itself now lives in database/experiment_id_parser.py
+(issue #70 P5 consolidation); parse_experiment_id below delegates to it.
 """
-import re
 from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+
+from .experiment_id_parser import parse_lineage_fields
 
 if TYPE_CHECKING:
     from .models import Experiment
 
 
-_REPLICATE_LETTER_RE = re.compile(r'^(\d+)([a-z])$')
-_REPLICATE_GUARD_RE = re.compile(r'^\d+[a-z]$')
-
-
 def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str]]:
     """
-    Parse an experiment ID to extract the base ID, derivation number, treatment variant,
-    and replicate label.
+    Parse an experiment ID into (base_experiment_id, derivation_number,
+    treatment_variant, replicate_label).
 
-    Uses hybrid delimiter system:
-    - Hyphen-NUMBER for sequential lineage (e.g., -2, -3), but ONLY when the prefix
-      itself ends in a numeric segment (_NNN or -NNN, optionally letter-suffixed).
-    - Underscore-TEXT for treatment variants (e.g., _Desorption).
-    - A single trailing lowercase letter bound to the numeric index for replicates
-      (e.g., _001a). Extracted last so a letter-suffixed index is never mistaken
-      for a treatment name.
-
-    TYPE-NNN IDs (e.g., CF-015, CF-04) are treated as standalone base experiments
-    because their prefix ("CF") does not end in digits.
-
-    -0 and -1 are valid derivation numbers (they denote the explicit "group parent"
-    spelling of a replicate set — see database/lineage_utils.py::update_experiment_lineage).
-
-    Args:
-        experiment_id: The experiment ID to parse
-
-    Returns:
-        A tuple of (base_experiment_id, derivation_number, treatment_variant, replicate_label)
-
-    Examples:
-        >>> parse_experiment_id("CF-015")
-        ("CF-015", None, None, None)
-        >>> parse_experiment_id("CF-015-2")
-        ("CF-015", 2, None, None)
-        >>> parse_experiment_id("HPHT_MH_001-2")
-        ("HPHT_MH_001", 2, None, None)
-        >>> parse_experiment_id("HPHT_MH_001-2_Desorption")
-        ("HPHT_MH_001", 2, "Desorption", None)
-        >>> parse_experiment_id("HPHT_MH_001")
-        ("HPHT_MH_001", None, None, None)
-        >>> parse_experiment_id("HPHT_MH_001_Desorption")
-        ("HPHT_MH_001", None, "Desorption", None)
-        >>> parse_experiment_id("SERUM_001-0")
-        ("SERUM_001", 0, None, None)
-        >>> parse_experiment_id("SERUM_001a")
-        ("SERUM_001", None, None, "a")
-        >>> parse_experiment_id("Serum_MH_101a")
-        ("Serum_MH_101", None, None, "a")
-        >>> parse_experiment_id("SERUM_001a-2")
-        ("SERUM_001", 2, None, "a")
+    Delegates to the canonical grammar in database/experiment_id_parser.py
+    (issue #70 P5 consolidation) — see parse_lineage_fields there for the
+    full delimiter rules and examples. Kept as a public wrapper because it
+    is the 4-tuple surface used throughout lineage handling, event
+    listeners, replicate routing, tests, and the data-migration script.
     """
-    if not experiment_id or not isinstance(experiment_id, str):
-        return None, None, None, None
-
-    experiment_id = experiment_id.strip()
-    if not experiment_id:
-        return None, None, None, None
-
-    treatment_variant = None
-    derivation_num = None
-    replicate_label = None
-    base_id = experiment_id
-
-    # Step 1: Extract treatment variant (trailing _TEXT segment).
-    # A trailing underscore segment is a treatment only when:
-    #   - it is not a letter-suffixed numeric index (e.g. "101a") — replicate guard
-    #   - it contains no hyphens (so "001-2" is not mistaken for a treatment)
-    #   - it is not all digits (so "001" index segments are left alone)
-    #   - removing it still leaves a structured ID with >= 2 underscore-segments
-    #     (prevents "CF_Desorption" from stripping "Desorption" off a 1-part base)
-    parts = experiment_id.split('_')
-    if len(parts) >= 2:
-        last = parts[-1]
-        if not _REPLICATE_GUARD_RE.match(last) and not last.isdigit() and '-' not in last:
-            remaining = '_'.join(parts[:-1])
-            if len(remaining.split('_')) >= 2:
-                treatment_variant = last
-                base_id = remaining
-
-    # Step 2: Extract sequential derivation number (trailing -N).
-    # Only treat -N as a derivation when the prefix already ends in _NNN or -NNN
-    # (optionally letter-suffixed, e.g. "_001a"), confirming it carries a numeric index.
-    # This prevents TYPE-NNN IDs like CF-015 from being parsed as deriv=15 of "CF".
-    # -0 and -1 are valid derivation numbers (see docstring).
-    if '-' in base_id:
-        prefix, _, suffix = base_id.rpartition('-')
-        if suffix.isdigit() and re.search(r'[_-]\d+[a-z]?$', prefix):
-            derivation_num = int(suffix)
-            base_id = prefix
-
-    # Step 3: Extract the replicate letter bound to the numeric index and rebuild
-    # base_id with the numeric-only index (e.g. "SERUM_001a" -> "SERUM_001").
-    id_parts = base_id.split('_')
-    letter_match = _REPLICATE_LETTER_RE.match(id_parts[-1])
-    if letter_match:
-        replicate_label = letter_match.group(2)
-        id_parts[-1] = letter_match.group(1)
-        base_id = '_'.join(id_parts)
-
-    return base_id, derivation_num, treatment_variant, replicate_label
+    return parse_lineage_fields(experiment_id)
 
 
 def _normalize_experiment_id(value: str) -> str:
@@ -310,8 +226,11 @@ def update_experiment_lineage(db: Session, experiment):
         - Bare stem, or explicit "-0"/"-1" parent spelling (no treatment, no replicate
           letter): this row IS a group parent. base_experiment_id = stem,
           parent_experiment_fk = NULL.
-        - Replicate member (replicate_label set): base_experiment_id = stem, parent
-          resolved via find_replicate_group_parent (bare stem, then -0, then -1).
+        - Replicate member (replicate_label set): base_experiment_id = stem. Parent:
+          a letter+sequential re-run with no treatment (e.g. SERUM_001a-2) resolves
+          to the lettered sibling (SERUM_001a) when it exists; otherwise (plain
+          replicate, treatment combo, or sibling missing) the group parent via
+          find_replicate_group_parent (bare stem, then -0, then -1).
         - Everything else (sequential >= 2, treatment variants): unchanged existing
           behavior via get_or_find_parent_experiment.
     """
@@ -345,10 +264,20 @@ def update_experiment_lineage(db: Session, experiment):
     experiment.base_experiment_id = base_id
 
     if replicate_label is not None:
-        parent = find_replicate_group_parent(db, base_id)
-        # Assign via the relationship (not a raw `.id`): find_replicate_group_parent
-        # can resolve a group-parent row that is itself still pending in the current
-        # flush (no primary key yet) — see _find_experiment_by_exact_spelling.
+        parent = None
+        if derivation_num is not None and treatment_variant is None:
+            # P5 (issue #70): a sequential re-run of a lettered replicate
+            # (e.g. SERUM_001a-2) links to the lettered sibling (SERUM_001a).
+            # Any -N links to the letter itself (a-3 -> a, not a-2). Treatment
+            # combos are excluded and keep the group-parent link below.
+            parent = _find_experiment_by_exact_spelling(db, f"{base_id}{replicate_label}")
+        if parent is None:
+            # Plain replicate, or fallback when the lettered sibling doesn't
+            # exist: pre-P5 group-parent resolution (bare stem, then -0, -1).
+            parent = find_replicate_group_parent(db, base_id)
+        # Assign via the relationship (not a raw `.id`): both resolvers can
+        # return a row that is itself still pending in the current flush
+        # (no primary key yet) — see _find_experiment_by_exact_spelling.
         experiment.parent = parent
     else:
         parent = get_or_find_parent_experiment(db, experiment.experiment_id)
