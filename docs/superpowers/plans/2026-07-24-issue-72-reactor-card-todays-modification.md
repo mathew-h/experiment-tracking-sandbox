@@ -500,7 +500,7 @@ git commit -m "[#72] Render today's modification on reactor cards
 | Card with today's mod shows the text | Task 1 `test_reactor_card_shows_todays_modification` + Task 2 test 1 |
 | No mod → card identical to current behavior | Task 1 keying test (R08 None) + Task 2 test 2; pre-existing dashboard tests pass unchanged |
 | Prior-day mod not shown | Task 1 `test_reactor_card_prior_day_modification_not_shown` |
-| Save in pop-out + reload shows on card | `['dashboard']` query already invalidated on save (pre-existing); backend read path covered by Task 1 tests |
+| Save in pop-out + reload shows on card | ~~`['dashboard']` query already invalidated on save (pre-existing)~~ **Plan premise was false** (final review finding): `crMutation.onSuccess` did not invalidate `['dashboard']` — fixed post-review by adding the one-line invalidation, matching the sibling mutations. Backend read path covered by Task 1 tests |
 | Works for ONGOING and QUEUED; never empty slots | Task 1 keying test (QUEUED card) + Task 2 render placement (occupied branch only) |
 | Long text line-clamped with title hover | Task 2 render block (`line-clamp-2`, `title`) + Task 2 test 3 |
 | Single call, one batched lookup, no per-card queries | Task 1 `test_dashboard_modification_lookup_is_single_batched_query` |
