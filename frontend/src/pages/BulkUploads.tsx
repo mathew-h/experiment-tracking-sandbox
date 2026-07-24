@@ -189,15 +189,19 @@ export function BulkUploadsPage() {
 
       <div className="space-y-2">
 
-        {/* 1 — Master Results Sync */}
+        {/* 1 — Master Results Sync (drag-and-drop; the broken SharePoint sync was removed, issue #74) */}
         <UploadRow
           id="master-results"
           title="Master Results Sync"
-          description="Sync from SharePoint or upload the master tracking spreadsheet"
-          helpText="Reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). Sync reads from the configured SharePoint path; upload allows a manual override. Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent."
+          description="Drag and drop the master tracker spreadsheet to push updates"
+          helpText={
+            'Drag and drop the master results file into the zone below to push updates: ' +
+            '01_R&D\\02_Results\\Master_Reactor_Sampling_Tracker_v2.xlsx — ' +
+            "reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). " +
+            'Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent.'
+          }
           accept=".xlsx,.xls"
           uploadFn={(file) => bulkUploadsApi.uploadMasterResults(file)}
-          syncFn={() => bulkUploadsApi.triggerMasterSync()}
           isOpen={isOpen('master-results')}
           onToggle={() => toggle('master-results')}
         />

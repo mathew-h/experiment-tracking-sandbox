@@ -28,19 +28,6 @@ function IconDownload() {
   )
 }
 
-function IconRefresh() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-    >
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-      <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
-    </svg>
-  )
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export interface UploadRowProps {
@@ -53,8 +40,6 @@ export interface UploadRowProps {
   templateType?: TemplateType
   /** Optional mode passed to the template download endpoint (e.g. 'experiment' for XRD) */
   templateMode?: string
-  /** If provided, shows a "Sync from SharePoint" button above the file zone */
-  syncFn?: () => Promise<BulkUploadResult>
   /** If provided, shown below the skipped badge when result.skipped > 0 */
   skippedMessage?: string
   /** Optional content rendered inside the expanded panel (chips, extra fields, etc.) */
@@ -81,7 +66,6 @@ export function UploadRow({
   uploadFn,
   templateType,
   templateMode,
-  syncFn,
   skippedMessage,
   topContent,
   onUploadError,
@@ -109,17 +93,6 @@ export function UploadRow({
     },
   })
 
-  const syncMutation = useMutation({
-    mutationFn: () => syncFn!(),
-    onSuccess: (data) => {
-      setResult(data)
-      success(`Sync complete — ${data.created} created, ${data.updated} updated`)
-    },
-    onError: (err: Error) => {
-      toastError('Sync failed', err.message)
-    },
-  })
-
   const templateMutation = useMutation({
     mutationFn: () => bulkUploadsApi.downloadTemplate(templateType!, templateMode),
     onError: (err: Error) => {
@@ -127,7 +100,7 @@ export function UploadRow({
     },
   })
 
-  const isPending = uploadMutation.isPending || syncMutation.isPending
+  const isPending = uploadMutation.isPending
   const lastStatus = result
     ? (isBulkUploadResult(result) && result.errors.length > 0) ? 'error' : 'success'
     : null
@@ -165,22 +138,6 @@ export function UploadRow({
 
           {/* Optional top content — next-ID chips, extra fields, etc. */}
           {topContent}
-
-          {/* Sync button row (Master Results only) */}
-          {syncFn && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { setResult(null); syncMutation.mutate() }}
-                disabled={isPending}
-                leftIcon={<IconRefresh />}
-              >
-                Sync from SharePoint
-              </Button>
-              <span className="text-xs text-ink-muted">or upload a file below</span>
-            </div>
-          )}
 
           {/* File drop zone */}
           <FileUpload
