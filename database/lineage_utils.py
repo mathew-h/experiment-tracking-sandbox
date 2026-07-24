@@ -226,8 +226,11 @@ def update_experiment_lineage(db: Session, experiment):
         - Bare stem, or explicit "-0"/"-1" parent spelling (no treatment, no replicate
           letter): this row IS a group parent. base_experiment_id = stem,
           parent_experiment_fk = NULL.
-        - Replicate member (replicate_label set): base_experiment_id = stem, parent
-          resolved via find_replicate_group_parent (bare stem, then -0, then -1).
+        - Replicate member (replicate_label set): base_experiment_id = stem. Parent:
+          a letter+sequential re-run with no treatment (e.g. SERUM_001a-2) resolves
+          to the lettered sibling (SERUM_001a) when it exists; otherwise (plain
+          replicate, treatment combo, or sibling missing) the group parent via
+          find_replicate_group_parent (bare stem, then -0, then -1).
         - Everything else (sequential >= 2, treatment variants): unchanged existing
           behavior via get_or_find_parent_experiment.
     """
@@ -261,10 +264,20 @@ def update_experiment_lineage(db: Session, experiment):
     experiment.base_experiment_id = base_id
 
     if replicate_label is not None:
-        parent = find_replicate_group_parent(db, base_id)
-        # Assign via the relationship (not a raw `.id`): find_replicate_group_parent
-        # can resolve a group-parent row that is itself still pending in the current
-        # flush (no primary key yet) — see _find_experiment_by_exact_spelling.
+        parent = None
+        if derivation_num is not None and treatment_variant is None:
+            # P5 (issue #70): a sequential re-run of a lettered replicate
+            # (e.g. SERUM_001a-2) links to the lettered sibling (SERUM_001a).
+            # Any -N links to the letter itself (a-3 -> a, not a-2). Treatment
+            # combos are excluded and keep the group-parent link below.
+            parent = _find_experiment_by_exact_spelling(db, f"{base_id}{replicate_label}")
+        if parent is None:
+            # Plain replicate, or fallback when the lettered sibling doesn't
+            # exist: pre-P5 group-parent resolution (bare stem, then -0, -1).
+            parent = find_replicate_group_parent(db, base_id)
+        # Assign via the relationship (not a raw `.id`): both resolvers can
+        # return a row that is itself still pending in the current flush
+        # (no primary key yet) — see _find_experiment_by_exact_spelling.
         experiment.parent = parent
     else:
         parent = get_or_find_parent_experiment(db, experiment.experiment_id)
