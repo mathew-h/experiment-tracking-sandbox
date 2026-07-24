@@ -100,10 +100,12 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
 interface Props {
   experimentId: string
   experimentFk: number
+  /** Day parsed from a -t<days> token on the experiment ID (issue #81). */
+  idTimepointDays?: number | null
 }
 
 /** Results tab: timepoint result cards with scalar chemistry and ICP data. */
-export function ResultsTab({ experimentId, experimentFk }: Props) {
+export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [bgInput, setBgInput] = useState(false)
   const [bgValue, setBgValue] = useState(String(DEFAULT_BACKGROUND_NH4))
@@ -280,6 +282,7 @@ export function ResultsTab({ experimentId, experimentFk }: Props) {
         onClose={() => setShowAddModal(false)}
         experimentFk={experimentFk}
         experimentId={experimentId}
+        idTimepointDays={idTimepointDays}
       />
     </div>
   )
