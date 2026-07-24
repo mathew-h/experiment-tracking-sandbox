@@ -17,6 +17,8 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
+from backend.services.result_merge_utils import apply_id_timepoint
+from database.experiment_id_parser import split_timepoint_token
 
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
@@ -149,15 +151,26 @@ def _process_bytes(
             errors.append(f"Row {row_num} ({exp_id}): {exc}")
             continue
 
+        # Issue #81: '-t<days>' in the experiment ID is canonical for the
+        # timepoint — fill a blank Duration from it, error a conflict.
+        _, id_timepoint = split_timepoint_token(exp_id)
+
         duration_raw = row.get("Duration (Days)")
         if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
-            skipped += 1
-            continue
-
-        time_post_reaction = _parse_float(duration_raw)
-        if time_post_reaction is None:
-            errors.append(f"Row {row_num}: invalid Duration (Days) '{duration_raw}'")
-            continue
+            if id_timepoint is None:
+                skipped += 1
+                continue
+            time_post_reaction = id_timepoint
+        else:
+            time_post_reaction = _parse_float(duration_raw)
+            if time_post_reaction is None:
+                errors.append(f"Row {row_num}: invalid Duration (Days) '{duration_raw}'")
+                continue
+            try:
+                time_post_reaction = apply_id_timepoint(id_timepoint, time_post_reaction)
+            except ValueError as exc:
+                errors.append(f"Row {row_num} ({exp_id}): {exc}")
+                continue
 
         description = str(row.get("Description") or "").strip() or None
         sample_date = _parse_date(row.get("Sample Date"))

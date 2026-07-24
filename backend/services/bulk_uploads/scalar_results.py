@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from backend.services.scalar_results_service import ScalarResultsService
 from frontend.config.variable_config import SCALAR_RESULTS_TEMPLATE_HEADERS
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
+from backend.services.result_merge_utils import apply_id_timepoint
+from database.experiment_id_parser import split_timepoint_token
 
 
 class ScalarResultsUploadService:
@@ -192,6 +194,36 @@ class ScalarResultsUploadService:
                         "errors": [str(exc)],
                     })
                     continue
+
+            # Issue #81: '-t<days>' in the experiment ID is canonical for the
+            # timepoint — fill a blank Time (days) from it, error a conflict.
+            # A non-float-coercible Time cell is left untouched so the existing
+            # "'Time (days)' must be a number" row error below still fires.
+            _, id_timepoint = split_timepoint_token(str(clean.get("experiment_id") or ""))
+            if id_timepoint is not None:
+                raw_time = clean.get("time_post_reaction")
+                coercible = True
+                if raw_time is not None:
+                    try:
+                        raw_time = float(raw_time)
+                    except (TypeError, ValueError):
+                        coercible = False
+                if coercible:
+                    try:
+                        clean["time_post_reaction"] = apply_id_timepoint(id_timepoint, raw_time)
+                    except ValueError as exc:
+                        errors.append(f"Row {row_num}: {exc}")
+                        parse_feedbacks.append({
+                            "row": row_num,
+                            "experiment_id": str(clean.get("experiment_id", "")),
+                            "time_post_reaction": None,
+                            "status": "error",
+                            "fields_updated": [], "fields_preserved": [],
+                            "old_values": {}, "new_values": {},
+                            "warnings": [],
+                            "errors": [str(exc)],
+                        })
+                        continue
 
             if "measurement_date" in clean:
                 parsed_date = ScalarResultsUploadService._parse_measurement_date(
