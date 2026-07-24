@@ -153,7 +153,9 @@ def _process_bytes(
         # ("SERUM_001-t7") combined with a real Replicate letter is rejected —
         # the letter must be encoded in the ID itself (e.g. SERUM_001a-t7).
         try:
-            combined = combine_replicate_id(stem if id_timepoint is not None else exp_id, row.get("Replicate"))
+            combined = combine_replicate_id(
+                stem if id_timepoint is not None else exp_id, row.get("Replicate"),
+            )
             if id_timepoint is not None and combined != stem:
                 raise ValueError(
                     "Replicate column cannot be combined with a -t<days> ID token; "
@@ -178,10 +180,14 @@ def _process_bytes(
         else:
             time_post_reaction = _parse_float(duration_raw)
             if time_post_reaction is None:
-                errors.append(f"Row {row_num}: invalid Duration (Days) '{duration_raw}'")
+                errors.append(
+                    f"Row {row_num}: invalid Duration (Days) '{duration_raw}'"
+                )
                 continue
             try:
-                time_post_reaction = apply_id_timepoint(id_timepoint, time_post_reaction)
+                time_post_reaction = apply_id_timepoint(
+                    id_timepoint, time_post_reaction,
+                )
             except ValueError as exc:
                 errors.append(f"Row {row_num} ({exp_id}): {exc}")
                 continue

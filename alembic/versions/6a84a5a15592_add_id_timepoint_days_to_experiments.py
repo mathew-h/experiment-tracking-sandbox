@@ -23,8 +23,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('experiments', sa.Column('id_timepoint_days', sa.Float(), nullable=True))
-    op.create_index(op.f('ix_experiments_id_timepoint_days'), 'experiments', ['id_timepoint_days'], unique=False)
+    op.add_column(
+        'experiments',
+        sa.Column('id_timepoint_days', sa.Float(), nullable=True),
+    )
+    op.create_index(
+        op.f('ix_experiments_id_timepoint_days'),
+        'experiments', ['id_timepoint_days'], unique=False,
+    )
 
 
 def downgrade() -> None:

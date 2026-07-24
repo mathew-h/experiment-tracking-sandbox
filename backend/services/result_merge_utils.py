@@ -34,10 +34,12 @@ def apply_id_timepoint(id_timepoint_days, time_post_reaction):
         return time_post_reaction
     if time_post_reaction is None:
         return id_timepoint_days
-    if abs(float(time_post_reaction) - float(id_timepoint_days)) > TIMEPOINT_TOLERANCE_DAYS:
+    delta = abs(float(time_post_reaction) - float(id_timepoint_days))
+    if delta > TIMEPOINT_TOLERANCE_DAYS:
         raise ValueError(
-            f"Time (days) {time_post_reaction} conflicts with the timepoint encoded "
-            f"in the experiment ID (-t{id_timepoint_days:g} = day {id_timepoint_days:g}). "
+            f"Time (days) {time_post_reaction} conflicts with the timepoint "
+            f"encoded in the experiment ID (-t{id_timepoint_days:g} = "
+            f"day {id_timepoint_days:g}). "
             "The ID is canonical: leave Time blank to use the ID's day, or fix the ID."
         )
     return time_post_reaction

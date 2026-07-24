@@ -61,7 +61,7 @@ class ParsedExperimentID:
     is_valid: bool
     warnings: List[str]
     replicate_label: Optional[str] = None  # "a", "b", "c"; None = not a replicate
-    timepoint_days: Optional[float] = None  # from '-t<days>' token; None = not encoded in ID
+    timepoint_days: Optional[float] = None  # '-t<days>' day; None = no token
 
 
 _REPLICATE_LETTER_RE = re.compile(r'^(\d+)([a-z])$')

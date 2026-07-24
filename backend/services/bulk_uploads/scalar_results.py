@@ -180,10 +180,13 @@ class ScalarResultsUploadService:
                 raw_id = str(clean.get("experiment_id") or "")
                 stem, id_tp = split_timepoint_token(raw_id)
                 try:
-                    combined = combine_replicate_id(stem if id_tp is not None else raw_id, rep_val)
+                    combined = combine_replicate_id(
+                        stem if id_tp is not None else raw_id, rep_val,
+                    )
                     if id_tp is not None and combined != stem:
                         raise ValueError(
-                            "Replicate column cannot be combined with a -t<days> ID token; "
+                            "Replicate column cannot be combined with a "
+                            "-t<days> ID token; "
                             "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
                         )
                     if id_tp is None:
@@ -206,7 +209,9 @@ class ScalarResultsUploadService:
             # timepoint — fill a blank Time (days) from it, error a conflict.
             # A non-float-coercible Time cell is left untouched so the existing
             # "'Time (days)' must be a number" row error below still fires.
-            _, id_timepoint = split_timepoint_token(str(clean.get("experiment_id") or ""))
+            _, id_timepoint = split_timepoint_token(
+                str(clean.get("experiment_id") or "")
+            )
             if id_timepoint is not None:
                 raw_time = clean.get("time_post_reaction")
                 coercible = True
@@ -217,7 +222,9 @@ class ScalarResultsUploadService:
                         coercible = False
                 if coercible:
                     try:
-                        clean["time_post_reaction"] = apply_id_timepoint(id_timepoint, raw_time)
+                        clean["time_post_reaction"] = apply_id_timepoint(
+                            id_timepoint, raw_time,
+                        )
                     except ValueError as exc:
                         errors.append(f"Row {row_num}: {exc}")
                         parse_feedbacks.append({
