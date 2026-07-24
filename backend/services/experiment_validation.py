@@ -26,6 +26,7 @@ from database.experiment_id_parser import (
     ParsedExperimentID,
     classify_base_id,
     get_experiment_type_from_id,
+    split_timepoint_token,
 )
 
 __all__ = [
@@ -213,7 +214,10 @@ def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
 
     # Extract lineage info first — NOTE: intentionally the LEGACY extraction,
     # not the canonical grammar; see extract_lineage_info's docstring.
-    base_id, sequential_number, treatment_variant, replicate_label = extract_lineage_info(original_id)
+    # Issue #81: peel the '-t<days>' timepoint token BEFORE the frozen legacy
+    # extraction so extract_lineage_info's pinned algorithm never sees it.
+    stem, timepoint_days = split_timepoint_token(original_id)
+    base_id, sequential_number, treatment_variant, replicate_label = extract_lineage_info(stem)
 
     # Classification (type / initials / index / validity) is shared with the
     # canonical parser module.
@@ -230,6 +234,7 @@ def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
         is_valid=is_valid,
         warnings=warnings,
         replicate_label=replicate_label,
+        timepoint_days=timepoint_days,
     )
 
 
