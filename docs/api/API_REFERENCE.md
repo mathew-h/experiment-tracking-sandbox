@@ -51,7 +51,7 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
 
 - A row is top-level when `replicate_label IS NULL OR parent_experiment_fk IS NULL`.
 - A lettered replicate that matches the active filters is represented by its parent row instead of itself — i.e. filtering that matches only `SERUM_001b` still pulls `SERUM_001` (the parent) into the page, with `b` attached as a child.
-- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, and `is_outlier`.
+- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, `is_outlier`, and `id_timepoint_days`.
 - In grouped mode, each parent row additionally gets a `replicates` array: its lettered children (`replicate_label IS NOT NULL`, `parent_experiment_fk` pointing at this row), ordered by letter. Children are attached in full regardless of whether they individually matched the filters — that's the point of grouping. Non-parent items have `replicates: null`.
 - `total` counts top-level rows, not raw experiment rows.
 - Flat mode (`group_replicates=false`, the default) is unchanged — every experiment row is returned individually.
@@ -65,9 +65,10 @@ Example grouped item:
   "parent_experiment_fk": null,
   "replicate_label": null,
   "is_outlier": false,
+  "id_timepoint_days": null,
   "replicates": [
-    { "id": 211, "experiment_id": "SERUM_001a", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "replicates": null },
-    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "replicates": null }
+    { "id": 211, "experiment_id": "SERUM_001a-t7", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "id_timepoint_days": 7.0, "replicates": null },
+    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "id_timepoint_days": null, "replicates": null }
   ]
 }
 ```
@@ -209,6 +210,31 @@ Update experiment properties.
 | PATCH | `/api/results/scalar/{scalar_id}` | Update scalar (recalculates) |
 | GET | `/api/results/icp/{result_id}` | Get ICP result |
 | POST | `/api/results/icp` | Create ICP result |
+
+### POST /api/results and POST /api/results/scalar — `id_timepoint_days` (issue #81)
+
+If the target experiment's `id_timepoint_days` is set (its ID carries a `-t<days>` token),
+the day encoded in the ID is canonical for that vial's timepoint:
+
+- An omitted/blank `time_post_reaction_days` (`POST /api/results`) or `time_post_reaction`
+  (the scalar-result creation path shared by the UI and all bulk uploads) is filled from
+  `id_timepoint_days`.
+- A supplied value that differs from `id_timepoint_days` by more than
+  `TIMEPOINT_TOLERANCE_DAYS` (0.0001 days) is rejected with `422 Unprocessable Entity`; the
+  error message contains "canonical" and names the conflicting day.
+- No change to behavior when `id_timepoint_days` is `NULL` (the common case).
+
+This guard lives in `backend/services/result_merge_utils.py::apply_id_timepoint`, called
+from `backend/api/routers/results.py::create_result` and
+`backend/services/scalar_results_service.py::create_scalar_result_ex`. The bulk-upload
+parsers (Solution Chemistry, Master Results Sync) additionally check this at the
+string/row level before results ever reach these functions, so a conflicting row is
+reported with a per-row error rather than raising at the API layer — see
+`docs/upload_templates/scalar_results.md` and `docs/upload_templates/master_bulk_upload.md`.
+
+**Known bulk-upload limitation:** the New Experiments upload parses and persists
+`id_timepoint_days` for each created row but does not copy a parent's conditions/additives
+for `-t<days>` IDs — see `docs/user_guide/REPLICATES.md` for the full limitation.
 
 ## Samples
 

@@ -56,6 +56,13 @@ describe('BulkUploadsPage — master results widget (issue #74)', () => {
       screen.getByText(/01_R&D\\02_Results\\Master_Reactor_Sampling_Tracker_v2\.xlsx/)
     ).toBeInTheDocument()
     expect(screen.queryByText('Sync from SharePoint')).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: /New Experiments/i }))
+
+    const newExperimentsHelpText = screen
+      .getAllByText(/-t<days>/)
+      .find((el) => el.textContent?.includes('SERUM_001a-t0'))
+    expect(newExperimentsHelpText).toBeInTheDocument()
   })
 })
 

@@ -305,6 +305,11 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
           {child && <span className="text-ink-muted">↳ {exp.replicate_label}</span>}
           {exp.experiment_id}
         </span>
+        {exp.id_timepoint_days != null && (
+          <span className="ml-1 rounded bg-surface-raised px-1.5 py-0.5 text-2xs text-ink-secondary">
+            day {exp.id_timepoint_days}
+          </span>
+        )}
         {groupBadge}
       </Td>
       <Td className="text-xs text-ink-secondary max-w-48 truncate">
