@@ -4,6 +4,10 @@ The Bulk Uploads page lets you ingest large datasets into the experiment trackin
 without entering rows one at a time. Each upload type is an accordion row — click a row
 header to expand it, drop a file, and submit. Only one row can be open at a time.
 
+The six most-used upload types appear at the top of the page at full size; the
+remaining low-use types are collapsed under a **Less-used uploads** section at
+the bottom — click it to expand them.
+
 ---
 
 ## Common behaviour for all upload types
@@ -22,14 +26,14 @@ header to expand it, drop a file, and submit. Only one row can be open at a time
 
 **Endpoint:** `POST /api/bulk-uploads/master-results`
 
-Reads the team's shared Excel tracker from a configured SharePoint path
-(`C:\Users\MathewHearl\Addis Energy\...\Master Reactor Sampling Tracker.xlsx`).
+Drag and drop the team's master tracker spreadsheet to push updates:
 
-Two modes:
-- **Sync from SharePoint** — click the "Sync from SharePoint" button to pull from the
-  configured path. No file upload needed.
-- **Manual upload** — drag-and-drop the xlsx file for a one-off import when the
-  SharePoint path is unavailable.
+`01_R&D\02_Results\Master_Reactor_Sampling_Tracker_v2.xlsx`
+
+Download the file from SharePoint (or use a synced local copy) and drop it into
+the upload zone. The former "Sync from SharePoint" button was removed (issue #74)
+— the file is now always uploaded manually, and the `file` field is required on
+the endpoint.
 
 ### Expected sheet: `Dashboard`
 

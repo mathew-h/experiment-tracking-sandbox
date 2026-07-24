@@ -175,7 +175,7 @@ Add one `<BulkUploadRow>` to the ordered list:
 | `accept` | `string` | ✓ | File picker filter, e.g. `".xlsx,.csv"` |
 | `uploadFn` | `(file: File) => Promise<BulkUploadResult>` | ✓ | |
 | `templateType` | `string` | | If set, shows download button; calls `downloadTemplate(type)` |
-| `syncFn` | `() => Promise<BulkUploadResult>` | | If set, shows "Sync" button (Master Results only) |
+| `prominent` | `boolean` | | Larger header/title treatment — used by the six active widgets at the top of the page |
 | `helpText` | `string` | | Override the default help paragraph |
 | `children` | `ReactNode` | | Extra content in expanded area (e.g. Next-ID chips) |
 
