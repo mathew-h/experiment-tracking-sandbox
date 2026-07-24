@@ -319,6 +319,7 @@ function ReactorDetailModal({
       setCrText(saved.requested_change)
       queryClient.invalidateQueries({ queryKey: ['reactorModificationRecent', card.experiment_id] })
       queryClient.invalidateQueries({ queryKey: ['changeRequests', card.experiment_id] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       success('Reactor modification saved')
     },
     onError: () => {
