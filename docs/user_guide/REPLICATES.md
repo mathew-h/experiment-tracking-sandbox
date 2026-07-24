@@ -15,6 +15,10 @@ instead of a single number.
 - A base experiment can have sequential re-runs (`HPHT_001-2`) that are **not**
   replicates — those stay flat in the list and are never grouped into a replicate set.
 
+### Re-running a single replicate
+
+If one vial of a replicate set is re-run, name it by appending a sequential number to the lettered ID (e.g. `SERUM_001a-2` for the second run of vial `a`). The re-run is linked to the lettered replicate itself (`SERUM_001a`) as its parent, so the lineage chain reads stem → `a` → `a-2`. If the lettered experiment does not exist in the system, the re-run falls back to linking directly to the group parent.
+
 ---
 
 ## Grouped experiments list
