@@ -8,9 +8,11 @@ import { useToast } from '@/components/ui'
 interface ActlabsUploadRowProps {
   isOpen: boolean
   onToggle: () => void
+  /** Larger header treatment — passed through to UploadRow */
+  prominent?: boolean
 }
 
-export function ActlabsUploadRow({ isOpen, onToggle }: ActlabsUploadRowProps) {
+export function ActlabsUploadRow({ isOpen, onToggle, prominent = false }: ActlabsUploadRowProps) {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [conflicts, setConflicts] = useState<ConflictCheckResult['conflicts'] | null>(null)
   const { success, error: toastError } = useToast()
@@ -59,6 +61,7 @@ export function ActlabsUploadRow({ isOpen, onToggle }: ActlabsUploadRowProps) {
         helpText="Accepts ActLabs standard report format. Row 3 = analyte symbols, Row 4 = units. Values like '<0.01', 'nd', 'na' are handled. Analytes are auto-created from file headers."
         accept=".xlsx,.xls,.csv"
         uploadFn={uploadFn}
+        prominent={prominent}
         onUploadError={(err) => {
           if (err.message !== '__conflicts__') toastError('Upload failed', err.message)
         }}

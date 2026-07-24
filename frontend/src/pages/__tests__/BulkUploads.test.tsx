@@ -58,3 +58,41 @@ describe('BulkUploadsPage — master results widget (issue #74)', () => {
     expect(screen.queryByText('Sync from SharePoint')).toBeNull()
   })
 })
+
+describe('BulkUploadsPage — layout (issue #74)', () => {
+  const ACTIVE_TITLES = [
+    'Master Results Sync',
+    'ICP-OES Data',
+    'XRD Mineralogy',
+    'New Experiments',
+    'Experiment Status Update',
+    'ActLabs Rock Analysis',
+  ]
+
+  it('renders the six active widgets in order before the less-used section', () => {
+    render(<BulkUploadsPage />, { wrapper })
+
+    const labels = screen.getAllByRole('button').map((b) => b.textContent ?? '')
+    const positions = [...ACTIVE_TITLES, 'Less-used uploads'].map((t) =>
+      labels.findIndex((l) => l.includes(t))
+    )
+    expect(positions.every((p) => p >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  })
+
+  it('hides demoted widgets until the less-used section is expanded', async () => {
+    render(<BulkUploadsPage />, { wrapper })
+
+    expect(screen.queryByText('Solution Chemistry')).toBeNull()
+    expect(screen.queryByText('Timepoint Modifications')).toBeNull()
+    expect(screen.queryByText('Rock Inventory')).toBeNull()
+    expect(screen.queryByText('Chemical Inventory')).toBeNull()
+    expect(screen.queryByText('Sample Chemical Composition')).toBeNull()
+    expect(screen.queryByText('pXRF Readings')).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: /Less-used uploads/i }))
+
+    expect(screen.getByText('Solution Chemistry')).toBeInTheDocument()
+    expect(screen.getByText('pXRF Readings')).toBeInTheDocument()
+  })
+})

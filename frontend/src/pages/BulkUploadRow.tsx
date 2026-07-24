@@ -4,7 +4,7 @@ import { Button, Badge, FileUpload, Spinner, useToast } from '@/components/ui'
 import { bulkUploadsApi, BulkUploadResult, ConflictCheckResult, isConflictCheckResult, TemplateType } from '@/api/bulkUploads'
 
 // ─── Minimal inline icons ────────────────────────────────────────────────────
-function IconChevron({ open }: { open: boolean }) {
+export function IconChevron({ open }: { open: boolean }) {
   return (
     <svg
       width={16} height={16} viewBox="0 0 24 24" fill="none"
@@ -44,6 +44,8 @@ export interface UploadRowProps {
   skippedMessage?: string
   /** Optional content rendered inside the expanded panel (chips, extra fields, etc.) */
   topContent?: React.ReactNode
+  /** Larger header treatment for the six active widgets at the top of the page */
+  prominent?: boolean
   /** Override upload error handling; defaults to toastError('Upload failed', err.message) */
   onUploadError?: (err: Error) => void
   isOpen: boolean
@@ -68,6 +70,7 @@ export function UploadRow({
   templateMode,
   skippedMessage,
   topContent,
+  prominent = false,
   onUploadError,
   isOpen,
   onToggle,
@@ -109,13 +112,13 @@ export function UploadRow({
     <div className="border border-surface-border rounded-lg overflow-hidden">
       {/* ── Header — always visible ─────────────────────────────────────── */}
       <button
-        className="w-full flex items-center justify-between px-4 py-3 bg-surface-primary hover:bg-surface-secondary transition-colors text-left"
+        className={`w-full flex items-center justify-between ${prominent ? 'px-5 py-4' : 'px-4 py-3'} bg-surface-primary hover:bg-surface-secondary transition-colors text-left`}
         onClick={onToggle}
         aria-expanded={isOpen}
       >
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-sm font-medium text-ink-primary shrink-0">{title}</span>
-          <span className="text-xs text-ink-muted truncate hidden sm:block">{description}</span>
+          <span className={`${prominent ? 'text-base font-semibold' : 'text-sm font-medium'} text-ink-primary shrink-0`}>{title}</span>
+          <span className={`${prominent ? 'text-sm' : 'text-xs'} text-ink-muted truncate hidden sm:block`}>{description}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {lastStatus === 'success' && <Badge variant="success">Uploaded</Badge>}
