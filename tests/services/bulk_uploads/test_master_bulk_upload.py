@@ -596,3 +596,52 @@ def test_master_blank_duration_without_token_still_skipped(db_session: Session):
     assert errors == []
     assert created == 0
     assert skipped == 1
+
+
+# --- #81 I1: Replicate column + '-t<days>' ID token combo must be rejected ---
+# Reuses the `_master_excel_with_replicate` helper (Replicate as 2nd column)
+# defined above under "Replicate routing (issue #70 P3)".
+
+def test_master_token_id_with_replicate_letter_errors_row(db_session: Session):
+    """A token ID combined with a real Replicate letter is a per-row error;
+    the rest of the batch still uploads."""
+    _seed_experiment(db_session, "SERUM_094", 8194)
+
+    xlsx = _master_excel_with_replicate([
+        ["SERUM_094-t7", "a", None, "bad combo", None, None, None, None,
+         2.0, None, None, None, 7.0, None, None, "FALSE"],
+        ["SERUM_094", None, 5.0, "good row", None, None, None, None,
+         1.0, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert created == 1  # the good row still lands
+    assert len(errors) == 1
+    assert "-t<days>" in errors[0]
+
+
+def test_master_token_id_with_blank_replicate_uploads_fine(db_session: Session):
+    """A blank Replicate cell alongside a token ID is a no-op — uploads with
+    the token intact."""
+    _seed_experiment(db_session, "SERUM_095a-t7", 8195)
+
+    xlsx = _master_excel_with_replicate([
+        ["SERUM_095a-t7", None, None, "blank replicate", None, None, None, None,
+         2.0, None, None, None, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_095a-t7")
+        .one()
+    )
+    assert result.time_post_reaction_days == 7.0

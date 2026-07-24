@@ -475,6 +475,38 @@ def test_patch_rename_strips_whitespace(client, db_session):
     assert resp.json()["experiment_id"] == "STRIP_DST_001"
 
 
+# --- #81 C1: rename must re-sync id_timepoint_days ---
+
+def test_patch_rename_resyncs_id_timepoint_days(client, db_session):
+    _make_experiment(db_session, "SERUM_020a-t7", 9041)
+    resp = client.patch(
+        "/api/experiments/SERUM_020a-t7",
+        json={"experiment_id": "SERUM_020a-t14"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["id_timepoint_days"] == 14.0
+    db_session.expire_all()
+    exp = db_session.query(Experiment).filter(
+        Experiment.experiment_id == "SERUM_020a-t14"
+    ).one()
+    assert exp.id_timepoint_days == 14.0
+
+
+def test_patch_rename_clears_id_timepoint_days_when_token_dropped(client, db_session):
+    _make_experiment(db_session, "SERUM_021a-t7", 9042)
+    resp = client.patch(
+        "/api/experiments/SERUM_021a-t7",
+        json={"experiment_id": "SERUM_021a"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["id_timepoint_days"] is None
+    db_session.expire_all()
+    exp = db_session.query(Experiment).filter(
+        Experiment.experiment_id == "SERUM_021a"
+    ).one()
+    assert exp.id_timepoint_days is None
+
+
 def test_patch_rename_syncs_external_analysis(client, db_session):
     from database.models.analysis import ExternalAnalysis
 

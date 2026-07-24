@@ -143,17 +143,31 @@ def _process_bytes(
             skipped += 1
             continue
 
+        # Split the '-t<days>' token once, up front, so both the replicate
+        # combination below and the Duration fill further down share a single
+        # split (issue #81 I1/M-fix — do not re-split exp_id later).
+        stem, id_timepoint = split_timepoint_token(exp_id)
+
         # Optional replicate column: resolve base + letter to the sibling ID
-        # before anything downstream sees exp_id (issue #70 P3).
+        # before anything downstream sees exp_id (issue #70 P3). A token ID
+        # ("SERUM_001-t7") combined with a real Replicate letter is rejected —
+        # the letter must be encoded in the ID itself (e.g. SERUM_001a-t7).
         try:
-            exp_id = combine_replicate_id(exp_id, row.get("Replicate"))
+            combined = combine_replicate_id(stem if id_timepoint is not None else exp_id, row.get("Replicate"))
+            if id_timepoint is not None and combined != stem:
+                raise ValueError(
+                    "Replicate column cannot be combined with a -t<days> ID token; "
+                    "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
+                )
+            if id_timepoint is None:
+                exp_id = combined
         except ValueError as exc:
             errors.append(f"Row {row_num} ({exp_id}): {exc}")
             continue
 
         # Issue #81: '-t<days>' in the experiment ID is canonical for the
         # timepoint — fill a blank Duration from it, error a conflict.
-        _, id_timepoint = split_timepoint_token(exp_id)
+        # (id_timepoint already computed above.)
 
         duration_raw = row.get("Duration (Days)")
         if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):

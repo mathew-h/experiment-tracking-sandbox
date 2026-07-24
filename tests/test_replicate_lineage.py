@@ -313,3 +313,22 @@ class TestTimepointPersistence:
         vial = _make_exp(sqlite_session, "SERUM_006a-t7", 9)
         sqlite_session.flush()
         assert vial.parent_experiment_fk == parent.id
+
+    def test_letterless_timepoint_vial_not_adopted_by_later_stem(self, sqlite_session):
+        """Issue #81 I2: a letterless '-t<days>' vial is a parent-like row, not
+        a replicate member — it must never be adopted by orphan back-linking
+        just because a later sibling insert (bare stem) triggers that pass."""
+        t7 = _make_exp(sqlite_session, "SERUM_007-t7", 910)
+        stem = _make_exp(sqlite_session, "SERUM_007", 911)
+        t14 = _make_exp(sqlite_session, "SERUM_007-t14", 912)
+        sqlite_session.flush()
+        assert t7.parent_experiment_fk is None
+        assert t14.parent_experiment_fk is None
+        assert stem.parent_experiment_fk is None
+
+        # Control: a LETTERED '-t' vial is an ordinary replicate member and
+        # must still be adopted when its stem arrives later.
+        lettered_orphan = _make_exp(sqlite_session, "SERUM_008a-t7", 913)
+        lettered_stem = _make_exp(sqlite_session, "SERUM_008", 914)
+        sqlite_session.flush()
+        assert lettered_orphan.parent_experiment_fk == lettered_stem.id

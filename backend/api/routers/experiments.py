@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
+from database.experiment_id_parser import split_timepoint_token
 from database.models.enums import ExperimentStatus
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
@@ -850,6 +851,10 @@ def update_experiment(
                     detail=f"Experiment ID '{new_id}' already exists",
                 )
             exp.experiment_id = new_id
+            # Issue #81: rename must re-sync the '-t<days>' timepoint token —
+            # the before_flush lineage listener only wires session.new rows,
+            # so a rename (a dirty row) would otherwise leave a stale value.
+            _, exp.id_timepoint_days = split_timepoint_token(new_id.strip())
             # Keep denormalized string in conditions in sync so additives endpoints work
             cond = db.execute(
                 select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)

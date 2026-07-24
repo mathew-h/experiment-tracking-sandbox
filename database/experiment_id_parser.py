@@ -66,7 +66,7 @@ class ParsedExperimentID:
 
 _REPLICATE_LETTER_RE = re.compile(r'^(\d+)([a-z])$')
 _REPLICATE_GUARD_RE = re.compile(r'^\d+[a-z]$')
-_TIMEPOINT_TOKEN_RE = re.compile(r'-t(\d+(?:\.\d+)?)$')
+_TIMEPOINT_TOKEN_RE = re.compile(r'-t(\d+(?:\.\d+)?)$', re.ASCII)
 
 
 def split_timepoint_token(experiment_id: str) -> Tuple[str, Optional[float]]:

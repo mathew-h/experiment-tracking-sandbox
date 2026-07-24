@@ -102,3 +102,39 @@ def test_untokened_sheet_unchanged(db_session):
     )
     assert errors == []
     assert created == 1
+
+
+# --- #81 I1: Replicate column + '-t<days>' ID token combo must be rejected ---
+
+_HEADERS_WITH_REPLICATE = ["Experiment ID", "Replicate", "Time (days)", "Gross Ammonium (mM)"]
+
+
+def test_token_id_with_replicate_letter_errors_row(db_session):
+    """A token ID combined with a real Replicate letter is a per-row error;
+    the rest of the batch still uploads."""
+    _seed_experiment(db_session, "SERUM_086", 8086)
+    created, updated, skipped, errors, feedbacks = _upload(
+        db_session,
+        _HEADERS_WITH_REPLICATE,
+        [
+            ["SERUM_086-t7", "a", None, 2.0],
+            ["SERUM_086", None, 5.0, 1.0],
+        ],
+    )
+    assert created == 1  # the good row still lands
+    assert len(errors) == 1
+    assert "-t<days>" in errors[0]
+
+
+def test_token_id_with_blank_replicate_uploads_fine(db_session):
+    """A blank Replicate cell alongside a token ID is a no-op — uploads with
+    the token intact."""
+    _seed_experiment(db_session, "SERUM_087a-t7", 8087)
+    created, updated, skipped, errors, feedbacks = _upload(
+        db_session,
+        _HEADERS_WITH_REPLICATE,
+        [["SERUM_087a-t7", None, None, 2.0]],
+    )
+    assert errors == []
+    assert created == 1
+    assert _gross_for(db_session, "SERUM_087a-t7", 7.0) == 2.0

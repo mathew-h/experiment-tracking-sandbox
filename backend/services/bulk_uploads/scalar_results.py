@@ -177,10 +177,17 @@ class ScalarResultsUploadService:
 
             if "replicate" in clean:
                 rep_val = clean.pop("replicate")
+                raw_id = str(clean.get("experiment_id") or "")
+                stem, id_tp = split_timepoint_token(raw_id)
                 try:
-                    clean["experiment_id"] = combine_replicate_id(
-                        clean.get("experiment_id"), rep_val,
-                    )
+                    combined = combine_replicate_id(stem if id_tp is not None else raw_id, rep_val)
+                    if id_tp is not None and combined != stem:
+                        raise ValueError(
+                            "Replicate column cannot be combined with a -t<days> ID token; "
+                            "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
+                        )
+                    if id_tp is None:
+                        clean["experiment_id"] = combined
                 except ValueError as exc:
                     errors.append(f"Row {row_num}: {exc}")
                     parse_feedbacks.append({
