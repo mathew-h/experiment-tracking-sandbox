@@ -17,7 +17,7 @@ from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from .experiment_id_parser import parse_lineage_fields
+from .experiment_id_parser import parse_lineage_fields, split_timepoint_token
 
 if TYPE_CHECKING:
     from .models import Experiment
@@ -208,8 +208,8 @@ def get_or_find_parent_experiment(db: Session, experiment_id: str):
 
 def update_experiment_lineage(db: Session, experiment):
     """
-    Update the lineage fields (base_experiment_id, parent_experiment_fk, replicate_label)
-    for an experiment.
+    Update the lineage fields (base_experiment_id, parent_experiment_fk,
+    replicate_label, id_timepoint_days) for an experiment.
 
     Args:
         db: Database session
@@ -242,6 +242,11 @@ def update_experiment_lineage(db: Session, experiment):
     updated = False
     if experiment.replicate_label != replicate_label:
         experiment.replicate_label = replicate_label
+        updated = True
+
+    _, timepoint_days = split_timepoint_token(experiment.experiment_id)
+    if experiment.id_timepoint_days != timepoint_days:
+        experiment.id_timepoint_days = timepoint_days
         updated = True
 
     is_parent_row = (

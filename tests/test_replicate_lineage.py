@@ -269,3 +269,47 @@ class TestLetterSequentialParentWiring:
         assert rerun0.parent_experiment_fk == rep_a.id
         assert rerun1.parent_experiment_fk == rep_a.id
         assert rerun0.parent_experiment_fk != stem.id
+
+
+class TestTimepointPersistence:
+    """Issue #81: '-t<days>' persists as Experiment.id_timepoint_days."""
+
+    def test_timepoint_vials_share_base_and_persist_day(self, sqlite_session):
+        _make_exp(sqlite_session, "SERUM_001", 1)
+        t0 = _make_exp(sqlite_session, "SERUM_001a-t0", 2)
+        t7 = _make_exp(sqlite_session, "SERUM_001a-t7", 3)
+        sqlite_session.flush()
+        assert t0.base_experiment_id == "SERUM_001"
+        assert t7.base_experiment_id == "SERUM_001"
+        assert t0.replicate_label == "a"
+        assert t7.replicate_label == "a"
+        assert t0.id_timepoint_days == 0.0
+        assert t7.id_timepoint_days == 7.0
+
+    def test_decimal_timepoint_persists(self, sqlite_session):
+        half = _make_exp(sqlite_session, "SERUM_002a-t0.5", 4)
+        sqlite_session.flush()
+        assert half.id_timepoint_days == 0.5
+
+    def test_untimed_ids_stay_null(self, sqlite_session):
+        plain = _make_exp(sqlite_session, "SERUM_003a", 5)
+        base = _make_exp(sqlite_session, "SERUM_004", 6)
+        sqlite_session.flush()
+        assert plain.id_timepoint_days is None
+        assert base.id_timepoint_days is None
+
+    def test_letterless_timepoint_vial_classification_pinned(self, sqlite_session):
+        # Decision Point 7: SERUM_005-t7 stays a parent-like row (base = stem,
+        # parent NULL) with the day persisted. Change requires a plan amendment.
+        vial = _make_exp(sqlite_session, "SERUM_005-t7", 7)
+        sqlite_session.flush()
+        assert vial.id_timepoint_days == 7.0
+        assert vial.base_experiment_id == "SERUM_005"
+        assert vial.replicate_label is None
+        assert vial.parent_experiment_fk is None
+
+    def test_timepoint_vial_links_to_group_parent(self, sqlite_session):
+        parent = _make_exp(sqlite_session, "SERUM_006", 8)
+        vial = _make_exp(sqlite_session, "SERUM_006a-t7", 9)
+        sqlite_session.flush()
+        assert vial.parent_experiment_fk == parent.id
