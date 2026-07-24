@@ -18,7 +18,7 @@ elemental composition) are net-new additions in `backend/services/bulk_uploads/`
 
 | # | Card Title | Backend Parser | Template Available | Notes |
 |---|---|---|---|---|
-| 1 | Master Results Sync | `master_bulk_upload.py` | No — fixed living file | Sync mode, not one-off upload |
+| 1 | Master Results Sync | `master_bulk_upload.py` | No — fixed living file | Drag-and-drop upload of the living tracker file (sync button removed by issue #74) |
 | 2 | New Experiments | `new_experiments.py` | Yes — downloadable Excel | Show next-ID hints before download |
 | 3 | Solution Chemistry | `scalar_results.py` | Yes — existing | No changes |
 | 4 | ICP-OES Data | `icp_service.py` | No — raw instrument CSV | See spec: `docs/specs/icp_oes_upload.md` |
@@ -35,7 +35,7 @@ elemental composition) are net-new additions in `backend/services/bulk_uploads/`
 
 Every card must include:
 - **Header:** Upload type name + short description
-- **File zone:** Drag-and-drop area (or "Sync Now" button for Master Results)
+- **File zone:** Drag-and-drop area (the Master Results "Sync Now" button was removed by issue #74)
 - **Pre-upload validation:** File type check before the file reaches the backend
 - **Progress indicator:** Spinner during processing
 - **Result summary:** Created / updated / skipped counts + collapsible error table

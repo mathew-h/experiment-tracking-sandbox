@@ -9,9 +9,9 @@
 ## Overview
 
 The Master Results file is a shared Excel workbook that the lab team updates daily.
-It is not a one-off import — it is a persistent file on the lab PC that accumulates
-rows over time. The upload mechanism is a **sync operation**: the app reads the
-current state of the file and upserts any new or changed rows.
+It is not a one-off import — it is a persistent living file that accumulates rows
+over time. Each upload re-reads the current state of the file and upserts any new
+or changed rows.
 
 As of issue #74 the upload is **drag-and-drop only**: the user downloads or syncs
 the tracker locally (`01_R&D\02_Results\Master_Reactor_Sampling_Tracker_v2.xlsx`)
