@@ -217,8 +217,9 @@ If the target experiment's `id_timepoint_days` is set (its ID carries a `-t<days
 the day encoded in the ID is canonical for that vial's timepoint:
 
 - An omitted/blank `time_post_reaction_days` (`POST /api/results`) or `time_post_reaction`
-  (the scalar-result creation path shared by the UI and all bulk uploads) is filled from
-  `id_timepoint_days`.
+  (`create_scalar_result_ex`, the scalar-result creation path shared by all bulk-upload
+  routes — the UI's Add Results modal is guarded separately via `POST /api/results`) is
+  filled from `id_timepoint_days`.
 - A supplied value that differs from `id_timepoint_days` by more than
   `TIMEPOINT_TOLERANCE_DAYS` (0.0001 days) is rejected with `422 Unprocessable Entity`; the
   error message contains "canonical" and names the conflicting day.
