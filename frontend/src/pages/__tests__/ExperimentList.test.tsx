@@ -38,6 +38,7 @@ function makeItems(skip: number, limit: number): ExperimentListItem[] {
     parent_experiment_fk: null,
     replicate_label: null,
     is_outlier: false,
+    id_timepoint_days: null,
   }))
 }
 
@@ -210,6 +211,7 @@ function makeGroupedItem(): ExperimentListItem {
     additives_summary: null, condition_note: null,
     base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
     replicate_label: null as string | null, is_outlier: false,
+    id_timepoint_days: null as number | null,
   }
   return {
     ...base, id: 1, experiment_id: 'SERUM_001', experiment_number: 100,
@@ -253,5 +255,34 @@ describe('ExperimentListPage — replicate grouping', () => {
     await waitFor(() => {
       expect(vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]?.group_replicates).toBeUndefined()
     })
+  })
+})
+
+describe('ExperimentListPage — id_timepoint_days chip', () => {
+  const base = {
+    status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
+    created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
+    additives_summary: null, condition_note: null,
+    base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
+    replicate_label: null as string | null, is_outlier: false,
+  }
+
+  afterEach(() => { vi.clearAllMocks() })
+
+  it('renders a day chip when id_timepoint_days is set, and none when null', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [
+        { ...base, id: 1, experiment_id: 'SERUM_001a-t7', experiment_number: 100, id_timepoint_days: 7 },
+        { ...base, id: 2, experiment_id: 'SERUM_002', experiment_number: 101, id_timepoint_days: null },
+      ],
+      total: 2, skip: 0, limit: 25,
+    })
+
+    render(<ExperimentListPage />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText('SERUM_001a-t7')).toBeInTheDocument())
+    expect(screen.getByText('day 7')).toBeInTheDocument()
+    expect(screen.getByText('SERUM_002')).toBeInTheDocument()
+    expect(screen.getAllByText(/^day /)).toHaveLength(1)
   })
 })

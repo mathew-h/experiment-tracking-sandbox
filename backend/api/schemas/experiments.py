@@ -55,6 +55,7 @@ class ExperimentListItem(BaseModel):
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
     is_outlier: bool = False
+    id_timepoint_days: Optional[float] = None
     # Joined from conditions (may be None if no conditions recorded yet)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
@@ -92,6 +93,7 @@ class ExperimentResponse(BaseModel):
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
     is_outlier: bool = False
+    id_timepoint_days: Optional[float] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

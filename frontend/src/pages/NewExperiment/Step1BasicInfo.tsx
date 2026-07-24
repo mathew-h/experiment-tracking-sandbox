@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { Input, Select, Button, SampleSelector } from '@/components/ui'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
+import { splitTimepointToken } from '@/utils/experimentId'
 import type { ExperimentType } from './fieldVisibility'
 
 export interface Step1Data {
@@ -51,6 +52,7 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
   }, [nextIdData])
 
   const idValidation = useExperimentIdValidation(data.experimentId)
+  const { timepointDays } = splitTimepointToken(data.experimentId.trim())
 
   const idRightElement =
     idValidation.status === 'checking' ? (
@@ -84,12 +86,17 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
         error={idValidation.status === 'taken' ? idValidation.message : undefined}
         hint={
           idValidation.status !== 'taken'
-            ? 'Auto-generated. Edit to use a custom ID (e.g., HPHT_100-2, HPHT_100_Desorption, or a replicate letter like SERUM_001a/b/c — the bare SERUM_001 is replicate 0, the parent).'
+            ? 'Auto-generated. Edit to use a custom ID (e.g., HPHT_100-2, HPHT_100_Desorption, or a replicate letter like SERUM_001a/b/c — the bare SERUM_001 is replicate 0, the parent). Encode a destructively-sampled timepoint with -t<days>: SERUM_001a-t7 = replicate a sampled at day 7 (decimals allowed, e.g. -t0.5). The day is locked to the ID for all results.'
             : undefined
         }
         rightElement={idRightElement}
         disabled={loadingId}
       />
+      {timepointDays !== null && (
+        <p className="text-xs text-ink-muted">
+          Timepoint from ID: day {timepointDays}. Result times for this experiment will be locked to it.
+        </p>
+      )}
       <SampleSelector value={data.sampleId} onChange={(id) => onChange({ sampleId: id })} />
       <div className="grid grid-cols-2 gap-3">
         <Input

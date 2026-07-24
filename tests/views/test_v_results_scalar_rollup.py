@@ -228,3 +228,56 @@ class TestRollupOutlierExclusion:
             text("SELECT 1 FROM v_results_scalar_rollup WHERE base_experiment_id = 'ROLL_OUT_003'")
         ).fetchall()
         assert rows == []
+
+
+class TestRollupTimepointVials:
+    """Issue #81: '-t<days>' vials aggregate under the shared base per day
+    bucket with NO view change (reuses base + time_post_reaction_bucket_days)."""
+
+    def test_three_vials_roll_up_at_their_day(self, view_db):
+        for i, (exp_id, nh4) in enumerate([
+            ("SERUM_050a-t7", 1.0), ("SERUM_050b-t7", 2.0), ("SERUM_050c-t7", 3.0),
+        ]):
+            exp = _make_experiment(view_db, exp_id, 5000 + i)
+            result = _make_result(view_db, exp, bucket_days=7.0)
+            _make_scalar(view_db, result, gross_nh4=nh4)
+        view_db.commit()
+        row = view_db.execute(text(
+            'SELECT n_replicates, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", '
+            '"sd_gross_ammonium_mM" FROM v_results_scalar_rollup '
+            "WHERE base_experiment_id = 'SERUM_050' "
+            "AND time_post_reaction_bucket_days = 7.0"
+        )).fetchone()
+        assert row is not None
+        assert row[0] == 3
+        assert row[1] == 2.0
+        assert row[2] == 2.0
+        assert abs(row[3] - 1.0) < 1e-9
+
+    def test_t0_set_forms_separate_bucket(self, view_db):
+        for i, exp_id in enumerate(["SERUM_051a-t0", "SERUM_051b-t0"]):
+            exp = _make_experiment(view_db, exp_id, 5100 + i)
+            result = _make_result(view_db, exp, bucket_days=0.0)
+            _make_scalar(view_db, result, gross_nh4=1.5)
+        exp7 = _make_experiment(view_db, "SERUM_051a-t7", 5102)
+        result7 = _make_result(view_db, exp7, bucket_days=7.0)
+        _make_scalar(view_db, result7, gross_nh4=4.0)
+        view_db.commit()
+        buckets = view_db.execute(text(
+            "SELECT time_post_reaction_bucket_days, n_replicates "
+            "FROM v_results_scalar_rollup WHERE base_experiment_id = 'SERUM_051' "
+            "ORDER BY time_post_reaction_bucket_days"
+        )).fetchall()
+        assert [(b[0], b[1]) for b in buckets] == [(0.0, 2), (7.0, 1)]
+
+    def test_lone_vial_n1_sd_null(self, view_db):
+        exp = _make_experiment(view_db, "SERUM_052a-t14", 5200)
+        result = _make_result(view_db, exp, bucket_days=14.0)
+        _make_scalar(view_db, result, gross_nh4=2.5)
+        view_db.commit()
+        row = view_db.execute(text(
+            'SELECT n_replicates, "sd_gross_ammonium_mM" FROM v_results_scalar_rollup '
+            "WHERE base_experiment_id = 'SERUM_052'"
+        )).fetchone()
+        assert row[0] == 1
+        assert row[1] is None

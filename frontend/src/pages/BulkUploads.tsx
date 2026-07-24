@@ -201,7 +201,8 @@ export function BulkUploadsPage() {
             'Drag and drop the master results file into the zone below to push updates: ' +
             '01_R&D\\02_Results\\Master_Reactor_Sampling_Tracker_v2.xlsx — ' +
             "reads the 'Dashboard' sheet. Required columns: Experiment ID, Duration (Days). " +
-            'Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent.'
+            'Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent. ' +
+            'If the Experiment ID carries -t<days>, a blank Duration (Days) is filled from the ID; a different Duration errors the row.'
           }
           accept=".xlsx,.xls"
           uploadFn={(file) => bulkUploadsApi.uploadMasterResults(file)}
@@ -259,7 +260,7 @@ export function BulkUploadsPage() {
           id="new-experiments"
           title="New Experiments"
           description="Bulk-create experiments from a structured Excel template"
-          helpText="Use the template for correct column formatting. The file must have an 'experiments' sheet; a 'conditions' sheet is optional. Replicates: write a lowercase letter after the number (SERUM_001a, _001b, _001c) — the bare SERUM_001 (or SERUM_001-0) is replicate 0, the group parent."
+          helpText="Use the template for correct column formatting. The file must have an 'experiments' sheet; a 'conditions' sheet is optional. Replicates: write a lowercase letter after the number (SERUM_001a, _001b, _001c) — the bare SERUM_001 (or SERUM_001-0) is replicate 0, the group parent. Replicate timepoints are separate vials: encode the sample day in the ID with -t<days> (SERUM_001a-t0, SERUM_001a-t7, decimals allowed like -t0.5). The day is locked to the ID for all results."
           accept=".xlsx,.xls"
           uploadFn={(file) => bulkUploadsApi.uploadNewExperiments(file)}
           templateType="new-experiments"
@@ -309,7 +310,7 @@ export function BulkUploadsPage() {
                 id="scalar-results"
                 title="Solution Chemistry"
                 description="Upload solution chemistry measurements (pH, NH₄, H₂, conductivity)"
-                helpText="Required columns: Experiment ID, Time (days). All other fields are optional. Set Overwrite=TRUE to replace existing values. Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent."
+                helpText="Required columns: Experiment ID, Time (days). All other fields are optional. Set Overwrite=TRUE to replace existing values. Replicates: either write the full lettered ID (SERUM_001a) in Experiment ID, or put the base ID there and the letter (a, b, c) in the optional Replicate column — 0 or blank means the group parent. If the Experiment ID carries -t<days>, a blank Time (days) is filled from the ID; a different Time errors the row."
                 accept=".xlsx,.xls,.csv"
                 uploadFn={(file) => bulkUploadsApi.uploadScalarResults(file)}
                 templateType="scalar-results"

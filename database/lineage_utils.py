@@ -15,9 +15,9 @@ The experiment ID grammar itself now lives in database/experiment_id_parser.py
 """
 from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_
 
-from .experiment_id_parser import parse_lineage_fields
+from .experiment_id_parser import parse_lineage_fields, split_timepoint_token
 
 if TYPE_CHECKING:
     from .models import Experiment
@@ -208,8 +208,8 @@ def get_or_find_parent_experiment(db: Session, experiment_id: str):
 
 def update_experiment_lineage(db: Session, experiment):
     """
-    Update the lineage fields (base_experiment_id, parent_experiment_fk, replicate_label)
-    for an experiment.
+    Update the lineage fields (base_experiment_id, parent_experiment_fk,
+    replicate_label, id_timepoint_days) for an experiment.
 
     Args:
         db: Database session
@@ -242,6 +242,11 @@ def update_experiment_lineage(db: Session, experiment):
     updated = False
     if experiment.replicate_label != replicate_label:
         experiment.replicate_label = replicate_label
+        updated = True
+
+    _, timepoint_days = split_timepoint_token(experiment.experiment_id.strip())
+    if experiment.id_timepoint_days != timepoint_days:
+        experiment.id_timepoint_days = timepoint_days
         updated = True
 
     is_parent_row = (
@@ -331,9 +336,19 @@ def update_orphaned_derivations(db: Session, base_experiment_id: str):
 
     # Find orphaned derivations (those with base_experiment_id matching but parent_experiment_fk
     # is NULL), excluding every parent-alias row for this stem.
+    #
+    # Issue #81 (I2): a letterless '-t<days>' timepoint vial (e.g. SERUM_001-t7)
+    # is not a replicate-group member — it must never be adopted here just
+    # because a later sibling insert (bare stem, -0, or -1) triggers this pass.
+    # Lettered '-t' vials (replicate_label set) remain ordinary replicate
+    # members and stay adoptable.
     query = db.query(Experiment).filter(
         Experiment.base_experiment_id == base_experiment_id,
         Experiment.parent_experiment_fk.is_(None),
+        ~and_(
+            Experiment.id_timepoint_days.isnot(None),
+            Experiment.replicate_label.is_(None),
+        ),
     )
     if parent_alias_ids:
         query = query.filter(Experiment.id.notin_(parent_alias_ids))

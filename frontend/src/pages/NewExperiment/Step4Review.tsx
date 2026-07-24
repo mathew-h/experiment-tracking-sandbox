@@ -1,4 +1,5 @@
 import { Button, Input } from '@/components/ui'
+import { splitTimepointToken } from '@/utils/experimentId'
 import type { Step1Data } from './Step1BasicInfo'
 import type { Step2Data } from './Step2Conditions'
 import type { AdditiveRow } from './Step3Additives'
@@ -37,7 +38,10 @@ export function Step4Review({
   isSubmitting,
 }: Props) {
   const visibleFields = step1.experimentType ? FIELD_VISIBILITY[step1.experimentType] : new Set<string>()
-  const isLetteredId = /\d+[a-z]$/.test(step1.experimentId.trim())
+  const { stem, timepointDays } = splitTimepointToken(step1.experimentId.trim())
+  // A -t<days> vial is a single destructively-sampled timepoint — creating
+  // lettered replicates of it would drop the token, so hide the control.
+  const isLetteredId = /\d+[a-z]$/.test(stem) || timepointDays !== null
 
   return (
     <div className="space-y-4">

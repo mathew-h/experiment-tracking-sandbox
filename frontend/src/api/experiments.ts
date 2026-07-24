@@ -19,6 +19,7 @@ export interface ExperimentListItem {
   parent_experiment_fk: number | null
   replicate_label: string | null
   is_outlier: boolean
+  id_timepoint_days: number | null
   /** Grouped-list mode only: lettered children of this group parent. */
   replicates?: ExperimentListItem[] | null
 }
@@ -42,6 +43,7 @@ export interface ExperimentDetail {
   parent_experiment_fk: number | null
   replicate_label: string | null
   is_outlier: boolean
+  id_timepoint_days: number | null
   created_at: string
   updated_at: string | null
   conditions: Record<string, unknown> | null

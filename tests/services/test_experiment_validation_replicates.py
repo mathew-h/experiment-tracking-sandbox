@@ -111,3 +111,34 @@ class TestLegacyLineageDivergencesPinned:
         result = parse_experiment_id("XYZ_001")
         assert result.is_valid is False
         assert any("Unknown experiment type 'XYZ'" in w for w in result.warnings)
+
+
+class TestTimepointOnValidationSurface:
+    """Issue #81: the validation surface pre-strips '-t<days>' before the
+    FROZEN extract_lineage_info, so legacy lineage semantics apply to the stem."""
+
+    def test_timepoint_surfaced(self):
+        parsed = parse_experiment_id("SERUM_001a-t7")
+        assert parsed.timepoint_days == 7.0
+        assert parsed.replicate_label == "a"
+        assert parsed.base_id == "SERUM_001"
+        assert parsed.is_valid is True
+
+    def test_decimal_timepoint_surfaced(self):
+        assert parse_experiment_id("SERUM_001a-t0.5").timepoint_days == 0.5
+
+    def test_no_token_means_none(self):
+        assert parse_experiment_id("SERUM_001a").timepoint_days is None
+        assert parse_experiment_id("CF-015").timepoint_days is None
+
+    def test_legacy_divergences_apply_to_stem(self):
+        # CF-015-t3: strip token -> 'CF-015' -> legacy naive rule still fires
+        # exactly as pinned for the bare shape.
+        parsed = parse_experiment_id("CF-015-t3")
+        assert parsed.timepoint_days == 3.0
+        assert parsed.base_id == "CF"
+        assert parsed.sequential_number == 15
+
+    def test_frozen_function_untouched_by_token(self):
+        # extract_lineage_info itself never sees/strips tokens (frozen body).
+        assert extract_lineage_info("SERUM_001a-t7") == ("SERUM_001a-t7", None, None, None)

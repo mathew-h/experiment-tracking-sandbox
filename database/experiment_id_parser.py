@@ -61,10 +61,34 @@ class ParsedExperimentID:
     is_valid: bool
     warnings: List[str]
     replicate_label: Optional[str] = None  # "a", "b", "c"; None = not a replicate
+    timepoint_days: Optional[float] = None  # '-t<days>' day; None = no token
 
 
 _REPLICATE_LETTER_RE = re.compile(r'^(\d+)([a-z])$')
 _REPLICATE_GUARD_RE = re.compile(r'^\d+[a-z]$')
+_TIMEPOINT_TOKEN_RE = re.compile(r'-t(\d+(?:\.\d+)?)$', re.ASCII)
+
+
+def split_timepoint_token(experiment_id: str) -> Tuple[str, Optional[float]]:
+    """
+    Peel a trailing '-t<days>' timepoint token (issue #81).
+
+    '-t<days>' encodes a destructively-sampled vial's time post-reaction in
+    DAYS (decimals allowed), e.g. SERUM_001a-t7 or SERUM_001a-t0.5. Lowercase
+    't' only; the token must be the final characters of the ID (a trailing
+    treatment suffix suppresses it — deferred combo, issue #81 open question 2).
+
+    Returns (stem_without_token, timepoint_days):
+        'SERUM_001a-t7'   -> ('SERUM_001a', 7.0)
+        'SERUM_001a-t0.5' -> ('SERUM_001a', 0.5)
+        'SERUM_001a'      -> ('SERUM_001a', None)
+    """
+    if not experiment_id or not isinstance(experiment_id, str):
+        return experiment_id, None
+    match = _TIMEPOINT_TOKEN_RE.search(experiment_id)
+    if not match:
+        return experiment_id, None
+    return experiment_id[:match.start()], float(match.group(1))
 
 
 def get_experiment_type_from_id(type_text: str) -> Optional[ExperimentType]:
@@ -90,6 +114,8 @@ def parse_lineage_fields(experiment_id: str) -> Tuple[Optional[str], Optional[in
     and replicate label.
 
     Uses hybrid delimiter system:
+    - A trailing '-t<days>' timepoint token (issue #81), peeled first via
+      split_timepoint_token so it never interferes with the steps below.
     - Hyphen-NUMBER for sequential lineage (e.g., -2, -3), but ONLY when the prefix
       itself ends in a numeric segment (_NNN or -NNN, optionally letter-suffixed).
     - Underscore-TEXT for treatment variants (e.g., _Desorption).
@@ -130,11 +156,22 @@ def parse_lineage_fields(experiment_id: str) -> Tuple[Optional[str], Optional[in
         ("Serum_MH_101", None, None, "a")
         >>> parse_lineage_fields("SERUM_001a-2")
         ("SERUM_001", 2, None, "a")
+        >>> parse_lineage_fields("SERUM_001a-t7")
+        ("SERUM_001", None, None, "a")
+        >>> parse_lineage_fields("SERUM_001a-2-t0")
+        ("SERUM_001", 2, None, "a")
     """
     if not experiment_id or not isinstance(experiment_id, str):
         return None, None, None, None
 
     experiment_id = experiment_id.strip()
+    if not experiment_id:
+        return None, None, None, None
+
+    # Step 0 (issue #81): peel a trailing '-t<days>' timepoint token first.
+    # The day value is not a lineage field and is discarded here; callers that
+    # need it use split_timepoint_token / parse_experiment_id_full.
+    experiment_id, _timepoint_days = split_timepoint_token(experiment_id)
     if not experiment_id:
         return None, None, None, None
 
@@ -279,7 +316,8 @@ def parse_experiment_id_full(experiment_id: str) -> ParsedExperimentID:
         )
 
     original_id = experiment_id.strip()
-    base_id, sequential_number, treatment_variant, replicate_label = parse_lineage_fields(original_id)
+    stem, timepoint_days = split_timepoint_token(original_id)
+    base_id, sequential_number, treatment_variant, replicate_label = parse_lineage_fields(stem)
     experiment_type, researcher_initials, index, is_valid, warnings = classify_base_id(base_id, original_id)
 
     return ParsedExperimentID(
@@ -293,4 +331,5 @@ def parse_experiment_id_full(experiment_id: str) -> ParsedExperimentID:
         is_valid=is_valid,
         warnings=warnings,
         replicate_label=replicate_label,
+        timepoint_days=timepoint_days,
     )

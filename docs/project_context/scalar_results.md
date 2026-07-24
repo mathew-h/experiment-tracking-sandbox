@@ -33,6 +33,11 @@ Date, Description, Replicate, Gross Ammonium (mM), Bkg Ammonium (mM), Bkg Exp ID
 - Combination happens at parse time via `backend/services/bulk_uploads/replicate_routing.py::combine_replicate_id`; conflicting or malformed combinations (different letter than the ID already carries, derivation/treatment suffixes, IDs without a numeric index, multi-character values) produce a per-row error and the row is skipped without aborting the upload.
 - Missing siblings are **not** auto-created; the row errors with the standard "not found" message.
 
+## Timepoint ID Token (Issue #81)
+- If the resolved Experiment ID carries a `-t<days>` token (e.g. `SERUM_001a-t7`), a blank `Time (days)` cell is filled from the ID; a different `Time (days)` value errors the row rather than being silently overwritten.
+- Checked at the string level in `scalar_results.py` before the row reaches `ScalarResultsService`, which applies the same rule again as a second layer of defense (`apply_id_timepoint`, `backend/services/result_merge_utils.py`).
+- A `Time (days)` cell that isn't numeric is left untouched here — it still fails the existing "must be a number" validation below this check.
+
 ## Output and Data Flow
 The cleaned records are passed to `ScalarResultsService.bulk_create_scalar_results_ex(db, cleaned_records)`. The service returns a tuple containing:
 - `created` (int)

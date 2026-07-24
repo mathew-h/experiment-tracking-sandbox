@@ -99,6 +99,78 @@ Replicate experiments must already exist (create them with the **Create replicat
 
 ---
 
+## Replicate timepoints (`-t<days>`)
+
+A different problem from lettered replicates: sometimes each "replicate" is actually its
+own vial sacrificed at a specific day, rather than a sister vial sampled repeatedly over
+time. For that pattern, encode the sample day directly in the experiment ID with a
+trailing `-t<days>` token.
+
+### Grammar
+
+- `-t<days>` goes at the very end of the ID, after any letter or sequential suffix:
+  `SERUM_001a-t0`, `SERUM_001a-t7`, `SERUM_001a-t14`.
+- Decimals are allowed: `SERUM_001a-t0.5`.
+- The token is letter-optional — a bare stem can carry it too: `SERUM_001-t7`. This stays
+  a parent-like row (its `base_experiment_id` is the stem itself, `parent_experiment_fk`
+  is `NULL`) rather than becoming a lettered replicate member.
+- The token is stripped before lineage grouping, so `SERUM_001a-t7` still groups under
+  base `SERUM_001` with `replicate_label = a`, exactly as `SERUM_001a` would without the
+  token.
+- **The Replicate column (base ID + letter format) cannot be combined with a token ID.**
+  A row with `SERUM_001-t7` in Experiment ID and `a` in the Replicate column is rejected
+  with a per-row error — encode the letter directly in the ID instead
+  (`SERUM_001a-t7`). Blank/`0` Replicate cells are unaffected and upload fine with the
+  token intact.
+
+### One vial, one timepoint
+
+The day encoded in the ID is canonical for that vial — every result row on that
+experiment must be at that day. This is enforced everywhere a result's time is set:
+
+- **Add Results modal:** the Time (days) field auto-fills from the ID and locks —
+  you can't type a conflicting value.
+- **Solution Chemistry upload:** a blank Time (days) cell is filled from the ID; a
+  different value in that cell errors the row.
+- **Master Results Sync:** a blank Duration (Days) cell is filled from the ID; a
+  different value errors the row.
+- **Direct API calls** (`POST /api/results`, and the scalar-result creation path used by
+  all three upload routes above) apply the same fill/reject rule, so there's no way to
+  get a `-t` vial's results out of sync with its ID.
+
+### How the rollup reads it
+
+Each `-t<days>` vial groups under its base experiment like any other replicate, and when
+the result row has a `time_post_reaction_bucket_days` set, it lands in that day's bucket
+in `v_results_scalar_rollup` — so a set like `SERUM_001a-t0`, `SERUM_001b-t0`,
+`SERUM_001c-t0` (three vials sacrificed at day 0) rolls up exactly like three same-vial
+samples taken at day 0 would. Use `-t<days>` when each timepoint is destructively sampled
+from its own vial; use a repeated Add Results entry on one experiment when the same vial
+is sampled non-destructively over time.
+
+**Caveat — Add Results modal does not bucket.** Results entered via the Add Results modal
+(`POST /api/results`) currently receive no `time_post_reaction_bucket_days` (it defaults
+to `NULL` unless the caller passes it explicitly), so they do **not** appear under a day
+bucket in `v_results_scalar_rollup` even though the ID's `-t<days>` value is still
+recorded on the experiment. Enter `-t<days>` results via the bulk uploads (Master Results
+sync or Solution Chemistry upload) instead — both paths bucket the row — if you need
+rollup inclusion.
+
+### Limitations
+
+- **Untimed bare siblings are not blocked.** Nothing stops you from mixing a `-t`-tagged
+  vial with an ordinary untimed sibling in the same replicate set — the system does not
+  cross-check that every member of a set uses (or doesn't use) the token. Keep result
+  days consistent across a replicate set manually.
+- **Bulk New Experiments upload does not copy parent conditions for `-t` IDs.** Creating
+  a batch of `-t<days>` vials via the New Experiments template creates each experiment
+  row and parses its `id_timepoint_days`, but does not copy conditions/additives from a
+  parent the way the **Create Replicates** button or `POST /api/experiments/replicates`
+  does. Set up each `-t` vial's conditions after upload, or create the vials via the
+  replicate-creation paths instead if you want conditions copied automatically.
+
+---
+
 ## Flagging an outlier
 
 If one vial in a replicate set goes bad (leak, cracked septum, contamination), you can drop it from the group statistics without deleting any data:

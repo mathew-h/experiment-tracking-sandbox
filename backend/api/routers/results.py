@@ -13,6 +13,7 @@ from backend.api.schemas.results import (
     ResultCreate, ResultResponse, ScalarCreate, ScalarUpdate,
     ScalarResponse, ICPCreate, ICPResponse,
 )
+from backend.services.result_merge_utils import apply_id_timepoint
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/results", tags=["results"])
@@ -87,7 +88,15 @@ def create_result(
             detail=f"Experiment with id={payload.experiment_fk} not found. "
                    "Pass experiments.id (integer PK), not the string experiment_id.",
         )
-    result = ExperimentalResults(**payload.model_dump())
+    data = payload.model_dump()
+    try:
+        # Issue #81: '-t<days>' in the experiment ID is canonical for the timepoint.
+        data["time_post_reaction_days"] = apply_id_timepoint(
+            exp.id_timepoint_days, data.get("time_post_reaction_days"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    result = ExperimentalResults(**data)
     db.add(result)
     db.commit()
     db.refresh(result)

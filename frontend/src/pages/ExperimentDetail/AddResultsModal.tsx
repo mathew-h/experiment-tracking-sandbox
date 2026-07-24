@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Modal, Button } from '@/components/ui'
 import { resultsApi, type ResultCreate, type ScalarCreate } from '@/api/results'
@@ -22,6 +22,9 @@ interface Props {
   onClose: () => void
   experimentFk: number
   experimentId: string
+  /** Day parsed from a -t<days> token on the experiment ID (issue #81). When set,
+   *  the time field is defaulted and locked to this value for every result. */
+  idTimepointDays?: number | null
 }
 
 interface FormState {
@@ -37,20 +40,29 @@ interface FormState {
   brine_modification_description: string
 }
 
-const INITIAL: FormState = {
-  measurement_date: todayIso(),
-  time_post_reaction_days: '',
-  description: 'Manual entry',
-  gross_ammonium_concentration_mM: '',
-  h2_concentration: '',
-  gas_sampling_pressure_psi: '',
-  gas_sampling_volume_ml: '',
-  final_ph: '',
-  final_conductivity_mS_cm: '',
-  brine_modification_description: '',
+function buildInitial(idTimepointDays?: number | null): FormState {
+  return {
+    measurement_date: todayIso(),
+    time_post_reaction_days: idTimepointDays != null ? String(idTimepointDays) : '',
+    description: 'Manual entry',
+    gross_ammonium_concentration_mM: '',
+    h2_concentration: '',
+    gas_sampling_pressure_psi: '',
+    gas_sampling_volume_ml: '',
+    final_ph: '',
+    final_conductivity_mS_cm: '',
+    brine_modification_description: '',
+  }
 }
 
-function validate(f: FormState): string | null {
+function validate(f: FormState, idTimepointDays?: number | null): string | null {
+  if (
+    idTimepointDays != null &&
+    f.time_post_reaction_days.trim() !== '' &&
+    Math.abs(parseFloat(f.time_post_reaction_days) - idTimepointDays) > 0.0001
+  ) {
+    return `Time is locked to day ${idTimepointDays} by the experiment ID token; remove the -t token from the ID to log a different day.`
+  }
   if (!f.measurement_date) return 'Measurement date is required.'
   if (f.time_post_reaction_days.trim() === '') return 'Time post reaction is required.'
   if (isNaN(parseFloat(f.time_post_reaction_days))) return 'Time post reaction must be a number.'
@@ -66,10 +78,23 @@ function validate(f: FormState): string | null {
 }
 
 /** Two-step result entry modal: POST /api/results then POST /api/results/scalar. */
-export function AddResultsModal({ open, onClose, experimentFk, experimentId }: Props) {
-  const [form, setForm] = useState<FormState>(INITIAL)
+export function AddResultsModal({ open, onClose, experimentFk, experimentId, idTimepointDays }: Props) {
+  const [form, setForm] = useState<FormState>(() => buildInitial(idTimepointDays))
   const [serverError, setServerError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // Re-sync the locked time field when the modal (re)opens or the ID timepoint
+  // becomes known/changes — the modal instance can stay mounted while its
+  // `experiment` data (and therefore idTimepointDays) loads or changes.
+  useEffect(() => {
+    if (open) {
+      setForm((f) => ({
+        ...f,
+        time_post_reaction_days: idTimepointDays != null ? String(idTimepointDays) : f.time_post_reaction_days,
+      }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, idTimepointDays])
 
   function set(field: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
@@ -104,7 +129,7 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId }: P
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['experiment-results', experimentId] })
-      setForm(INITIAL)
+      setForm(buildInitial(idTimepointDays))
       setServerError(null)
       onClose()
     },
@@ -116,7 +141,7 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId }: P
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const err = validate(form)
+    const err = validate(form, idTimepointDays)
     if (err) { setServerError(err); return }
     setServerError(null)
     mutation.mutate(form)
@@ -124,7 +149,7 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId }: P
 
   function handleClose() {
     if (mutation.isPending) return
-    setForm(INITIAL)
+    setForm(buildInitial(idTimepointDays))
     setServerError(null)
     onClose()
   }
@@ -170,8 +195,11 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId }: P
             />
           </div>
           <div>
-            <label className={labelCls}>Time post reaction (days) <span className="text-red-400">*</span></label>
+            <label htmlFor="time_post_reaction_days" className={labelCls}>
+              Time post reaction (days) <span className="text-red-400">*</span>
+            </label>
             <input
+              id="time_post_reaction_days"
               type="number"
               step="any"
               min="0"
@@ -179,8 +207,14 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId }: P
               value={form.time_post_reaction_days}
               onChange={(e) => set('time_post_reaction_days', e.target.value)}
               className={inputCls}
+              disabled={idTimepointDays != null}
               required
             />
+            {idTimepointDays != null && (
+              <p className="text-xs text-ink-muted">
+                Locked to day {idTimepointDays} from the experiment ID (-t{idTimepointDays}).
+              </p>
+            )}
           </div>
         </div>
 

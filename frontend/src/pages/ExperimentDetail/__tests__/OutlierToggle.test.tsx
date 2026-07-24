@@ -52,6 +52,7 @@ const BASE_DETAIL: ExperimentDetail = {
   parent_experiment_fk: 1,
   replicate_label: 'a',
   is_outlier: false,
+  id_timepoint_days: null,
   created_at: '2026-07-01T00:00:00Z',
   updated_at: null,
   conditions: null,
