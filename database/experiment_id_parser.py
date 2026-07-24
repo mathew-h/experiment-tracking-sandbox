@@ -182,7 +182,9 @@ def parse_lineage_fields(experiment_id: str) -> Tuple[Optional[str], Optional[in
     return base_id, derivation_num, treatment_variant, replicate_label
 
 
-def classify_base_id(base_id: str, original_id: str) -> Tuple[Optional[ExperimentType], Optional[str], Optional[str], bool, List[str]]:
+def classify_base_id(
+    base_id: str, original_id: str
+) -> Tuple[Optional[ExperimentType], Optional[str], Optional[str], bool, List[str]]:
     """
     Classify a base stem into (experiment_type, researcher_initials, index,
     is_valid, warnings).
