@@ -262,36 +262,31 @@ async def upload_aeris_xrd(
 
 @router.post("/master-results", response_model=UploadResponse)
 async def upload_master_results(
-    file: Optional[UploadFile] = File(None),
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """
-    Master Results upload.
+    Master Results upload — parse the uploaded master tracker file.
 
-    - No file: sync from the configured SharePoint path (MASTER_RESULTS_PATH).
-    - With file: parse the uploaded file (manual override).
+    The former no-file SharePoint sync mode was removed (issue #74);
+    a file is now required.
     """
     from backend.services.bulk_uploads.master_bulk_upload import MasterBulkUploadService  # noqa: PLC0415
     try:
-        if file is None:
-            created, updated, skipped, errors, feedbacks = MasterBulkUploadService.sync_from_path(db)
-            mode = "sync"
-        else:
-            file_bytes = await file.read()
-            created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(db, file_bytes)
-            mode = "upload"
+        file_bytes = await file.read()
+        created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(db, file_bytes)
         db.commit()
     except Exception as exc:
         db.rollback()
         log.error("master_results_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
-    log.info("master_results", mode=mode, created=created, updated=updated, user=current_user.email)
+    log.info("master_results", created=created, updated=updated, user=current_user.email)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         feedbacks=feedbacks,
-        message=f"Master Results ({mode}): {created} created, {updated} updated, {skipped} skipped",
+        message=f"Master Results: {created} created, {updated} updated, {skipped} skipped",
     )
 
 
@@ -623,63 +618,6 @@ async def upload_experiment_status(
             f"{len(preview.missing_ids)} not found"
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# Master Results config (Chunk D)
-# ---------------------------------------------------------------------------
-
-from pydantic import BaseModel as _PydanticBase  # noqa: E402
-
-
-class MasterResultsConfigResponse(_PydanticBase):
-    path: str | None
-
-
-class MasterResultsConfigUpdate(_PydanticBase):
-    path: str
-
-
-_MASTER_RESULTS_CONFIG_KEY = "master_results_path"
-
-
-@router.get("/master-results/config", response_model=MasterResultsConfigResponse)
-def get_master_results_config(
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> MasterResultsConfigResponse:
-    """Return the currently configured Master Results file path."""
-    from database.models.app_config import AppConfig  # noqa: PLC0415
-    cfg = db.query(AppConfig).filter_by(key=_MASTER_RESULTS_CONFIG_KEY).first()
-    if cfg:
-        return MasterResultsConfigResponse(path=cfg.value)
-    from backend.config.settings import get_settings  # noqa: PLC0415
-    return MasterResultsConfigResponse(path=get_settings().master_results_path)
-
-
-@router.patch("/master-results/config", response_model=MasterResultsConfigResponse)
-def update_master_results_config(
-    body: MasterResultsConfigUpdate,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> MasterResultsConfigResponse:
-    """Set the Master Results file path after validating it resolves to a readable .xlsx file."""
-    import os  # noqa: PLC0415
-    from database.models.app_config import AppConfig  # noqa: PLC0415
-
-    path = body.path
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=422, detail=f"File not found: {path}")
-    if not path.lower().endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=422, detail="Path must point to an .xlsx or .xls file")
-
-    cfg = db.query(AppConfig).filter_by(key=_MASTER_RESULTS_CONFIG_KEY).first()
-    if cfg:
-        cfg.value = path
-    else:
-        db.add(AppConfig(key=_MASTER_RESULTS_CONFIG_KEY, value=path))
-    db.commit()
-    return MasterResultsConfigResponse(path=path)
 
 
 # ---------------------------------------------------------------------------
