@@ -143,7 +143,7 @@ Experiment Status upload specs are documented in the existing upload template do
 All endpoints live under `/api/bulk-uploads/`:
 
 ```
-POST /api/bulk-uploads/master-results          (multipart or path-based sync)
+POST /api/bulk-uploads/master-results          (multipart file required — path-based sync removed by issue #74)
 POST /api/bulk-uploads/new-experiments
 POST /api/bulk-uploads/scalar-results
 POST /api/bulk-uploads/icp-oes
@@ -159,7 +159,7 @@ GET  /api/experiments/next-ids                 (new, for New Experiments card)
 
 All endpoints:
 - Require Firebase auth
-- Accept `multipart/form-data` (file upload) except master-results (see spec)
+- Accept `multipart/form-data` (file upload), including master-results (`file` required as of issue #74; see spec)
 - Return a consistent `UploadResult` Pydantic schema (see below)
 - Use lazy imports for parsers that import `frontend.config.variable_config`
 
@@ -203,7 +203,7 @@ class UploadResult(BaseModel):
 - [x] Each upload processes a valid test fixture file and returns correct counts
 - [x] Each upload rejects an invalid file (wrong type, missing required columns) with a clear error
 - [x] Calculation engine runs after writes for affected models (ScalarResults)
-- [x] Master Results sync reads from the configured path on the server, not a user-uploaded file
+- [x] ~~Master Results sync reads from the configured path on the server, not a user-uploaded file~~ (superseded by issue #74 — a user-uploaded file is now required; server-side path sync removed)
 - [x] New Experiments card shows correct next-ID chips before download
 - [x] Auth required on all endpoints (401 without token)
 - [x] XRD upload correctly routes to Aeris or ActLabs format
