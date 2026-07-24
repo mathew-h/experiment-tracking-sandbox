@@ -181,14 +181,20 @@ def test_master_results_no_file_returns_422(client):
     assert resp.status_code == 422
 
 
-def test_master_results_config_endpoints_removed(client):
-    """GET/PATCH /master-results/config were removed with the sync feature (issue #74)."""
-    assert client.get("/api/bulk-uploads/master-results/config").status_code == 404
-    r = client.patch(
-        "/api/bulk-uploads/master-results/config",
-        json={"path": "C:/anything.xlsx"},
-    )
-    assert r.status_code == 404
+def test_master_results_config_endpoints_removed():
+    """The /master-results/config routes were removed with the sync feature (issue #74).
+
+    Asserted against the route registry, not via HTTP status codes: the SPA
+    catch-all in backend/api/main.py answers unknown paths, so HTTP-level
+    404 assertions would require changing app-wide routing semantics
+    (plan amendment 2026-07-24, user-confirmed).
+    """
+    from backend.api.main import app
+
+    config_paths = [
+        r.path for r in app.routes if "master-results/config" in getattr(r, "path", "")
+    ]
+    assert config_paths == []
 
 
 def test_icp_oes_returns_upload_response_shape(client):
