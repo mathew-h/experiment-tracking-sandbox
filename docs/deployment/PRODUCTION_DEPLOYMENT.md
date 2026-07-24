@@ -137,18 +137,6 @@ cd C:\Apps\experiment-tracking
 .venv\Scripts\python scripts\manage_users.py approve <request_id>
 ```
 
----
-
-## Configuring the Master Results Path
-
-The master results sync reads from a configurable file path. Set or update it via the Swagger UI:
-
-1. Open `http://localhost:8000/docs` on the lab PC.
-2. Find `PATCH /api/bulk-uploads/master-results/config`.
-3. Enter the path to the master results file (e.g. `\\server\shared\Master Results.xlsx`).
-
----
-
 ## Troubleshooting
 
 **View application logs:**

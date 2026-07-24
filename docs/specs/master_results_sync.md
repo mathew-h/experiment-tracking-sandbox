@@ -9,13 +9,14 @@
 ## Overview
 
 The Master Results file is a shared Excel workbook that the lab team updates daily.
-It is not a one-off import — it is a persistent file on the lab PC that accumulates
-rows over time. The upload mechanism is a **sync operation**: the app reads the
-current state of the file and upserts any new or changed rows.
+It is not a one-off import — it is a persistent living file that accumulates rows
+over time. Each upload re-reads the current state of the file and upserts any new
+or changed rows.
 
-Because the file lives on the same LAN machine as the server, it can be read
-directly from the filesystem. The user configures the file path once; thereafter
-they press "Sync Now" and the backend reads the file from that path.
+As of issue #74 the upload is **drag-and-drop only**: the user downloads or syncs
+the tracker locally (`01_R&D\02_Results\Master_Reactor_Sampling_Tracker_v2.xlsx`)
+and drops it onto the Master Results widget. The former server-side
+read-from-configured-path sync mode was removed.
 
 ---
 
@@ -89,44 +90,15 @@ to recompute yield fields and net ammonium concentration.
 
 ---
 
-## UI Behaviour (Master Results card is different from other cards)
+## UI Behaviour
 
-The Master Results card does **not** use a drag-and-drop file picker.
-It uses a **server-side sync** model:
+The Master Results card is a standard drag-and-drop upload row (the largest,
+topmost widget on the page). Its help text instructs users to drop
+`01_R&D\02_Results\Master_Reactor_Sampling_Tracker_v2.xlsx`.
 
-### First-time setup
-A settings panel (accessible via a gear icon on the card) allows the user to
-configure the file path on the server:
-
-```
-File path: [____________________________________] [Browse]
-```
-
-The path is stored in the app's settings table or `.env`-adjacent config.
-A "Test connection" button verifies the path resolves to a readable `.xlsx` file.
-
-### Normal operation
-Once configured, the card shows:
-
-```
-Master Results Sync
-Last synced: 2 hours ago (47 rows processed)
-
-[Sync Now]   [View last sync log]
-```
-
-Pressing **Sync Now** calls `POST /api/bulk-uploads/master-results` with no file body.
-The backend reads the file from the configured path and processes it.
-
-### Response display
-After sync:
-- Created: N rows
-- Updated: N rows
-- Skipped: N rows
-- Warnings: collapsible list of experiment IDs not found in DB
-
-Errors (unexpected exceptions) are shown prominently in red with the option to
-view full server logs.
+After upload the card shows Created / Updated / Skipped counts, a collapsible
+warning list (experiment IDs not found in DB), and prominent red errors for
+unexpected exceptions.
 
 ---
 
@@ -136,27 +108,16 @@ view full server logs.
 POST /api/bulk-uploads/master-results
 ```
 
-- No file body — the backend reads from the configured path
+- `file` (multipart) is **required** — the endpoint parses the uploaded workbook
 - Returns `UploadResult`
 - Requires Firebase auth
 
-```
-GET /api/bulk-uploads/master-results/config
-PATCH /api/bulk-uploads/master-results/config
-```
-
-Reads and writes the configured file path. Requires Firebase auth.
-The `PATCH` endpoint validates the path resolves before saving.
+The former `GET`/`PATCH /api/bulk-uploads/master-results/config` endpoints were
+removed with the sync mode (issue #74).
 
 ---
 
 ## Backend Implementation Notes
 
-- File path config should be stored in a small `AppConfig` table (key-value) or
-  in a dedicated `.env`-style settings mechanism — not hardcoded
-- The endpoint should acquire a read lock (or handle `PermissionError`) gracefully
-  in case the lab team has the file open in Excel when sync is triggered
-- On `PermissionError`: return a clear user-facing message ("File is open in Excel.
-  Please close it and try again.") rather than a 500
 - Parsing is delegated entirely to the existing `master_bulk_upload.py` parser;
   do not modify its logic

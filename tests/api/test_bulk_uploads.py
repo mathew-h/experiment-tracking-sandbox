@@ -175,17 +175,26 @@ def test_master_results_upload_returns_response_shape(client):
     _assert_upload_shape(resp.json())
 
 
-def test_master_results_sync_no_file_returns_response_shape(client):
-    """POST to master-results without a file triggers sync_from_path."""
-    mock_svc = MagicMock()
-    mock_svc.sync_from_path.return_value = (2, 0, 0, [], [])
-    fake_mod = MagicMock()
-    fake_mod.MasterBulkUploadService = mock_svc
+def test_master_results_no_file_returns_422(client):
+    """POST to master-results without a file is rejected — sync mode removed (issue #74)."""
+    resp = client.post("/api/bulk-uploads/master-results")
+    assert resp.status_code == 422
 
-    with patch.dict(sys.modules, {"backend.services.bulk_uploads.master_bulk_upload": fake_mod}):
-        resp = client.post("/api/bulk-uploads/master-results")
-    assert resp.status_code == 200
-    _assert_upload_shape(resp.json())
+
+def test_master_results_config_endpoints_removed():
+    """The /master-results/config routes were removed with the sync feature (issue #74).
+
+    Asserted against the route registry, not via HTTP status codes: the SPA
+    catch-all in backend/api/main.py answers unknown paths, so HTTP-level
+    404 assertions would require changing app-wide routing semantics
+    (plan amendment 2026-07-24, user-confirmed).
+    """
+    from backend.api.main import app
+
+    config_paths = [
+        r.path for r in app.routes if "master-results/config" in getattr(r, "path", "")
+    ]
+    assert config_paths == []
 
 
 def test_icp_oes_returns_upload_response_shape(client):
@@ -690,58 +699,6 @@ def test_app_config_primary_key_is_key(db_session):
     db_session.add(AppConfig(key="dup_key", value="second"))
     with pytest.raises(Exception):
         db_session.flush()
-
-
-# ---------------------------------------------------------------------------
-# D2: Master Results config endpoints
-# ---------------------------------------------------------------------------
-
-def test_get_master_results_config_returns_path(client):
-    """GET /master-results/config returns JSON with a 'path' field."""
-    r = client.get("/api/bulk-uploads/master-results/config")
-    assert r.status_code == 200
-    data = r.json()
-    assert "path" in data
-
-
-def test_patch_master_results_config_invalid_path(client):
-    """PATCH /master-results/config rejects a nonexistent file path with 422."""
-    r = client.patch(
-        "/api/bulk-uploads/master-results/config",
-        json={"path": "/nonexistent/path/to/file.xlsx"},
-    )
-    assert r.status_code == 422
-
-
-def test_patch_master_results_config_valid_path(client, tmp_path):
-    """PATCH /master-results/config accepts a real .xlsx file path and persists it."""
-    import openpyxl
-
-    p = tmp_path / "test.xlsx"
-    wb = openpyxl.Workbook()
-    wb.save(str(p))
-
-    r = client.patch(
-        "/api/bulk-uploads/master-results/config",
-        json={"path": str(p)},
-    )
-    assert r.status_code == 200
-    assert r.json()["path"] == str(p)
-
-
-def test_patch_master_results_config_persists_to_get(client, tmp_path):
-    """After PATCH, GET returns the newly configured path."""
-    import openpyxl
-
-    p = tmp_path / "persist.xlsx"
-    wb = openpyxl.Workbook()
-    wb.save(str(p))
-
-    client.patch("/api/bulk-uploads/master-results/config", json={"path": str(p)})
-
-    r = client.get("/api/bulk-uploads/master-results/config")
-    assert r.status_code == 200
-    assert r.json()["path"] == str(p)
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,8 @@ const WIDE_FILE = path.resolve(
 test('elemental composition wide upload creates records', async ({ page }) => {
   await page.goto('/bulk-uploads')
 
+  await page.getByRole('button', { name: /Less-used uploads/i }).click()
+
   await page.getByRole('button', { name: /Sample Chemical Composition/i }).click()
 
   const card = page.locator('.rounded-lg').filter({

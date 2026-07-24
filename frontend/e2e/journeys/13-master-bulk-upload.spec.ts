@@ -92,6 +92,7 @@ test('master results upload persists data and experiment results appear', async 
 
 test('solution chemistry upload processes and commits correctly', async ({ page }) => {
   await page.goto('/bulk-uploads')
+  await page.getByRole('button', { name: /Less-used uploads/i }).click()
   await page.getByRole('button', { name: /Solution Chemistry/i }).click()
 
   const card = page.locator('.rounded-lg').filter({

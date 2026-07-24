@@ -62,10 +62,7 @@ function post<T>(path: string, body?: FormData | null): Promise<T> {
 }
 
 export const bulkUploadsApi = {
-  // Card 1 — Master Results Sync
-  triggerMasterSync: () =>
-    post<BulkUploadResult>('/bulk-uploads/master-results'),
-
+  // Card 1 — Master Results (drag-and-drop upload of the master tracker file)
   uploadMasterResults: (file: File) =>
     post<BulkUploadResult>('/bulk-uploads/master-results', fileForm(file)),
 

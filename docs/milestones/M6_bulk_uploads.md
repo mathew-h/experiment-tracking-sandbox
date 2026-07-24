@@ -18,7 +18,7 @@ elemental composition) are net-new additions in `backend/services/bulk_uploads/`
 
 | # | Card Title | Backend Parser | Template Available | Notes |
 |---|---|---|---|---|
-| 1 | Master Results Sync | `master_bulk_upload.py` | No — fixed living file | Sync mode, not one-off upload |
+| 1 | Master Results Sync | `master_bulk_upload.py` | No — fixed living file | Drag-and-drop upload of the living tracker file (sync button removed by issue #74) |
 | 2 | New Experiments | `new_experiments.py` | Yes — downloadable Excel | Show next-ID hints before download |
 | 3 | Solution Chemistry | `scalar_results.py` | Yes — existing | No changes |
 | 4 | ICP-OES Data | `icp_service.py` | No — raw instrument CSV | See spec: `docs/specs/icp_oes_upload.md` |
@@ -35,7 +35,7 @@ elemental composition) are net-new additions in `backend/services/bulk_uploads/`
 
 Every card must include:
 - **Header:** Upload type name + short description
-- **File zone:** Drag-and-drop area (or "Sync Now" button for Master Results)
+- **File zone:** Drag-and-drop area (the Master Results "Sync Now" button was removed by issue #74)
 - **Pre-upload validation:** File type check before the file reaches the backend
 - **Progress indicator:** Spinner during processing
 - **Result summary:** Created / updated / skipped counts + collapsible error table
@@ -143,7 +143,7 @@ Experiment Status upload specs are documented in the existing upload template do
 All endpoints live under `/api/bulk-uploads/`:
 
 ```
-POST /api/bulk-uploads/master-results          (multipart or path-based sync)
+POST /api/bulk-uploads/master-results          (multipart file required — path-based sync removed by issue #74)
 POST /api/bulk-uploads/new-experiments
 POST /api/bulk-uploads/scalar-results
 POST /api/bulk-uploads/icp-oes
@@ -159,7 +159,7 @@ GET  /api/experiments/next-ids                 (new, for New Experiments card)
 
 All endpoints:
 - Require Firebase auth
-- Accept `multipart/form-data` (file upload) except master-results (see spec)
+- Accept `multipart/form-data` (file upload), including master-results (`file` required as of issue #74; see spec)
 - Return a consistent `UploadResult` Pydantic schema (see below)
 - Use lazy imports for parsers that import `frontend.config.variable_config`
 
@@ -203,7 +203,7 @@ class UploadResult(BaseModel):
 - [x] Each upload processes a valid test fixture file and returns correct counts
 - [x] Each upload rejects an invalid file (wrong type, missing required columns) with a clear error
 - [x] Calculation engine runs after writes for affected models (ScalarResults)
-- [x] Master Results sync reads from the configured path on the server, not a user-uploaded file
+- [x] ~~Master Results sync reads from the configured path on the server, not a user-uploaded file~~ (superseded by issue #74 — a user-uploaded file is now required; server-side path sync removed)
 - [x] New Experiments card shows correct next-ID chips before download
 - [x] Auth required on all endpoints (401 without token)
 - [x] XRD upload correctly routes to Aeris or ActLabs format

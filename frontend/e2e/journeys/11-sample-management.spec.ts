@@ -191,6 +191,8 @@ test('new sample modal creates sample and redirects to detail page', async ({ pa
 test('rock inventory upload creates or updates sample record', async ({ page }) => {
   await page.goto('/bulk-uploads')
 
+  await page.getByRole('button', { name: /Less-used uploads/i }).click()
+
   // Expand the Rock Inventory card
   await page.getByRole('button', { name: /rock inventory/i }).click()
 

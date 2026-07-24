@@ -11,6 +11,8 @@ const SOL_CHEM_FILE = path.resolve(
 test('solution chemistry upload processes without errors', async ({ page }) => {
   await page.goto('/bulk-uploads')
 
+  await page.getByRole('button', { name: /Less-used uploads/i }).click()
+
   // Open the Solution Chemistry accordion
   await page.getByRole('button', { name: /Solution Chemistry/i }).click()
 
