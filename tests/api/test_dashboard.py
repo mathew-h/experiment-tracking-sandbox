@@ -780,3 +780,197 @@ def test_reactor_status_excludes_non_hpht_experiments(client, db_session):
     exp_ids = [r["experiment_id"] for r in resp.json()]
     assert "RS_HPHT_001" in exp_ids
     assert "RS_SERUM_001" not in exp_ids
+
+
+# ---------------------------------------------------------------------------
+# Today's reactor modification on cards (issue #72)
+# ---------------------------------------------------------------------------
+
+def _utc_today() -> datetime.date:
+    """The dashboard's definition of 'today' — UTC, matching the pop-out save path."""
+    return datetime.datetime.now(datetime.timezone.utc).date()
+
+
+def test_reactor_card_data_schema_todays_modification_defaults_none():
+    from backend.api.schemas.dashboard import ReactorCardData
+    r = ReactorCardData(reactor_number=5, reactor_label="R05")
+    assert r.todays_modification is None
+
+
+def test_reactor_card_shows_todays_modification(client, db_session):
+    """A card whose experiment has a change request with sync_date == today (UTC)
+    returns the requested_change text in todays_modification."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.notion_sync import ReactorChangeRequest
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="MOD_TODAY_001",
+        experiment_number=72001,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="MOD_TODAY_001",
+        reactor_number=4,
+        experiment_type="HPHT",
+    ))
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R04",
+        experiment_id="MOD_TODAY_001",
+        requested_change="Swapped stir shaft; topped up catalyst",
+        sync_date=_utc_today(),
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert "R04" in cards
+    assert cards["R04"]["todays_modification"] == "Swapped stir shaft; topped up catalyst"
+
+
+def test_reactor_card_prior_day_modification_not_shown(client, db_session):
+    """A modification saved yesterday must NOT surface on the card."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.notion_sync import ReactorChangeRequest
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="MOD_YDAY_001",
+        experiment_number=72002,
+        status=ExperimentStatus.ONGOING,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="MOD_YDAY_001",
+        reactor_number=5,
+        experiment_type="HPHT",
+    ))
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R05",
+        experiment_id="MOD_YDAY_001",
+        requested_change="Yesterday's note",
+        sync_date=_utc_today() - datetime.timedelta(days=1),
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert "R05" in cards
+    assert cards["R05"]["todays_modification"] is None
+
+
+def test_todays_modification_keys_on_experiment_and_reactor_label(client, db_session):
+    """Three cards: ONGOING with a today-mod, QUEUED with a today-mod, ONGOING without.
+    Only the two with a matching (experiment_id, reactor_label, today) row are populated.
+    A same-day row saved under a DIFFERENT reactor_label must not leak onto the card."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.notion_sync import ReactorChangeRequest
+    from database.models.enums import ExperimentStatus
+
+    specs = [
+        ("MOD_KEY_ON", 72010, ExperimentStatus.ONGOING, 6),
+        ("MOD_KEY_QU", 72011, ExperimentStatus.QUEUED, 7),
+        ("MOD_KEY_NO", 72012, ExperimentStatus.ONGOING, 8),
+        ("MOD_KEY_WRONG_SLOT", 72013, ExperimentStatus.ONGOING, 9),
+    ]
+    for exp_id, num, status, rn in specs:
+        exp = Experiment(
+            experiment_id=exp_id,
+            experiment_number=num,
+            status=status,
+            created_at=datetime.datetime.utcnow(),
+        )
+        db_session.add(exp)
+        db_session.flush()
+        db_session.add(ExperimentalConditions(
+            experiment_fk=exp.id,
+            experiment_id=exp_id,
+            reactor_number=rn,
+            experiment_type="HPHT",
+        ))
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R06", experiment_id="MOD_KEY_ON",
+        requested_change="ongoing mod", sync_date=_utc_today(),
+    ))
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R07", experiment_id="MOD_KEY_QU",
+        requested_change="queued mod", sync_date=_utc_today(),
+    ))
+    # Saved today for MOD_KEY_WRONG_SLOT but under a reactor label it does NOT occupy:
+    db_session.add(ReactorChangeRequest(
+        reactor_label="R01", experiment_id="MOD_KEY_WRONG_SLOT",
+        requested_change="wrong slot mod", sync_date=_utc_today(),
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R06"]["todays_modification"] == "ongoing mod"
+    assert cards["R07"]["todays_modification"] == "queued mod"
+    assert cards["R08"]["todays_modification"] is None
+    assert cards["R09"]["todays_modification"] is None, (
+        "A same-day row under a different reactor_label must not appear on this card"
+    )
+
+
+def test_dashboard_modification_lookup_is_single_batched_query(client, db_session):
+    """The enrichment must add exactly ONE query touching reactor_change_requests,
+    regardless of how many cards are occupied (no per-card N+1)."""
+    import sqlalchemy
+    from sqlalchemy.engine import Engine
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.notion_sync import ReactorChangeRequest
+    from database.models.enums import ExperimentStatus
+
+    for i, rn in enumerate((10, 11, 12)):
+        exp = Experiment(
+            experiment_id=f"MOD_BATCH_{rn}",
+            experiment_number=72100 + i,
+            status=ExperimentStatus.ONGOING,
+            created_at=datetime.datetime.utcnow(),
+        )
+        db_session.add(exp)
+        db_session.flush()
+        db_session.add(ExperimentalConditions(
+            experiment_fk=exp.id, experiment_id=exp.experiment_id,
+            reactor_number=rn, experiment_type="HPHT",
+        ))
+        db_session.add(ReactorChangeRequest(
+            reactor_label=f"R{rn:02d}", experiment_id=exp.experiment_id,
+            requested_change=f"mod {rn}", sync_date=_utc_today(),
+        ))
+    db_session.commit()
+
+    statements: list[str] = []
+
+    def counter(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sqlalchemy.event.listen(Engine, "before_cursor_execute", counter)
+    try:
+        resp = client.get("/api/dashboard/")
+    finally:
+        sqlalchemy.event.remove(Engine, "before_cursor_execute", counter)
+
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R10"]["todays_modification"] == "mod 10"
+    assert cards["R12"]["todays_modification"] == "mod 12"
+    cr_queries = [s for s in statements if "reactor_change_requests" in s]
+    assert len(cr_queries) == 1, (
+        f"Expected exactly 1 batched change-request query, got {len(cr_queries)}"
+    )

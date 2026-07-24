@@ -8,6 +8,7 @@ from database.models.experiments import Experiment, ExperimentNotes, Modificatio
 from database.models.conditions import ExperimentalConditions
 from database.models.results import ExperimentalResults, ScalarResults, ICPResults
 from database.models.enums import ExperimentStatus
+from database.models.notion_sync import ReactorChangeRequest
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.dashboard import (
@@ -185,6 +186,27 @@ def get_dashboard(
             material=specs.get("material"),
             vendor=specs.get("vendor"),
         ))
+
+    # ── 2b. Today's reactor modification per card (issue #72) ─────────────
+    # One batched query keyed on (experiment_id, reactor_label) — keeps the
+    # "no N+1" contract of this endpoint. "Today" is UTC, matching the
+    # pop-out's save path (todayISO() is the UTC date).
+    today = now.date()
+    card_exp_ids = [c.experiment_id for c in reactor_cards if c.experiment_id]
+    if card_exp_ids:
+        mod_rows = db.execute(
+            select(
+                ReactorChangeRequest.experiment_id,
+                ReactorChangeRequest.reactor_label,
+                ReactorChangeRequest.requested_change,
+            ).where(
+                ReactorChangeRequest.experiment_id.in_(card_exp_ids),
+                ReactorChangeRequest.sync_date == today,
+            )
+        ).all()
+        mods = {(r.experiment_id, r.reactor_label): r.requested_change for r in mod_rows}
+        for c in reactor_cards:
+            c.todays_modification = mods.get((c.experiment_id, c.reactor_label))
 
     # ── 3. Gantt timeline (all experiments, newest first, limit 100) ──────
     gantt_rows = db.execute(

@@ -322,7 +322,8 @@ Returns all dashboard data in a single call. Response shape:
       "researcher": "MH",
       "started_at": "2026-03-01T09:00:00Z",
       "days_running": 18,
-      "temperature_c": 200.0
+      "temperature_c": 200.0,
+      "todays_modification": "Swapped stir shaft; topped up catalyst"
     }
   ],
   "timeline": [
@@ -357,6 +358,7 @@ Returns all dashboard data in a single call. Response shape:
 - Timeline limited to 100 most recent experiments
 - Activity limited to last 20 modification log entries
 - Core Flood experiments use `CF01`/`CF02` labels; all others use `R01`–`R16`
+- `todays_modification` is the `requested_change` of a reactor modification saved for the current UTC day for this card's `(experiment_id, reactor_label)`; `null` if none was saved today. Populated by one batched query — the endpoint remains a single call.
 
 ## Admin
 
