@@ -18,83 +18,54 @@ Format Examples:
 - Combined (2-part): HPHT_001-2_Desorption (treatment on 2nd run)
 """
 
-from typing import Optional, Tuple, Dict, List
-from dataclasses import dataclass
-from database.models.enums import ExperimentType
+from typing import Optional, Tuple, List
 import re
 
+from database.experiment_id_parser import (
+    EXPERIMENT_TYPE_ABBREVIATIONS,
+    ParsedExperimentID,
+    classify_base_id,
+    get_experiment_type_from_id,
+)
 
-# Mapping of common abbreviations to ExperimentType enum values
-EXPERIMENT_TYPE_ABBREVIATIONS: Dict[str, ExperimentType] = {
-    # Full names (case-insensitive)
-    "serum": ExperimentType.SERUM,
-    "autoclave": ExperimentType.AUTOCLAVE,
-    "hpht": ExperimentType.HPHT,
-    "coreflood": ExperimentType.CF,
-    "core flood": ExperimentType.CF,
-    "cf": ExperimentType.CF,
-    "other": ExperimentType.OTHER,
-    # Common abbreviations
-    "ac": ExperimentType.AUTOCLAVE,
-}
-
-
-@dataclass
-class ParsedExperimentID:
-    """Result of parsing an experiment ID."""
-    experiment_type: Optional[ExperimentType]
-    researcher_initials: Optional[str]
-    index: Optional[str]
-    sequential_number: Optional[int]
-    treatment_variant: Optional[str]
-    base_id: str  # The ID without sequential/treatment suffixes
-    original_id: str
-    is_valid: bool
-    warnings: List[str]
-    replicate_label: Optional[str] = None  # "a", "b", "c"; None = not a replicate
-
-
-def get_experiment_type_from_id(type_text: str) -> Optional[ExperimentType]:
-    """
-    Map experiment type text (abbreviation or full name) to ExperimentType enum.
-    
-    Args:
-        type_text: The type portion from experiment ID (case-insensitive)
-        
-    Returns:
-        ExperimentType enum value if found, None otherwise
-        
-    Examples:
-        >>> get_experiment_type_from_id("Serum")
-        ExperimentType.SERUM
-        >>> get_experiment_type_from_id("CF")
-        ExperimentType.CF
-        >>> get_experiment_type_from_id("ac")
-        ExperimentType.AUTOCLAVE
-    """
-    if not type_text:
-        return None
-    
-    normalized = type_text.strip().lower()
-    return EXPERIMENT_TYPE_ABBREVIATIONS.get(normalized)
+__all__ = [
+    "EXPERIMENT_TYPE_ABBREVIATIONS",
+    "ParsedExperimentID",
+    "get_experiment_type_from_id",
+    "extract_lineage_info",
+    "parse_experiment_id",
+    "validate_experiment_id",
+    "format_validation_warning",
+]
 
 
 def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Optional[str], Optional[str]]:
     """
-    Extract base ID, sequential number, treatment variant, and replicate label from
-    experiment ID.
+    LEGACY lineage extraction — frozen, pinned behavior (issue #70 P5).
 
-    Uses hybrid delimiter system:
-    - Hyphen-NUMBER for sequential lineage (e.g., -2, -3)
-    - Underscore-TEXT for treatment variants (e.g., _Desorption)
-    - A single trailing lowercase letter bound to the numeric index for replicates
-      (e.g., _001a), extracted before treatment detection so a letter-suffixed
-      index is never mistaken for a treatment name.
+    The canonical experiment ID grammar lives in
+    database/experiment_id_parser.py::parse_lineage_fields. This function is
+    retained verbatim because its algorithm diverges from the canonical
+    grammar on shapes that locked callers depend on
+    (backend/services/bulk_uploads/new_experiments.py::find_parent_for_copy
+    and the parsed.sequential_number warning gate in the same file):
 
-    Supports both 2-part (TYPE_INDEX) and 3-part (TYPE_INITIALS_INDEX) formats.
+    1. Naive trailing "-N": ANY trailing hyphen-number is treated as a
+       sequential number, so extract_lineage_info("CF-015") returns
+       ("CF", 15, None, None) while the canonical grammar treats CF-015 as
+       a standalone base experiment.
+    2. Combined "-N_Treatment" suffixes (pre-existing bug, predates issue
+       #69): the hyphen-NUMBER match requires the entire tail after the
+       last hyphen to be purely digits, so the sequential number is never
+       extracted and stays glued to base_id:
+       extract_lineage_info("HPHT_001-2_Desorption") returns
+       ("HPHT_001-2", None, "Desorption", None), NOT ("HPHT_001", 2, ...).
 
-    Args:
-        experiment_id: The full experiment ID
+    Both divergences are pinned by
+    tests/services/test_experiment_validation_replicates.py
+    (TestLegacyLineageDivergencesPinned and test_existing_combined_unaffected).
+    Do not modify this function's behavior without an explicit product
+    decision covering every caller.
 
     Returns:
         Tuple of (base_id, sequential_number, treatment_variant, replicate_label)
@@ -119,7 +90,7 @@ def extract_lineage_info(experiment_id: str) -> Tuple[str, Optional[int], Option
         # purely digits, so a combined "-N_Treatment" suffix never matches and the
         # sequential number is not extracted; see test_existing_combined_unaffected.
         >>> extract_lineage_info("HPHT_001-2_Desorption")
-        ("HPHT_001", 2, "Desorption", None)
+        ("HPHT_001-2", None, "Desorption", None)
         >>> extract_lineage_info("SERUM_001a")
         ("SERUM_001", None, None, "a")
         >>> extract_lineage_info("Serum_MH_101a")
@@ -219,9 +190,12 @@ def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
         None
         >>> result.index
         '001'
+
+    Lineage fields use the legacy extraction (see extract_lineage_info);
+    classification is shared with database/experiment_id_parser.py.
     """
     warnings = []
-    
+
     if not experiment_id or not isinstance(experiment_id, str):
         return ParsedExperimentID(
             experiment_type=None,
@@ -234,70 +208,17 @@ def parse_experiment_id(experiment_id: str) -> ParsedExperimentID:
             is_valid=False,
             warnings=["Experiment ID is empty or invalid"]
         )
-    
+
     original_id = experiment_id.strip()
-    
-    # Extract lineage info first
+
+    # Extract lineage info first — NOTE: intentionally the LEGACY extraction,
+    # not the canonical grammar; see extract_lineage_info's docstring.
     base_id, sequential_number, treatment_variant, replicate_label = extract_lineage_info(original_id)
-    
-    # Parse base_id - support both 2-part and 3-part formats
-    parts = base_id.split('_')
-    
-    experiment_type = None
-    researcher_initials = None
-    index = None
-    
-    if len(parts) < 2:
-        warnings.append(
-            f"Expected format: ExperimentType_Index or ExperimentType_ResearcherInitials_Index "
-            f"(e.g., HPHT_001 or Serum_MH_101). Got: {original_id}"
-        )
-        is_valid = False
-    elif len(parts) == 2:
-        # 2-part format: TYPE_INDEX
-        type_text = parts[0]
-        index = parts[1]
-        researcher_initials = None  # Not present in 2-part format
-        
-        # Validate experiment type
-        experiment_type = get_experiment_type_from_id(type_text)
-        if not experiment_type:
-            warnings.append(
-                f"Unknown experiment type '{type_text}'. Expected one of: "
-                f"{', '.join(sorted(set(EXPERIMENT_TYPE_ABBREVIATIONS.keys())))}"
-            )
-        
-        # Validate index (should be numeric or alphanumeric)
-        if not index:
-            warnings.append("Index portion is missing (e.g., 001, 101)")
-        
-        is_valid = len(warnings) == 0
-    else:
-        # 3-part format: TYPE_INITIALS_INDEX
-        type_text = parts[0]
-        researcher_initials = parts[1]
-        index = parts[2]
-        
-        # Validate experiment type
-        experiment_type = get_experiment_type_from_id(type_text)
-        if not experiment_type:
-            warnings.append(
-                f"Unknown experiment type '{type_text}'. Expected one of: "
-                f"{', '.join(sorted(set(EXPERIMENT_TYPE_ABBREVIATIONS.keys())))}"
-            )
-        
-        # Validate researcher initials (basic check)
-        if not researcher_initials or not researcher_initials.isalnum():
-            warnings.append(
-                f"Researcher initials '{researcher_initials}' should be alphanumeric (e.g., MH, JD)"
-            )
-        
-        # Validate index (should be numeric or alphanumeric)
-        if not index:
-            warnings.append("Index portion is missing (e.g., 101, 001)")
-        
-        is_valid = len(warnings) == 0
-    
+
+    # Classification (type / initials / index / validity) is shared with the
+    # canonical parser module.
+    experiment_type, researcher_initials, index, is_valid, warnings = classify_base_id(base_id, original_id)
+
     return ParsedExperimentID(
         experiment_type=experiment_type,
         researcher_initials=researcher_initials,
