@@ -103,13 +103,9 @@ _DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 if _DIST.exists():
     app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
 
-    @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str) -> FileResponse:
         """Serve React SPA — static files from dist/, everything else returns index.html."""
-        from fastapi import HTTPException
-        # Do not serve API routes; let FastAPI return 404 for non-existent /api/ endpoints
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
         # Serve static files (images, etc.) from dist/ if they exist
         static_file = _DIST / full_path
         if full_path and static_file.is_file():
