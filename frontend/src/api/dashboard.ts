@@ -36,6 +36,7 @@ export interface ReactorCardData {
   volume_mL: number | null
   material: string | null
   vendor: string | null
+  todays_modification: string | null
 }
 
 export interface GanttEntry {

@@ -216,6 +216,15 @@ function ReactorCard({
               {card!.description}
             </p>
           )}
+          {card!.todays_modification && (
+            <p
+              className="text-xs text-ink-secondary line-clamp-2 leading-snug"
+              title={card!.todays_modification}
+            >
+              <span className="text-ink-muted">Modified today:</span>{' '}
+              {card!.todays_modification}
+            </p>
+          )}
           <div className="flex items-center gap-3 pt-0.5">
             {card!.temperature_c != null && (
               <span className="text-xs text-ink-muted">
@@ -310,6 +319,7 @@ function ReactorDetailModal({
       setCrText(saved.requested_change)
       queryClient.invalidateQueries({ queryKey: ['reactorModificationRecent', card.experiment_id] })
       queryClient.invalidateQueries({ queryKey: ['changeRequests', card.experiment_id] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       success('Reactor modification saved')
     },
     onError: () => {

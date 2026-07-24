@@ -56,6 +56,7 @@ class ReactorCardData(BaseModel):
     volume_mL: Optional[int] = None     # reactor hardware spec
     material: Optional[str] = None      # reactor hardware spec
     vendor: Optional[str] = None        # reactor hardware spec
+    todays_modification: Optional[str] = None  # requested_change saved today (UTC) for this card; None if none
 
 
 class GanttEntry(BaseModel):
