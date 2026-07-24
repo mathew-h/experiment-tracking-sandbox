@@ -257,3 +257,15 @@ class TestLetterSequentialParentWiring:
         stem = _make_exp(sqlite_session, "REP26_001", 920060)
         rep_a = _make_exp(sqlite_session, "REP26_001a", 920061)
         assert rep_a.parent_experiment_fk == stem.id
+
+    def test_letter_seq_zero_and_one_also_link_to_letter_itself(self, sqlite_session):
+        # Pin for the locked "any -N" interpretation (issue #70 P5): explicit
+        # a-0/a-1 spellings on a lettered ID link to the lettered sibling,
+        # not the group parent — -0/-1 are parent aliases only at group level.
+        stem = _make_exp(sqlite_session, "REP27_001", 920070)
+        rep_a = _make_exp(sqlite_session, "REP27_001a", 920071)
+        rerun0 = _make_exp(sqlite_session, "REP27_001a-0", 920072)
+        rerun1 = _make_exp(sqlite_session, "REP27_001a-1", 920073)
+        assert rerun0.parent_experiment_fk == rep_a.id
+        assert rerun1.parent_experiment_fk == rep_a.id
+        assert rerun0.parent_experiment_fk != stem.id
