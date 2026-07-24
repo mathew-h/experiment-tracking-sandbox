@@ -2,6 +2,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from sqlalchemy.orm import Session, joinedload
 from database import Experiment, ExperimentalResults, ScalarResults, ModificationsLog
 from backend.services.result_merge_utils import (
+    apply_id_timepoint,
     create_experimental_result_row,
     ensure_primary_result_for_timepoint,
     find_timepoint_candidates,
@@ -93,8 +94,14 @@ class ScalarResultsService:
             if not experiment:
                 raise ValueError(f"Experiment with ID '{experiment_id}' not found and could not be auto-created.")
         
-        # Validate time_post_reaction is provided (required for proper merge with ICP data)
-        time_post_reaction = result_data.get('time_post_reaction')
+        # Issue #81: the '-t<days>' token in the experiment ID is canonical for
+        # this vial's timepoint — fill a missing time from it, reject a conflict.
+        # Defense in depth: the live bulk parsers also check string-level, but
+        # every upload path (scalar, master, long-format) funnels through here.
+        time_post_reaction = apply_id_timepoint(
+            experiment.id_timepoint_days, result_data.get('time_post_reaction'),
+        )
+        result_data['time_post_reaction'] = time_post_reaction
         if time_post_reaction is None:
             raise ValueError(
                 "time_post_reaction (Time (days)) is required for scalar results. "

@@ -18,6 +18,31 @@ def normalize_timepoint(time_post_reaction: Optional[float]) -> Optional[float]:
     return round(float(time_post_reaction), TIMEPOINT_BUCKET_DECIMALS)
 
 
+def apply_id_timepoint(id_timepoint_days, time_post_reaction):
+    """
+    Resolve a result's time against an ID-encoded timepoint (issue #81).
+
+    The '-t<days>' token in an experiment ID is canonical for that vial's
+    timepoint: a missing time is filled from it; a conflicting time (beyond
+    the bucket tolerance) is rejected so one vial never holds result rows at
+    a different day.
+
+    Returns the effective time_post_reaction value.
+    Raises ValueError when the supplied time conflicts with the ID.
+    """
+    if id_timepoint_days is None:
+        return time_post_reaction
+    if time_post_reaction is None:
+        return id_timepoint_days
+    if abs(float(time_post_reaction) - float(id_timepoint_days)) > TIMEPOINT_TOLERANCE_DAYS:
+        raise ValueError(
+            f"Time (days) {time_post_reaction} conflicts with the timepoint encoded "
+            f"in the experiment ID (-t{id_timepoint_days:g} = day {id_timepoint_days:g}). "
+            "The ID is canonical: leave Time blank to use the ID's day, or fix the ID."
+        )
+    return time_post_reaction
+
+
 def find_timepoint_candidates(
     db: Session,
     experiment_fk: int,

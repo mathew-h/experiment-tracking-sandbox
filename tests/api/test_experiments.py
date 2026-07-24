@@ -956,3 +956,15 @@ class TestOutlierFlagPatch:
         assert not any(
             l.old_values is not None and "is_outlier" in (l.old_values or {}) for l in logs
         )
+
+
+def test_id_timepoint_days_in_responses(client, db_session):
+    exp = Experiment(experiment_id="SERUM_074a-t7", experiment_number=6074, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.commit()  # before_flush sets id_timepoint_days = 7.0
+    detail = client.get(f"/api/experiments/{exp.experiment_id}")
+    assert detail.status_code == 200
+    assert detail.json()["id_timepoint_days"] == 7.0
+    listing = client.get("/api/experiments")
+    item = next(i for i in listing.json()["items"] if i["experiment_id"] == "SERUM_074a-t7")
+    assert item["id_timepoint_days"] == 7.0

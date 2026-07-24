@@ -194,3 +194,59 @@ def test_results_endpoint_xrd_run_date_null_when_absent(client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert data[0]["xrd_run_date"] is None
+
+
+# ── Issue #81: '-t<days>' ID timepoint is canonical on POST /api/results ─────
+
+
+def _seed_timepoint_exp(db, experiment_id, number):
+    exp = Experiment(experiment_id=experiment_id, experiment_number=number, status=ExperimentStatus.ONGOING)
+    db.add(exp)
+    db.commit()  # commit fires before_flush -> id_timepoint_days is populated
+    db.refresh(exp)
+    return exp
+
+
+def test_create_result_omitted_time_filled_from_id(client, db_session):
+    exp = _seed_timepoint_exp(db_session, "SERUM_070a-t7", 6070)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "auto-filled",
+        "is_primary_timepoint_result": True,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["time_post_reaction_days"] == 7.0
+
+
+def test_create_result_matching_time_accepted(client, db_session):
+    exp = _seed_timepoint_exp(db_session, "SERUM_071a-t7", 6071)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "match",
+        "time_post_reaction_days": 7.0,
+        "is_primary_timepoint_result": True,
+    })
+    assert resp.status_code == 201
+
+
+def test_create_result_conflicting_time_422(client, db_session):
+    exp = _seed_timepoint_exp(db_session, "SERUM_072a-t7", 6072)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "conflict",
+        "time_post_reaction_days": 3.0,
+        "is_primary_timepoint_result": True,
+    })
+    assert resp.status_code == 422
+    assert "canonical" in resp.json()["detail"]
+
+
+def test_create_result_untimed_experiment_unaffected(client, db_session):
+    exp = _seed_timepoint_exp(db_session, "SERUM_073a", 6073)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "free",
+        "time_post_reaction_days": 3.0,
+        "is_primary_timepoint_result": True,
+    })
+    assert resp.status_code == 201
