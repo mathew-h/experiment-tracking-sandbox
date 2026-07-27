@@ -1,16 +1,20 @@
 /**
- * Journey 14 — Dashboard CF01/CF02 slot mapping (issue #26)
+ * Journey 14 — Dashboard CF01/CF02/CF03 slot mapping (issue #26, extended by issue #85)
  *
  * Acceptance criteria covered here:
  * - CF01 slot shows an active Core Flood experiment when reactor_number = 1
  * - HPHT experiment in reactor 1 appears in R01, not CF01
+ * - CF03 slot (added in issue #85) shows an active Core Flood experiment when reactor_number = 3
  *
  * CF02 (reactor_number=2) is covered by backend tests only:
  * see tests/api/test_dashboard.py::test_core_flood_experiment_in_reactor_2_gets_cf02_label
  *
  * Approach:
  * - Create experiments via the UI (New Experiment wizard)
- * - Navigate to /dashboard and assert reactor grid slot contents
+ * - Navigate to /dashboard and assert reactor grid slot contents by locating the
+ *   card's mono-data label directly (there are no section headers in the DOM —
+ *   ReactorGrid renders one unified grid; see the "Section title lives in the
+ *   enclosing Dashboard CardHeader" comment in ReactorGrid.tsx)
  * - Cancel created experiments in afterEach to avoid polluting other journeys
  */
 import { test, expect } from '../fixtures/auth'
@@ -83,12 +87,8 @@ test('CF01 slot is populated when Core Flood experiment with reactor_number=1 is
   await page.goto('/dashboard')
   await page.waitForLoadState('networkidle')
 
-  // Find the CF01 label inside the Core Flood grid section
-  const cfSection = page.locator('text=Core Flood (CF01–CF02)').locator('../..')
-  await expect(cfSection).toBeVisible({ timeout: 10_000 })
-
-  // CF01 card — the label "CF01" appears as a mono-data heading inside the section
-  const cf01Label = cfSection.locator('p.font-mono-data').filter({ hasText: /^CF01$/ })
+  // CF01 card — the label "CF01" appears as a mono-data heading
+  const cf01Label = page.locator('p.font-mono-data').filter({ hasText: /^CF01$/ })
   await expect(cf01Label).toBeVisible({ timeout: 10_000 })
 
   // The experiment ID should appear in the same card
@@ -108,20 +108,29 @@ test('HPHT experiment in reactor_number=1 appears in R01, not CF01', async ({ pa
   await page.waitForLoadState('networkidle')
 
   // R01 card should contain the experiment
-  const rSection = page.locator('text=Standard Reactors (R01–R16)').locator('../..')
-  await expect(rSection).toBeVisible({ timeout: 10_000 })
-
-  const r01Label = rSection.locator('p.font-mono-data').filter({ hasText: /^R01$/ })
+  const r01Label = page.locator('p.font-mono-data').filter({ hasText: /^R01$/ })
   await expect(r01Label).toBeVisible({ timeout: 10_000 })
-  // DOM: p (label) → div (label wrapper) → div (flex justify-between) → div (Card root)
   const r01Card = r01Label.locator('../../..')
   await expect(r01Card.locator(`text=${expId}`)).toBeVisible({ timeout: 5_000 })
 
   // CF01 must NOT contain this experiment
-  const cfSection = page.locator('text=Core Flood (CF01–CF02)').locator('../..')
-  const cf01Label = cfSection.locator('p.font-mono-data').filter({ hasText: /^CF01$/ })
+  const cf01Label = page.locator('p.font-mono-data').filter({ hasText: /^CF01$/ })
   await expect(cf01Label).toBeVisible({ timeout: 5_000 })
-  // DOM: p (label) → div (label wrapper) → div (flex justify-between) → div (Card root)
   const cf01Card = cf01Label.locator('../../..')
   await expect(cf01Card.locator(`text=${expId}`)).not.toBeVisible()
+})
+
+test('CF03 slot is populated when Core Flood experiment with reactor_number=3 is ONGOING', async ({ page }) => {
+  const expId = await createExperiment(page, { type: 'Core Flood', reactorNumber: '3' })
+  createdIds.push(expId)
+
+  await page.goto('/dashboard')
+  await page.waitForLoadState('networkidle')
+
+  const cf03Label = page.locator('p.font-mono-data').filter({ hasText: /^CF03$/ })
+  await expect(cf03Label).toBeVisible({ timeout: 10_000 })
+
+  const cf03Card = cf03Label.locator('../../..')
+  await expect(cf03Card.locator(`text=${expId}`)).toBeVisible({ timeout: 5_000 })
+  await expect(cf03Card.locator('text=ONGOING')).toBeVisible()
 })
