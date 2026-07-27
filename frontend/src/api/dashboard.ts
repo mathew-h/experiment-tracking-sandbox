@@ -13,11 +13,22 @@ export interface ReactorStatus {
 }
 
 // M7 full dashboard types
+export interface SlotOccupancy {
+  total: number
+  ongoing: number
+  queued: number
+  empty: number
+}
+
 export interface DashboardSummary {
-  active_experiments: number
-  reactors_in_use: number
-  completed_this_month: number
-  pending_results: number
+  reactors: SlotOccupancy
+  core_floods: SlotOccupancy
+  gc_measurements_7wd: number
+  gc_experiments_7wd: number
+  serum_vials_started_7wd: number
+  serum_experiments_7wd: number
+  workday_window_start: string
+  workday_window_end: string
 }
 
 export interface ReactorCardData {
