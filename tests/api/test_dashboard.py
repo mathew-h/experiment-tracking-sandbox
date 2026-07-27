@@ -1298,6 +1298,8 @@ def test_dashboard_serum_vial_hpht_not_counted(client, db_session):
     from database.models.enums import ExperimentStatus
     from backend.services.workdays import last_n_workdays
 
+    before = client.get("/api/dashboard/").json()["summary"]["serum_vials_started_7wd"]
+
     start = datetime.datetime.combine(
         last_n_workdays(7)[0], datetime.time(8, 0), tzinfo=datetime.timezone.utc
     )
@@ -1313,8 +1315,6 @@ def test_dashboard_serum_vial_hpht_not_counted(client, db_session):
     ))
     db_session.commit()
 
-    before = client.get("/api/dashboard/").json()["summary"]["serum_vials_started_7wd"]
-    # No new serum row was added; count must be unaffected by the HPHT row above.
     after = client.get("/api/dashboard/").json()["summary"]["serum_vials_started_7wd"]
     assert before == after
 
