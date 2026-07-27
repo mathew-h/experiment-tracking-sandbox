@@ -1047,3 +1047,13 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Process note:** subagent-driven (4 plan tasks, fresh implementer + independent reviewer each).
   Task 1 and Task 2 each had one Important review finding fixed and re-approved (line wraps;
   test-fixture reuse); Task 3 approved first pass.
+
+## 2026-07-27 | issue #73 — Remove non-functional gram-conversion display from Chemical Additives list
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ConditionsTab.tsx` — removed the `{a.mass_in_grams.toFixed(4)} g`
+    conditional span from the additive row; only `{amount} {unit}` displays now. `mass_in_grams`
+    remains a valid derived field for moles/concentration calculations and Power BI views.
+- **Tests added:** no — verified `ConditionsTab.buttons.test.tsx` (3/3 pass, no assertion depended
+  on the removed span) and `frontend/e2e/journeys/12-chemicals.spec.ts` (its `/2\.5\s*g/` assertion
+  targets the amount+unit span, not the removed one) before merging, per the issue's own notes.
+- **Decision logged:** no

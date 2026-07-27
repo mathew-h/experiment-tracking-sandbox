@@ -269,9 +269,6 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
               <div key={a.id} className="flex items-baseline gap-4 py-1 border-b border-surface-border/50 group">
                 <span className="text-xs text-ink-secondary w-44 shrink-0">{a.compound?.name ?? `Compound #${a.compound_id}`}</span>
                 <span className="text-xs font-mono-data text-ink-primary">{a.amount} {a.unit}</span>
-                {a.mass_in_grams != null && (
-                  <span className="text-xs text-ink-muted">{a.mass_in_grams.toFixed(4)} g</span>
-                )}
                 {/* Action group — right-aligned, hover reveal on desktop, always visible on mobile */}
                 <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100 transition-opacity">
                   {/* Edit */}
