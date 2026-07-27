@@ -47,6 +47,9 @@ const baseResult: ResultWithFlags = {
   scalar_measurement_date: null,
   ferrous_iron_yield_h2_pct: null,
   ferrous_iron_yield_nh3_pct: null,
+  nmr_run_date: null,
+  icp_run_date: null,
+  gc_run_date: null,
   xrd_run_date: null,
 }
 

@@ -82,6 +82,9 @@ export interface ResultWithFlags {
   scalar_measurement_date: string | null
   ferrous_iron_yield_h2_pct: number | null
   ferrous_iron_yield_nh3_pct: number | null
+  nmr_run_date: string | null
+  icp_run_date: string | null
+  gc_run_date: string | null
   xrd_run_date: string | null
 }
 

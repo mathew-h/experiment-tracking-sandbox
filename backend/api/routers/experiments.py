@@ -287,6 +287,9 @@ def get_experiment_results(
             scalar_measurement_date=scalar.measurement_date if scalar else None,
             ferrous_iron_yield_h2_pct=scalar.ferrous_iron_yield_h2_pct if scalar else None,
             ferrous_iron_yield_nh3_pct=scalar.ferrous_iron_yield_nh3_pct if scalar else None,
+            nmr_run_date=scalar.nmr_run_date if scalar else None,
+            icp_run_date=scalar.icp_run_date if scalar else None,
+            gc_run_date=scalar.gc_run_date if scalar else None,
             xrd_run_date=scalar.xrd_run_date if scalar else None,
         ))
     return out

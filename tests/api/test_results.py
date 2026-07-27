@@ -196,6 +196,67 @@ def test_results_endpoint_xrd_run_date_null_when_absent(client, db_session):
     assert data[0]["xrd_run_date"] is None
 
 
+def test_results_endpoint_includes_nmr_icp_gc_run_dates(client, db_session):
+    """GET /experiments/{id}/results returns nmr_run_date, icp_run_date, gc_run_date per row."""
+    exp, result = _seed(db_session)
+    scalar = ScalarResults(
+        result_id=result.id,
+        nmr_run_date=datetime(2026, 4, 10, 9, 0, 0, tzinfo=timezone.utc),
+        icp_run_date=datetime(2026, 4, 11, 9, 0, 0, tzinfo=timezone.utc),
+        gc_run_date=datetime(2026, 4, 12, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert "2026-04-10" in data[0]["nmr_run_date"]
+    assert "2026-04-11" in data[0]["icp_run_date"]
+    assert "2026-04-12" in data[0]["gc_run_date"]
+
+
+def test_results_endpoint_nmr_icp_gc_run_dates_null_when_absent(client, db_session):
+    """nmr_run_date/icp_run_date/gc_run_date are null in the response when not set on the scalar row."""
+    exp, result = _seed(db_session)
+    scalar = ScalarResults(result_id=result.id, gross_ammonium_concentration_mM=1.0)
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["nmr_run_date"] is None
+    assert data[0]["icp_run_date"] is None
+    assert data[0]["gc_run_date"] is None
+
+
+def test_scalar_response_schema_includes_all_four_run_dates():
+    """ScalarResponse (not just ResultWithFlagsResponse) now carries all four run-date fields."""
+    from backend.api.schemas.results import ScalarResponse
+    s = ScalarResponse(
+        id=1, result_id=1,
+        nmr_run_date=datetime(2026, 4, 10, tzinfo=timezone.utc),
+        icp_run_date=datetime(2026, 4, 11, tzinfo=timezone.utc),
+        gc_run_date=datetime(2026, 4, 12, tzinfo=timezone.utc),
+        xrd_run_date=datetime(2026, 4, 13, tzinfo=timezone.utc),
+    )
+    assert s.gc_run_date is not None
+
+
+def test_scalar_update_schema_accepts_all_four_run_dates():
+    """ScalarUpdate accepts all four run-date fields so a wrong one can be corrected via PATCH."""
+    from backend.api.schemas.results import ScalarUpdate
+    u = ScalarUpdate(
+        nmr_run_date=datetime(2026, 4, 10, tzinfo=timezone.utc),
+        icp_run_date=datetime(2026, 4, 11, tzinfo=timezone.utc),
+        gc_run_date=datetime(2026, 4, 12, tzinfo=timezone.utc),
+        xrd_run_date=datetime(2026, 4, 13, tzinfo=timezone.utc),
+    )
+    assert u.icp_run_date is not None
+
+
 # ── Issue #81: '-t<days>' ID timepoint is canonical on POST /api/results ─────
 
 

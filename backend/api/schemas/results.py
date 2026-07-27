@@ -48,6 +48,10 @@ class ScalarCreate(BaseModel):
     ferrous_iron_yield: Optional[float] = None
     sampling_volume_mL: Optional[float] = None
     measurement_date: Optional[datetime] = None
+    nmr_run_date: Optional[datetime] = None
+    icp_run_date: Optional[datetime] = None
+    gc_run_date: Optional[datetime] = None
+    xrd_run_date: Optional[datetime] = None
     h2_concentration: Optional[float] = None
     h2_concentration_unit: Optional[str] = "ppm"
     gas_sampling_volume_ml: Optional[float] = None
@@ -66,6 +70,10 @@ class ScalarUpdate(BaseModel):
     sampling_volume_mL: Optional[float] = None
     ferrous_iron_yield: Optional[float] = None
     measurement_date: Optional[datetime] = None
+    nmr_run_date: Optional[datetime] = None
+    icp_run_date: Optional[datetime] = None
+    gc_run_date: Optional[datetime] = None
+    xrd_run_date: Optional[datetime] = None
 
 
 class ScalarResponse(BaseModel):
@@ -85,6 +93,10 @@ class ScalarResponse(BaseModel):
     ferrous_iron_yield: Optional[float] = None
     sampling_volume_mL: Optional[float] = None
     measurement_date: Optional[datetime] = None
+    nmr_run_date: Optional[datetime] = None
+    icp_run_date: Optional[datetime] = None
+    gc_run_date: Optional[datetime] = None
+    xrd_run_date: Optional[datetime] = None
     h2_concentration: Optional[float] = None
     h2_concentration_unit: Optional[str] = None
     gas_sampling_volume_ml: Optional[float] = None
@@ -128,6 +140,9 @@ class ResultWithFlagsResponse(BaseModel):
     scalar_measurement_date: Optional[datetime] = None
     ferrous_iron_yield_h2_pct: Optional[float] = None
     ferrous_iron_yield_nh3_pct: Optional[float] = None
+    nmr_run_date: Optional[datetime] = None
+    icp_run_date: Optional[datetime] = None
+    gc_run_date: Optional[datetime] = None
     xrd_run_date: Optional[datetime] = None
 
 
