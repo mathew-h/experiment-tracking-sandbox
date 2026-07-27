@@ -87,6 +87,11 @@ Cross-replicate mean/median/std per timepoint bucket, sourced from the `v_result
 **Response `200`:** array of rows, one per `time_post_reaction_bucket_days`, ordered ascending. 19 fields per row:
 `base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`.
 
+**Parent inclusion (intended):** the bare group parent's own primary results share the
+grouping key with its lettered replicates, so they are averaged into the group stats
+like any member. Flag the parent `is_outlier` to exclude it. There is no separate
+parent opt-out.
+
 **Errors:**
 - `404 Not Found` — no experiment matches `experiment_id`
 
@@ -236,6 +241,24 @@ reported with a per-row error rather than raising at the API layer — see
 **Known bulk-upload limitation:** the New Experiments upload parses and persists
 `id_timepoint_days` for each created row but does not copy a parent's conditions/additives
 for `-t<days>` IDs — see `docs/user_guide/REPLICATES.md` for the full limitation.
+
+### POST /api/results — timepoint bucketing (issue #83)
+
+- The server sets `time_post_reaction_bucket_days` to the resolved
+  `time_post_reaction_days` rounded to 4 decimals (`normalize_timepoint`). Any
+  client-supplied `time_post_reaction_bucket_days` is ignored — the field is
+  accepted for backward compatibility but always overwritten.
+- A `null` resolved time (no `time_post_reaction_days` and no `-t<days>` ID token)
+  leaves the bucket `null`; such rows do not appear in `v_results_scalar_rollup`
+  buckets.
+- **Newest wins:** if the new row is primary (`is_primary_timepoint_result`, default
+  `true`) and another primary row already occupies the same bucket for the same
+  experiment, the older row is demoted to non-primary. Non-primary inserts leave the
+  existing primary untouched.
+- Historical rows created before this fix were backfilled by the
+  `backfill result timepoint buckets` migration using the same rounding and a
+  data-first demotion rule (rows with scalar+ICP outrank rows with either, which
+  outrank dataless rows; ties go to the newest row).
 
 ## Samples
 

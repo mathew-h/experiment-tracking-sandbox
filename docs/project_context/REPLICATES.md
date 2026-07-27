@@ -148,13 +148,21 @@ samples taken at day 0 would. Use `-t<days>` when each timepoint is destructivel
 from its own vial; use a repeated Add Results entry on one experiment when the same vial
 is sampled non-destructively over time.
 
-**Caveat — Add Results modal does not bucket.** Results entered via the Add Results modal
-(`POST /api/results`) currently receive no `time_post_reaction_bucket_days` (it defaults
-to `NULL` unless the caller passes it explicitly), so they do **not** appear under a day
-bucket in `v_results_scalar_rollup` even though the ID's `-t<days>` value is still
-recorded on the experiment. Enter `-t<days>` results via the bulk uploads (Master Results
-sync or Solution Chemistry upload) instead — both paths bucket the row — if you need
-rollup inclusion.
+Results entered via the Add Results modal (`POST /api/results`) set
+`time_post_reaction_bucket_days` automatically from the entered (or ID-encoded) time,
+so they land in that day's rollup bucket just like bulk-uploaded rows (fixed in issue
+#83; rows entered before the fix were backfilled). If you enter the same day twice for
+the same experiment, the newest entry becomes that day's primary row and the older one
+is kept but excluded from the rollup.
+
+### The group parent counts toward the stats
+
+The bare parent ID ("replicate 0") is part of its own replicate group: if the parent
+has results of its own, they are averaged into the group mean ± sd alongside the
+lettered replicates. This is intentional — a parent with data is treated as a group
+member. If the parent's run should not count (for example, it was a scouting run under
+different handling), flag the parent **Mark as outlier** on its experiment page; the
+rollup then excludes it, exactly like an outlier replicate.
 
 ### Limitations
 
