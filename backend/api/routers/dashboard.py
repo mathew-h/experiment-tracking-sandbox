@@ -13,8 +13,9 @@ from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.dashboard import (
     ReactorStatusResponse, ExperimentTimelineResponse, TimelinePoint,
-    DashboardResponse, DashboardSummary, ReactorCardData, GanttEntry, ActivityEntry,
+    DashboardResponse, DashboardSummary, SlotOccupancy, ReactorCardData, GanttEntry, ActivityEntry,
 )
+from backend.services.workdays import workday_window
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -40,6 +41,28 @@ REACTOR_SPECS: dict[int, dict[str, object]] = {
     16: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
 }
 
+R_SLOT_COUNT = 16    # HPHT vessels R01-R16; must stay in sync with REACTOR_SPECS
+CF_SLOT_COUNT = 3    # Core flood rigs CF01-CF03
+
+
+def _occupancy(cards: list[ReactorCardData], prefix: str, total: int) -> SlotOccupancy:
+    """Derive ongoing/queued/empty counts for a fixed slot-label prefix ('R' or 'CF').
+
+    Filters against the valid label set (not just a startswith check) so an
+    out-of-range reactor_number (no CHECK constraint exists on that column)
+    can never drive `empty` negative.
+    """
+    valid = {f"{prefix}{i:02d}" for i in range(1, total + 1)}
+    relevant = [c for c in cards if c.reactor_label in valid]
+    ongoing = sum(1 for c in relevant if c.status == ExperimentStatus.ONGOING)
+    queued = sum(1 for c in relevant if c.status == ExperimentStatus.QUEUED)
+    return SlotOccupancy(
+        total=total,
+        ongoing=ongoing,
+        queued=queued,
+        empty=total - ongoing - queued,
+    )
+
 
 @router.get("/", response_model=DashboardResponse)
 def get_dashboard(
@@ -51,53 +74,6 @@ def get_dashboard(
     Four focused queries — no N+1. Target: <500ms with 500 experiments.
     """
     now = datetime.now(timezone.utc)
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    seven_days_ago = now - timedelta(days=7)
-
-    # ── 1. Summary stats ──────────────────────────────────────────────────
-    summary_row = db.execute(
-        select(
-            # active_experiments counts only ONGOING experiments (not QUEUED).
-            # QUEUED experiments appear in reactor cards but are intentionally excluded from this count.
-            func.count(case((Experiment.status == ExperimentStatus.ONGOING, 1))).label("active"),
-            func.count(
-                distinct(case((
-                    (Experiment.status == ExperimentStatus.ONGOING) &
-                    ExperimentalConditions.reactor_number.isnot(None),
-                    ExperimentalConditions.reactor_number,
-                )))
-            ).label("reactors_in_use"),
-            func.count(
-                case((
-                    (Experiment.status == ExperimentStatus.COMPLETED) &
-                    (Experiment.updated_at >= month_start),
-                    1,
-                ))
-            ).label("completed_month"),
-        )
-        .outerjoin(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
-    ).one()
-
-    # Pending results: ONGOING experiments with no result in the last 7 days
-    ongoing_with_recent_result = set(
-        db.execute(
-            select(ExperimentalResults.experiment_fk)
-            .where(ExperimentalResults.created_at >= seven_days_ago)
-        ).scalars().all()
-    )
-    ongoing_ids = set(
-        db.execute(
-            select(Experiment.id).where(Experiment.status == ExperimentStatus.ONGOING)
-        ).scalars().all()
-    )
-    pending_results = len(ongoing_ids - ongoing_with_recent_result)
-
-    summary = DashboardSummary(
-        active_experiments=summary_row.active,
-        reactors_in_use=summary_row.reactors_in_use,
-        completed_this_month=summary_row.completed_month,
-        pending_results=pending_results,
-    )
 
     # ── 2. Reactor cards (ONGOING experiments with a reactor assigned) ────
     # Subquery: pick the oldest note per experiment (the "description" note)
@@ -207,6 +183,47 @@ def get_dashboard(
         mods = {(r.experiment_id, r.reactor_label): r.requested_change for r in mod_rows}
         for c in reactor_cards:
             c.todays_modification = mods.get((c.experiment_id, c.reactor_label))
+
+    # ── 2c. Workday-window KPI counts + slot occupancy ─────────────────────
+    # ET is used here (not UTC) because "last 7 workdays" is a statement about
+    # the lab's week — see design notes in issue #85. This is intentionally
+    # NOT the same "today" as section 2b's UTC-based modification lookup.
+    wd_first, wd_last, wd_start, wd_end = workday_window(7)
+
+    gc_row = db.execute(
+        select(
+            func.count(ScalarResults.id).label("measurements"),
+            func.count(distinct(ExperimentalResults.experiment_fk)).label("experiments"),
+        )
+        .join(ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id)
+        .where(ScalarResults.gc_run_date >= wd_start)
+        .where(ScalarResults.gc_run_date < wd_end)
+    ).one()
+
+    serum_start = func.coalesce(Experiment.date, Experiment.created_at)
+    serum_row = db.execute(
+        select(
+            func.count(Experiment.id).label("vials"),
+            func.count(distinct(
+                func.coalesce(Experiment.base_experiment_id, Experiment.experiment_id)
+            )).label("experiments"),
+        )
+        .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
+        .where(ExperimentalConditions.experiment_type == "Serum")
+        .where(serum_start >= wd_start)
+        .where(serum_start < wd_end)
+    ).one()
+
+    summary = DashboardSummary(
+        reactors=_occupancy(reactor_cards, "R", R_SLOT_COUNT),
+        core_floods=_occupancy(reactor_cards, "CF", CF_SLOT_COUNT),
+        gc_measurements_7wd=gc_row.measurements,
+        gc_experiments_7wd=gc_row.experiments,
+        serum_vials_started_7wd=serum_row.vials,
+        serum_experiments_7wd=serum_row.experiments,
+        workday_window_start=wd_first,
+        workday_window_end=wd_last,
+    )
 
     # ── 3. Gantt timeline (all experiments, newest first, limit 100) ──────
     gantt_rows = db.execute(

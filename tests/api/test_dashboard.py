@@ -175,8 +175,17 @@ def test_get_dashboard_shape(client):
     assert "timeline" in data
     assert "recent_activity" in data
     s = data["summary"]
-    for key in ("active_experiments", "reactors_in_use", "completed_this_month", "pending_results"):
+    for key in (
+        "reactors", "core_floods", "gc_measurements_7wd", "gc_experiments_7wd",
+        "serum_vials_started_7wd", "serum_experiments_7wd",
+        "workday_window_start", "workday_window_end",
+    ):
         assert key in s, f"Missing summary key: {key}"
+    for occ_key in ("reactors", "core_floods"):
+        occ = s[occ_key]
+        assert occ["ongoing"] + occ["queued"] + occ["empty"] == occ["total"]
+    assert s["reactors"]["total"] == 16
+    assert s["core_floods"]["total"] == 3
 
 
 def test_get_dashboard_reactor_cards_have_label(client, db_session):
@@ -263,8 +272,7 @@ def test_get_dashboard_with_ongoing_experiment(client, db_session):
     assert card["reactor_label"] == "R09"
     assert card["days_running"] is not None and card["days_running"] >= 4
 
-    assert data["summary"]["active_experiments"] >= 1
-    assert data["summary"]["reactors_in_use"] >= 1
+    assert data["summary"]["reactors"]["ongoing"] >= 1
 
 
 def test_get_dashboard_timeline_entries_have_required_fields(client, db_session):
@@ -297,36 +305,15 @@ def test_get_dashboard_activity_capped_at_20(client):
     assert len(resp.json()["recent_activity"]) <= 20
 
 
-def test_get_dashboard_completed_this_month(client, db_session):
-    """completed_this_month count includes experiments completed this month."""
-    from database.models.experiments import Experiment
-    from database.models.enums import ExperimentStatus
-
-    now = datetime.datetime.utcnow()
-    exp = Experiment(
-        experiment_id="COMPLETED_MONTH_001",
-        experiment_number=8805,
-        status=ExperimentStatus.COMPLETED,
-        created_at=now - datetime.timedelta(days=5),
-        updated_at=now,
-    )
-    db_session.add(exp)
-    db_session.commit()
-
-    resp = client.get("/api/dashboard/")
-    assert resp.status_code == 200
-    assert resp.json()["summary"]["completed_this_month"] >= 1
-
-
 # ---------------------------------------------------------------------------
 # Reactor spec-merge tests (issue #2)
 # ---------------------------------------------------------------------------
 
 def test_reactor_specs_constant_coverage():
-    """REACTOR_SPECS covers all 16 standard reactors with required keys."""
-    from backend.api.routers.dashboard import REACTOR_SPECS
-    assert len(REACTOR_SPECS) == 16
-    for rn in range(1, 17):
+    """REACTOR_SPECS covers all R_SLOT_COUNT standard reactors with required keys."""
+    from backend.api.routers.dashboard import REACTOR_SPECS, R_SLOT_COUNT
+    assert len(REACTOR_SPECS) == R_SLOT_COUNT
+    for rn in range(1, R_SLOT_COUNT + 1):
         spec = REACTOR_SPECS[rn]
         assert "volume_mL" in spec
         assert "material" in spec
