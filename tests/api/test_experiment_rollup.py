@@ -140,17 +140,20 @@ class TestRollupFromHandEnteredResults:
         })
         assert resp.status_code == 201
 
-    def test_hand_entered_results_roll_up_per_day(self, client, db_session, reporting_views):
+    def test_hand_entered_results_roll_up_per_day(
+        self, client, db_session, reporting_views
+    ):
         _make_experiment(db_session, "RUP_083", 9800)
         a = _make_experiment(db_session, "RUP_083a", 9801)
         b = _make_experiment(db_session, "RUP_083b", 9802)
         db_session.commit()
-        # day 7 on both replicates, day 14 on replicate a only — all via the API
+        # day 7 on both replicates, day 14 on replicate a only — via API
         self._post_result_with_scalar(client, a.id, 7.0, 1.0)
         self._post_result_with_scalar(client, b.id, 7.0, 3.0)
         self._post_result_with_scalar(client, a.id, 14.0, 5.0)
         rows = client.get("/api/experiments/RUP_083a/rollup").json()
-        assert [r["time_post_reaction_bucket_days"] for r in rows] == [7.0, 14.0]
+        buckets = [r["time_post_reaction_bucket_days"] for r in rows]
+        assert buckets == [7.0, 14.0]
         day7, day14 = rows
         assert day7["n_replicates"] == 2
         assert day7["mean_gross_ammonium_mM"] == pytest.approx(2.0)
