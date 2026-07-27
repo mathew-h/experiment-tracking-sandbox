@@ -92,8 +92,8 @@ test('CF01 slot is populated when Core Flood experiment with reactor_number=1 is
   await expect(cf01Label).toBeVisible({ timeout: 10_000 })
 
   // The experiment ID should appear in the same card
-  // DOM: p (label) → div (label wrapper) → div (flex justify-between) → div (Card root)
-  const cf01Card = cf01Label.locator('../../..')
+  // DOM: p (label) → div (flex.items-start.justify-between.mb-1, the label wrapper) → Card root. That's 2 levels, not 3.
+  const cf01Card = cf01Label.locator('../..')
   await expect(cf01Card.locator(`text=${expId}`)).toBeVisible({ timeout: 5_000 })
 
   // The status badge should say ONGOING (not "Empty")
@@ -110,13 +110,13 @@ test('HPHT experiment in reactor_number=1 appears in R01, not CF01', async ({ pa
   // R01 card should contain the experiment
   const r01Label = page.locator('p.font-mono-data').filter({ hasText: /^R01$/ })
   await expect(r01Label).toBeVisible({ timeout: 10_000 })
-  const r01Card = r01Label.locator('../../..')
+  const r01Card = r01Label.locator('../..')
   await expect(r01Card.locator(`text=${expId}`)).toBeVisible({ timeout: 5_000 })
 
   // CF01 must NOT contain this experiment
   const cf01Label = page.locator('p.font-mono-data').filter({ hasText: /^CF01$/ })
   await expect(cf01Label).toBeVisible({ timeout: 5_000 })
-  const cf01Card = cf01Label.locator('../../..')
+  const cf01Card = cf01Label.locator('../..')
   await expect(cf01Card.locator(`text=${expId}`)).not.toBeVisible()
 })
 
@@ -130,7 +130,7 @@ test('CF03 slot is populated when Core Flood experiment with reactor_number=3 is
   const cf03Label = page.locator('p.font-mono-data').filter({ hasText: /^CF03$/ })
   await expect(cf03Label).toBeVisible({ timeout: 10_000 })
 
-  const cf03Card = cf03Label.locator('../../..')
+  const cf03Card = cf03Label.locator('../..')
   await expect(cf03Card.locator(`text=${expId}`)).toBeVisible({ timeout: 5_000 })
   await expect(cf03Card.locator('text=ONGOING')).toBeVisible()
 })
