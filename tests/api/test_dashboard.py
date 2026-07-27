@@ -43,10 +43,42 @@ def unauth_client(db_session):
 # ---------------------------------------------------------------------------
 
 def test_dashboard_summary_schema():
+    from backend.api.schemas.dashboard import DashboardSummary, SlotOccupancy
+    s = DashboardSummary(
+        reactors=SlotOccupancy(total=16, ongoing=3, queued=1, empty=12),
+        core_floods=SlotOccupancy(total=3, ongoing=1, queued=0, empty=2),
+        gc_measurements_7wd=5,
+        gc_experiments_7wd=3,
+        serum_vials_started_7wd=4,
+        serum_experiments_7wd=2,
+        workday_window_start="2026-07-21",
+        workday_window_end="2026-07-29",
+    )
+    assert s.reactors.ongoing == 3
+    assert s.core_floods.total == 3
+    assert s.gc_measurements_7wd == 5
+    assert s.serum_experiments_7wd == 2
+
+
+def test_slot_occupancy_schema_rejects_missing_fields():
+    from backend.api.schemas.dashboard import SlotOccupancy
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        SlotOccupancy(total=16, ongoing=3, queued=1)  # missing `empty`
+
+
+def test_dashboard_summary_schema_rejects_removed_fields():
+    """Constructing DashboardSummary with only the old field names fails —
+    the new required fields (reactors, core_floods, etc.) are all missing."""
     from backend.api.schemas.dashboard import DashboardSummary
-    s = DashboardSummary(active_experiments=3, reactors_in_use=3, completed_this_month=1, pending_results=2)
-    assert s.active_experiments == 3
-    assert s.pending_results == 2
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        DashboardSummary(
+            active_experiments=3,
+            reactors_in_use=3,
+            completed_this_month=1,
+            pending_results=2,
+        )
 
 
 def test_reactor_card_data_schema_empty():
@@ -101,17 +133,23 @@ def test_activity_entry_schema():
 
 
 def test_dashboard_response_schema():
-    from backend.api.schemas.dashboard import DashboardResponse, DashboardSummary
+    from backend.api.schemas.dashboard import DashboardResponse, DashboardSummary, SlotOccupancy
     resp = DashboardResponse(
         summary=DashboardSummary(
-            active_experiments=0, reactors_in_use=0,
-            completed_this_month=0, pending_results=0,
+            reactors=SlotOccupancy(total=16, ongoing=0, queued=0, empty=16),
+            core_floods=SlotOccupancy(total=3, ongoing=0, queued=0, empty=3),
+            gc_measurements_7wd=0,
+            gc_experiments_7wd=0,
+            serum_vials_started_7wd=0,
+            serum_experiments_7wd=0,
+            workday_window_start="2026-07-21",
+            workday_window_end="2026-07-29",
         ),
         reactors=[],
         timeline=[],
         recent_activity=[],
     )
-    assert resp.summary.active_experiments == 0
+    assert resp.summary.reactors.total == 16
     assert resp.reactors == []
 
 

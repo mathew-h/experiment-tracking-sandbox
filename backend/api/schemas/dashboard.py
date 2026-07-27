@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel
 from database.models.enums import ExperimentStatus
@@ -33,11 +33,23 @@ class ExperimentTimelineResponse(BaseModel):
 
 # ── M7 full-dashboard schemas ────────────────────────────────────────────────
 
+class SlotOccupancy(BaseModel):
+    """Occupancy of a fixed set of physical slots. ongoing + queued + empty == total."""
+    total: int
+    ongoing: int
+    queued: int
+    empty: int
+
+
 class DashboardSummary(BaseModel):
-    active_experiments: int
-    reactors_in_use: int
-    completed_this_month: int
-    pending_results: int  # ONGOING experiments with no result recorded in the last 7 days
+    reactors: SlotOccupancy                  # R01-R16 (HPHT only)
+    core_floods: SlotOccupancy               # CF01-CF03
+    gc_measurements_7wd: int                 # scalar_results rows with gc_run_date in window
+    gc_experiments_7wd: int                  # distinct experiments behind those rows
+    serum_vials_started_7wd: int             # Serum experiment rows started in window
+    serum_experiments_7wd: int               # distinct base experiments behind those vials
+    workday_window_start: date               # first workday in the window (lab-local)
+    workday_window_end: date                 # last workday in the window (== today if a workday)
 
 
 class ReactorCardData(BaseModel):
