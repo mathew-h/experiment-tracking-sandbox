@@ -1,4 +1,4 @@
-import { HTMLAttributes } from 'react'
+import { HTMLAttributes, ReactNode } from 'react'
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   variant?: 'default' | 'raised' | 'flat'
@@ -55,13 +55,13 @@ interface MetricCardProps {
   label: string
   value: string | number
   unit?: string
-  trend?: 'up' | 'down' | 'neutral'
   sub?: string
   className?: string
+  children?: ReactNode
 }
 
-/** Dashboard stat tile with a label, numeric value, optional unit, and subtitle. */
-export function MetricCard({ label, value, unit, sub, className = '' }: MetricCardProps) {
+/** Dashboard stat tile with a label, numeric value, optional unit, subtitle, and optional footer content (e.g. a SlotBar). */
+export function MetricCard({ label, value, unit, sub, className = '', children }: MetricCardProps) {
   return (
     <Card className={className}>
       <p className="text-xs font-medium text-ink-muted uppercase tracking-wider mb-2">{label}</p>
@@ -70,6 +70,7 @@ export function MetricCard({ label, value, unit, sub, className = '' }: MetricCa
         {unit && <span className="text-xs text-ink-muted">{unit}</span>}
       </div>
       {sub && <p className="text-xs text-ink-muted mt-1.5">{sub}</p>}
+      {children && <div className="mt-2.5">{children}</div>}
     </Card>
   )
 }
