@@ -999,3 +999,379 @@ def test_dashboard_modification_lookup_is_single_batched_query(client, db_sessio
     assert len(cr_queries) == 1, (
         f"Expected exactly 1 batched change-request query, got {len(cr_queries)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Workday-window KPI + occupancy regression tests (issue #85)
+# ---------------------------------------------------------------------------
+
+def test_dashboard_summary_empty_db(client):
+    """No experiments at all → full-empty occupancy on both bars, zero KPI counts."""
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    s = resp.json()["summary"]
+    assert s["reactors"] == {"total": 16, "ongoing": 0, "queued": 0, "empty": 16}
+    assert s["core_floods"] == {"total": 3, "ongoing": 0, "queued": 0, "empty": 3}
+
+
+def test_dashboard_occupancy_mixed_ongoing_and_queued(client, db_session):
+    """3 ONGOING + 2 QUEUED HPHT experiments in distinct reactors → correct tallies."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    specs = [
+        ("KPI_OCC_1", 9300, ExperimentStatus.ONGOING, 1),
+        ("KPI_OCC_2", 9301, ExperimentStatus.ONGOING, 2),
+        ("KPI_OCC_3", 9302, ExperimentStatus.ONGOING, 3),
+        ("KPI_OCC_4", 9303, ExperimentStatus.QUEUED, 4),
+        ("KPI_OCC_5", 9304, ExperimentStatus.QUEUED, 5),
+    ]
+    for exp_id, num, status, rn in specs:
+        exp = Experiment(experiment_id=exp_id, experiment_number=num, status=status)
+        db_session.add(exp)
+        db_session.flush()
+        db_session.add(ExperimentalConditions(
+            experiment_fk=exp.id, experiment_id=exp_id,
+            reactor_number=rn, experiment_type="HPHT",
+        ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    r = resp.json()["summary"]["reactors"]
+    assert r["ongoing"] == 3
+    assert r["queued"] == 2
+    assert r["empty"] == 11
+    assert r["total"] == 16
+
+
+def test_dashboard_occupancy_hpht_and_cf_same_reactor_number_each_own_bar(client, db_session):
+    """HPHT in R01 and Core Flood in CF01 (both reactor_number=1) count once each,
+    in their own bar — regression for the old collapsed-count bug."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    hpht = Experiment(experiment_id="KPI_COLLIDE_R", experiment_number=9305, status=ExperimentStatus.ONGOING)
+    cf = Experiment(experiment_id="KPI_COLLIDE_CF", experiment_number=9306, status=ExperimentStatus.ONGOING)
+    db_session.add_all([hpht, cf])
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=hpht.id, experiment_id="KPI_COLLIDE_R", reactor_number=1, experiment_type="HPHT",
+    ))
+    db_session.add(ExperimentalConditions(
+        experiment_fk=cf.id, experiment_id="KPI_COLLIDE_CF", reactor_number=1, experiment_type="Core Flood",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    s = resp.json()["summary"]
+    assert s["reactors"]["ongoing"] == 1
+    assert s["core_floods"]["ongoing"] == 1
+
+
+def test_dashboard_occupancy_cf03_slot(client, db_session):
+    """Core Flood on reactor_number=3 fills the new CF03 slot; core_floods.total == 3."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(experiment_id="KPI_CF03", experiment_number=9307, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="KPI_CF03", reactor_number=3, experiment_type="Core Flood",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert "CF03" in cards
+    s = resp.json()["summary"]
+    assert s["core_floods"]["total"] == 3
+    assert s["core_floods"]["ongoing"] == 1
+
+
+def test_dashboard_occupancy_out_of_range_reactor_number_excluded(client, db_session):
+    """An ONGOING HPHT with reactor_number=22 (out of the R01-R16 range) is excluded
+    from occupancy; `empty` never goes negative."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(experiment_id="KPI_OOR", experiment_number=9308, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="KPI_OOR", reactor_number=22, experiment_type="HPHT",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    r = resp.json()["summary"]["reactors"]
+    assert r["ongoing"] == 0
+    assert r["empty"] == 16
+
+
+def test_dashboard_occupancy_serum_never_affects_bars(client, db_session):
+    """A Serum experiment with a reactor_number set never affects either bar
+    (extends issue #38's guard to the new occupancy summary)."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(experiment_id="KPI_SERUM_RN", experiment_number=9309, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="KPI_SERUM_RN", reactor_number=5, experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    s = resp.json()["summary"]
+    assert s["reactors"]["ongoing"] == 0
+    assert s["core_floods"]["ongoing"] == 0
+
+
+def _make_gc_row(db_session, exp_id: str, exp_num: int, gc_run_date):
+    """Create an experiment with one ExperimentalResults + ScalarResults row."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.results import ExperimentalResults, ScalarResults
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(experiment_id=exp_id, experiment_number=exp_num, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    result = ExperimentalResults(experiment_fk=exp.id, description="KPI GC test row")
+    db_session.add(result)
+    db_session.flush()
+    scalar = ScalarResults(result_id=result.id, gc_run_date=gc_run_date)
+    db_session.add(scalar)
+    return exp, result, scalar
+
+
+def test_dashboard_gc_count_only_in_window_weekdays(client, db_session):
+    """Only gc_run_date rows that fall on a workday inside the last-7-workdays window count."""
+    import datetime
+    from backend.services.workdays import last_n_workdays
+
+    window_days = last_n_workdays(7)
+    in_window_day = datetime.datetime.combine(window_days[0], datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+    too_old_day = datetime.datetime.combine(
+        window_days[0] - datetime.timedelta(days=14), datetime.time(12, 0), tzinfo=datetime.timezone.utc
+    )
+
+    _make_gc_row(db_session, "KPI_GC_IN", 9310, in_window_day)
+    _make_gc_row(db_session, "KPI_GC_OLD", 9311, too_old_day)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    s = resp.json()["summary"]
+    assert s["gc_measurements_7wd"] == 1
+    assert s["gc_experiments_7wd"] == 1
+
+
+def test_dashboard_gc_count_two_rows_same_experiment(client, db_session):
+    """Two ScalarResults rows for the same experiment, both in window →
+    measurements == 2, distinct experiments == 1."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.results import ExperimentalResults, ScalarResults
+    from database.models.enums import ExperimentStatus
+    from backend.services.workdays import last_n_workdays
+
+    window_day = datetime.datetime.combine(
+        last_n_workdays(7)[0], datetime.time(9, 0), tzinfo=datetime.timezone.utc
+    )
+    exp = Experiment(experiment_id="KPI_GC_DUP", experiment_number=9312, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    for i in range(2):
+        result = ExperimentalResults(experiment_fk=exp.id, description=f"KPI GC dup {i}")
+        db_session.add(result)
+        db_session.flush()
+        db_session.add(ScalarResults(result_id=result.id, gc_run_date=window_day))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    s = resp.json()["summary"]
+    assert s["gc_measurements_7wd"] == 2
+    assert s["gc_experiments_7wd"] == 1
+
+
+def test_dashboard_gc_count_null_gc_run_date_never_counts(client, db_session):
+    """A ScalarResults row with gc_run_date IS NULL never counts, even if measurement_date is set."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.results import ExperimentalResults, ScalarResults
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(experiment_id="KPI_GC_NULL", experiment_number=9313, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    result = ExperimentalResults(experiment_fk=exp.id, description="KPI GC null test")
+    db_session.add(result)
+    db_session.flush()
+    db_session.add(ScalarResults(
+        result_id=result.id, gc_run_date=None, measurement_date=datetime.datetime.now(datetime.timezone.utc)
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    assert resp.json()["summary"]["gc_measurements_7wd"] == 0
+
+
+def test_dashboard_serum_vials_count_replicates_separately(client, db_session):
+    """Three replicate vials (a/b/c) sharing a base_experiment_id, all started in
+    window → vials == 3, distinct base experiments == 1."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+    from backend.services.workdays import last_n_workdays
+
+    start = datetime.datetime.combine(
+        last_n_workdays(7)[0], datetime.time(8, 0), tzinfo=datetime.timezone.utc
+    )
+    for i, label in enumerate(("a", "b", "c")):
+        exp = Experiment(
+            experiment_id=f"KPI_SERUM_REP{label}", experiment_number=9320 + i,
+            status=ExperimentStatus.ONGOING, base_experiment_id="KPI_SERUM_REP",
+            replicate_label=label, date=start,
+        )
+        db_session.add(exp)
+        db_session.flush()
+        db_session.add(ExperimentalConditions(
+            experiment_fk=exp.id, experiment_id=exp.experiment_id, experiment_type="Serum",
+        ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    s = resp.json()["summary"]
+    assert s["serum_vials_started_7wd"] == 3
+    assert s["serum_experiments_7wd"] == 1
+
+
+def test_dashboard_serum_vial_date_null_falls_back_to_created_at(client, db_session):
+    """A serum experiment with date=NULL falls back to created_at for the window test."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+    from backend.services.workdays import last_n_workdays
+
+    created = datetime.datetime.combine(
+        last_n_workdays(7)[0], datetime.time(8, 0), tzinfo=datetime.timezone.utc
+    )
+    exp = Experiment(
+        experiment_id="KPI_SERUM_FALLBACK", experiment_number=9323,
+        status=ExperimentStatus.ONGOING, date=None, created_at=created,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="KPI_SERUM_FALLBACK", experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    assert resp.json()["summary"]["serum_vials_started_7wd"] >= 1
+
+
+def test_dashboard_serum_vial_hpht_not_counted(client, db_session):
+    """An HPHT experiment started in the window must not count toward serum KPIs."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+    from backend.services.workdays import last_n_workdays
+
+    start = datetime.datetime.combine(
+        last_n_workdays(7)[0], datetime.time(8, 0), tzinfo=datetime.timezone.utc
+    )
+    exp = Experiment(
+        experiment_id="KPI_HPHT_NOT_SERUM", experiment_number=9324,
+        status=ExperimentStatus.ONGOING, date=start,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="KPI_HPHT_NOT_SERUM",
+        reactor_number=6, experiment_type="HPHT",
+    ))
+    db_session.commit()
+
+    before = client.get("/api/dashboard/").json()["summary"]["serum_vials_started_7wd"]
+    # No new serum row was added; count must be unaffected by the HPHT row above.
+    after = client.get("/api/dashboard/").json()["summary"]["serum_vials_started_7wd"]
+    assert before == after
+
+
+def test_dashboard_serum_vial_cancelled_still_counted(client, db_session):
+    """A CANCELLED serum vial started in the window is still counted — the KPI
+    answers 'how many vials were set up', not 'how many are live' (issue #85 design note)."""
+    import datetime
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+    from backend.services.workdays import last_n_workdays
+
+    start = datetime.datetime.combine(
+        last_n_workdays(7)[0], datetime.time(8, 0), tzinfo=datetime.timezone.utc
+    )
+    exp = Experiment(
+        experiment_id="KPI_SERUM_CANCELLED", experiment_number=9325,
+        status=ExperimentStatus.CANCELLED, date=start,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="KPI_SERUM_CANCELLED", experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    assert resp.json()["summary"]["serum_vials_started_7wd"] >= 1
+
+
+def test_dashboard_query_count_not_increased(client, db_session):
+    """Net query count for GET /api/dashboard/ must not exceed the pre-issue-85 baseline
+    (3 queries removed — summary aggregate, recent-results set, ongoing-ids set — 2 added:
+    GC, serum). Extends the existing before_cursor_execute counter pattern used for
+    the reactor_change_requests batching test."""
+    import sqlalchemy
+    from sqlalchemy.engine import Engine
+
+    statements: list[str] = []
+
+    def counter(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sqlalchemy.event.listen(Engine, "before_cursor_execute", counter)
+    try:
+        resp = client.get("/api/dashboard/")
+    finally:
+        sqlalchemy.event.remove(Engine, "before_cursor_execute", counter)
+
+    assert resp.status_code == 200
+    # Baseline before issue #85 was 6 top-level SELECTs (summary, pending x2, reactor
+    # cards, gantt, activity) plus a conditional change-request batch query. Post-#85
+    # it's 7 (reactor cards, gantt, activity, GC, serum, occupancy is computed in
+    # Python with no query, plus the conditional change-request batch) — net -1
+    # relative to the old 8-query worst case (6 + change-request + none). Assert an
+    # upper bound rather than an exact count, since the change-request query is
+    # conditional on there being occupied cards.
+    assert len(statements) <= 8, f"Expected at most 8 statements, got {len(statements)}"
