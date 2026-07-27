@@ -250,3 +250,106 @@ def test_create_result_untimed_experiment_unaffected(client, db_session):
         "is_primary_timepoint_result": True,
     })
     assert resp.status_code == 201
+
+
+# ── Issue #83: POST /api/results must set time_post_reaction_bucket_days ────
+
+
+def test_create_result_sets_bucket_from_days(client, db_session):
+    """The server derives the bucket from the resolved time (round to 4 dp)."""
+    exp, _ = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "Day 7",
+        "time_post_reaction_days": 7.0,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["time_post_reaction_bucket_days"] == pytest.approx(7.0)
+
+
+def test_create_result_bucket_rounds_to_4_decimals(client, db_session):
+    exp, _ = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "odd time",
+        "time_post_reaction_days": 7.123456,
+    })
+    assert resp.status_code == 201
+    bucket = resp.json()["time_post_reaction_bucket_days"]
+    assert bucket == pytest.approx(7.1235)
+
+
+def test_create_result_overrides_client_supplied_bucket(client, db_session):
+    """The server owns the bucket; a client-sent value must be ignored."""
+    exp, _ = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "lying client",
+        "time_post_reaction_days": 7.0,
+        "time_post_reaction_bucket_days": 99.0,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["time_post_reaction_bucket_days"] == pytest.approx(7.0)
+
+
+def test_create_result_null_days_null_bucket(client, db_session):
+    """No time and no ID token → bucket stays null (pre-#83 behavior)."""
+    exp, _ = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "no time yet",
+        "is_primary_timepoint_result": False,
+    })
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["time_post_reaction_days"] is None
+    assert body["time_post_reaction_bucket_days"] is None
+
+
+def test_create_result_bucket_from_id_timepoint_token(client, db_session):
+    """A '-t<days>' ID fills a blank time AND the bucket (issues #81 + #83)."""
+    exp = Experiment(experiment_id="RES_T_001-t7", experiment_number=6002,
+                     status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.commit()
+    # sanity: lineage listener parsed the token
+    assert exp.id_timepoint_days == 7.0
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "token vial",
+    })
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["time_post_reaction_days"] == pytest.approx(7.0)
+    assert body["time_post_reaction_bucket_days"] == pytest.approx(7.0)
+
+
+def test_create_result_same_day_newest_wins(client, db_session):
+    """A second primary entry at the same day demotes the first instead of
+    500ing on uq_primary_result_per_experiment_bucket."""
+    exp, first = _seed(db_session)  # first: day 0.0, bucket 0.0, primary
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "corrected day-0 entry",
+        "time_post_reaction_days": 0.0,
+    })
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["is_primary_timepoint_result"] is True
+    db_session.expire_all()
+    old = db_session.get(ExperimentalResults, first.id)
+    assert old.is_primary_timepoint_result is False
+
+
+def test_create_result_nonprimary_leaves_existing_primary(client, db_session):
+    exp, first = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id,
+        "description": "extra vial draw",
+        "time_post_reaction_days": 0.0,
+        "is_primary_timepoint_result": False,
+    })
+    assert resp.status_code == 201
+    db_session.expire_all()
+    old = db_session.get(ExperimentalResults, first.id)
+    assert old.is_primary_timepoint_result is True

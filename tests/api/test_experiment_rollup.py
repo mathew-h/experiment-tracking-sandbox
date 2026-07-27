@@ -119,3 +119,40 @@ class TestReplicateGroupEndpoint:
         data = client.get("/api/experiments/RGRP_OUT_001/replicate-group").json()
         assert data["parent"]["is_outlier"] is False
         assert data["members"][0]["is_outlier"] is True
+
+
+class TestRollupFromHandEnteredResults:
+    """Issue #83: results created via POST /api/results (the Add Results modal
+    path) must land in per-day rollup buckets, not one bucket=null row."""
+
+    def _post_result_with_scalar(self, client, experiment_pk, day, gross_nh4):
+        resp = client.post("/api/results", json={
+            "experiment_fk": experiment_pk,
+            "description": f"day {day}",
+            "time_post_reaction_days": day,
+        })
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["time_post_reaction_bucket_days"] == pytest.approx(day)
+        resp = client.post("/api/results/scalar", json={
+            "result_id": body["id"],
+            "gross_ammonium_concentration_mM": gross_nh4,
+        })
+        assert resp.status_code == 201
+
+    def test_hand_entered_results_roll_up_per_day(self, client, db_session, reporting_views):
+        _make_experiment(db_session, "RUP_083", 9800)
+        a = _make_experiment(db_session, "RUP_083a", 9801)
+        b = _make_experiment(db_session, "RUP_083b", 9802)
+        db_session.commit()
+        # day 7 on both replicates, day 14 on replicate a only — all via the API
+        self._post_result_with_scalar(client, a.id, 7.0, 1.0)
+        self._post_result_with_scalar(client, b.id, 7.0, 3.0)
+        self._post_result_with_scalar(client, a.id, 14.0, 5.0)
+        rows = client.get("/api/experiments/RUP_083a/rollup").json()
+        assert [r["time_post_reaction_bucket_days"] for r in rows] == [7.0, 14.0]
+        day7, day14 = rows
+        assert day7["n_replicates"] == 2
+        assert day7["mean_gross_ammonium_mM"] == pytest.approx(2.0)
+        assert day14["n_replicates"] == 1
+        assert day14["mean_gross_ammonium_mM"] == pytest.approx(5.0)
