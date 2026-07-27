@@ -37,7 +37,9 @@ test.afterEach(async ({ page }) => {
       const badge = card.locator('button[title="Change status"]')
       if (await badge.isVisible({ timeout: 2_000 }).catch(() => false)) {
         await badge.click()
-        await page.getByRole('button', { name: /^CANCELLED$/i }).click()
+        // Scope the CANCELLED button lookup to the card's dropdown, not the entire page,
+        // to avoid strict mode violation when multiple "CANCELLED" buttons exist on the page.
+        await card.getByRole('button', { name: /^CANCELLED$/i }).click()
         await page.waitForLoadState('networkidle')
       }
     }
