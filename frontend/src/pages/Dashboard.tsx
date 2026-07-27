@@ -1,12 +1,23 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { dashboardApi } from '@/api/dashboard'
-import type { GanttEntry } from '@/api/dashboard'
-import { MetricCard, Card, CardHeader, CardBody, PageSpinner } from '@/components/ui'
+import type { GanttEntry, SlotOccupancy } from '@/api/dashboard'
+import { MetricCard, Card, CardHeader, CardBody, PageSpinner, SlotBar } from '@/components/ui'
+import type { SlotSegment } from '@/components/ui'
 import { ReactorGrid } from './ReactorGrid'
 import { ExperimentTimeline } from './ExperimentTimeline'
 import { ActivityFeed } from './ActivityFeed'
 import { DashboardFilters, type DashboardFilterState } from './DashboardFilters'
+
+const R_FALLBACK = 16
+const CF_FALLBACK = 3
+
+function occupancySegments(o?: SlotOccupancy): SlotSegment[] {
+  return [
+    { count: o?.ongoing ?? 0, className: 'bg-status-ongoing', label: 'ongoing' },
+    { count: o?.queued ?? 0, className: 'bg-status-queued', label: 'queued' },
+  ]
+}
 
 function applyFilters(entries: GanttEntry[], f: DashboardFilterState): GanttEntry[] {
   return entries.filter((e) => {
@@ -50,22 +61,52 @@ export function DashboardPage() {
       {/* Summary metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricCard
-          label="Active Experiments"
-          value={data?.summary.active_experiments ?? '—'}
-        />
+          label="Reactor Occupancy"
+          value={data?.summary.reactors.ongoing ?? '—'}
+          unit={`/ ${data?.summary.reactors.total ?? R_FALLBACK} ongoing`}
+          sub={
+            data
+              ? `${data.summary.reactors.queued} queued · ${data.summary.reactors.empty} empty`
+              : undefined
+          }
+        >
+          {data && <SlotBar total={data.summary.reactors.total} segments={occupancySegments(data.summary.reactors)} />}
+        </MetricCard>
+
         <MetricCard
-          label="Reactors In Use"
-          value={data?.summary.reactors_in_use ?? '—'}
-          unit="/ 18"
+          label="GC Measurements"
+          value={data?.summary.gc_measurements_7wd ?? '—'}
+          sub={
+            data
+              ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end} · across ${data.summary.gc_experiments_7wd} experiment${data.summary.gc_experiments_7wd === 1 ? '' : 's'}`
+              : undefined
+          }
+          title={data ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end}` : undefined}
         />
+
         <MetricCard
-          label="Completed This Month"
-          value={data?.summary.completed_this_month ?? '—'}
+          label="Serum Vials Started"
+          value={data?.summary.serum_vials_started_7wd ?? '—'}
+          sub={
+            data
+              ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end} · ${data.summary.serum_experiments_7wd} experiment${data.summary.serum_experiments_7wd === 1 ? '' : 's'}`
+              : undefined
+          }
+          title={data ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end}` : undefined}
         />
+
         <MetricCard
-          label="Pending Results"
-          value={data?.summary.pending_results ?? '—'}
-        />
+          label="Core Floods Ongoing"
+          value={data?.summary.core_floods.ongoing ?? '—'}
+          unit={`/ ${data?.summary.core_floods.total ?? CF_FALLBACK}`}
+          sub={
+            data
+              ? `${data.summary.core_floods.queued} queued · ${data.summary.core_floods.empty} idle`
+              : undefined
+          }
+        >
+          {data && <SlotBar total={data.summary.core_floods.total} segments={occupancySegments(data.summary.core_floods)} />}
+        </MetricCard>
       </div>
 
       {/* Reactor grid */}
@@ -76,7 +117,13 @@ export function DashboardPage() {
           {error && (
             <p className="text-sm text-red-400 py-4 text-center">Failed to load dashboard</p>
           )}
-          {data && <ReactorGrid cards={data.reactors} />}
+          {data && (
+            <ReactorGrid
+              cards={data.reactors}
+              rSlotCount={data.summary.reactors.total}
+              cfSlotCount={data.summary.core_floods.total}
+            />
+          )}
         </CardBody>
       </Card>
 

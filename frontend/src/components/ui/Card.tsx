@@ -57,13 +57,14 @@ interface MetricCardProps {
   unit?: string
   sub?: string
   className?: string
+  title?: string
   children?: ReactNode
 }
 
 /** Dashboard stat tile with a label, numeric value, optional unit, subtitle, and optional footer content (e.g. a SlotBar). */
-export function MetricCard({ label, value, unit, sub, className = '', children }: MetricCardProps) {
+export function MetricCard({ label, value, unit, sub, className = '', title, children }: MetricCardProps) {
   return (
-    <Card className={className}>
+    <Card className={className} title={title}>
       <p className="text-xs font-medium text-ink-muted uppercase tracking-wider mb-2">{label}</p>
       <div className="flex items-baseline gap-1.5">
         <span className="text-2xl font-bold text-ink-primary font-mono-data leading-none">{value}</span>
