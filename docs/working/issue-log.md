@@ -984,3 +984,66 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - **Recommended follow-up (M3, not fixed here):** the experiment detail page's **Create Replicates** button is still visible on a letterless `-t` vial (e.g. `SERUM_001-t7`); only `Step4Review` (New Experiment wizard) hides it. Low risk — `create_replicate_experiments` would resolve the parent via `find_replicate_group_parent` on the bare stem regardless, so clicking it on a `-t` vial page doesn't corrupt lineage, but the button is misleading in that context.
   - **Accepted (M4, no action):** fuzzy-matched token conflicts (e.g. a token ID that fuzzy-matches an existing experiment with a different day) surface via the generic bulk-upload error wrapper rather than a token-specific message — acceptable, matches how all other fuzzy-match conflicts are reported.
   - Full suite re-run at HEAD after these fixes: 942 passed / 4 skipped / 3 known pre-existing `test_pg_backup_restore.py` failures (unrelated pg_dump toolchain gap).
+
+## 2026-07-27 | issue #83 — Replicate rollup: bucket hand-entered results, backfill, H₂ table columns
+- **Files changed (4 tasks / 6 commits):**
+  - Task 1 (`c251a81` + `a095f7e`) — `backend/api/routers/results.py::create_result` now sets
+    `time_post_reaction_bucket_days = normalize_timepoint(resolved_days)`, overwriting any
+    client-supplied value; when the new row is primary and its bucket is already occupied by
+    another primary row, the existing primary is demoted (newest wins). 6 new tests in
+    `tests/api/test_results.py`, 1 end-to-end rollup test class in
+    `tests/api/test_experiment_rollup.py`. `a095f7e` was a review-driven line-wrap fix (flake8).
+  - Task 2 (`ca5c0be` + `92d8c6b`) — data-only migration
+    `alembic/versions/daae92e908f1_backfill_result_timepoint_buckets.py`: demotes colliding
+    primaries data-first/id-DESC, then fills NULL buckets from the resolved time; no-op
+    downgrade (matches the `458f344f73d8` clamp precedent). `alembic upgrade`/`downgrade`/`upgrade`
+    round-tripped clean on the dev DB. Tests: `tests/data_migrations/test_backfill_bucket_migration.py`
+    (4 tests) — moved there from the plan's original `tests/test_backfill_bucket_migration.py`
+    path during review, to reuse the existing `migration_session` fixture instead of private
+    engine plumbing (review-driven deviation from the plan).
+  - Task 3 (`94bcd34`) — `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` table gains
+    `H₂ (g/t)` and `Fe²⁺ → H₂ (%)` mean±sd columns; +1 vitest test.
+  - Task 4 (this entry) — docs only: `.claude/rules/MODELS.md` (`v_results_scalar_rollup` parent-
+    inclusion + hand-entered-rows bullets), `docs/api/API_REFERENCE.md` (rollup parent-inclusion
+    note + new `POST /api/results — timepoint bucketing (issue #83)` subsection),
+    `docs/user_guide/REPLICATES.md` (reverses the stale issue-#81 "Add Results modal does not
+    bucket" caveat; adds "The group parent counts toward the stats" subsection) — all hook-synced
+    to `docs/project_context/`. Also commits the untracked
+    `docs/issue-replicate-group-h2-calc-testing-findings.md` (the investigation artifact this
+    issue is built on) and its `docs/project_context/` copy.
+- **Newest-wins demotion decision:** at the `POST /api/results` endpoint, a new primary result
+  landing in an already-occupied bucket demotes the existing primary (matches
+  `v_primary_experiment_results`'s `id DESC` tie-break and modal UX — the most recently entered
+  reading is what a researcher expects to see as "the" result for that day). The backfill
+  migration uses a different, data-first rule for historical rows instead: an existing bulk-upload
+  row with full scalar+ICP data should not lose primary status to an emptier hand-entered row just
+  because the hand-entered row has a higher id; ties within the same data tier go to the newest row.
+- **Backfill migration:** `daae92e908f1_backfill_result_timepoint_buckets` — additive data
+  migration, runs automatically on the lab PC's nightly `alembic upgrade head`; downgrade is a
+  documented no-op (backfilled buckets are not un-set on downgrade, matching precedent).
+- **Defect #3 (parent counted in replicate-group aggregates) — resolved as docs-only:** confirmed
+  intended per the issue's own triage — the group parent shares the `COALESCE(base_experiment_id,
+  experiment_id)` grouping key with its lettered replicates by design, so a parent with its own
+  results is correctly averaged into the group stats. No code change; documented in `MODELS.md`,
+  `API_REFERENCE.md`, and `REPLICATES.md` that `is_outlier` is the (deliberately) only opt-out.
+- **Defect #5 (ammonium 0.00±0.00 GREATEST-NULL semantics) — deferred:** out of scope for this
+  issue per the Global Constraints; needs its own follow-up ticket.
+- **Other out-of-scope note carried from the issue:** no PATCH endpoint for `ExperimentalResults`
+  — noted in the issue as "consider separately," not addressed here.
+- **Tests added:** no (Task 4 is docs-only). Cumulative tests added across Tasks 1-3: yes — see
+  above (11 new backend tests + 4 migration tests + 1 frontend test).
+- **Whole-branch verification (this entry, run at HEAD):**
+  - Backend: `.venv/Scripts/python -m pytest tests/ -x -q --ignore=tests/test_pg_backup_restore.py`
+    → 954 passed, 4 skipped, 538 warnings (deprecation/SAWarning noise only) in ~56s.
+  - Frontend: `npx vitest run` → 18 test files / 77 tests, all passed.
+  - Frontend: `npx tsc --noEmit` → clean (no output).
+  - `git diff develop --stat` → 12 files changed, 486 insertions / 18 deletions; confirmed zero
+    edits to `backend/services/bulk_uploads/`, `database/models/`, `database/event_listeners.py`,
+    and no `frontend/package*.json` changes.
+- **Decision logged:** no — the newest-wins vs. data-first demotion split and the backfill's
+  no-op downgrade were resolved inline in the plan's Global Constraints / Task descriptions, not
+  in `docs/working/decisions.md`; defect #3's "confirmed intended" triage is documented in
+  `MODELS.md`/`API_REFERENCE.md`/`REPLICATES.md` rather than as a standing architectural decision.
+- **Process note:** subagent-driven (4 plan tasks, fresh implementer + independent reviewer each).
+  Task 1 and Task 2 each had one Important review finding fixed and re-approved (line wraps;
+  test-fixture reuse); Task 3 approved first pass.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.services.calculations.registry import recalculate
@@ -13,7 +13,10 @@ from backend.api.schemas.results import (
     ResultCreate, ResultResponse, ScalarCreate, ScalarUpdate,
     ScalarResponse, ICPCreate, ICPResponse,
 )
-from backend.services.result_merge_utils import apply_id_timepoint
+from backend.services.result_merge_utils import (
+    apply_id_timepoint,
+    normalize_timepoint,
+)
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/results", tags=["results"])
@@ -96,6 +99,23 @@ def create_result(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    # Issue #83: the server owns the bucket — mirror the resolved time and
+    # ignore any client-supplied value, so hand-entered rows land in
+    # v_results_scalar_rollup's per-day buckets like bulk-uploaded ones.
+    bucket = normalize_timepoint(data["time_post_reaction_days"])
+    data["time_post_reaction_bucket_days"] = bucket
+    if bucket is not None and data["is_primary_timepoint_result"]:
+        # Newest wins: demote any existing primary row in this bucket so
+        # uq_primary_result_per_experiment_bucket cannot reject the insert.
+        db.execute(
+            update(ExperimentalResults)
+            .where(
+                ExperimentalResults.experiment_fk == exp.id,
+                ExperimentalResults.time_post_reaction_bucket_days == bucket,
+                ExperimentalResults.is_primary_timepoint_result.is_(True),
+            )
+            .values(is_primary_timepoint_result=False)
+        )
     result = ExperimentalResults(**data)
     db.add(result)
     db.commit()
