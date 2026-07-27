@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, case, distinct

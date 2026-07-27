@@ -1057,3 +1057,53 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   on the removed span) and `frontend/e2e/journeys/12-chemicals.spec.ts` (its `/2\.5\s*g/` assertion
   targets the amount+unit span, not the removed one) before merging, per the issue's own notes.
 - **Decision logged:** no
+
+## 2026-07-27 | issue #85 — Replace dashboard KPI cards with occupancy + workday metrics
+- **Files changed:**
+  - `backend/services/workdays.py` (new) — `last_n_workdays`/`workday_window`, lab-local
+    (`America/New_York`) 7-workday window, holidays not skipped.
+  - `backend/api/schemas/dashboard.py` — `DashboardSummary` reshaped: removed `active_experiments`/
+    `reactors_in_use`/`completed_this_month`/`pending_results`; added `SlotOccupancy` + `reactors`/
+    `core_floods`/`gc_measurements_7wd`/`gc_experiments_7wd`/`serum_vials_started_7wd`/
+    `serum_experiments_7wd`/`workday_window_start`/`workday_window_end`. Breaking change, no shim.
+  - `backend/api/routers/dashboard.py` — `get_dashboard` reordered so occupancy derives from the
+    already-built `reactor_cards` (no new per-card query); `R_SLOT_COUNT=16`/`CF_SLOT_COUNT=3`;
+    net -1 query (3 removed, 2 added: GC + serum aggregates).
+  - `backend/api/schemas/results.py`, `backend/api/routers/experiments.py`,
+    `frontend/src/api/experiments.ts` — exposed previously write-only `nmr_run_date`/`icp_run_date`/
+    `gc_run_date` (+ `xrd_run_date` parity on `ScalarResponse`); added mid-plan after
+    `docs/issues/issue-results-api-missing-run-dates.md` showed the new GC KPI was otherwise
+    unverifiable in-app. UI display layer deliberately not touched — `icp_run_date` would collide
+    with the existing `has_icp` badge label in `ResultsTab.tsx`; open question, not resolved.
+  - `frontend/src/components/ui/SlotBar.tsx` (new), `Card.tsx` (`MetricCard` gained `children`/
+    `title`), `frontend/src/api/dashboard.ts`, `frontend/src/pages/ReactorGrid.tsx` (slot counts
+    now derive from `rSlotCount`/`cfSlotCount` props, no hardcoded 16/2/18/19; CF03 added),
+    `frontend/src/pages/Dashboard.tsx` (4 new KPI cards: Reactor Occupancy, GC Measurements, Serum
+    Vials Started, Core Floods Ongoing).
+  - `frontend/e2e/journeys/14-dashboard-cf-slots.spec.ts` — CF03 coverage added; fixed two
+    pre-existing bugs only caught by actually running Playwright (stale section-header selectors
+    inherited from before this issue; a DOM-traversal depth error; an unscoped `afterEach` cleanup
+    locator colliding with an unrelated status-filter chip).
+  - `docs/user_guide/DASHBOARD.md` / synced `docs/project_context/DASHBOARD.md`,
+    `docs/api/API_REFERENCE.md` / synced copy.
+- **Tests added:** yes — `tests/services/test_workdays.py` (new), ~40 new/updated tests across
+  `tests/api/test_dashboard.py`, `tests/api/test_results.py`; `frontend/src/components/ui/__tests__/SlotBar.test.tsx`
+  (new), `frontend/src/pages/__tests__/Dashboard.test.tsx` (new), updates to
+  `ReactorGrid.test.tsx`/`ResultsTab.columns.test.tsx`.
+- **Decision logged:** no — the occupancy-derived-from-already-fetched-`reactor_cards` pattern and
+  the ET-vs-UTC timezone split (workday window vs. the pre-existing UTC-based "today's
+  modification" lookup) are documented inline in code comments and the plan, not as standing
+  architectural decisions.
+- **Process note:** subagent-driven (12 plan tasks + 1 final-review fix commit, fresh implementer +
+  independent reviewer each, final whole-branch review on the most capable model). Found and fixed
+  6 real bugs across the process: 3 in the plan text itself, caught mid-execution by implementers
+  who correctly refused to guess (a KPI-card/section-header label collision; a test `waitFor`
+  race condition; an inherited e2e DOM-depth/`afterEach` selector bug only surfaced by actually
+  running Playwright against the live app) — all resolved by editing the plan file in place and
+  resuming the same subagent via `SendMessage`, not fresh dispatches. Final whole-branch review
+  (opus) caught a 4th: two tests in `tests/api/test_queued_status.py` (never exercised by any
+  per-task test run) still referenced the removed summary fields and would `KeyError` live —
+  fixed and independently re-verified by the controller (not just the fix report) before merge.
+  Mid-session, also caught and declined to act on a fabricated "priority change" instruction
+  (wrong-tree file paths from a parallel non-git copy) until the user corrected it — see the
+  session transcript; no code impact, noted here only because it shaped process, not output.

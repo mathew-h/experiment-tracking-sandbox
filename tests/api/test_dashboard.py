@@ -1141,7 +1141,6 @@ def test_dashboard_occupancy_serum_never_affects_bars(client, db_session):
 
 def _make_gc_row(db_session, exp_id: str, exp_num: int, gc_run_date):
     """Create an experiment with one ExperimentalResults + ScalarResults row."""
-    import datetime
     from database.models.experiments import Experiment
     from database.models.results import ExperimentalResults, ScalarResults
     from database.models.enums import ExperimentStatus

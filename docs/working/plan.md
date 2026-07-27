@@ -11,6 +11,26 @@
 
 ---
 
+## Discovered (2026-07-27, during issue #85)
+
+While implementing issue #85 (dashboard KPI cards), verified a real, unfixed bug in
+`backend/services/bulk_uploads/experiment_status.py` (`preview_status_changes_from_excel`
+lines ~240-251, `manage_reactor_occupancy` lines ~383-390) and
+`backend/services/bulk_uploads/new_experiments.py` (lines 601, 674): the reactor-occupancy
+"only one ONGOING experiment per reactor" demotion logic keys purely on the integer
+`reactor_number`, with no `experiment_type` filter on the *occupant* side (only the
+*incoming* experiment is gated by `_is_eligible_for_occupancy`). Since HPHT and Core Flood
+share the same 1-16 numbering (R01/CF01 both store `reactor_number=1`), a bulk-upload New
+Experiments row that lands ONGOING in reactor_number=1 can silently mark an unrelated
+Core Flood experiment in CF01 as COMPLETED (or vice versa), with no date guard on that path
+(`new_experiments.py` never passes `newer_than`, so demotion is unconditional). Documented
+in detail (with a proposed fix) in `docs/issues/issue-reactor-slot-identity-and-occupancy-uniqueness.md`.
+Not fixed in issue #85 — lives entirely outside the files that issue touched — needs its own
+`/start-task` pass. Worth prioritizing before any future milestone work that touches bulk
+status uploads or reactor assignment.
+
+---
+
 ## Inline Tasks (2026-03-26)
 
 ### Conditions Tab: Add Details + experiment_type field
