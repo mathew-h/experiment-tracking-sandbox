@@ -12,19 +12,21 @@ Four cards at the top of the page:
 
 | Metric | Description |
 |--------|-------------|
-| **Active Experiments** | Count of all experiments with status `ONGOING` |
-| **Reactors In Use** | Count of reactors with an active (`ONGOING`) experiment assigned |
-| **Completed This Month** | Experiments marked `COMPLETED` since the 1st of the current month |
-| **Pending Results** | `ONGOING` experiments with no result recorded in the last 7 days |
+| **Reactor Occupancy** | Segmented bar over the 16 HPHT vessel slots (R01–R16): green ticks = ongoing, amber = queued, grey = empty. Subtitle shows queued/empty counts. |
+| **GC Measurements** | Count of GC runs (`scalar_results.gc_run_date`) in the last 7 workdays, plus the number of distinct experiments they came from. |
+| **Serum Vials Started** | Count of Serum experiment vials (including replicates) whose start date falls in the last 7 workdays, plus the number of distinct base experiments. |
+| **Core Floods Ongoing** | Segmented bar over the 3 core flood rig slots (CF01–CF03), same tick treatment as Reactor Occupancy. |
+
+**"Last 7 workdays"** means the last 7 Monday–Friday dates in the lab's local timezone (`America/New_York`), including today if today is a workday. US federal holidays are not skipped and are treated as ordinary workdays. The exact window (e.g. "Jul 21 – Jul 29") is shown on hover over the GC Measurements and Serum Vials Started cards.
 
 ---
 
 ## Reactor Grid
 
-Shows all 18 reactor slots:
+Shows all 19 reactor slots:
 
 - **R01–R16** — Standard serum, HPHT, and autoclave reactors
-- **CF01–CF02** — Core flood reactors
+- **CF01–CF03** — Core flood reactors
 
 **Occupied slots** display:
 - Reactor label (e.g. `R05`, `CF01`)
