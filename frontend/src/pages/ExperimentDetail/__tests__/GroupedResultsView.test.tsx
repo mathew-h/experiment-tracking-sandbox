@@ -33,8 +33,8 @@ const ROLLUP: RollupTimepoint[] = [
     mean_gross_ammonium_mM: 2.0, median_gross_ammonium_mM: 2.0, sd_gross_ammonium_mM: 1.0,
     mean_net_ammonium_mM: 1.5, sd_net_ammonium_mM: 0.5,
     mean_h2_micromoles: null, sd_h2_micromoles: null,
-    mean_h2_grams_per_ton: null, sd_h2_grams_per_ton: null,
-    mean_fe_yield_h2_pct: null, sd_fe_yield_h2_pct: null,
+    mean_h2_grams_per_ton: 12.3, sd_h2_grams_per_ton: 2.5,
+    mean_fe_yield_h2_pct: 1.23, sd_fe_yield_h2_pct: 0.45,
     mean_fe_yield_nh3_pct: null, sd_fe_yield_nh3_pct: null,
     mean_grams_per_ton_yield: 40.0, sd_grams_per_ton_yield: 4.0, mean_final_ph: 8.1,
   },
@@ -83,5 +83,14 @@ describe('GroupedResultsView', () => {
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     expect(screen.getByRole('link', { name: /SERUM_001b.*outlier/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'SERUM_001a' })).toBeInTheDocument()
+  })
+
+  it('shows H₂ (g/t) and Fe²⁺ → H₂ (%) mean ± sd columns (issue #83)', async () => {
+    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByRole('columnheader', { name: 'H₂ (g/t)' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Fe²⁺ → H₂ (%)' })).toBeInTheDocument()
+    expect(screen.getByText('12.3 ± 2.5')).toBeInTheDocument()
+    expect(screen.getByText('1.23 ± 0.45')).toBeInTheDocument()
   })
 })

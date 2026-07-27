@@ -191,6 +191,8 @@ export function GroupedResultsView({ experimentId }: GroupedResultsViewProps) {
             <Th>Net NH₄ (mM)</Th>
             <Th>NH₄ (g/t)</Th>
             <Th>H₂ (µmol)</Th>
+            <Th>H₂ (g/t)</Th>
+            <Th>Fe²⁺ → H₂ (%)</Th>
             <Th>Fe²⁺ → NH₃ (%)</Th>
             <Th>pH</Th>
           </tr>
@@ -219,6 +221,16 @@ export function GroupedResultsView({ experimentId }: GroupedResultsViewProps) {
                 {r.mean_h2_micromoles == null
                   ? '—'
                   : `${fmt(r.mean_h2_micromoles, 1)} ± ${fmt(r.sd_h2_micromoles ?? 0, 1)}`}
+              </Td>
+              <Td className="font-mono-data">
+                {r.mean_h2_grams_per_ton == null
+                  ? '—'
+                  : `${fmt(r.mean_h2_grams_per_ton, 1)} ± ${fmt(r.sd_h2_grams_per_ton ?? 0, 1)}`}
+              </Td>
+              <Td className="font-mono-data">
+                {r.mean_fe_yield_h2_pct == null
+                  ? '—'
+                  : `${fmt(r.mean_fe_yield_h2_pct)} ± ${fmt(r.sd_fe_yield_h2_pct ?? 0)}`}
               </Td>
               <Td className="font-mono-data">
                 {r.mean_fe_yield_nh3_pct == null
