@@ -216,6 +216,8 @@ Update experiment properties.
 | GET | `/api/results/icp/{result_id}` | Get ICP result |
 | POST | `/api/results/icp` | Create ICP result |
 
+`GET /api/experiments/{experiment_id}/results` and scalar result responses now include `nmr_run_date`, `icp_run_date`, `gc_run_date`, and `xrd_run_date` (all nullable) — instrument run-date provenance.
+
 ### POST /api/results and POST /api/results/scalar — `id_timepoint_days` (issue #81)
 
 If the target experiment's `id_timepoint_days` is set (its ID carries a `-t<days>` token),
@@ -354,10 +356,14 @@ Returns all dashboard data in a single call. Response shape:
 ```json
 {
   "summary": {
-    "active_experiments": 5,
-    "reactors_in_use": 4,
-    "completed_this_month": 2,
-    "pending_results": 1
+    "reactors": { "total": 16, "ongoing": 8, "queued": 4, "empty": 4 },
+    "core_floods": { "total": 3, "ongoing": 1, "queued": 0, "empty": 2 },
+    "gc_measurements_7wd": 5,
+    "gc_experiments_7wd": 3,
+    "serum_vials_started_7wd": 4,
+    "serum_experiments_7wd": 2,
+    "workday_window_start": "2026-07-21",
+    "workday_window_end": "2026-07-29"
   },
   "reactors": [
     {

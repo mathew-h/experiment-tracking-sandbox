@@ -6,6 +6,7 @@ import datetime
 import pytest
 
 from database.models.experiments import Experiment
+from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 
 
@@ -17,7 +18,15 @@ def test_experiment_status_queued_enum_value():
 
 
 def test_dashboard_active_count_excludes_queued(client, db_session):
-    """Active Experiments metric counts ONGOING only — QUEUED must not inflate it."""
+    """Active Experiments metric counts ONGOING only — QUEUED must not inflate it.
+
+    Both experiments are given a reactor_number (in the 1-16 HPHT range, isolated
+    to this test's own transaction) and experiment_type="HPHT" so they actually
+    land in reactor_cards and are counted by the new reactors.ongoing/queued
+    occupancy tallies (see backend/api/routers/dashboard.py::_occupancy) —
+    without ExperimentalConditions, neither experiment would appear in the
+    reactor grid at all.
+    """
     ongoing = Experiment(
         experiment_id="QUEUED_TEST_ONGOING",
         experiment_number=33001,
@@ -31,12 +40,31 @@ def test_dashboard_active_count_excludes_queued(client, db_session):
         created_at=datetime.datetime.utcnow(),
     )
     db_session.add_all([ongoing, queued])
+    db_session.flush()
+    db_session.add_all([
+        ExperimentalConditions(
+            experiment_fk=ongoing.id,
+            experiment_id="QUEUED_TEST_ONGOING",
+            reactor_number=10,
+            experiment_type="HPHT",
+        ),
+        ExperimentalConditions(
+            experiment_fk=queued.id,
+            experiment_id="QUEUED_TEST_QUEUED",
+            reactor_number=11,
+            experiment_type="HPHT",
+        ),
+    ])
     db_session.commit()
 
     resp = client.get("/api/dashboard/")
     assert resp.status_code == 200
     summary = resp.json()["summary"]
-    assert summary["active_experiments"] >= 1
+    # This test's transaction is isolated (savepoint rollback per test — see
+    # tests/api/conftest.py), so exactly the one ONGOING experiment above
+    # contributes to reactors.ongoing.
+    assert summary["reactors"]["ongoing"] == 1
+    assert summary["reactors"]["queued"] == 1
     # Verify via DB that only the ONGOING experiment matches the active filter
     from sqlalchemy import select, func
     from database.models.experiments import Experiment as E
@@ -47,22 +75,6 @@ def test_dashboard_active_count_excludes_queued(client, db_session):
         )
     ).scalar()
     assert count == 1, "Only the ONGOING experiment should match the active filter"
-
-
-def test_dashboard_pending_results_excludes_queued(client, db_session):
-    """Pending Results counts ONGOING experiments with no recent result — QUEUED excluded."""
-    queued = Experiment(
-        experiment_id="QUEUED_PENDING_TEST",
-        experiment_number=33003,
-        status=ExperimentStatus.QUEUED,
-        created_at=datetime.datetime.utcnow() - datetime.timedelta(days=14),
-    )
-    db_session.add(queued)
-    db_session.commit()
-
-    resp = client.get("/api/dashboard/")
-    assert resp.status_code == 200
-    assert resp.json()["summary"]["pending_results"] >= 0
 
 
 # ---------------------------------------------------------------------------
