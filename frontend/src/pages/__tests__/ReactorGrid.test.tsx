@@ -39,7 +39,7 @@ function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
   }
 }
 
-function renderGrid(cards: ReactorCardData[]) {
+function renderGrid(cards: ReactorCardData[], rSlotCount = 16, cfSlotCount = 3) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -47,7 +47,7 @@ function renderGrid(cards: ReactorCardData[]) {
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <ReactorGrid cards={cards} />
+          <ReactorGrid cards={cards} rSlotCount={rSlotCount} cfSlotCount={cfSlotCount} />
         </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>
@@ -72,5 +72,26 @@ describe('ReactorCard — todays_modification (issue #72)', () => {
     renderGrid([makeCard({ todays_modification: long })])
     const block = screen.getByTitle(long)
     expect(block).toHaveTextContent('Modified today:')
+  })
+})
+
+describe('ReactorGrid — slot counts derived from props (issue #85)', () => {
+  it('renders 19 slots (16 R + 3 CF) and includes CF03', () => {
+    const { container } = renderGrid([])
+    const labels = Array.from(container.querySelectorAll('p.font-mono-data.text-xl')).map(
+      (el) => el.textContent
+    )
+    expect(labels.length).toBe(19)
+    expect(labels).toContain('CF03')
+    expect(labels).toContain('R16')
+  })
+
+  it('renders a different total when rSlotCount/cfSlotCount props change', () => {
+    const { container } = renderGrid([], 2, 1)
+    const labels = Array.from(container.querySelectorAll('p.font-mono-data.text-xl')).map(
+      (el) => el.textContent
+    )
+    expect(labels.length).toBe(3)
+    expect(labels).toEqual(['R01', 'R02', 'CF01'])
   })
 })

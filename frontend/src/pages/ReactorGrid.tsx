@@ -9,10 +9,6 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-// Fixed reactor layout: R01-R16 and CF01-CF02
-const R_SLOTS = Array.from({ length: 16 }, (_, i) => `R${String(i + 1).padStart(2, '0')}`)
-const CF_SLOTS = ['CF01', 'CF02']
-
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
 type _ExperimentStatus = typeof STATUS_OPTIONS[number]
 
@@ -566,7 +562,15 @@ function ReactorDetailModal({
 }
 
 /** Grid of reactor status cards showing current occupant, temperature, and elapsed time. */
-export function ReactorGrid({ cards }: { cards: ReactorCardData[] }) {
+export function ReactorGrid({
+  cards,
+  rSlotCount,
+  cfSlotCount,
+}: {
+  cards: ReactorCardData[]
+  rSlotCount: number
+  cfSlotCount: number
+}) {
   const [selected, setSelected] = useState<ReactorCardData | null>(null)
 
   // Build lookup: reactor_label → card data
@@ -575,15 +579,19 @@ export function ReactorGrid({ cards }: { cards: ReactorCardData[] }) {
     byLabel[c.reactor_label] = c
   }
 
-  // Single unified grid: R01–R16 then CF01–CF02, in slot order. At 6 columns
-  // this lays out as R01–R06 / R07–R12 / R13–R16+CF01–CF02 — CF cards land in
-  // the last two positions of row 3 with no separate section needed.
+  const pad = (i: number) => String(i).padStart(2, '0')
+  const R_SLOTS = Array.from({ length: rSlotCount }, (_, i) => `R${pad(i + 1)}`)
+  const CF_SLOTS = Array.from({ length: cfSlotCount }, (_, i) => `CF${pad(i + 1)}`)
+
+  // Single unified grid: R01-R16 then CF01-CF03, in slot order — the 19-slot
+  // total no longer divides evenly into a 6-column grid, so this uses 5
+  // columns to keep R and CF rows breaking more naturally.
   const ALL_SLOTS = [...R_SLOTS, ...CF_SLOTS]
 
   return (
     <>
       {/* Section title lives in the enclosing Dashboard CardHeader ("Reactor Status") */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
         {ALL_SLOTS.map((label) => (
           <ReactorCard
             key={label}
