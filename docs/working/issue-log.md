@@ -1133,3 +1133,8 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** yes — backend: `tests/api/test_replicate_group_detail.py` (NEW, group resource + route ordering + 404 + `-t` shared-letter + divergent conditions/additives), wrapper byte-identical + rename-lineage + grouped-list (orphan collapse, sequential-not-absorbed, `-0`/`-1` parent grouping) suites in `tests/api/test_experiments.py` / `test_experiment_rollup.py`; frontend: `ReplicateGroupPage.test.tsx`, `GroupStrip.test.tsx`, updated `GroupedResultsView.test.tsx`. tests/api 397 pass; full backend 1009 pass (3 pre-existing pg_backup env failures unrelated); frontend vitest 96/96. Chrome DevTools e2e PASS.
 - **Decision logged:** no — key call recorded in commits/ledger: `/{experiment_id}/replicate-group` wrapper kept byte-identical (issue-owner decision) rather than delegating; 2 observational minors accepted (parent row excluded from condition divergence; letter+sequential re-run groups under stem in list mode)
 - **Schema change:** none. No migration, no new dependency.
+
+## 2026-07-28 | inline — Default replicate rollup chart metric to H2 (umol)
+- **Files changed:** `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` (metric useState default `gross_nh4` -> `h2_umol`); `frontend/src/pages/ExperimentDetail/__tests__/GroupedResultsView.test.tsx` (new test pinning default to H2 (umol))
+- **Tests added:** yes — one vitest assertion pinning the selector default (select value + visible option text). ExperimentDetail suite 32/32 pass; eslint clean
+- **Decision logged:** no
