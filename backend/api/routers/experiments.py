@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text, update, case
+from sqlalchemy import select, func, text, update, case, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -154,13 +154,16 @@ def list_experiments(
         # (#87 D2): a lettered member (replicate_label IS NOT NULL) buckets on
         # COALESCE(base_experiment_id, experiment_id) -- a STRING, since the
         # group parent frequently does not exist as a row (orphan sets are the
-        # common case, not the edge case). Everything else -- group parents,
-        # bare stems, standalone experiments, and non-lettered derivations
-        # like sequential re-runs (SERUM_001-2) or treatments
-        # (SERUM_001_Desorption) -- buckets on its OWN experiment_id. A
-        # parent's own experiment_id equals its lettered members' bucket key,
-        # so it joins their group; a sequential/treatment derivation's bucket
-        # key is its own id, so it never does and always stands alone.
+        # common case, not the edge case). A BARE-STEM parent (base_experiment_id
+        # == its own experiment_id, no letter, no treatment) buckets on its own
+        # experiment_id, which already equals its lettered members' key, so it
+        # joins their group naturally. An explicit "-0"/"-1" parent spelling
+        # (e.g. HPHT_012-0) is different: its own experiment_id is NOT the
+        # stem, so it needs an explicit branch bucketing it on base_experiment_id
+        # (the stem) to join its lettered members. Everything else -- standalone
+        # experiments and non-lettered derivations like sequential re-runs
+        # (SERUM_001-2) or treatments (SERUM_001_Desorption) -- buckets on its
+        # OWN experiment_id and so always stands alone.
         #
         # Because base_experiment_id may not name an existing row, the
         # representative for a bucket can't always be resolved from a single
@@ -172,23 +175,27 @@ def list_experiments(
         # row if one exists (rank 0), otherwise the lowest-ordered lettered
         # member (replicate_label ASC, id_timepoint_days ASC NULLS FIRST,
         # experiment_number ASC).
+        def _bucket_key_expr(col):
+            return case(
+                (
+                    col.replicate_label.isnot(None),
+                    func.coalesce(col.base_experiment_id, col.experiment_id),
+                ),
+                (
+                    or_(
+                        col.experiment_id == col.base_experiment_id.concat("-0"),
+                        col.experiment_id == col.base_experiment_id.concat("-1"),
+                    ),
+                    col.base_experiment_id,
+                ),
+                else_=col.experiment_id,
+            )
+
         matched_sq = stmt.subquery()
-        matched_bucket_key = case(
-            (
-                matched_sq.c.replicate_label.isnot(None),
-                func.coalesce(matched_sq.c.base_experiment_id, matched_sq.c.experiment_id),
-            ),
-            else_=matched_sq.c.experiment_id,
-        )
+        matched_bucket_key = _bucket_key_expr(matched_sq.c)
         matched_keys_sq = select(matched_bucket_key.label("bucket_key")).distinct().subquery()
 
-        full_bucket_key = case(
-            (
-                Experiment.replicate_label.isnot(None),
-                func.coalesce(Experiment.base_experiment_id, Experiment.experiment_id),
-            ),
-            else_=Experiment.experiment_id,
-        )
+        full_bucket_key = _bucket_key_expr(Experiment)
         is_parent_like = case((Experiment.replicate_label.is_(None), 0), else_=1)
         ranked_sq = (
             select(
@@ -225,17 +232,21 @@ def list_experiments(
         if group_replicates:
             # Bucket key for this representative -- mirrors Block A: a
             # lettered representative (orphan-set case) buckets on its own
-            # base_experiment_id; a parent/bare-stem/standalone representative
-            # buckets on its own experiment_id. Members are fetched from the
-            # UNFILTERED table (attached in full regardless of whether they
-            # matched the query filters) and identified by id, never by
-            # replicate_label (a '-t<days>' vial shares its letter with its
-            # parent vial).
-            bucket_key = (
-                (exp.base_experiment_id or exp.experiment_id)
-                if exp.replicate_label is not None
-                else exp.experiment_id
-            )
+            # base_experiment_id; an explicit "-0"/"-1" parent spelling also
+            # buckets on base_experiment_id (the stem) to join its lettered
+            # members; a bare-stem/standalone representative buckets on its
+            # own experiment_id. Members are fetched from the UNFILTERED
+            # table (attached in full regardless of whether they matched the
+            # query filters) and identified by id, never by replicate_label
+            # (a '-t<days>' vial shares its letter with its parent vial).
+            if exp.replicate_label is not None:
+                bucket_key = exp.base_experiment_id or exp.experiment_id
+            elif exp.base_experiment_id and exp.experiment_id in (
+                f"{exp.base_experiment_id}-0", f"{exp.base_experiment_id}-1",
+            ):
+                bucket_key = exp.base_experiment_id
+            else:
+                bucket_key = exp.experiment_id
             members = db.execute(
                 select(Experiment)
                 .where(

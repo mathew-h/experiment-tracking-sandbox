@@ -1126,6 +1126,34 @@ class TestGroupedListMode:
         seq_item = by_id["GRPMIX_001-2"]
         assert seq_item.get("replicates") is None
 
+    def test_dash0_parent_groups_with_lettered_members_in_list_mode(self, client, db_session):
+        """A -0/-1 parent spelling (e.g. HPHT_012-0) is a different string
+        than its stem, but must still bucket with its lettered members
+        (base_experiment_id == the stem) rather than standing alone."""
+        parent = _make_experiment(db_session, experiment_id="HPHT_012-0", number=9750)
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"HPHT_012{letter}", experiment_number=9751 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+
+        resp = client.get("/api/experiments?group_replicates=true&search=HPHT_012")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        top_level_ids = {i["experiment_id"] for i in data["items"]}
+        assert top_level_ids == {"HPHT_012-0"}
+        assert "HPHT_012a" not in top_level_ids
+        assert "HPHT_012b" not in top_level_ids
+        assert "HPHT_012c" not in top_level_ids
+
+        (item,) = data["items"]
+        assert item["experiment_id"] == "HPHT_012-0"
+        assert {r["experiment_id"] for r in item["replicates"]} == {
+            "HPHT_012a", "HPHT_012b", "HPHT_012c",
+        }
+
 
 class TestCreateReplicatesEndpoint:
     def test_create_replicates_batch(self, client, db_session):
