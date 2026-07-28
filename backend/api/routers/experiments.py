@@ -7,7 +7,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
-from database.experiment_id_parser import split_timepoint_token
 from database.models.enums import ExperimentStatus
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
@@ -930,11 +929,67 @@ def update_experiment(
                     status_code=409,
                     detail=f"Experiment ID '{new_id}' already exists",
                 )
+
+            # Issue #87 (D3, locked decision 5): block renaming a group parent
+            # that has lettered replicates. Checked against the OLD id, before
+            # any mutation, so a rejected rename leaves everything untouched.
+            member_ids = db.execute(
+                select(Experiment.experiment_id).where(
+                    Experiment.base_experiment_id == experiment_id,
+                    Experiment.replicate_label.isnot(None),
+                    Experiment.id != exp.id,
+                )
+            ).scalars().all()
+            if member_ids:
+                log.warning(
+                    "experiment_rename_blocked_group_parent",
+                    experiment_id=experiment_id,
+                    members=sorted(member_ids),
+                    user=current_user.uid,
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Cannot rename group parent '{experiment_id}': it has lettered "
+                        f"replicate(s) {sorted(member_ids)}; renaming would orphan them."
+                    ),
+                )
+
             exp.experiment_id = new_id
-            # Issue #81: rename must re-sync the '-t<days>' timepoint token —
-            # the before_flush lineage listener only wires session.new rows,
-            # so a rename (a dirty row) would otherwise leave a stale value.
-            _, exp.id_timepoint_days = split_timepoint_token(new_id.strip())
+            # Issue #87 (D3): persist the new id BEFORE recomputing lineage.
+            # Production SessionLocal has autoflush=False (same as tests/api's
+            # session factory), so without this flush update_experiment_lineage's
+            # group-parent SELECT can match this row against its own stale
+            # (old) experiment_id — the exact issue #86 ordering bug. Mirrors
+            # the bulk-upload rename precedent (new_experiments.py:385-392).
+            from database.lineage_utils import (
+                update_experiment_lineage, update_orphaned_derivations, parse_experiment_id,
+            )
+            db.flush()
+            update_experiment_lineage(db, exp)
+
+            # If the new spelling is itself a group-parent spelling (no
+            # treatment, no letter, sequential in {None, 0, 1}), back-link any
+            # pre-existing orphaned derivations of that stem to this row.
+            new_base_id, new_derivation_num, new_treatment, new_replicate_label = (
+                parse_experiment_id(new_id)
+            )
+            is_new_parent_spelling = (
+                new_treatment is None
+                and new_replicate_label is None
+                and (new_derivation_num is None or new_derivation_num in (0, 1))
+            )
+            if is_new_parent_spelling:
+                new_stem = new_base_id or new_id
+                backlinked = update_orphaned_derivations(db, new_stem)
+                if backlinked:
+                    log.info(
+                        "experiment_rename_backlinked_orphans",
+                        new_id=new_id,
+                        stem=new_stem,
+                        count=backlinked,
+                        user=current_user.uid,
+                    )
             # Keep denormalized string in conditions in sync so additives endpoints work
             cond = db.execute(
                 select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)

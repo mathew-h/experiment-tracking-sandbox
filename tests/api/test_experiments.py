@@ -530,6 +530,92 @@ def test_patch_rename_syncs_external_analysis(client, db_session):
     assert analysis.experiment_id == "ANALYSIS_SYNC_DST_001"
 
 
+# --- #87 Phase 4 (D3): rename recomputes replicate lineage ---
+
+def test_patch_rename_same_stem_sets_replicate_lineage(client, db_session):
+    """Renaming a plain experiment into a lettered spelling of an EXISTING
+    stem's parent must set replicate_label and link parent_experiment_fk,
+    and the vial must then show up in its replicate group."""
+    parent = _make_experiment(db_session, "SERUM_020", 9050)
+    _make_experiment(db_session, "RENAME_INTO_REPL_SRC", 9051)
+
+    resp = client.patch(
+        "/api/experiments/RENAME_INTO_REPL_SRC",
+        json={"experiment_id": "SERUM_020b"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["replicate_label"] == "b"
+    assert body["base_experiment_id"] == "SERUM_020"
+    assert body["parent_experiment_fk"] == parent.id
+
+    group_resp = client.get("/api/experiments/SERUM_020b/replicate-group")
+    assert group_resp.status_code == 200
+    group = group_resp.json()
+    assert group["parent"]["experiment_id"] == "SERUM_020"
+    labels = [m["replicate_label"] for m in group["members"]]
+    assert "b" in labels
+
+
+def test_patch_rename_across_stems_rewrites_base_experiment_id(client, db_session):
+    """Renaming a lettered replicate of one stem into a lettered spelling of
+    a DIFFERENT stem must rewrite base_experiment_id to the new stem."""
+    _make_experiment(db_session, "SERUM_020", 9052)
+    _make_experiment(db_session, "SERUM_020c", 9053)
+
+    resp = client.patch(
+        "/api/experiments/SERUM_020c",
+        json={"experiment_id": "SERUM_030c"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["base_experiment_id"] == "SERUM_030"
+    assert resp.json()["replicate_label"] == "c"
+
+
+def test_patch_rename_group_parent_with_replicates_returns_409(client, db_session):
+    """Renaming a group parent that has lettered members is blocked, and
+    nothing about the parent or its members is mutated."""
+    parent = _make_experiment(db_session, "SERUM_040", 9054)
+    member = _make_experiment(db_session, "SERUM_040a", 9055)
+    db_session.expire_all()
+    member = db_session.query(Experiment).filter_by(id=member.id).one()
+    assert member.parent_experiment_fk == parent.id  # sanity: lineage set on create
+
+    resp = client.patch("/api/experiments/SERUM_040", json={"experiment_id": "SERUM_050"})
+    assert resp.status_code == 409
+    assert "SERUM_040a" in resp.json()["detail"]
+
+    db_session.expire_all()
+    unchanged_parent = db_session.query(Experiment).filter_by(id=parent.id).one()
+    assert unchanged_parent.experiment_id == "SERUM_040"
+    unchanged_member = db_session.query(Experiment).filter_by(id=member.id).one()
+    assert unchanged_member.parent_experiment_fk == parent.id
+    assert unchanged_member.experiment_id == "SERUM_040a"
+
+
+def test_patch_rename_to_parent_spelling_backlinks_orphans(client, db_session):
+    """Renaming an unrelated experiment INTO a group-parent spelling must
+    back-link any pre-existing orphaned lettered derivations of that stem."""
+    orphan_a = _make_experiment(db_session, "SERUM_060a", 9056)
+    orphan_b = _make_experiment(db_session, "SERUM_060b", 9057)
+    db_session.expire_all()
+    orphan_a = db_session.query(Experiment).filter_by(id=orphan_a.id).one()
+    orphan_b = db_session.query(Experiment).filter_by(id=orphan_b.id).one()
+    assert orphan_a.parent_experiment_fk is None
+    assert orphan_b.parent_experiment_fk is None
+
+    _make_experiment(db_session, "STAGE_060", 9058)
+    resp = client.patch("/api/experiments/STAGE_060", json={"experiment_id": "SERUM_060"})
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    new_parent = db_session.query(Experiment).filter_by(experiment_id="SERUM_060").one()
+    a = db_session.query(Experiment).filter_by(id=orphan_a.id).one()
+    b = db_session.query(Experiment).filter_by(id=orphan_b.id).one()
+    assert a.parent_experiment_fk == new_parent.id
+    assert b.parent_experiment_fk == new_parent.id
+
+
 def test_patch_experiment_date(client, db_session):
     """PATCH with a valid ISO date string updates the experiment's date field."""
     _make_experiment(db_session, "DATE_PATCH_001", 9020)
