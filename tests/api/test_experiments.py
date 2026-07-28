@@ -1130,7 +1130,7 @@ class TestGroupedListMode:
         """A -0/-1 parent spelling (e.g. HPHT_012-0) is a different string
         than its stem, but must still bucket with its lettered members
         (base_experiment_id == the stem) rather than standing alone."""
-        parent = _make_experiment(db_session, experiment_id="HPHT_012-0", number=9750)
+        _make_experiment(db_session, experiment_id="HPHT_012-0", number=9750)
         for i, letter in enumerate("abc"):
             db_session.add(Experiment(
                 experiment_id=f"HPHT_012{letter}", experiment_number=9751 + i,
