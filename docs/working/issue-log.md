@@ -1138,3 +1138,11 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Files changed:** `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` (metric useState default `gross_nh4` -> `h2_umol`); `frontend/src/pages/ExperimentDetail/__tests__/GroupedResultsView.test.tsx` (new test pinning default to H2 (umol))
 - **Tests added:** yes — one vitest assertion pinning the selector default (select value + visible option text). ExperimentDetail suite 32/32 pass; eslint clean
 - **Decision logged:** no
+
+## 2026-07-28 | issue #89 — Grouped experiment view: hide empty conditions and round numeric values
+- **Files changed:**
+  - `frontend/src/pages/ReplicateGroup/index.tsx` — `formatValue` now routes numbers through a new `formatNumber` helper (rounds to 3dp, trims trailing zeros); added `hasValue` and filtered the shared-conditions `.map` to skip null/undefined/empty entries before rendering, instead of rendering them as `—`
+  - `frontend/src/pages/ReplicateGroup/__tests__/ReplicateGroupPage.test.tsx` — 4 new tests: null shared-condition fields suppressed, long float rounds to 3dp, integer condition renders without trailing decimal, divergent field still renders label + "varies" text with its shared value absent
+- **Tests added:** yes — ReplicateGroupPage suite 11/11 pass; full frontend suite 101/101 pass; eslint clean
+- **Decision logged:** no — no shared numeric formatter extracted to `frontend/src/utils/` (issue's "consider extracting" was optional; `ConditionsTab.tsx`'s `Row` doesn't yet need it since `total_ferrous_iron_g` isn't rendered there)
+- **PR:** #91 → develop (open, not yet merged)
