@@ -19,23 +19,14 @@ interface MetricDef {
 }
 
 const METRICS: MetricDef[] = [
-  { key: 'gross_nh4', label: 'Gross NH₄ (mM)', mean: 'mean_gross_ammonium_mM', sd: 'sd_gross_ammonium_mM',
-    individual: (r) => r.gross_ammonium_concentration_mM },
-  { key: 'net_nh4', label: 'Net NH₄ (mM)', mean: 'mean_net_ammonium_mM', sd: 'sd_net_ammonium_mM',
-    individual: (r) =>
-      r.gross_ammonium_concentration_mM != null && r.background_ammonium_concentration_mM != null
-        ? Math.max(0, r.gross_ammonium_concentration_mM - r.background_ammonium_concentration_mM)
-        : null },
-  { key: 'nh4_gpt', label: 'NH₄ (g/t)', mean: 'mean_grams_per_ton_yield', sd: 'sd_grams_per_ton_yield',
-    individual: (r) => r.grams_per_ton_yield },
+  { key: 'h2_ppm', label: 'H₂ (ppm)', mean: 'mean_h2_ppm', sd: 'sd_h2_ppm',
+    individual: (r) => r.h2_concentration },
   { key: 'h2_umol', label: 'H₂ (µmol)', mean: 'mean_h2_micromoles', sd: 'sd_h2_micromoles',
     individual: (r) => r.h2_micromoles },
   { key: 'h2_gpt', label: 'H₂ (g/t)', mean: 'mean_h2_grams_per_ton', sd: 'sd_h2_grams_per_ton',
     individual: (r) => r.h2_grams_per_ton_yield },
   { key: 'fe_h2', label: 'Fe²⁺ → H₂ (%)', mean: 'mean_fe_yield_h2_pct', sd: 'sd_fe_yield_h2_pct',
     individual: (r) => r.ferrous_iron_yield_h2_pct },
-  { key: 'fe_nh3', label: 'Fe²⁺ → NH₃ (%)', mean: 'mean_fe_yield_nh3_pct', sd: 'sd_fe_yield_nh3_pct',
-    individual: (r) => r.ferrous_iron_yield_nh3_pct },
   { key: 'ph', label: 'pH', mean: 'mean_final_ph', sd: null, individual: (r) => r.final_ph },
 ]
 
@@ -49,7 +40,7 @@ interface GroupedResultsViewProps {
 /** Base-level grouped results: mean ± std per timepoint from the rollup view,
  *  with individual replicate series overlay and drill-in links. */
 export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps) {
-  const [metricKey, setMetricKey] = useState('h2_umol')
+  const [metricKey, setMetricKey] = useState('h2_ppm')
   const [showIndividual, setShowIndividual] = useState(true)
   const metric = METRICS.find((m) => m.key === metricKey)!
 
@@ -191,13 +182,10 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           <tr>
             <Th>Time (d)</Th>
             <Th>n</Th>
-            <Th>Gross NH₄ (mM)</Th>
-            <Th>Net NH₄ (mM)</Th>
-            <Th>NH₄ (g/t)</Th>
+            <Th>H₂ (ppm)</Th>
             <Th>H₂ (µmol)</Th>
             <Th>H₂ (g/t)</Th>
             <Th>Fe²⁺ → H₂ (%)</Th>
-            <Th>Fe²⁺ → NH₃ (%)</Th>
             <Th>pH</Th>
           </tr>
         </TableHead>
@@ -207,19 +195,9 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
               <Td className="font-mono-data">{fmt(r.time_post_reaction_bucket_days, 1)}</Td>
               <Td className="font-mono-data text-ink-muted">n = {r.n_replicates}</Td>
               <Td className="font-mono-data">
-                {r.mean_gross_ammonium_mM == null
+                {r.mean_h2_ppm == null
                   ? '—'
-                  : `${fmt(r.mean_gross_ammonium_mM)} ± ${fmt(r.sd_gross_ammonium_mM ?? 0)}`}
-              </Td>
-              <Td className="font-mono-data">
-                {r.mean_net_ammonium_mM == null
-                  ? '—'
-                  : `${fmt(r.mean_net_ammonium_mM)} ± ${fmt(r.sd_net_ammonium_mM ?? 0)}`}
-              </Td>
-              <Td className="font-mono-data">
-                {r.mean_grams_per_ton_yield == null
-                  ? '—'
-                  : `${fmt(r.mean_grams_per_ton_yield, 1)} ± ${fmt(r.sd_grams_per_ton_yield ?? 0, 1)}`}
+                  : `${fmt(r.mean_h2_ppm, 1)} ± ${fmt(r.sd_h2_ppm ?? 0, 1)}`}
               </Td>
               <Td className="font-mono-data">
                 {r.mean_h2_micromoles == null
@@ -235,11 +213,6 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
                 {r.mean_fe_yield_h2_pct == null
                   ? '—'
                   : `${fmt(r.mean_fe_yield_h2_pct)} ± ${fmt(r.sd_fe_yield_h2_pct ?? 0)}`}
-              </Td>
-              <Td className="font-mono-data">
-                {r.mean_fe_yield_nh3_pct == null
-                  ? '—'
-                  : `${fmt(r.mean_fe_yield_nh3_pct)} ± ${fmt(r.sd_fe_yield_nh3_pct ?? 0)}`}
               </Td>
               <Td className="font-mono-data">{fmt(r.mean_final_ph)}</Td>
             </TableRow>

@@ -1172,3 +1172,15 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Verification:** `alembic upgrade head` → both columns present on the view; `downgrade -1` → columns gone, view still queryable (1034 rows); re-`upgrade` clean.
 - **Decision logged:** no
 - **Lint note:** repo has no black/flake8 config; committed baseline already fails tool defaults (event_listeners flake8 111→115, all 4 new lines E501 on SQL matching the surrounding 20+ aggregate lines). New code matches surrounding style; not reformatted.
+
+## 2026-07-28 | issue #92 — H2-first results and rollup views: remove ammonium metrics from the frontend
+- **Depends on:** #90 (merged to develop via PR #94 before this branch was cut, so `r.h2_concentration` / `mean_h2_ppm` / `sd_h2_ppm` are available)
+- **Files changed:**
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `GRID` template 13→11 tracks; per-result columns reordered H2-first (`★ · Time · Sample Date · H₂ ppm · H₂ µmol · H₂ g/t · Fe²⁺ H₂ % · pH · Cond. · ICP/XRD/MOD · ▾`); H₂ (ppm) reads `r.h2_concentration` from the existing `/results` payload (no per-row `getScalar`); removed the entire Background NH₄ affordance (button + inline input, `bgInput`/`bgValue` state, `storedBgValue`, `bgMutation`, `DEFAULT_BACKGROUND_NH4`, and the now-unused `useMutation`/`useQueryClient`/`queryClient`); dropped Gross NH₄ + Net NH₄ Yield from the `ExpandedRow` scalar list
+  - `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` — `METRICS` trimmed from 8 to 5 (H₂ ppm/µmol/g/t, Fe²⁺→H₂ %, pH); default `metricKey` `h2_umol`→`h2_ppm`; rollup table columns → `Time · n · H₂ ppm · H₂ µmol · H₂ g/t · Fe²⁺→H₂ % · pH`, ppm at 1 dp with existing `mean ± sd` / `—` rendering
+  - `frontend/src/pages/ExperimentDetail/__tests__/ResultsTab.columns.test.tsx` — swapped Fe²⁺-NH₃ tests for: H₂ (ppm) header, H₂ (ppm) value from `/results`, no `NH₄` text anywhere, Background NH₄ button absent; kept Fe²⁺ H₂/XRD/MOD tests
+  - `frontend/src/pages/ExperimentDetail/__tests__/GroupedResultsView.test.tsx` — fixture `mean_h2_ppm`/`sd_h2_ppm` populated; default-selector test → H₂ (ppm); added exactly-five-options, no-NH₄-columnheader, and null-ppm→`—` tests
+  - `docs/user_guide/REPLICATES.md`, `docs/user_guide/USER_MANUAL.md` (+ auto-synced `docs/project_context/` copies) — noted results & rollup views are H2-focused and ammonium data remains in the DB, calc engine, `v_results_scalar_rollup`, and Power BI
+- **Backend/schema/view:** none — display-only change. Confirmed `v_results_scalar_rollup` still computes every ammonium aggregate (`mean_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `mean_fe_yield_nh3_pct`) unchanged in `database/event_listeners.py`
+- **Tests added:** yes — frontend only; affected suites 20/20, full frontend suite 116/116 pass; `tsc --noEmit` clean; eslint clean
+- **Decision logged:** no
