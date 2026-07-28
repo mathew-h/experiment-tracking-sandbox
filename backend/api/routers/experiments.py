@@ -49,6 +49,16 @@ _TYPE_PREFIX: dict[str, str] = {
 }
 
 
+def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
+    """True when a parsed experiment_id (derivation_number, treatment_variant,
+    replicate_label from parse_experiment_id) names a replicate GROUP PARENT
+    spelling: bare stem, or explicit -0/-1 (see database/lineage_utils.py::
+    update_experiment_lineage). False for lettered members (e.g. SERUM_040a)
+    and for sequential re-runs (e.g. SERUM_040-2), which are never parents.
+    """
+    return treatment is None and replicate_label is None and (derivation is None or derivation in (0, 1))
+
+
 def _build_list_item(db: Session, exp: Experiment) -> dict:
     """Build the ExperimentListItem payload dict for one experiment row."""
     item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
@@ -930,30 +940,44 @@ def update_experiment(
                     detail=f"Experiment ID '{new_id}' already exists",
                 )
 
+            from database.lineage_utils import (
+                update_experiment_lineage, update_orphaned_derivations, parse_experiment_id,
+            )
+
             # Issue #87 (D3, locked decision 5): block renaming a group parent
-            # that has lettered replicates. Checked against the OLD id, before
-            # any mutation, so a rejected rename leaves everything untouched.
-            member_ids = db.execute(
-                select(Experiment.experiment_id).where(
-                    Experiment.base_experiment_id == experiment_id,
-                    Experiment.replicate_label.isnot(None),
-                    Experiment.id != exp.id,
-                )
-            ).scalars().all()
-            if member_ids:
-                log.warning(
-                    "experiment_rename_blocked_group_parent",
-                    experiment_id=experiment_id,
-                    members=sorted(member_ids),
-                    user=current_user.uid,
-                )
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Cannot rename group parent '{experiment_id}': it has lettered "
-                        f"replicate(s) {sorted(member_ids)}; renaming would orphan them."
-                    ),
-                )
+            # that has lettered replicates. Only fires when the OLD id is
+            # ITSELF a group-parent spelling (bare stem, or explicit -0/-1) —
+            # gating on the parsed spelling, not just base_experiment_id,
+            # keeps this from over-firing on renames of lettered members
+            # (e.g. SERUM_040a) or sequential re-runs (e.g. SERUM_040-2),
+            # which are never parents and must remain allowed. A -0/-1-spelled
+            # parent shares its lettered members' base_experiment_id (the bare
+            # stem), not its own literal id string, so the member query below
+            # must use the parsed stem, not the raw path param.
+            old_base, old_deriv, old_treat, old_letter = parse_experiment_id(experiment_id)
+            if _is_group_parent_spelling(old_deriv, old_treat, old_letter):
+                old_stem = old_base or experiment_id
+                member_ids = db.execute(
+                    select(Experiment.experiment_id).where(
+                        Experiment.base_experiment_id == old_stem,
+                        Experiment.replicate_label.isnot(None),
+                        Experiment.id != exp.id,
+                    )
+                ).scalars().all()
+                if member_ids:
+                    log.warning(
+                        "experiment_rename_blocked_group_parent",
+                        experiment_id=experiment_id,
+                        members=sorted(member_ids),
+                        user=current_user.uid,
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Cannot rename group parent '{experiment_id}': it has lettered "
+                            f"replicate(s) {sorted(member_ids)}; renaming would orphan them."
+                        ),
+                    )
 
             exp.experiment_id = new_id
             # Issue #87 (D3): persist the new id BEFORE recomputing lineage.
@@ -962,9 +986,6 @@ def update_experiment(
             # group-parent SELECT can match this row against its own stale
             # (old) experiment_id — the exact issue #86 ordering bug. Mirrors
             # the bulk-upload rename precedent (new_experiments.py:385-392).
-            from database.lineage_utils import (
-                update_experiment_lineage, update_orphaned_derivations, parse_experiment_id,
-            )
             db.flush()
             update_experiment_lineage(db, exp)
 
@@ -974,10 +995,8 @@ def update_experiment(
             new_base_id, new_derivation_num, new_treatment, new_replicate_label = (
                 parse_experiment_id(new_id)
             )
-            is_new_parent_spelling = (
-                new_treatment is None
-                and new_replicate_label is None
-                and (new_derivation_num is None or new_derivation_num in (0, 1))
+            is_new_parent_spelling = _is_group_parent_spelling(
+                new_derivation_num, new_treatment, new_replicate_label
             )
             if is_new_parent_spelling:
                 new_stem = new_base_id or new_id

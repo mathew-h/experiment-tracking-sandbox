@@ -593,6 +593,64 @@ def test_patch_rename_group_parent_with_replicates_returns_409(client, db_sessio
     assert unchanged_member.experiment_id == "SERUM_040a"
 
 
+def test_patch_rename_dash0_parent_with_replicates_returns_409(client, db_session):
+    """Regression (review gap): a group parent spelled '-0' shares its lettered
+    members' base_experiment_id via the BARE STEM, not its own literal id
+    string. The guard must resolve the canonical stem before querying members
+    so this spelling is blocked too, not just the bare-stem parent case."""
+    parent = _make_experiment(db_session, "SERUM_040-0", 9059)
+    member_a = _make_experiment(db_session, "SERUM_040a", 9060)
+    member_b = _make_experiment(db_session, "SERUM_040b", 9061)
+    db_session.expire_all()
+    member_a = db_session.query(Experiment).filter_by(id=member_a.id).one()
+    member_b = db_session.query(Experiment).filter_by(id=member_b.id).one()
+    assert member_a.parent_experiment_fk == parent.id  # sanity: lineage set on create
+    assert member_b.parent_experiment_fk == parent.id
+
+    resp = client.patch("/api/experiments/SERUM_040-0", json={"experiment_id": "SERUM_050"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "SERUM_040a" in detail
+    assert "SERUM_040b" in detail
+
+    db_session.expire_all()
+    unchanged_parent = db_session.query(Experiment).filter_by(id=parent.id).one()
+    assert unchanged_parent.experiment_id == "SERUM_040-0"
+    unchanged_a = db_session.query(Experiment).filter_by(id=member_a.id).one()
+    assert unchanged_a.parent_experiment_fk == parent.id
+    assert unchanged_a.experiment_id == "SERUM_040a"
+
+
+def test_patch_rename_lettered_member_not_blocked_by_parent_guard(client, db_session):
+    """Regression: renaming a LETTERED MEMBER (not the parent) must never be
+    blocked by the group-parent guard, even though its base_experiment_id
+    equals the parent's stem — the guard must gate on the OLD id itself being
+    a parent spelling, not merely on shared base_experiment_id."""
+    parent = _make_experiment(db_session, "SERUM_070", 9062)
+    _make_experiment(db_session, "SERUM_070b", 9063)
+    _make_experiment(db_session, "SERUM_070c", 9064)
+
+    resp = client.patch("/api/experiments/SERUM_070b", json={"experiment_id": "SERUM_070z"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["replicate_label"] == "z"
+    assert body["base_experiment_id"] == "SERUM_070"
+    assert body["parent_experiment_fk"] == parent.id
+
+
+def test_patch_rename_sequential_derivation_not_blocked_by_parent_guard(client, db_session):
+    """Regression: renaming a SEQUENTIAL re-run (e.g. SERUM_070-2) of a stem
+    that has lettered members must never be blocked — it is not a group
+    parent and the guard must not treat it as one."""
+    _make_experiment(db_session, "SERUM_080", 9065)
+    _make_experiment(db_session, "SERUM_080a", 9066)
+    _make_experiment(db_session, "SERUM_080-2", 9067)
+
+    resp = client.patch("/api/experiments/SERUM_080-2", json={"experiment_id": "SERUM_080-3"})
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "SERUM_080-3"
+
+
 def test_patch_rename_to_parent_spelling_backlinks_orphans(client, db_session):
     """Renaming an unrelated experiment INTO a group-parent spelling must
     back-link any pre-existing orphaned lettered derivations of that stem."""
