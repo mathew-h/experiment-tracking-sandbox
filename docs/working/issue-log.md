@@ -1150,3 +1150,12 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** yes — 10 new vitest assertions (3 tokens × 3 surfaces + ordering check), all passing; full frontend suite 107/107 pass; eslint clean
 - **Verification:** visually confirmed in Chrome (replicate group page, experiment detail Conditions/Results tabs, New Experiment form) — `Th` headers, condition labels, chevrons, and rollup chart axis/legend all legible and still read as chrome/secondary, not competing with data; no component-level color classes changed
 - **Decision logged:** no
+- **PR:** #93 → develop (merged)
+
+## 2026-07-28 | issue #89 — Grouped experiment view: hide empty conditions and round numeric values
+- **Files changed:**
+  - `frontend/src/pages/ReplicateGroup/index.tsx` — `formatValue` now routes numbers through a new `formatNumber` helper (rounds to 3dp, trims trailing zeros); added `hasValue` and filtered the shared-conditions `.map` to skip null/undefined/empty entries before rendering, instead of rendering them as `—`
+  - `frontend/src/pages/ReplicateGroup/__tests__/ReplicateGroupPage.test.tsx` — 4 new tests: null shared-condition fields suppressed, long float rounds to 3dp, integer condition renders without trailing decimal, divergent field still renders label + "varies" text with its shared value absent
+- **Tests added:** yes — ReplicateGroupPage suite 11/11 pass; full frontend suite 101/101 pass; eslint clean
+- **Decision logged:** no — no shared numeric formatter extracted to `frontend/src/utils/` (issue's "consider extracting" was optional; `ConditionsTab.tsx`'s `Row` doesn't yet need it since `total_ferrous_iron_g` isn't rendered there)
+- **PR:** #91 → develop
