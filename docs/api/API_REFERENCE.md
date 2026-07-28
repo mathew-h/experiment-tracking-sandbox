@@ -14,6 +14,8 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags |
 | GET | `/api/experiments/{experiment_id}/rollup` | Cross-replicate mean/median/std per timepoint bucket from `v_results_scalar_rollup` |
 | GET | `/api/experiments/{experiment_id}/replicate-group` | The lettered replicate set (parent + members) this experiment belongs to |
+| GET | `/api/experiments/groups/{base_id}` | Replicate group detail addressed by base-ID string (not an experiment row) — members, shared/divergent conditions, additives summary |
+| GET | `/api/experiments/groups/{base_id}/rollup` | Cross-replicate rollup for the group, addressed by base-ID string; same shape as `/rollup` above |
 | POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
 | POST | `/api/experiments/replicates` | Batch-create lettered replicates copying a base experiment's setup |
 | PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), and is_outlier |
@@ -123,6 +125,51 @@ The lettered replicate set (if any) that `experiment_id` belongs to.
 
 **Errors:**
 - `404 Not Found` — no experiment matches `experiment_id`
+
+### GET /api/experiments/groups/{base_id}
+
+Replicate group detail addressed by the base-ID **string** — `base_id` need not match any experiment row. Lettered-only replicate sets (the common case) have no parent row.
+
+**Auth:** Required (Firebase token)
+
+**Response `200`** (`ReplicateGroupDetailResponse`):
+```json
+{
+  "base_experiment_id": "SERUM_001",
+  "parent": { "id": 210, "experiment_id": "SERUM_001", "..." : "..." } ,
+  "members": [
+    { "id": 211, "experiment_id": "SERUM_001a", "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": { "rock_mass_g": 5.2 } }
+  ],
+  "member_count": 3,
+  "shared_conditions": { "temperature_c": 200.0 },
+  "divergent_fields": ["rock_mass_g"],
+  "additives_summary": "Mg(OH)2 5 g" ,
+  "additive_names": "Mg(OH)2",
+  "additives_diverge": false
+}
+```
+
+**Fields:**
+- `parent` — `null` when no parent row exists (orphan lettered set).
+- `members[].conditions` — only the fields whose values diverge from `shared_conditions`, per member.
+- `shared_conditions` / `divergent_fields` — condition fields identical vs. differing across all members.
+- `additives_summary` / `additive_names` — `null` when `additives_diverge` is `true` (members disagree on additives).
+
+**Errors:**
+- `404 Not Found` — `base_id` matches neither an experiment row nor any `base_experiment_id` value.
+
+### GET /api/experiments/groups/{base_id}/rollup
+
+Cross-replicate rollup for the group, addressed the same way as the detail endpoint above.
+
+**Auth:** Required (Firebase token)
+
+**Response `200`:** `list[RollupTimepointResponse]` — same shape as `GET /api/experiments/{experiment_id}/rollup`.
+
+**Errors:**
+- `404 Not Found` — same rule as the detail endpoint above.
+
+**Compatibility note:** `GET /{experiment_id}/replicate-group` and `GET /{experiment_id}/rollup` are unchanged (byte-identical responses) — both are now thin wrappers delegating to the same group resolver used by the two endpoints above.
 
 ### POST /api/experiments/replicates
 

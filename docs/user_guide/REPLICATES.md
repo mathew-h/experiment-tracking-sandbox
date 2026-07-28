@@ -50,6 +50,33 @@ sets are a/b/c, well under that cap.
 
 ---
 
+## Replicate Group View
+
+Every replicate group — including an orphan lettered set with no parent row — has its
+own page at `/experiments/groups/{base}` (e.g. `/experiments/groups/SERUM_001`). Reach
+it from the **Group {base}** link in the experiment detail header strip of any member.
+
+It shows:
+
+- A **members table** — one row per replicate (the parent, if one exists, plus every
+  lettered member), with status, outlier flag, and result count per row. Any condition
+  that differs from the rest of the group (e.g. actual rock mass) is called out per row.
+- **Shared conditions** — the fields identical across every member, shown once instead
+  of repeated per row.
+- An **additive summary** — a single summary line if every member's additives agree, or
+  a "varies" note if they don't.
+- The cross-replicate **rollup chart** (mean ± std per timepoint) — the same data as the
+  Grouped (n=N) mode on an individual member's Results tab.
+
+The page is **read-only**: "This is a grouped experiment view — you may only edit
+individual replicates." Edit a replicate's conditions, additives, or results from its
+own experiment page.
+
+This replaces the old header link to `/experiments/{base}`, which 404'd whenever the
+base ID had no parent row — the common case for lettered-only replicate sets.
+
+---
+
 ## Creating replicates
 
 Two ways to create lettered replicates of an existing experiment:
