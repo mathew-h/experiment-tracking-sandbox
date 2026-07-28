@@ -1138,3 +1138,15 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Files changed:** `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` (metric useState default `gross_nh4` -> `h2_umol`); `frontend/src/pages/ExperimentDetail/__tests__/GroupedResultsView.test.tsx` (new test pinning default to H2 (umol))
 - **Tests added:** yes — one vitest assertion pinning the selector default (select value + visible option text). ExperimentDetail suite 32/32 pass; eslint clean
 - **Decision logged:** no
+
+## 2026-07-28 | issue #88 — Raise text contrast: shift the ink ramp up one step
+- **Files changed:**
+  - `frontend/src/styles/tokens.css` — `--color-ink-secondary` #8BACC8 → #C5D9EA; `--color-ink-muted` #4d6e8a → #A3C2DC
+  - `frontend/tailwind.config.ts` — `theme.extend.colors.ink.secondary`/`.muted` same values
+  - `frontend/src/assets/brand.ts` — `colors.inkSecondary`/`inkMuted` same values (source of truth)
+  - `frontend/src/test/contrast.test.ts` — NEW: WCAG luminance/contrast regression test, asserts inkPrimary/inkSecondary/inkMuted each clear 4.5:1 against navyBase/navyRaised/navyOverlay (imports live values from `brand.ts`) and asserts strict luminance ordering (primary > secondary > muted)
+  - `docs/DESIGN.md` (+ synced `docs/project_context/DESIGN.md`) — added a "Text Hierarchy" table (didn't previously exist) with hex values, per-surface contrast ratios, and the 4.5:1 AA floor note
+- **Deviation from issue spec:** `ink.muted` was raised past the issue's originally proposed #8BACC8 (5.52:1 on `overlay`) to #A3C2DC (7.07–9.72:1) after user feedback that the Th/hint-text tier was still hard to read in practice at the AA floor; re-verified AAA-level contrast on the worst-case surface while keeping `ink.muted` distinctly below `ink.secondary` (order preserved)
+- **Tests added:** yes — 10 new vitest assertions (3 tokens × 3 surfaces + ordering check), all passing; full frontend suite 107/107 pass; eslint clean
+- **Verification:** visually confirmed in Chrome (replicate group page, experiment detail Conditions/Results tabs, New Experiment form) — `Th` headers, condition labels, chevrons, and rollup chart axis/legend all legible and still read as chrome/secondary, not competing with data; no component-level color classes changed
+- **Decision logged:** no
