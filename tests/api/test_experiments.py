@@ -1090,6 +1090,42 @@ class TestGroupedListMode:
         assert data["total"] == 1
         assert data["items"][0].get("replicates") is None
 
+    def test_sequential_rerun_not_absorbed_into_coexisting_orphan_group(self, client, db_session):
+        """The trap (brief TDD item 3): a naive COALESCE(base_experiment_id,
+        experiment_id) bucket key applied uniformly would wrongly pull a
+        sequential re-run (base_experiment_id == the stem, but
+        replicate_label IS NULL) into a co-existing orphan lettered group
+        that shares the same stem. GRPMIX_001a/b/c (orphan, no parent row)
+        and GRPMIX_001-2 (sequential re-run) must remain two separate
+        top-level buckets."""
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"GRPMIX_001{letter}", experiment_number=9726 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.add(Experiment(experiment_id="GRPMIX_001-2", experiment_number=9729,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.commit()
+
+        resp = client.get("/api/experiments?group_replicates=true&search=GRPMIX_001")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        top_level_ids = {i["experiment_id"] for i in data["items"]}
+        assert top_level_ids == {"GRPMIX_001a", "GRPMIX_001-2"}
+        assert "GRPMIX_001b" not in top_level_ids
+        assert "GRPMIX_001c" not in top_level_ids
+
+        by_id = {i["experiment_id"]: i for i in data["items"]}
+
+        group_item = by_id["GRPMIX_001a"]
+        assert {r["experiment_id"] for r in group_item["replicates"]} == {
+            "GRPMIX_001b", "GRPMIX_001c",
+        }
+
+        seq_item = by_id["GRPMIX_001-2"]
+        assert seq_item.get("replicates") is None
+
 
 class TestCreateReplicatesEndpoint:
     def test_create_replicates_batch(self, client, db_session):
