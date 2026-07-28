@@ -38,15 +38,23 @@ The Experiments list has a **Group replicates** toggle (on by default). When on:
 On an experiment's **Results** tab, if the experiment belongs to a replicate set, a
 **Grouped (n=N)** mode appears alongside the normal per-vial view. It shows:
 
-- A chart of the selected metric (gross/net NH₄, NH₄ or H₂ g/t, H₂ µmol, Fe²⁺ yield, pH)
-  with the cross-replicate mean line and error bars (± 1 std) per timepoint, plus each
-  individual replicate's series overlaid (toggle-able) so you can spot an outlier vial.
+- A chart of the selected metric — **H₂ (ppm)** (the default), **H₂ (µmol)**, **H₂ (g/t)**,
+  **Fe²⁺ → H₂ (%)**, or **pH** — with the cross-replicate mean line and error bars (± 1 std)
+  per timepoint, plus each individual replicate's series overlaid (toggle-able) so you can
+  spot an outlier vial.
 - A table with the same mean/median/std/n columns per timepoint.
 - Click through from an individual series or table row to that replicate's own
   detail page to inspect its raw data.
 
 Individual series overlays are capped at 4 lines on the chart — in practice replicate
 sets are a/b/c, well under that cap.
+
+> **H₂-focused views.** Both the per-vial Results tab and the grouped rollup are
+> hydrogen-first: they show only H₂ metrics, Fe²⁺ → H₂ (%), pH, and conductivity. Ammonium
+> figures (gross/net NH₄, NH₄ g/t, Fe²⁺ → NH₃ (%)) are **not** deleted — they remain in the
+> database, the calculation engine, the `v_results_scalar_rollup` view, and the Power BI
+> datasets, and are still recorded through Bulk Uploads and the Add Results form. Only the
+> on-screen results and rollup tables dropped the NH₄ columns.
 
 ---
 

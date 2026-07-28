@@ -54,25 +54,41 @@ const baseResult: ResultWithFlags = {
   xrd_run_date: null,
 }
 
-describe('ResultsTab — new columns', () => {
-  it('renders Fe²⁺ NH₃ (%) column header', async () => {
+describe('ResultsTab — H2-first columns', () => {
+  it('renders the H₂ (ppm) column header', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('Fe²⁺ NH₃ (%)')).toBeInTheDocument()
+    expect(await screen.findByText('H₂ (ppm)')).toBeInTheDocument()
+  })
+
+  it('renders the H₂ (ppm) value from the /results payload', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, h2_concentration: 512 },
+    ])
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    expect(await screen.findByText('512.0')).toBeInTheDocument()
+  })
+
+  it('renders no NH₄ text anywhere in the table', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, gross_ammonium_concentration_mM: 3.2, ferrous_iron_yield_nh3_pct: 24.6 },
+    ])
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    await screen.findByText('T+7')
+    expect(screen.queryByText(/NH₄/)).not.toBeInTheDocument()
+  })
+
+  it('does not render the Background NH₄ action-bar button', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    await screen.findByText('T+7')
+    expect(screen.queryByText(/Background NH₄/)).not.toBeInTheDocument()
   })
 
   it('renders Fe²⁺ H₂ (%) column header', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
     expect(await screen.findByText('Fe²⁺ H₂ (%)')).toBeInTheDocument()
-  })
-
-  it('renders 24.6% for ferrous_iron_yield_nh3_pct = 24.6', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, ferrous_iron_yield_nh3_pct: 24.6 },
-    ])
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('24.6%')).toBeInTheDocument()
   })
 
   it('renders 16.8% for ferrous_iron_yield_h2_pct = 16.8', async () => {

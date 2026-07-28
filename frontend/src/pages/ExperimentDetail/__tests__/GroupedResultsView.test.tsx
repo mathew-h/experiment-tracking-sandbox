@@ -32,7 +32,7 @@ const ROLLUP: RollupTimepoint[] = [
     base_experiment_id: 'SERUM_001', time_post_reaction_bucket_days: 7, n_replicates: 3,
     mean_gross_ammonium_mM: 2.0, median_gross_ammonium_mM: 2.0, sd_gross_ammonium_mM: 1.0,
     mean_net_ammonium_mM: 1.5, sd_net_ammonium_mM: 0.5,
-    mean_h2_ppm: null, sd_h2_ppm: null,
+    mean_h2_ppm: 500.0, sd_h2_ppm: 25.0,
     mean_h2_micromoles: null, sd_h2_micromoles: null,
     mean_h2_grams_per_ton: 12.3, sd_h2_grams_per_ton: 2.5,
     mean_fe_yield_h2_pct: 1.23, sd_fe_yield_h2_pct: 0.45,
@@ -76,10 +76,27 @@ describe('GroupedResultsView', () => {
     expect(experimentsApi.getGroupRollup).toHaveBeenCalledWith('SERUM_001')
   })
 
-  it('renders rollup stats table with mean ± sd and n', async () => {
+  it('renders mean_h2_ppm as mean ± sd with n', async () => {
     render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
-    expect(screen.getByText('2.00 ± 1.00')).toBeInTheDocument()
+    expect(screen.getByText('500.0 ± 25.0')).toBeInTheDocument()
+  })
+
+  it('renders — when mean_h2_ppm is null', async () => {
+    vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue([
+      { ...ROLLUP[0], mean_h2_ppm: null, sd_h2_ppm: null },
+    ])
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    // Table columns: Time, n, H₂ (ppm), H₂ (µmol), H₂ (g/t), Fe²⁺ → H₂ (%), pH
+    const cells = screen.getAllByRole('cell')
+    expect(cells[2]).toHaveTextContent('—')
+  })
+
+  it('renders no NH₄ column headers in the rollup table', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.queryByRole('columnheader', { name: /NH₄/ })).not.toBeInTheDocument()
   })
 
   it('links to each replicate page for drill-in', async () => {
@@ -90,12 +107,20 @@ describe('GroupedResultsView', () => {
     )
   })
 
-  it('defaults the metric selector to H₂ (µmol)', async () => {
+  it('defaults the metric selector to H₂ (ppm)', async () => {
     render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
-    expect(select.value).toBe('h2_umol')
-    expect(select.options[select.selectedIndex].text).toBe('H₂ (µmol)')
+    expect(select.value).toBe('h2_ppm')
+    expect(select.options[select.selectedIndex].text).toBe('H₂ (ppm)')
+  })
+
+  it('lists exactly the five H₂-first metric options', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
+    const texts = Array.from(select.options).map((o) => o.text)
+    expect(texts).toEqual(['H₂ (ppm)', 'H₂ (µmol)', 'H₂ (g/t)', 'Fe²⁺ → H₂ (%)', 'pH'])
   })
 
   it('changes plotted metric via the selector', async () => {
