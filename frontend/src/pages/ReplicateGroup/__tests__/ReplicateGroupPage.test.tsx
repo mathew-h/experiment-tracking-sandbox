@@ -142,4 +142,65 @@ describe('ReplicateGroupPage', () => {
     await waitFor(() => expect(experimentsApi.getGroup).toHaveBeenCalledWith('SERUM_001'))
     await waitFor(() => expect(experimentsApi.getGroupRollup).toHaveBeenCalledWith('SERUM_001'))
   })
+
+  it('does not render shared-condition labels whose value is null', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      shared_conditions: {
+        experiment_type: 'Serum',
+        temperature_c: 90,
+        co2_partial_pressure_MPa: null,
+        confining_pressure: null,
+      },
+    })
+    renderAtBase('SERUM_001')
+
+    await waitFor(() => expect(screen.getByText('Temperature C:')).toBeInTheDocument())
+    expect(screen.queryByText('Co2 Partial Pressure MPa:')).not.toBeInTheDocument()
+    expect(screen.queryByText('Confining Pressure:')).not.toBeInTheDocument()
+  })
+
+  it('rounds a long float to 3 decimal places', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      shared_conditions: {
+        ...ORPHAN_GROUP.shared_conditions,
+        total_ferrous_iron_g: 0.4088873141807,
+      },
+    })
+    renderAtBase('SERUM_001')
+
+    await waitFor(() => expect(screen.getByText('0.409')).toBeInTheDocument())
+  })
+
+  it('renders an integer-valued condition without a trailing decimal', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      shared_conditions: {
+        ...ORPHAN_GROUP.shared_conditions,
+        temperature_c: 90,
+        initial_ph: 8,
+      },
+    })
+    renderAtBase('SERUM_001')
+
+    await waitFor(() => expect(screen.getByText('90')).toBeInTheDocument())
+    expect(screen.getByText('8')).toBeInTheDocument()
+    expect(screen.queryByText('90.000')).not.toBeInTheDocument()
+  })
+
+  it('still renders a divergent field label and the "varies" text when its shared value is absent', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      divergent_fields: ['temperature_c'],
+      members: ORPHAN_GROUP.members.map((m, i) => ({
+        ...m,
+        conditions: { temperature_c: 60 + i },
+      })),
+    })
+    renderAtBase('SERUM_001')
+
+    await waitFor(() => expect(screen.getByText('Temperature C:')).toBeInTheDocument())
+    expect(screen.getByText('varies — see members table')).toBeInTheDocument()
+  })
 })

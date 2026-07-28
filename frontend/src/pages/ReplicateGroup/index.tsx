@@ -35,8 +35,19 @@ function formatFieldName(field: string): string {
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (typeof value === 'number') return formatNumber(value)
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
+}
+
+/** Rounds to 3 decimal places and trims trailing zeros (0.40888731418072486 -> "0.409", 90 -> "90"). */
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return String(value)
+  return parseFloat(value.toFixed(3)).toString()
+}
+
+function hasValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== ''
 }
 
 function isMemberDetail(
@@ -146,12 +157,14 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
         <CardHeader label="Conditions" />
         <CardBody>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
-            {Object.entries(group.shared_conditions).map(([field, value]) => (
-              <div key={field} className="text-xs">
-                <span className="text-ink-muted">{formatFieldName(field)}: </span>
-                <span className="font-mono-data text-ink-primary">{formatValue(value)}</span>
-              </div>
-            ))}
+            {Object.entries(group.shared_conditions)
+              .filter(([, value]) => hasValue(value))
+              .map(([field, value]) => (
+                <div key={field} className="text-xs">
+                  <span className="text-ink-muted">{formatFieldName(field)}: </span>
+                  <span className="font-mono-data text-ink-primary">{formatValue(value)}</span>
+                </div>
+              ))}
             {group.divergent_fields.map((field) => (
               <div key={field} className="text-xs">
                 <span className="text-ink-muted">{formatFieldName(field)}: </span>
