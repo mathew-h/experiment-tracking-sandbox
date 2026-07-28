@@ -47,7 +47,7 @@ These parsers handle real instrument output formats with edge cases accumulated 
 
 | Parser | Handles |
 |---|---|
-| `new_experiments.py` | Multi-sheet Excel, experiment lineage parsing |
+| `new_experiments.py` | Multi-sheet Excel, experiment lineage parsing |¹
 | `scalar_results.py` | Solution chemistry Excel, partial updates |
 | `icp_service.py` | Raw ICP-OES CSV, delimiter detection, dilution correction |
 | `actlabs_titration_data.py` | External titration lab reports |
@@ -64,6 +64,8 @@ These parsers handle real instrument output formats with edge cases accumulated 
 | `metric_groups.py` | Grouped metric upload templates |
 | `timepoint_modifications.py` | Timepoint-level record modifications |
 | `master_bulk_upload.py` | Dispatcher routing uploads to the correct parser |
+
+¹ **Rename-path ordering contract (issue #86, changed with explicit sign-off).** The experiments-sheet loop now (a) flushes a rename's new `experiment_id` **before** recomputing lineage, so the group-parent lookup resolves against the new ID rather than the row's stale old ID (which could otherwise self-match and raise `CircularDependencyError` under the production `autoflush=False` session), and (b) wraps each row in a `db.begin_nested()` SAVEPOINT so a single failed row rolls back only itself instead of poisoning the whole batch with cascading `PendingRollbackError`. Preserve both properties when touching this loop. See the lineage-section note in `MODELS.md` and `tests/services/bulk_uploads/test_new_experiments_rename_lineage.py`.
 
 ## Alembic Migration History
 

@@ -178,6 +178,16 @@ class NewExperimentsUploadService:
             df_exp.columns = [normalize_column(c) for c in df_exp.columns]
 
             for idx, row in df_exp.iterrows():
+                # Per-row savepoint isolation (issue #86, Defect B): a failed flush
+                # anywhere in this row's processing is confined to its own SAVEPOINT
+                # and rolled back, leaving the session usable for the remaining rows.
+                # Without this, one bad row poisoned the whole batch with cascading
+                # PendingRollbackError and buried the real cause. row_ok stays False
+                # for any early `continue` (all of which are pre-write skips) and for
+                # any exception, so the finally rolls those back; it is set True only
+                # when the row's body runs to completion.
+                savepoint = db.begin_nested()
+                row_ok = False
                 try:
                     exp_id = str(row.get('experiment_id') or '').strip()
                     if not exp_id:
@@ -385,12 +395,19 @@ class NewExperimentsUploadService:
                         if old_experiment_id and experiment.experiment_id != exp_id:
                             try:
                                 experiment.experiment_id = exp_id
+                                # Persist the rename BEFORE recomputing lineage (issue #86, Defect A1).
+                                # autoflush is off on the production session, so update_experiment_lineage's
+                                # group-parent SELECT would otherwise run against the row's OLD id and could
+                                # match the row against itself (self-parent -> CircularDependencyError). Flush
+                                # first so the lookup resolves against the NEW id. UNIQUE-constraint violations
+                                # now surface here and are still caught by the handler below.
+                                db.flush()
                                 info_messages.append(f"Renamed experiment: '{old_experiment_id}' -> '{exp_id}'")
                                 renamed_experiment_ids.add(exp_id)
-                                
+
                                 # Recalculate lineage fields based on new experiment_id
                                 update_experiment_lineage(db, experiment)
-                                
+
                                 # Update denormalized experiment_id in related ExperimentNotes records
                                 notes_to_update = db.query(ExperimentNotes).filter(
                                     ExperimentNotes.experiment_fk == experiment.id
@@ -457,6 +474,9 @@ class NewExperimentsUploadService:
                         )
                         db.add(note)
 
+                    # Row body completed without exception or early `continue`.
+                    row_ok = True
+
                 except Exception as e:
                     # Add more detailed error info including which step failed
                     error_detail = f"{type(e).__name__}: {str(e)}"
@@ -468,8 +488,21 @@ class NewExperimentsUploadService:
                             failed_experiment_ids.add(exp_id_norm)  # Use normalized ID for tracking
                         elif 'exp_id' in locals() and exp_id:
                             warnings.append(f"[experiments] Row {idx+2}: Failed processing experiment_id '{exp_id}'")
+                        # A row discarded by savepoint rollback must not leave its new
+                        # ID behind in the renamed-tracking set (issue #86, Defect B).
+                        if 'exp_id' in locals() and exp_id:
+                            renamed_experiment_ids.discard(exp_id)
                     except:
                         pass
+                finally:
+                    # Commit the row's savepoint on success; otherwise roll it back so
+                    # the session is usable for the next row. rollback() is also the
+                    # required recovery after a failed flush inside the savepoint, and
+                    # is a harmless no-op for the pre-write `continue` skip paths.
+                    if row_ok:
+                        savepoint.commit()
+                    else:
+                        savepoint.rollback()
         else:
             errors.append("Missing required 'experiments' sheet")
 
