@@ -15,7 +15,11 @@ from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
+    ReplicateGroupMemberDetail, ReplicateGroupDetailResponse,
     ReplicateCreateRequest, ReplicateCreateResponse,
+)
+from backend.services.replicate_groups import (
+    GroupData, group_exists, resolve_group, resolve_rollup_rows,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
@@ -235,6 +239,74 @@ def get_next_experiment_ids(
     return result
 
 
+def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
+    """Map a GroupMemberData (backend/services/replicate_groups.py) to the
+    API schema. `conditions` carries ONLY the group's divergent fields for
+    this member — shared fields live on the parent response instead."""
+    exp = member.experiment
+    return ReplicateGroupMemberDetail(
+        id=exp.id,
+        experiment_id=exp.experiment_id,
+        replicate_label=exp.replicate_label,
+        status=exp.status,
+        is_outlier=exp.is_outlier,
+        id_timepoint_days=exp.id_timepoint_days,
+        researcher=exp.researcher,
+        date=exp.date,
+        result_count=member.result_count,
+        conditions=member.divergent_conditions,
+    )
+
+
+def _group_data_to_detail_response(group: GroupData) -> ReplicateGroupDetailResponse:
+    return ReplicateGroupDetailResponse(
+        base_experiment_id=group.base_experiment_id,
+        parent=ReplicateGroupMember.model_validate(group.parent) if group.parent else None,
+        members=[_group_member_to_detail(m) for m in group.members],
+        member_count=len(group.members),
+        shared_conditions=group.shared_conditions,
+        divergent_fields=group.divergent_fields,
+        additives_summary=group.additives_summary,
+        additive_names=group.additive_names,
+        additives_diverge=group.additives_diverge,
+    )
+
+
+# NOTE: these two routes MUST stay registered before any "/{experiment_id}..."
+# route below — FastAPI matches in declaration order, and /{experiment_id}
+# would otherwise capture the literal path segment "groups".
+@router.get("/groups/{base_id}", response_model=ReplicateGroupDetailResponse)
+def get_replicate_group_detail(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReplicateGroupDetailResponse:
+    """The full replicate group for a base-ID string.
+
+    Addressed by string, not by row: `base_id` need not name an experiment
+    (lettered-only replicate sets with no group-parent row are the common
+    case). 404 only when base_id matches neither an experiment row nor any
+    base_experiment_id value.
+    """
+    group = resolve_group(db, base_id)
+    if group.parent is None and not group.members:
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    return _group_data_to_detail_response(group)
+
+
+@router.get("/groups/{base_id}/rollup", response_model=list[RollupTimepointResponse])
+def get_group_rollup(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[RollupTimepointResponse]:
+    """Cross-replicate mean/median/std per timepoint for a base-ID string."""
+    if not group_exists(db, base_id):
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    rows = resolve_rollup_rows(db, base_id)
+    return [RollupTimepointResponse(**dict(r)) for r in rows]
+
+
 @router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
 def get_experiment_results(
     experiment_id: str,
@@ -308,14 +380,7 @@ def get_experiment_rollup(
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
     base = exp.base_experiment_id or exp.experiment_id
-    rows = db.execute(
-        text("""
-            SELECT * FROM v_results_scalar_rollup
-            WHERE base_experiment_id = :base
-            ORDER BY time_post_reaction_bucket_days
-        """),
-        {"base": base},
-    ).mappings().all()
+    rows = resolve_rollup_rows(db, base)
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
@@ -332,30 +397,11 @@ def get_replicate_group(
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
     base = exp.base_experiment_id or exp.experiment_id
-    parent = exp if exp.replicate_label is None else exp.parent
-    if parent is not None:
-        members = db.execute(
-            select(Experiment)
-            .where(
-                Experiment.parent_experiment_fk == parent.id,
-                Experiment.replicate_label.isnot(None),
-            )
-            .order_by(Experiment.replicate_label.asc())
-        ).scalars().all()
-    else:
-        # Orphan member: parent row doesn't exist yet; list siblings by base stem.
-        members = db.execute(
-            select(Experiment)
-            .where(
-                Experiment.base_experiment_id == base,
-                Experiment.replicate_label.isnot(None),
-            )
-            .order_by(Experiment.replicate_label.asc())
-        ).scalars().all()
+    group = resolve_group(db, base)
     return ReplicateGroupResponse(
-        base_experiment_id=base,
-        parent=ReplicateGroupMember.model_validate(parent) if parent else None,
-        members=[ReplicateGroupMember.model_validate(m) for m in members],
+        base_experiment_id=group.base_experiment_id,
+        parent=ReplicateGroupMember.model_validate(group.parent) if group.parent else None,
+        members=[ReplicateGroupMember.model_validate(m.experiment) for m in group.members],
     )
 
 

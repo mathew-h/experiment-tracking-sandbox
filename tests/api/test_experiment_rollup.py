@@ -85,7 +85,14 @@ class TestRollupEndpoint:
 
 
 class TestReplicateGroupEndpoint:
-    def test_group_from_parent_and_member(self, client, db_session):
+    """Issue #87: /replicate-group is now a thin wrapper over the shared
+    replicate_groups.resolve_group() service, which also reads the additive
+    reporting views (unused by this endpoint's response, but part of the one
+    shared code path) — hence `reporting_views` on every non-empty-group case,
+    matching the pattern TestRollupEndpoint already uses below. The asserted
+    values are unchanged from before the refactor."""
+
+    def test_group_from_parent_and_member(self, client, db_session, reporting_views):
         parent = _make_experiment(db_session, "RGRP_001", 9770)
         for i, letter in enumerate("ab"):
             _make_experiment(db_session, f"RGRP_001{letter}", 9771 + i)
@@ -103,7 +110,7 @@ class TestReplicateGroupEndpoint:
         assert data["members"] == []
         assert data["parent"]["experiment_id"] == "RGRP_SOLO_001"
 
-    def test_group_orphan_member_lists_siblings(self, client, db_session):
+    def test_group_orphan_member_lists_siblings(self, client, db_session, reporting_views):
         _make_experiment(db_session, "RGRP_ORPH_001a", 9790)
         _make_experiment(db_session, "RGRP_ORPH_001b", 9791)
         db_session.commit()
@@ -111,7 +118,7 @@ class TestReplicateGroupEndpoint:
         assert data["parent"] is None
         assert [m["replicate_label"] for m in data["members"]] == ["a", "b"]
 
-    def test_replicate_group_exposes_is_outlier(self, client, db_session):
+    def test_replicate_group_exposes_is_outlier(self, client, db_session, reporting_views):
         _make_experiment(db_session, "RGRP_OUT_001", 9795)
         flagged = _make_experiment(db_session, "RGRP_OUT_001a", 9796)
         flagged.is_outlier = True

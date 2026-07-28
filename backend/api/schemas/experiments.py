@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from database.models.enums import ExperimentStatus
 
@@ -136,6 +136,38 @@ class ReplicateGroupResponse(BaseModel):
     base_experiment_id: str
     parent: Optional[ReplicateGroupMember] = None
     members: list[ReplicateGroupMember] = []
+
+
+class ReplicateGroupMemberDetail(ReplicateGroupMember):
+    """A ReplicateGroupMember plus per-member detail for the group page:
+    timepoint, researcher/date, result count, and — for fields the group's
+    conditions diverge on — this member's own value under `conditions`.
+    `conditions` holds ONLY the divergent fields; fields shared across the
+    whole group live on the parent response's `shared_conditions` instead.
+    """
+    id_timepoint_days: Optional[float] = None
+    researcher: Optional[str] = None
+    date: Optional[datetime] = None
+    result_count: int = 0
+    conditions: dict[str, Any] = {}
+
+
+class ReplicateGroupDetailResponse(BaseModel):
+    """Response for GET /api/experiments/groups/{base_id}.
+
+    Addressed by the base-ID *string*, which is not guaranteed to name an
+    experiment row — `parent` is None when no group-parent row exists
+    (the common case for lettered-only replicate sets).
+    """
+    base_experiment_id: str
+    parent: Optional[ReplicateGroupMember] = None
+    members: list[ReplicateGroupMemberDetail] = []
+    member_count: int = 0
+    shared_conditions: dict[str, Any] = {}
+    divergent_fields: list[str] = []
+    additives_summary: Optional[str] = None
+    additive_names: Optional[str] = None
+    additives_diverge: bool = False
 
 
 class ReplicateCreateRequest(BaseModel):
