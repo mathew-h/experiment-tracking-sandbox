@@ -1118,3 +1118,18 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   - `docs/issues/issue-bulk-rename-circular-dependency.md` — reference issue doc
 - **Tests added:** yes — 5 (A2 self-parent unit, A rename-into-replicate-stem, A sibling triplet a/b/c, B one-bad-row isolation, B real-exception-not-PendingRollbackError). Regression: bulk_uploads dir 187, root rename+lineage 22, API experiments 75, API bulk-uploads 71 — all pass
 - **Decision logged:** yes — `docs/working/decisions.md` (2026-07-28)
+
+## 2026-07-28 | issue #87 — Replicate group view (dead base-experiment link, split list grouping, rename lineage loss)
+- **Files changed:**
+  - `backend/services/replicate_groups.py` — NEW: `resolve_group`/`resolve_rollup_rows`/`group_exists`; base-ID-string group resolution (parent via `find_replicate_group_parent`, members by `base_experiment_id` + `replicate_label IS NOT NULL`, shared/divergent condition comparison excluding reserved+deprecated fields, additive-view divergence)
+  - `backend/api/schemas/experiments.py` — NEW `ReplicateGroupMemberDetail`, `ReplicateGroupDetailResponse`
+  - `backend/api/routers/experiments.py` — NEW `GET /groups/{base_id}` + `/groups/{base_id}/rollup` (declared before `/{experiment_id}` catch-all); refactored `/{experiment_id}/rollup` → `resolve_rollup_rows`; `/{experiment_id}/replicate-group` kept BYTE-IDENTICAL (deliberately not delegated); rename branch now recomputes lineage (flush-new-id → `update_experiment_lineage`, issue-#86 ordering) + `409` parent-rename guard gated on `_is_group_parent_spelling` (bare stem/-0/-1, no over-fire on members/sequential) + orphan back-link; grouped-list mode rewritten (bucket lettered members on `COALESCE(base,experiment_id)`, `-0`/`-1` parents on stem, sequential/treatment re-runs stand alone; window-fn representative)
+  - `frontend/src/api/experiments.ts` — `ReplicateGroupDetail`/`ReplicateGroupMemberDetail` types, `getGroup`/`getGroupRollup`
+  - `frontend/src/pages/ReplicateGroup/index.tsx` — NEW read-only group page (members table, shared/`varies` conditions, additives, rollup, read-only notice)
+  - `frontend/src/pages/ExperimentDetail/index.tsx` — dead `/experiments/{base}` link → group strip (sibling chips keyed by id, `Group` link → `/experiments/groups/{base}`)
+  - `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` — prop `experimentId`→`baseExperimentId`, repointed to group endpoints with new cache keys; `ResultsTab.tsx` call site
+  - `frontend/src/App.tsx` — route `/experiments/groups/:baseId`
+  - `.claude/rules/MODELS.md`, `docs/api/API_REFERENCE.md`, `docs/user_guide/REPLICATES.md` (+ auto-synced `docs/project_context/` copies) — group-view + endpoint docs
+- **Tests added:** yes — backend: `tests/api/test_replicate_group_detail.py` (NEW, group resource + route ordering + 404 + `-t` shared-letter + divergent conditions/additives), wrapper byte-identical + rename-lineage + grouped-list (orphan collapse, sequential-not-absorbed, `-0`/`-1` parent grouping) suites in `tests/api/test_experiments.py` / `test_experiment_rollup.py`; frontend: `ReplicateGroupPage.test.tsx`, `GroupStrip.test.tsx`, updated `GroupedResultsView.test.tsx`. tests/api 397 pass; full backend 1009 pass (3 pre-existing pg_backup env failures unrelated); frontend vitest 96/96. Chrome DevTools e2e PASS.
+- **Decision logged:** no — key call recorded in commits/ledger: `/{experiment_id}/replicate-group` wrapper kept byte-identical (issue-owner decision) rather than delegating; 2 observational minors accepted (parent row excluded from condition divergence; letter+sequential re-run groups under stem in list mode)
+- **Schema change:** none. No migration, no new dependency.

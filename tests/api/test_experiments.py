@@ -530,6 +530,150 @@ def test_patch_rename_syncs_external_analysis(client, db_session):
     assert analysis.experiment_id == "ANALYSIS_SYNC_DST_001"
 
 
+# --- #87 Phase 4 (D3): rename recomputes replicate lineage ---
+
+def test_patch_rename_same_stem_sets_replicate_lineage(client, db_session):
+    """Renaming a plain experiment into a lettered spelling of an EXISTING
+    stem's parent must set replicate_label and link parent_experiment_fk,
+    and the vial must then show up in its replicate group."""
+    parent = _make_experiment(db_session, "SERUM_020", 9050)
+    _make_experiment(db_session, "RENAME_INTO_REPL_SRC", 9051)
+
+    resp = client.patch(
+        "/api/experiments/RENAME_INTO_REPL_SRC",
+        json={"experiment_id": "SERUM_020b"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["replicate_label"] == "b"
+    assert body["base_experiment_id"] == "SERUM_020"
+    assert body["parent_experiment_fk"] == parent.id
+
+    group_resp = client.get("/api/experiments/SERUM_020b/replicate-group")
+    assert group_resp.status_code == 200
+    group = group_resp.json()
+    assert group["parent"]["experiment_id"] == "SERUM_020"
+    labels = [m["replicate_label"] for m in group["members"]]
+    assert "b" in labels
+
+
+def test_patch_rename_across_stems_rewrites_base_experiment_id(client, db_session):
+    """Renaming a lettered replicate of one stem into a lettered spelling of
+    a DIFFERENT stem must rewrite base_experiment_id to the new stem."""
+    _make_experiment(db_session, "SERUM_020", 9052)
+    _make_experiment(db_session, "SERUM_020c", 9053)
+
+    resp = client.patch(
+        "/api/experiments/SERUM_020c",
+        json={"experiment_id": "SERUM_030c"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["base_experiment_id"] == "SERUM_030"
+    assert resp.json()["replicate_label"] == "c"
+
+
+def test_patch_rename_group_parent_with_replicates_returns_409(client, db_session):
+    """Renaming a group parent that has lettered members is blocked, and
+    nothing about the parent or its members is mutated."""
+    parent = _make_experiment(db_session, "SERUM_040", 9054)
+    member = _make_experiment(db_session, "SERUM_040a", 9055)
+    db_session.expire_all()
+    member = db_session.query(Experiment).filter_by(id=member.id).one()
+    assert member.parent_experiment_fk == parent.id  # sanity: lineage set on create
+
+    resp = client.patch("/api/experiments/SERUM_040", json={"experiment_id": "SERUM_050"})
+    assert resp.status_code == 409
+    assert "SERUM_040a" in resp.json()["detail"]
+
+    db_session.expire_all()
+    unchanged_parent = db_session.query(Experiment).filter_by(id=parent.id).one()
+    assert unchanged_parent.experiment_id == "SERUM_040"
+    unchanged_member = db_session.query(Experiment).filter_by(id=member.id).one()
+    assert unchanged_member.parent_experiment_fk == parent.id
+    assert unchanged_member.experiment_id == "SERUM_040a"
+
+
+def test_patch_rename_dash0_parent_with_replicates_returns_409(client, db_session):
+    """Regression (review gap): a group parent spelled '-0' shares its lettered
+    members' base_experiment_id via the BARE STEM, not its own literal id
+    string. The guard must resolve the canonical stem before querying members
+    so this spelling is blocked too, not just the bare-stem parent case."""
+    parent = _make_experiment(db_session, "SERUM_040-0", 9059)
+    member_a = _make_experiment(db_session, "SERUM_040a", 9060)
+    member_b = _make_experiment(db_session, "SERUM_040b", 9061)
+    db_session.expire_all()
+    member_a = db_session.query(Experiment).filter_by(id=member_a.id).one()
+    member_b = db_session.query(Experiment).filter_by(id=member_b.id).one()
+    assert member_a.parent_experiment_fk == parent.id  # sanity: lineage set on create
+    assert member_b.parent_experiment_fk == parent.id
+
+    resp = client.patch("/api/experiments/SERUM_040-0", json={"experiment_id": "SERUM_050"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "SERUM_040a" in detail
+    assert "SERUM_040b" in detail
+
+    db_session.expire_all()
+    unchanged_parent = db_session.query(Experiment).filter_by(id=parent.id).one()
+    assert unchanged_parent.experiment_id == "SERUM_040-0"
+    unchanged_a = db_session.query(Experiment).filter_by(id=member_a.id).one()
+    assert unchanged_a.parent_experiment_fk == parent.id
+    assert unchanged_a.experiment_id == "SERUM_040a"
+
+
+def test_patch_rename_lettered_member_not_blocked_by_parent_guard(client, db_session):
+    """Regression: renaming a LETTERED MEMBER (not the parent) must never be
+    blocked by the group-parent guard, even though its base_experiment_id
+    equals the parent's stem — the guard must gate on the OLD id itself being
+    a parent spelling, not merely on shared base_experiment_id."""
+    parent = _make_experiment(db_session, "SERUM_070", 9062)
+    _make_experiment(db_session, "SERUM_070b", 9063)
+    _make_experiment(db_session, "SERUM_070c", 9064)
+
+    resp = client.patch("/api/experiments/SERUM_070b", json={"experiment_id": "SERUM_070z"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["replicate_label"] == "z"
+    assert body["base_experiment_id"] == "SERUM_070"
+    assert body["parent_experiment_fk"] == parent.id
+
+
+def test_patch_rename_sequential_derivation_not_blocked_by_parent_guard(client, db_session):
+    """Regression: renaming a SEQUENTIAL re-run (e.g. SERUM_070-2) of a stem
+    that has lettered members must never be blocked — it is not a group
+    parent and the guard must not treat it as one."""
+    _make_experiment(db_session, "SERUM_080", 9065)
+    _make_experiment(db_session, "SERUM_080a", 9066)
+    _make_experiment(db_session, "SERUM_080-2", 9067)
+
+    resp = client.patch("/api/experiments/SERUM_080-2", json={"experiment_id": "SERUM_080-3"})
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "SERUM_080-3"
+
+
+def test_patch_rename_to_parent_spelling_backlinks_orphans(client, db_session):
+    """Renaming an unrelated experiment INTO a group-parent spelling must
+    back-link any pre-existing orphaned lettered derivations of that stem."""
+    orphan_a = _make_experiment(db_session, "SERUM_060a", 9056)
+    orphan_b = _make_experiment(db_session, "SERUM_060b", 9057)
+    db_session.expire_all()
+    orphan_a = db_session.query(Experiment).filter_by(id=orphan_a.id).one()
+    orphan_b = db_session.query(Experiment).filter_by(id=orphan_b.id).one()
+    assert orphan_a.parent_experiment_fk is None
+    assert orphan_b.parent_experiment_fk is None
+
+    _make_experiment(db_session, "STAGE_060", 9058)
+    resp = client.patch("/api/experiments/STAGE_060", json={"experiment_id": "SERUM_060"})
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    new_parent = db_session.query(Experiment).filter_by(experiment_id="SERUM_060").one()
+    a = db_session.query(Experiment).filter_by(id=orphan_a.id).one()
+    b = db_session.query(Experiment).filter_by(id=orphan_b.id).one()
+    assert a.parent_experiment_fk == new_parent.id
+    assert b.parent_experiment_fk == new_parent.id
+
+
 def test_patch_experiment_date(client, db_session):
     """PATCH with a valid ISO date string updates the experiment's date field."""
     _make_experiment(db_session, "DATE_PATCH_001", 9020)
@@ -898,6 +1042,117 @@ class TestGroupedListMode:
         data = resp.json()
         assert data["total"] == 2
         assert len(data["items"]) == 1
+
+    def test_orphan_lettered_set_collapses_to_one_row(self, client, db_session):
+        """No parent row exists for GRP_ORPHSET_001 -- a/b/c must still
+        collapse into one bucket (issue #87 D2 core fix), represented by the
+        lowest-ordered member ("a"), with the remaining members ("b", "c")
+        attached as replicates."""
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"GRP_ORPHSET_001{letter}", experiment_number=9721 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_ORPHSET_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["experiment_id"] == "GRP_ORPHSET_001a"
+        assert [r["replicate_label"] for r in item["replicates"]] == ["b", "c"]
+
+    def test_timepoint_variant_shares_letter_no_dedupe(self, client, db_session):
+        """A '-t<days>' vial shares its letter with its parent vial. Grouping
+        must not dedupe by replicate_label -- both rows attach as separate
+        replicates, identified by id."""
+        _make_experiment(db_session, experiment_id="GRPT_001", number=9730)
+        db_session.add(Experiment(experiment_id="GRPT_001a", experiment_number=9731,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.add(Experiment(experiment_id="GRPT_001a-t7", experiment_number=9732,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=GRPT_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        item = data["items"][0]
+        assert item["experiment_id"] == "GRPT_001"
+        replicate_ids = {r["experiment_id"] for r in item["replicates"]}
+        assert replicate_ids == {"GRPT_001a", "GRPT_001a-t7"}
+        assert [r["replicate_label"] for r in item["replicates"]] == ["a", "a"]
+
+    def test_standalone_experiment_has_no_replicates(self, client, db_session):
+        _make_experiment(db_session, experiment_id="GRP_STANDALONE_001", number=9745)
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_STANDALONE_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0].get("replicates") is None
+
+    def test_sequential_rerun_not_absorbed_into_coexisting_orphan_group(self, client, db_session):
+        """The trap (brief TDD item 3): a naive COALESCE(base_experiment_id,
+        experiment_id) bucket key applied uniformly would wrongly pull a
+        sequential re-run (base_experiment_id == the stem, but
+        replicate_label IS NULL) into a co-existing orphan lettered group
+        that shares the same stem. GRPMIX_001a/b/c (orphan, no parent row)
+        and GRPMIX_001-2 (sequential re-run) must remain two separate
+        top-level buckets."""
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"GRPMIX_001{letter}", experiment_number=9726 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.add(Experiment(experiment_id="GRPMIX_001-2", experiment_number=9729,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.commit()
+
+        resp = client.get("/api/experiments?group_replicates=true&search=GRPMIX_001")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        top_level_ids = {i["experiment_id"] for i in data["items"]}
+        assert top_level_ids == {"GRPMIX_001a", "GRPMIX_001-2"}
+        assert "GRPMIX_001b" not in top_level_ids
+        assert "GRPMIX_001c" not in top_level_ids
+
+        by_id = {i["experiment_id"]: i for i in data["items"]}
+
+        group_item = by_id["GRPMIX_001a"]
+        assert {r["experiment_id"] for r in group_item["replicates"]} == {
+            "GRPMIX_001b", "GRPMIX_001c",
+        }
+
+        seq_item = by_id["GRPMIX_001-2"]
+        assert seq_item.get("replicates") is None
+
+    def test_dash0_parent_groups_with_lettered_members_in_list_mode(self, client, db_session):
+        """A -0/-1 parent spelling (e.g. HPHT_012-0) is a different string
+        than its stem, but must still bucket with its lettered members
+        (base_experiment_id == the stem) rather than standing alone."""
+        _make_experiment(db_session, experiment_id="HPHT_012-0", number=9750)
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"HPHT_012{letter}", experiment_number=9751 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+
+        resp = client.get("/api/experiments?group_replicates=true&search=HPHT_012")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        top_level_ids = {i["experiment_id"] for i in data["items"]}
+        assert top_level_ids == {"HPHT_012-0"}
+        assert "HPHT_012a" not in top_level_ids
+        assert "HPHT_012b" not in top_level_ids
+        assert "HPHT_012c" not in top_level_ids
+
+        (item,) = data["items"]
+        assert item["experiment_id"] == "HPHT_012-0"
+        assert {r["experiment_id"] for r in item["replicates"]} == {
+            "HPHT_012a", "HPHT_012b", "HPHT_012c",
+        }
 
 
 class TestCreateReplicatesEndpoint:

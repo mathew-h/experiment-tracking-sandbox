@@ -223,15 +223,47 @@ export function ExperimentDetailPage() {
           </div>
         )}
 
-        {experiment.replicate_label !== null && experiment.base_experiment_id && (
-          <p className="text-xs text-ink-muted">
-            Replicate {experiment.replicate_label} of{' '}
-            <Link
-              to={`/experiments/${experiment.base_experiment_id}`}
-              className="text-red-400 hover:text-red-300 font-mono-data"
-            >
-              {experiment.base_experiment_id}
-            </Link>
+        {inReplicateSet && (
+          <p className="text-xs text-ink-muted flex flex-wrap items-center gap-x-1.5">
+            {experiment.replicate_label !== null && (
+              <>
+                <span>Replicate {experiment.replicate_label}</span>
+                <span>·</span>
+              </>
+            )}
+            <span>
+              Group{' '}
+              <Link
+                to={`/experiments/groups/${
+                  replicateGroup?.base_experiment_id ?? experiment.base_experiment_id ?? experiment.experiment_id
+                }`}
+                className="text-red-400 hover:text-red-300 font-mono-data"
+              >
+                {replicateGroup?.base_experiment_id ?? experiment.base_experiment_id ?? experiment.experiment_id}
+              </Link>
+            </span>
+            {(replicateGroup?.members.length ?? 0) > 0 && (
+              <>
+                <span>·</span>
+                <span className="flex flex-wrap items-center gap-1 font-mono-data">
+                  {replicateGroup!.members.map((member) =>
+                    member.id === experiment.id ? (
+                      <span key={member.id} className="font-semibold text-ink-primary">
+                        [{member.replicate_label ?? member.experiment_id}]
+                      </span>
+                    ) : (
+                      <Link
+                        key={member.id}
+                        to={`/experiments/${member.experiment_id}`}
+                        className="text-red-400 hover:text-red-300"
+                      >
+                        {member.replicate_label ?? member.experiment_id}
+                      </Link>
+                    ),
+                  )}
+                </span>
+              </>
+            )}
           </p>
         )}
 

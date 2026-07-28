@@ -2,12 +2,11 @@ from __future__ import annotations
 from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text, update, case, and_
+from sqlalchemy import select, func, text, update, case, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
-from database.experiment_id_parser import split_timepoint_token
 from database.models.enums import ExperimentStatus
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
@@ -15,7 +14,11 @@ from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
+    ReplicateGroupMemberDetail, ReplicateGroupDetailResponse,
     ReplicateCreateRequest, ReplicateCreateResponse,
+)
+from backend.services.replicate_groups import (
+    GroupData, group_exists, resolve_group, resolve_rollup_rows,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
@@ -44,6 +47,16 @@ _TYPE_PREFIX: dict[str, str] = {
     "Autoclave": "AUTOCLAVE",
     "Core Flood": "CF",
 }
+
+
+def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
+    """True when a parsed experiment_id (derivation_number, treatment_variant,
+    replicate_label from parse_experiment_id) names a replicate GROUP PARENT
+    spelling: bare stem, or explicit -0/-1 (see database/lineage_utils.py::
+    update_experiment_lineage). False for lettered members (e.g. SERUM_040a)
+    and for sequential re-runs (e.g. SERUM_040-2), which are never parents.
+    """
+    return treatment is None and replicate_label is None and (derivation is None or derivation in (0, 1))
 
 
 def _build_list_item(db: Session, exp: Experiment) -> dict:
@@ -137,27 +150,75 @@ def list_experiments(
         stmt = stmt.where(note_sq.c.note_text.ilike(f"%{description}%"))
 
     if group_replicates:
-        # Grouped mode: paginate over "top-level rows". A matched replicate member
-        # (lettered + linked to a parent) is represented by its parent; everything
-        # else (parents, non-replicates, sequential/treatment derivations, orphan
-        # members) represents itself. Lettered children of each page row are
-        # attached in full regardless of whether they matched the filters.
-        matched_sq = stmt.subquery()
-        top_id_expr = case(
-            (
-                and_(
-                    matched_sq.c.replicate_label.isnot(None),
-                    matched_sq.c.parent_experiment_fk.isnot(None),
+        # Grouped mode: paginate over "top-level rows" (buckets). Bucket key
+        # (#87 D2): a lettered member (replicate_label IS NOT NULL) buckets on
+        # COALESCE(base_experiment_id, experiment_id) -- a STRING, since the
+        # group parent frequently does not exist as a row (orphan sets are the
+        # common case, not the edge case). A BARE-STEM parent (base_experiment_id
+        # == its own experiment_id, no letter, no treatment) buckets on its own
+        # experiment_id, which already equals its lettered members' key, so it
+        # joins their group naturally. An explicit "-0"/"-1" parent spelling
+        # (e.g. HPHT_012-0) is different: its own experiment_id is NOT the
+        # stem, so it needs an explicit branch bucketing it on base_experiment_id
+        # (the stem) to join its lettered members. Everything else -- standalone
+        # experiments and non-lettered derivations like sequential re-runs
+        # (SERUM_001-2) or treatments (SERUM_001_Desorption) -- buckets on its
+        # OWN experiment_id and so always stands alone.
+        #
+        # Because base_experiment_id may not name an existing row, the
+        # representative for a bucket can't always be resolved from a single
+        # matched row (e.g. filtering to just "b" of an orphan a/b/c set must
+        # still resolve representative "a", which didn't match the filter).
+        # So: first find which bucket keys are touched by matched rows, then
+        # resolve full bucket membership from the UNFILTERED table and rank
+        # each bucket's rows to pick one representative: the parent/bare-stem
+        # row if one exists (rank 0), otherwise the lowest-ordered lettered
+        # member (replicate_label ASC, id_timepoint_days ASC NULLS FIRST,
+        # experiment_number ASC).
+        def _bucket_key_expr(col):
+            return case(
+                (
+                    col.replicate_label.isnot(None),
+                    func.coalesce(col.base_experiment_id, col.experiment_id),
                 ),
-                matched_sq.c.parent_experiment_fk,
-            ),
-            else_=matched_sq.c.id,
+                (
+                    or_(
+                        col.experiment_id == col.base_experiment_id.concat("-0"),
+                        col.experiment_id == col.base_experiment_id.concat("-1"),
+                    ),
+                    col.base_experiment_id,
+                ),
+                else_=col.experiment_id,
+            )
+
+        matched_sq = stmt.subquery()
+        matched_bucket_key = _bucket_key_expr(matched_sq.c)
+        matched_keys_sq = select(matched_bucket_key.label("bucket_key")).distinct().subquery()
+
+        full_bucket_key = _bucket_key_expr(Experiment)
+        is_parent_like = case((Experiment.replicate_label.is_(None), 0), else_=1)
+        ranked_sq = (
+            select(
+                Experiment.id.label("id"),
+                func.row_number().over(
+                    partition_by=full_bucket_key,
+                    order_by=(
+                        is_parent_like,
+                        Experiment.replicate_label.asc(),
+                        Experiment.id_timepoint_days.asc().nulls_first(),
+                        Experiment.experiment_number.asc(),
+                    ),
+                ).label("rn"),
+            )
+            .where(full_bucket_key.in_(select(matched_keys_sq.c.bucket_key)))
+            .subquery()
         )
-        top_ids_sq = select(top_id_expr.label("top_id")).distinct().subquery()
-        total = db.execute(select(func.count()).select_from(top_ids_sq)).scalar_one()
+        reps_sq = select(ranked_sq.c.id).where(ranked_sq.c.rn == 1).subquery()
+
+        total = db.execute(select(func.count()).select_from(reps_sq)).scalar_one()
         page_stmt = (
             select(Experiment)
-            .where(Experiment.id.in_(select(top_ids_sq.c.top_id)))
+            .where(Experiment.id.in_(select(reps_sq.c.id)))
             .order_by(Experiment.experiment_number.desc())
         )
         rows = db.execute(page_stmt.offset(skip).limit(limit)).scalars().all()
@@ -169,18 +230,40 @@ def list_experiments(
     for exp in rows:
         item_data = _build_list_item(db, exp)
         if group_replicates:
-            children = db.execute(
+            # Bucket key for this representative -- mirrors Block A: a
+            # lettered representative (orphan-set case) buckets on its own
+            # base_experiment_id; an explicit "-0"/"-1" parent spelling also
+            # buckets on base_experiment_id (the stem) to join its lettered
+            # members; a bare-stem/standalone representative buckets on its
+            # own experiment_id. Members are fetched from the UNFILTERED
+            # table (attached in full regardless of whether they matched the
+            # query filters) and identified by id, never by replicate_label
+            # (a '-t<days>' vial shares its letter with its parent vial).
+            if exp.replicate_label is not None:
+                bucket_key = exp.base_experiment_id or exp.experiment_id
+            elif exp.base_experiment_id and exp.experiment_id in (
+                f"{exp.base_experiment_id}-0", f"{exp.base_experiment_id}-1",
+            ):
+                bucket_key = exp.base_experiment_id
+            else:
+                bucket_key = exp.experiment_id
+            members = db.execute(
                 select(Experiment)
                 .where(
-                    Experiment.parent_experiment_fk == exp.id,
+                    Experiment.base_experiment_id == bucket_key,
                     Experiment.replicate_label.isnot(None),
                 )
-                .order_by(Experiment.replicate_label.asc())
+                .order_by(
+                    Experiment.replicate_label.asc(),
+                    Experiment.id_timepoint_days.asc().nulls_first(),
+                    Experiment.experiment_number.asc(),
+                )
             ).scalars().all()
-            if children:
+            siblings = [m for m in members if m.id != exp.id]
+            if siblings:
                 item_data["replicates"] = [
                     ExperimentListItem.model_validate(_build_list_item(db, ch))
-                    for ch in children
+                    for ch in siblings
                 ]
         items.append(ExperimentListItem.model_validate(item_data))
 
@@ -233,6 +316,74 @@ def get_next_experiment_ids(
                 max_num = max(max_num, int(suffix))
         result[label] = max_num + 1
     return result
+
+
+def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
+    """Map a GroupMemberData (backend/services/replicate_groups.py) to the
+    API schema. `conditions` carries ONLY the group's divergent fields for
+    this member — shared fields live on the parent response instead."""
+    exp = member.experiment
+    return ReplicateGroupMemberDetail(
+        id=exp.id,
+        experiment_id=exp.experiment_id,
+        replicate_label=exp.replicate_label,
+        status=exp.status,
+        is_outlier=exp.is_outlier,
+        id_timepoint_days=exp.id_timepoint_days,
+        researcher=exp.researcher,
+        date=exp.date,
+        result_count=member.result_count,
+        conditions=member.divergent_conditions,
+    )
+
+
+def _group_data_to_detail_response(group: GroupData) -> ReplicateGroupDetailResponse:
+    return ReplicateGroupDetailResponse(
+        base_experiment_id=group.base_experiment_id,
+        parent=ReplicateGroupMember.model_validate(group.parent) if group.parent else None,
+        members=[_group_member_to_detail(m) for m in group.members],
+        member_count=len(group.members),
+        shared_conditions=group.shared_conditions,
+        divergent_fields=group.divergent_fields,
+        additives_summary=group.additives_summary,
+        additive_names=group.additive_names,
+        additives_diverge=group.additives_diverge,
+    )
+
+
+# NOTE: these two routes MUST stay registered before any "/{experiment_id}..."
+# route below — FastAPI matches in declaration order, and /{experiment_id}
+# would otherwise capture the literal path segment "groups".
+@router.get("/groups/{base_id}", response_model=ReplicateGroupDetailResponse)
+def get_replicate_group_detail(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReplicateGroupDetailResponse:
+    """The full replicate group for a base-ID string.
+
+    Addressed by string, not by row: `base_id` need not name an experiment
+    (lettered-only replicate sets with no group-parent row are the common
+    case). 404 only when base_id matches neither an experiment row nor any
+    base_experiment_id value.
+    """
+    group = resolve_group(db, base_id)
+    if group.parent is None and not group.members:
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    return _group_data_to_detail_response(group)
+
+
+@router.get("/groups/{base_id}/rollup", response_model=list[RollupTimepointResponse])
+def get_group_rollup(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[RollupTimepointResponse]:
+    """Cross-replicate mean/median/std per timepoint for a base-ID string."""
+    if not group_exists(db, base_id):
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    rows = resolve_rollup_rows(db, base_id)
+    return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
 @router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
@@ -308,14 +459,7 @@ def get_experiment_rollup(
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
     base = exp.base_experiment_id or exp.experiment_id
-    rows = db.execute(
-        text("""
-            SELECT * FROM v_results_scalar_rollup
-            WHERE base_experiment_id = :base
-            ORDER BY time_post_reaction_bucket_days
-        """),
-        {"base": base},
-    ).mappings().all()
+    rows = resolve_rollup_rows(db, base)
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
@@ -325,7 +469,19 @@ def get_replicate_group(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ReplicateGroupResponse:
-    """The lettered replicate set this experiment belongs to (empty members if none)."""
+    """The lettered replicate set this experiment belongs to (empty members if none).
+
+    NOTE: deliberately NOT delegated to replicate_groups.resolve_group() —
+    review of issue #87 found that resolving by base-ID string diverges from
+    this endpoint's original row-relative resolution for a plain sequential/
+    treatment derivation with no letter (e.g. "SERUM_001-2"): the old logic
+    treats such a row as its own "parent" with no members, while resolving
+    by base string would surface the unrelated lettered a/b/c set under the
+    same stem. The issue owner decided to preserve the original behavior
+    byte-for-byte here; only /groups/{base_id} uses resolve_group(). See
+    tests/api/test_experiment_rollup.py::TestReplicateGroupWrapperShapes for
+    the locked-in regression coverage.
+    """
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
@@ -853,11 +1009,76 @@ def update_experiment(
                     status_code=409,
                     detail=f"Experiment ID '{new_id}' already exists",
                 )
+
+            from database.lineage_utils import (
+                update_experiment_lineage, update_orphaned_derivations, parse_experiment_id,
+            )
+
+            # Issue #87 (D3, locked decision 5): block renaming a group parent
+            # that has lettered replicates. Only fires when the OLD id is
+            # ITSELF a group-parent spelling (bare stem, or explicit -0/-1) —
+            # gating on the parsed spelling, not just base_experiment_id,
+            # keeps this from over-firing on renames of lettered members
+            # (e.g. SERUM_040a) or sequential re-runs (e.g. SERUM_040-2),
+            # which are never parents and must remain allowed. A -0/-1-spelled
+            # parent shares its lettered members' base_experiment_id (the bare
+            # stem), not its own literal id string, so the member query below
+            # must use the parsed stem, not the raw path param.
+            old_base, old_deriv, old_treat, old_letter = parse_experiment_id(experiment_id)
+            if _is_group_parent_spelling(old_deriv, old_treat, old_letter):
+                old_stem = old_base or experiment_id
+                member_ids = db.execute(
+                    select(Experiment.experiment_id).where(
+                        Experiment.base_experiment_id == old_stem,
+                        Experiment.replicate_label.isnot(None),
+                        Experiment.id != exp.id,
+                    )
+                ).scalars().all()
+                if member_ids:
+                    log.warning(
+                        "experiment_rename_blocked_group_parent",
+                        experiment_id=experiment_id,
+                        members=sorted(member_ids),
+                        user=current_user.uid,
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Cannot rename group parent '{experiment_id}': it has lettered "
+                            f"replicate(s) {sorted(member_ids)}; renaming would orphan them."
+                        ),
+                    )
+
             exp.experiment_id = new_id
-            # Issue #81: rename must re-sync the '-t<days>' timepoint token —
-            # the before_flush lineage listener only wires session.new rows,
-            # so a rename (a dirty row) would otherwise leave a stale value.
-            _, exp.id_timepoint_days = split_timepoint_token(new_id.strip())
+            # Issue #87 (D3): persist the new id BEFORE recomputing lineage.
+            # Production SessionLocal has autoflush=False (same as tests/api's
+            # session factory), so without this flush update_experiment_lineage's
+            # group-parent SELECT can match this row against its own stale
+            # (old) experiment_id — the exact issue #86 ordering bug. Mirrors
+            # the bulk-upload rename precedent (new_experiments.py:385-392).
+            db.flush()
+            update_experiment_lineage(db, exp)
+
+            # If the new spelling is itself a group-parent spelling (no
+            # treatment, no letter, sequential in {None, 0, 1}), back-link any
+            # pre-existing orphaned derivations of that stem to this row.
+            new_base_id, new_derivation_num, new_treatment, new_replicate_label = (
+                parse_experiment_id(new_id)
+            )
+            is_new_parent_spelling = _is_group_parent_spelling(
+                new_derivation_num, new_treatment, new_replicate_label
+            )
+            if is_new_parent_spelling:
+                new_stem = new_base_id or new_id
+                backlinked = update_orphaned_derivations(db, new_stem)
+                if backlinked:
+                    log.info(
+                        "experiment_rename_backlinked_orphans",
+                        new_id=new_id,
+                        stem=new_stem,
+                        count=backlinked,
+                        user=current_user.uid,
+                    )
             # Keep denormalized string in conditions in sync so additives endpoints work
             cond = db.execute(
                 select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)

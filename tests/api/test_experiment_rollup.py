@@ -121,6 +121,53 @@ class TestReplicateGroupEndpoint:
         assert data["members"][0]["is_outlier"] is True
 
 
+class TestReplicateGroupWrapperShapes:
+    """Issue #87 review finding: /{experiment_id}/replicate-group is
+    deliberately NOT delegated to replicate_groups.resolve_group() — it keeps
+    its original row-relative parent/member resolution byte-for-byte. These
+    lock in the two shapes where the two resolution strategies diverge, plus
+    a re-confirmation of the orphan-set case (the actual bug #87 fixes,
+    served by the new /groups/{base_id} endpoint instead)."""
+
+    def test_bare_sequential_rerun_is_its_own_parent_with_no_members(self, client, db_session):
+        """SERUM_001-2 has no replicate letter, so the old logic treats it as
+        its own 'parent' with an empty member list — even though its base
+        stem SERUM_001 has a real lettered a/b/c set. Resolving by base-ID
+        string (resolve_group) would instead surface that a/b/c set; the
+        wrapper must NOT do that.
+        """
+        _make_experiment(db_session, "RGRP_SEQ_001", 9970)
+        for i, letter in enumerate("abc"):
+            _make_experiment(db_session, f"RGRP_SEQ_001{letter}", 9971 + i)
+        sequential = _make_experiment(db_session, "RGRP_SEQ_001-2", 9974)
+        db_session.commit()
+        data = client.get("/api/experiments/RGRP_SEQ_001-2/replicate-group").json()
+        assert data["parent"]["id"] == sequential.id
+        assert data["parent"]["experiment_id"] == "RGRP_SEQ_001-2"
+        assert data["members"] == []
+
+    def test_letter_sequential_rerun_parent_is_lettered_sibling(self, client, db_session):
+        """SERUM_001a-2 (letter + sequential) links to its lettered sibling
+        SERUM_001a as parent_experiment_fk (P5 lineage rule). The wrapper's
+        FK-based member lookup then returns whatever else points at
+        SERUM_001a via parent_experiment_fk — which is just the rerun itself
+        (it satisfies its own member criteria: parent_experiment_fk ==
+        member_a.id AND replicate_label is not null) — never the sibling
+        SERUM_001b, which links to the group parent instead, not member_a.
+        """
+        _make_experiment(db_session, "RGRP_LS_001", 9980)
+        member_a = _make_experiment(db_session, "RGRP_LS_001a", 9981)
+        _make_experiment(db_session, "RGRP_LS_001b", 9982)
+        rerun = _make_experiment(db_session, "RGRP_LS_001a-2", 9983)
+        db_session.commit()
+        assert rerun.parent_experiment_fk == member_a.id  # lineage precondition
+        data = client.get("/api/experiments/RGRP_LS_001a-2/replicate-group").json()
+        assert data["parent"]["id"] == member_a.id
+        assert data["parent"]["experiment_id"] == "RGRP_LS_001a"
+        assert [m["id"] for m in data["members"]] == [rerun.id]
+        assert data["members"][0]["experiment_id"] == "RGRP_LS_001a-2"
+
+
 class TestRollupFromHandEnteredResults:
     """Issue #83: results created via POST /api/results (the Add Results modal
     path) must land in per-day rollup buckets, not one bucket=null row."""

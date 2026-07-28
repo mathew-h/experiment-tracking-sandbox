@@ -6,6 +6,7 @@ import { LoginPage } from '@/pages/Login'
 import { DashboardPage } from '@/pages/Dashboard'
 import { ExperimentListPage } from '@/pages/ExperimentList'
 import { ExperimentDetailPage } from '@/pages/ExperimentDetail'
+import { ReplicateGroupPage } from '@/pages/ReplicateGroup'
 import { NewExperimentPage } from '@/pages/NewExperiment'
 import { BulkUploadsPage } from '@/pages/BulkUploads'
 import { SamplesPage } from '@/pages/Samples'
@@ -34,6 +35,7 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="/experiments" element={<ExperimentListPage />} />
           <Route path="/experiments/new" element={<NewExperimentPage />} />
+          <Route path="/experiments/groups/:baseId" element={<ReplicateGroupPage />} />
           <Route path="/experiments/:id" element={<ExperimentDetailPage />} />
           <Route path="/bulk-uploads" element={<BulkUploadsPage />} />
           <Route path="/samples" element={<SamplesPage />} />

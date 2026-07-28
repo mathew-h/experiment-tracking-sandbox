@@ -43,23 +43,27 @@ const fmt = (v: number | null | undefined, digits = 2) =>
   v == null ? '—' : v.toFixed(digits)
 
 interface GroupedResultsViewProps {
-  experimentId: string
+  baseExperimentId: string
 }
 
 /** Base-level grouped results: mean ± std per timepoint from the rollup view,
  *  with individual replicate series overlay and drill-in links. */
-export function GroupedResultsView({ experimentId }: GroupedResultsViewProps) {
+export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps) {
   const [metricKey, setMetricKey] = useState('gross_nh4')
   const [showIndividual, setShowIndividual] = useState(true)
   const metric = METRICS.find((m) => m.key === metricKey)!
 
+  // NEW query keys — these hit the /experiments/groups/{base_id}[/rollup] endpoints,
+  // which return a differently-shaped response than the existing
+  // ['replicate-group', ...] / ['rollup', ...] keys used by the wrapper endpoints
+  // elsewhere on the detail page. Do not reuse those keys here.
   const { data: group } = useQuery({
-    queryKey: ['replicate-group', experimentId],
-    queryFn: () => experimentsApi.getReplicateGroup(experimentId),
+    queryKey: ['replicate-group-detail', baseExperimentId],
+    queryFn: () => experimentsApi.getGroup(baseExperimentId),
   })
   const { data: rollup, isLoading } = useQuery({
-    queryKey: ['rollup', experimentId],
-    queryFn: () => experimentsApi.getRollup(experimentId),
+    queryKey: ['group-rollup', baseExperimentId],
+    queryFn: () => experimentsApi.getGroupRollup(baseExperimentId),
   })
 
   // Series entities in fixed order: parent (replicate 0) first, then a, b, c…
