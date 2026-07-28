@@ -52,6 +52,7 @@ experiment_tracking_sandbox/
 ├── docs/
 │   ├── STACK.md, GIT_WORKFLOW.md, CODE_STANDARDS.md, CALCULATIONS.md
 │   ├── LOCKED_COMPONENTS.md, ENVIRONMENT.md, AGENT_SYSTEM.md, DESIGN.md
+│   ├── PSQL_ACCESS.md                 ← read-only psql access + query guide for the team
 │   ├── DIRECTORY_STRUCTURE.md         ← this file
 │   ├── api/API_REFERENCE.md
 │   ├── frontend/                      ← ARCHITECTURE.md, DESIGN_SYSTEM.md, ADDING_A_PAGE.md
