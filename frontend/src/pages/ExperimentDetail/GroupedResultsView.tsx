@@ -49,7 +49,7 @@ interface GroupedResultsViewProps {
 /** Base-level grouped results: mean ± std per timepoint from the rollup view,
  *  with individual replicate series overlay and drill-in links. */
 export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps) {
-  const [metricKey, setMetricKey] = useState('gross_nh4')
+  const [metricKey, setMetricKey] = useState('h2_umol')
   const [showIndividual, setShowIndividual] = useState(true)
   const metric = METRICS.find((m) => m.key === metricKey)!
 

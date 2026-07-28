@@ -89,6 +89,14 @@ describe('GroupedResultsView', () => {
     )
   })
 
+  it('defaults the metric selector to H₂ (µmol)', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
+    expect(select.value).toBe('h2_umol')
+    expect(select.options[select.selectedIndex].text).toBe('H₂ (µmol)')
+  })
+
   it('changes plotted metric via the selector', async () => {
     const user = userEvent.setup()
     render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
