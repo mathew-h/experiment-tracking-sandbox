@@ -6,8 +6,8 @@ import { MemoryRouter } from 'react-router-dom'
 
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
-    getRollup: vi.fn(),
-    getReplicateGroup: vi.fn(),
+    getGroupRollup: vi.fn(),
+    getGroup: vi.fn(),
     getResults: vi.fn(),
   },
 }))
@@ -43,27 +43,46 @@ const ROLLUP: RollupTimepoint[] = [
 beforeEach(() => {
   queryClient.clear()
   vi.clearAllMocks()
-  vi.mocked(experimentsApi.getRollup).mockResolvedValue(ROLLUP)
-  vi.mocked(experimentsApi.getReplicateGroup).mockResolvedValue({
+  vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue(ROLLUP)
+  vi.mocked(experimentsApi.getGroup).mockResolvedValue({
     base_experiment_id: 'SERUM_001',
     parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING', is_outlier: false },
     members: [
-      { id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false },
-      { id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING', is_outlier: true },
+      {
+        id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false,
+        id_timepoint_days: null, researcher: null, date: null, result_count: 1, conditions: {},
+      },
+      {
+        id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING', is_outlier: true,
+        id_timepoint_days: null, researcher: null, date: null, result_count: 1, conditions: {},
+      },
     ],
+    member_count: 2,
+    shared_conditions: {},
+    divergent_fields: [],
+    additives_summary: null,
+    additive_names: null,
+    additives_diverge: false,
   })
   vi.mocked(experimentsApi.getResults).mockResolvedValue([])
 })
 
 describe('GroupedResultsView', () => {
+  it('issues queries against the group endpoints off a base ID', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(experimentsApi.getGroup).toHaveBeenCalledWith('SERUM_001')
+    expect(experimentsApi.getGroupRollup).toHaveBeenCalledWith('SERUM_001')
+  })
+
   it('renders rollup stats table with mean ± sd and n', async () => {
-    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     expect(screen.getByText('2.00 ± 1.00')).toBeInTheDocument()
   })
 
   it('links to each replicate page for drill-in', async () => {
-    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'SERUM_001a' })).toHaveAttribute(
       'href', '/experiments/SERUM_001a'
@@ -72,21 +91,21 @@ describe('GroupedResultsView', () => {
 
   it('changes plotted metric via the selector', async () => {
     const user = userEvent.setup()
-    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/metric/i), 'ph')
     expect(screen.getByText('8.10')).toBeInTheDocument()
   })
 
   it('annotates outlier members in drill-in links', async () => {
-    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     expect(screen.getByRole('link', { name: /SERUM_001b.*outlier/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'SERUM_001a' })).toBeInTheDocument()
   })
 
   it('shows H₂ (g/t) and Fe²⁺ → H₂ (%) mean ± sd columns (issue #83)', async () => {
-    render(<GroupedResultsView experimentId="SERUM_001" />, { wrapper })
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     expect(screen.getByRole('columnheader', { name: 'H₂ (g/t)' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Fe²⁺ → H₂ (%)' })).toBeInTheDocument()

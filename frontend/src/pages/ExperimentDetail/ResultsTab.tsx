@@ -218,7 +218,7 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
 
       {mode === 'grouped' && hasGroup ? (
         <div className="p-4">
-          <GroupedResultsView experimentId={experimentId} />
+          <GroupedResultsView baseExperimentId={replicateGroup?.base_experiment_id ?? experimentId} />
         </div>
       ) : (
         <>

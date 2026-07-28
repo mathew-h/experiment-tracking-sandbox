@@ -164,6 +164,26 @@ export interface ReplicateGroup {
   members: ReplicateGroupMember[]
 }
 
+export interface ReplicateGroupMemberDetail extends ReplicateGroupMember {
+  id_timepoint_days: number | null
+  researcher: string | null
+  date: string | null
+  result_count: number
+  conditions: Record<string, unknown>
+}
+
+export interface ReplicateGroupDetail {
+  base_experiment_id: string
+  parent: ReplicateGroupMember | null
+  members: ReplicateGroupMemberDetail[]
+  member_count: number
+  shared_conditions: Record<string, unknown>
+  divergent_fields: string[]
+  additives_summary: string | null
+  additive_names: string | null
+  additives_diverge: boolean
+}
+
 /** Mirrors backend ReplicateCreateResponse: created items are ExperimentResponse-shaped
  *  (no conditions/notes/modifications). */
 export interface CreatedReplicate {
@@ -269,4 +289,14 @@ export const experimentsApi = {
 
   createReplicates: (payload: { base_experiment_id: string; count: number }) =>
     apiClient.post<CreateReplicatesResponse>('/experiments/replicates', payload).then((r) => r.data),
+
+  getGroup: (baseId: string) =>
+    apiClient
+      .get<ReplicateGroupDetail>(`/experiments/groups/${encodeURIComponent(baseId)}`)
+      .then((r) => r.data),
+
+  getGroupRollup: (baseId: string) =>
+    apiClient
+      .get<RollupTimepoint[]>(`/experiments/groups/${encodeURIComponent(baseId)}/rollup`)
+      .then((r) => r.data),
 }
