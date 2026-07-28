@@ -95,6 +95,7 @@ git commit -m "chore: ..."   # both files in the same commit
 | Code standards | `docs/CODE_STANDARDS.md` |
 | Git workflow | `docs/GIT_WORKFLOW.md` |
 | Environment variables | `docs/ENVIRONMENT.md` |
+| Read-only psql/reporting access | `docs/PSQL_ACCESS.md` |
 | Design system | `docs/DESIGN.md` |
 | Agent system full reference | `docs/AGENT_SYSTEM.md` |
 | Directory structure | `docs/DIRECTORY_STRUCTURE.md` |

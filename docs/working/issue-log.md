@@ -1184,3 +1184,12 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Backend/schema/view:** none — display-only change. Confirmed `v_results_scalar_rollup` still computes every ammonium aggregate (`mean_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `mean_fe_yield_nh3_pct`) unchanged in `database/event_listeners.py`
 - **Tests added:** yes — frontend only; affected suites 20/20, full frontend suite 116/116 pass; `tsc --noEmit` clean; eslint clean
 - **Decision logged:** no
+
+## 2026-07-28 | inline — Add psql read-only access and query guide
+- **Files changed:**
+  - `docs/PSQL_ACCESS.md` — NEW: team guide for connecting to prod Postgres via `psql` over the LAN (client-only install for Windows/macOS, connecting, `\l`/`\dt`/`\dv`/`\d+`/`\x`/`\timing` survival guide, plain-language schema/join/view definitions, table and reporting-view orientation, 10 sample queries verified against `database/models/` and the live view SQL in `database/event_listeners.py`, `\copy` CSV export incl. client-vs-server distinction, read-only rationale tied to the calculation engine and `ModificationsLog`, common gotchas, and an admin-only appendix proposing a new `reporting_reader` role — `CREATE ROLE`/grants/`ALTER DEFAULT PRIVILEGES` plus `pg_hba.conf`/`postgresql.conf`/Windows Firewall changes, all placeholder-only)
+  - `.claude/CLAUDE.md` §6, `docs/DIRECTORY_STRUCTURE.md` (+ auto-synced `docs/project_context/` copies) — added a reference row for the new doc
+  - `docs/working/issues/05-models-md-stale-v-primary-experiment-results.md` — NEW, left uncommitted per existing repo convention for draft issues in this directory: draft issue covering `.claude/rules/MODELS.md`/`.claude/MEMORY.md`/`docs/user_guide/ONBOARDING.md` all still documenting the dead `v_primary_experiment_results` view (dropped in `database/event_listeners.py`, never recreated)
+- **Investigation:** confirmed no read-only PostgreSQL role exists anywhere in the repo (`scripts/init-db.sql` only grants the read-write `experiments_user`); confirmed `v_primary_experiment_results` is not in the `_VIEWS` list in `database/event_listeners.py` and is unconditionally dropped there — MODELS.md's documentation of it is stale, so the fact-table sample query uses the `v_results_scalar`/`v_results_h2`/`v_results_icp` join on `result_id` instead
+- **Tests added:** no (documentation only)
+- **Decision logged:** yes — `docs/working/decisions.md`
