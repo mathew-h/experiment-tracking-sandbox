@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text, update, case, and_
+from sqlalchemy import select, func, text, update, case
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -150,27 +150,68 @@ def list_experiments(
         stmt = stmt.where(note_sq.c.note_text.ilike(f"%{description}%"))
 
     if group_replicates:
-        # Grouped mode: paginate over "top-level rows". A matched replicate member
-        # (lettered + linked to a parent) is represented by its parent; everything
-        # else (parents, non-replicates, sequential/treatment derivations, orphan
-        # members) represents itself. Lettered children of each page row are
-        # attached in full regardless of whether they matched the filters.
+        # Grouped mode: paginate over "top-level rows" (buckets). Bucket key
+        # (#87 D2): a lettered member (replicate_label IS NOT NULL) buckets on
+        # COALESCE(base_experiment_id, experiment_id) -- a STRING, since the
+        # group parent frequently does not exist as a row (orphan sets are the
+        # common case, not the edge case). Everything else -- group parents,
+        # bare stems, standalone experiments, and non-lettered derivations
+        # like sequential re-runs (SERUM_001-2) or treatments
+        # (SERUM_001_Desorption) -- buckets on its OWN experiment_id. A
+        # parent's own experiment_id equals its lettered members' bucket key,
+        # so it joins their group; a sequential/treatment derivation's bucket
+        # key is its own id, so it never does and always stands alone.
+        #
+        # Because base_experiment_id may not name an existing row, the
+        # representative for a bucket can't always be resolved from a single
+        # matched row (e.g. filtering to just "b" of an orphan a/b/c set must
+        # still resolve representative "a", which didn't match the filter).
+        # So: first find which bucket keys are touched by matched rows, then
+        # resolve full bucket membership from the UNFILTERED table and rank
+        # each bucket's rows to pick one representative: the parent/bare-stem
+        # row if one exists (rank 0), otherwise the lowest-ordered lettered
+        # member (replicate_label ASC, id_timepoint_days ASC NULLS FIRST,
+        # experiment_number ASC).
         matched_sq = stmt.subquery()
-        top_id_expr = case(
+        matched_bucket_key = case(
             (
-                and_(
-                    matched_sq.c.replicate_label.isnot(None),
-                    matched_sq.c.parent_experiment_fk.isnot(None),
-                ),
-                matched_sq.c.parent_experiment_fk,
+                matched_sq.c.replicate_label.isnot(None),
+                func.coalesce(matched_sq.c.base_experiment_id, matched_sq.c.experiment_id),
             ),
-            else_=matched_sq.c.id,
+            else_=matched_sq.c.experiment_id,
         )
-        top_ids_sq = select(top_id_expr.label("top_id")).distinct().subquery()
-        total = db.execute(select(func.count()).select_from(top_ids_sq)).scalar_one()
+        matched_keys_sq = select(matched_bucket_key.label("bucket_key")).distinct().subquery()
+
+        full_bucket_key = case(
+            (
+                Experiment.replicate_label.isnot(None),
+                func.coalesce(Experiment.base_experiment_id, Experiment.experiment_id),
+            ),
+            else_=Experiment.experiment_id,
+        )
+        is_parent_like = case((Experiment.replicate_label.is_(None), 0), else_=1)
+        ranked_sq = (
+            select(
+                Experiment.id.label("id"),
+                func.row_number().over(
+                    partition_by=full_bucket_key,
+                    order_by=(
+                        is_parent_like,
+                        Experiment.replicate_label.asc(),
+                        Experiment.id_timepoint_days.asc().nulls_first(),
+                        Experiment.experiment_number.asc(),
+                    ),
+                ).label("rn"),
+            )
+            .where(full_bucket_key.in_(select(matched_keys_sq.c.bucket_key)))
+            .subquery()
+        )
+        reps_sq = select(ranked_sq.c.id).where(ranked_sq.c.rn == 1).subquery()
+
+        total = db.execute(select(func.count()).select_from(reps_sq)).scalar_one()
         page_stmt = (
             select(Experiment)
-            .where(Experiment.id.in_(select(top_ids_sq.c.top_id)))
+            .where(Experiment.id.in_(select(reps_sq.c.id)))
             .order_by(Experiment.experiment_number.desc())
         )
         rows = db.execute(page_stmt.offset(skip).limit(limit)).scalars().all()
@@ -182,18 +223,36 @@ def list_experiments(
     for exp in rows:
         item_data = _build_list_item(db, exp)
         if group_replicates:
-            children = db.execute(
+            # Bucket key for this representative -- mirrors Block A: a
+            # lettered representative (orphan-set case) buckets on its own
+            # base_experiment_id; a parent/bare-stem/standalone representative
+            # buckets on its own experiment_id. Members are fetched from the
+            # UNFILTERED table (attached in full regardless of whether they
+            # matched the query filters) and identified by id, never by
+            # replicate_label (a '-t<days>' vial shares its letter with its
+            # parent vial).
+            bucket_key = (
+                (exp.base_experiment_id or exp.experiment_id)
+                if exp.replicate_label is not None
+                else exp.experiment_id
+            )
+            members = db.execute(
                 select(Experiment)
                 .where(
-                    Experiment.parent_experiment_fk == exp.id,
+                    Experiment.base_experiment_id == bucket_key,
                     Experiment.replicate_label.isnot(None),
                 )
-                .order_by(Experiment.replicate_label.asc())
+                .order_by(
+                    Experiment.replicate_label.asc(),
+                    Experiment.id_timepoint_days.asc().nulls_first(),
+                    Experiment.experiment_number.asc(),
+                )
             ).scalars().all()
-            if children:
+            siblings = [m for m in members if m.id != exp.id]
+            if siblings:
                 item_data["replicates"] = [
                     ExperimentListItem.model_validate(_build_list_item(db, ch))
-                    for ch in children
+                    for ch in siblings
                 ]
         items.append(ExperimentListItem.model_validate(item_data))
 

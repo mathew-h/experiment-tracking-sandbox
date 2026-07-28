@@ -1043,6 +1043,53 @@ class TestGroupedListMode:
         assert data["total"] == 2
         assert len(data["items"]) == 1
 
+    def test_orphan_lettered_set_collapses_to_one_row(self, client, db_session):
+        """No parent row exists for GRP_ORPHSET_001 -- a/b/c must still
+        collapse into one bucket (issue #87 D2 core fix), represented by the
+        lowest-ordered member ("a"), with the remaining members ("b", "c")
+        attached as replicates."""
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"GRP_ORPHSET_001{letter}", experiment_number=9721 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_ORPHSET_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["experiment_id"] == "GRP_ORPHSET_001a"
+        assert [r["replicate_label"] for r in item["replicates"]] == ["b", "c"]
+
+    def test_timepoint_variant_shares_letter_no_dedupe(self, client, db_session):
+        """A '-t<days>' vial shares its letter with its parent vial. Grouping
+        must not dedupe by replicate_label -- both rows attach as separate
+        replicates, identified by id."""
+        _make_experiment(db_session, experiment_id="GRPT_001", number=9730)
+        db_session.add(Experiment(experiment_id="GRPT_001a", experiment_number=9731,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.add(Experiment(experiment_id="GRPT_001a-t7", experiment_number=9732,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=GRPT_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        item = data["items"][0]
+        assert item["experiment_id"] == "GRPT_001"
+        replicate_ids = {r["experiment_id"] for r in item["replicates"]}
+        assert replicate_ids == {"GRPT_001a", "GRPT_001a-t7"}
+        assert [r["replicate_label"] for r in item["replicates"]] == ["a", "a"]
+
+    def test_standalone_experiment_has_no_replicates(self, client, db_session):
+        _make_experiment(db_session, experiment_id="GRP_STANDALONE_001", number=9745)
+        resp = client.get("/api/experiments?group_replicates=true&search=GRP_STANDALONE_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0].get("replicates") is None
+
 
 class TestCreateReplicatesEndpoint:
     def test_create_replicates_batch(self, client, db_session):
