@@ -86,8 +86,8 @@ Cross-replicate mean/median/std per timepoint bucket, sourced from the `v_result
 
 **Grouping key:** `COALESCE(base_experiment_id, experiment_id)` for the given experiment — i.e. its `base_experiment_id` if set, else its own `experiment_id`.
 
-**Response `200`:** array of rows, one per `time_post_reaction_bucket_days`, ordered ascending. 19 fields per row:
-`base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`.
+**Response `200`:** array of rows, one per `time_post_reaction_bucket_days`, ordered ascending. 21 fields per row:
+`base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`. `mean_h2_ppm`/`sd_h2_ppm` (issue #90) aggregate `h2_concentration` (ppm); `sd_h2_ppm` is `null` when `n_replicates = 1`.
 
 **Parent inclusion (intended):** the bare group parent's own primary results share the
 grouping key with its lettered replicates, so they are averaged into the group stats
@@ -264,6 +264,8 @@ Update experiment properties.
 | POST | `/api/results/icp` | Create ICP result |
 
 `GET /api/experiments/{experiment_id}/results` and scalar result responses now include `nmr_run_date`, `icp_run_date`, `gc_run_date`, and `xrd_run_date` (all nullable) — instrument run-date provenance.
+
+`GET /api/experiments/{experiment_id}/results` also includes `h2_concentration` (raw measured H2 in ppm, vol/vol; issue #90) on every row, `null` where the result has no scalar record — so the per-result table can show ppm without a second `resultsApi.getScalar` request per row.
 
 ### POST /api/results and POST /api/results/scalar — `id_timepoint_days` (issue #81)
 

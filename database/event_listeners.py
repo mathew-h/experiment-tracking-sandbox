@@ -532,6 +532,11 @@ _VIEWS = [
                                                                         AS "mean_net_ammonium_mM",
             stddev_samp(GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM"))
                                                                         AS "sd_net_ammonium_mM",
+            -- h2_concentration is invariant ppm (vol/vol) per MODELS.md; AVG is only
+            -- meaningful because the unit never varies. If h2_concentration_unit ever
+            -- becomes variable, this silently averages mixed units.
+            AVG(sr.h2_concentration)                                    AS mean_h2_ppm,
+            stddev_samp(sr.h2_concentration)                            AS sd_h2_ppm,
             AVG(sr.h2_micromoles)                                       AS mean_h2_micromoles,
             stddev_samp(sr.h2_micromoles)                               AS sd_h2_micromoles,
             AVG(sr.h2_grams_per_ton_yield)                              AS mean_h2_grams_per_ton,

@@ -429,6 +429,7 @@ def get_experiment_results(
             has_brine_modification=r.has_brine_modification,
             brine_modification_description=r.brine_modification_description,
             grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
+            h2_concentration=scalar.h2_concentration if scalar else None,
             h2_grams_per_ton_yield=scalar.h2_grams_per_ton_yield if scalar else None,
             h2_micromoles=scalar.h2_micromoles if scalar else None,
             gross_ammonium_concentration_mM=scalar.gross_ammonium_concentration_mM if scalar else None,

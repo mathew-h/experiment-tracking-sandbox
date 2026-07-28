@@ -1159,3 +1159,16 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Tests added:** yes — ReplicateGroupPage suite 11/11 pass; full frontend suite 101/101 pass; eslint clean
 - **Decision logged:** no — no shared numeric formatter extracted to `frontend/src/utils/` (issue's "consider extracting" was optional; `ConditionsTab.tsx`'s `Row` doesn't yet need it since `total_ferrous_iron_g` isn't rendered there)
 - **PR:** #91 → develop
+
+## 2026-07-28 | issue #90 — Expose H2 concentration (ppm) through results API and rollup view
+- **Files changed:**
+  - `backend/api/schemas/results.py` — `ResultWithFlagsResponse` +`h2_concentration`; `RollupTimepointResponse` +`mean_h2_ppm`, +`sd_h2_ppm`
+  - `backend/api/routers/experiments.py` — `get_experiment_results` populates `h2_concentration` (null when no scalar row)
+  - `database/event_listeners.py` — `v_results_scalar_rollup` +`mean_h2_ppm` (`AVG`), +`sd_h2_ppm` (`stddev_samp`), placed before `mean_h2_micromoles`; comment ties the AVG to the invariant-ppm unit in MODELS.md
+  - `alembic/versions/a1f2c3d4e5b6_add_h2_ppm_to_rollup_view.py` — NEW; drops/recreates the view (down_revision `daae92e908f1`); additive (view-only, no table DDL); `downgrade` restores prior definition verbatim
+  - `frontend/src/api/experiments.ts` — `ResultWithFlags` +`h2_concentration`; `RollupTimepoint` +`mean_h2_ppm`, +`sd_h2_ppm`
+  - `.claude/rules/MODELS.md`, `docs/api/API_REFERENCE.md` (+ auto-synced `docs/project_context/API_REFERENCE.md`) — rollup columns/scope + results & rollup response docs
+- **Tests added:** yes — backend: `test_v_results_scalar_rollup.py` (mean/sd across 3 replicates, n=1 null sd, outlier exclusion), `test_experiment_rollup.py::TestRollupH2Ppm` (same 3 at API level), `test_results.py` (`h2_concentration` present with scalar / null without). `tests/api` + `tests/views` = 433 pass. Frontend: 2 mock fixtures updated for the new required fields; `tsc --noEmit` clean; affected vitest suites 15/15.
+- **Verification:** `alembic upgrade head` → both columns present on the view; `downgrade -1` → columns gone, view still queryable (1034 rows); re-`upgrade` clean.
+- **Decision logged:** no
+- **Lint note:** repo has no black/flake8 config; committed baseline already fails tool defaults (event_listeners flake8 111→115, all 4 new lines E501 on SQL matching the surrounding 20+ aggregate lines). New code matches surrounding style; not reformatted.

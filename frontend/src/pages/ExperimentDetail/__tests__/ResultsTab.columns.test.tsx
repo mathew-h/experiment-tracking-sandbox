@@ -38,6 +38,7 @@ const baseResult: ResultWithFlags = {
   has_brine_modification: false,
   brine_modification_description: null,
   grams_per_ton_yield: null,
+  h2_concentration: null,
   h2_grams_per_ton_yield: null,
   h2_micromoles: null,
   gross_ammonium_concentration_mM: null,

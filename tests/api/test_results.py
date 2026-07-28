@@ -165,6 +165,36 @@ def test_results_endpoint_includes_ferrous_yield_columns(client, db_session):
     assert data[0]["ferrous_iron_yield_nh3_pct"] == pytest.approx(24.6)
 
 
+def test_results_endpoint_includes_h2_concentration(client, db_session):
+    """GET /experiments/{id}/results returns h2_concentration (ppm) per row (issue #90)."""
+    exp, result = _seed(db_session)
+    scalar = ScalarResults(
+        result_id=result.id,
+        h2_concentration=500.0,
+    )
+    db_session.add(scalar)
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["h2_concentration"] == pytest.approx(500.0)
+
+
+def test_results_endpoint_h2_concentration_null_when_no_scalar(client, db_session):
+    """h2_concentration is null in the response when the result has no scalar record (issue #90)."""
+    exp, result = _seed(db_session)  # result created with no ScalarResults row
+    db_session.commit()
+
+    resp = client.get(f"/api/experiments/{exp.experiment_id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["has_scalar"] is False
+    assert data[0]["h2_concentration"] is None
+
+
 def test_results_endpoint_includes_xrd_run_date(client, db_session):
     """GET /experiments/{id}/results returns xrd_run_date per row."""
     exp, result = _seed(db_session)

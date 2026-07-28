@@ -29,7 +29,7 @@ def _make_experiment(db, experiment_id, number):
     return exp
 
 
-def _add_primary_scalar(db, exp, bucket, gross_nh4):
+def _add_primary_scalar(db, exp, bucket, gross_nh4, h2_ppm=None):
     result = ExperimentalResults(
         experiment_fk=exp.id,
         time_post_reaction_days=bucket, time_post_reaction_bucket_days=bucket,
@@ -38,7 +38,8 @@ def _add_primary_scalar(db, exp, bucket, gross_nh4):
     db.add(result)
     db.flush()
     db.add(ScalarResults(result_id=result.id,
-                         gross_ammonium_concentration_mM=gross_nh4))
+                         gross_ammonium_concentration_mM=gross_nh4,
+                         h2_concentration=h2_ppm))
     db.flush()
     return result
 
@@ -82,6 +83,45 @@ class TestRollupEndpoint:
         (row,) = client.get("/api/experiments/RUP_003a/rollup").json()
         assert row["n_replicates"] == 2
         assert row["mean_gross_ammonium_mM"] == pytest.approx(1.5)
+
+
+class TestRollupH2Ppm:
+    """Issue #90: rollup view/endpoint expose mean_h2_ppm / sd_h2_ppm
+    (AVG / stddev_samp over scalar_results.h2_concentration)."""
+
+    def test_mean_h2_ppm_matches_member_values(self, client, db_session, reporting_views):
+        _make_experiment(db_session, "RUP_H2_001", 9850)
+        for i, letter in enumerate("abc"):
+            member = _make_experiment(db_session, f"RUP_H2_001{letter}", 9851 + i)
+            _add_primary_scalar(db_session, member, 7.0, 1.0, h2_ppm=float((i + 1) * 100))  # 100, 200, 300
+        db_session.commit()
+        (row,) = client.get("/api/experiments/RUP_H2_001a/rollup").json()
+        assert row["n_replicates"] == 3
+        assert row["mean_h2_ppm"] == pytest.approx(200.0)
+        assert row["sd_h2_ppm"] == pytest.approx(100.0)
+
+    def test_sd_h2_ppm_null_for_single_member(self, client, db_session, reporting_views):
+        _make_experiment(db_session, "RUP_H2_002", 9860)
+        member = _make_experiment(db_session, "RUP_H2_002a", 9861)
+        _add_primary_scalar(db_session, member, 7.0, 1.0, h2_ppm=420.0)
+        db_session.commit()
+        (row,) = client.get("/api/experiments/RUP_H2_002a/rollup").json()
+        assert row["n_replicates"] == 1
+        assert row["mean_h2_ppm"] == pytest.approx(420.0)
+        assert row["sd_h2_ppm"] is None
+
+    def test_outlier_member_excluded_from_mean_h2_ppm(self, client, db_session, reporting_views):
+        _make_experiment(db_session, "RUP_H2_003", 9865)
+        members = []
+        for i, letter in enumerate("abc"):
+            member = _make_experiment(db_session, f"RUP_H2_003{letter}", 9866 + i)
+            _add_primary_scalar(db_session, member, 7.0, 1.0, h2_ppm=float((i + 1) * 100))  # 100, 200, 300
+            members.append(member)
+        members[2].is_outlier = True  # drop the 300 value
+        db_session.commit()
+        (row,) = client.get("/api/experiments/RUP_H2_003a/rollup").json()
+        assert row["n_replicates"] == 2
+        assert row["mean_h2_ppm"] == pytest.approx(150.0)
 
 
 class TestReplicateGroupEndpoint:
