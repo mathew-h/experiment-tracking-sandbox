@@ -390,18 +390,49 @@ def get_replicate_group(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ReplicateGroupResponse:
-    """The lettered replicate set this experiment belongs to (empty members if none)."""
+    """The lettered replicate set this experiment belongs to (empty members if none).
+
+    NOTE: deliberately NOT delegated to replicate_groups.resolve_group() —
+    review of issue #87 found that resolving by base-ID string diverges from
+    this endpoint's original row-relative resolution for a plain sequential/
+    treatment derivation with no letter (e.g. "SERUM_001-2"): the old logic
+    treats such a row as its own "parent" with no members, while resolving
+    by base string would surface the unrelated lettered a/b/c set under the
+    same stem. The issue owner decided to preserve the original behavior
+    byte-for-byte here; only /groups/{base_id} uses resolve_group(). See
+    tests/api/test_experiment_rollup.py::TestReplicateGroupWrapperShapes for
+    the locked-in regression coverage.
+    """
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
     base = exp.base_experiment_id or exp.experiment_id
-    group = resolve_group(db, base)
+    parent = exp if exp.replicate_label is None else exp.parent
+    if parent is not None:
+        members = db.execute(
+            select(Experiment)
+            .where(
+                Experiment.parent_experiment_fk == parent.id,
+                Experiment.replicate_label.isnot(None),
+            )
+            .order_by(Experiment.replicate_label.asc())
+        ).scalars().all()
+    else:
+        # Orphan member: parent row doesn't exist yet; list siblings by base stem.
+        members = db.execute(
+            select(Experiment)
+            .where(
+                Experiment.base_experiment_id == base,
+                Experiment.replicate_label.isnot(None),
+            )
+            .order_by(Experiment.replicate_label.asc())
+        ).scalars().all()
     return ReplicateGroupResponse(
-        base_experiment_id=group.base_experiment_id,
-        parent=ReplicateGroupMember.model_validate(group.parent) if group.parent else None,
-        members=[ReplicateGroupMember.model_validate(m.experiment) for m in group.members],
+        base_experiment_id=base,
+        parent=ReplicateGroupMember.model_validate(parent) if parent else None,
+        members=[ReplicateGroupMember.model_validate(m) for m in members],
     )
 
 

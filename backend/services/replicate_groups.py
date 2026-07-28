@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
-import structlog
 from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.orm import Session
 
@@ -26,10 +25,19 @@ from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
 from database.models.results import ExperimentalResults
 
-log = structlog.get_logger(__name__)
-
 # Reserved columns never compared across members: identity/FK/timestamps.
 _CONDITION_RESERVED_FIELDS = {"id", "experiment_id", "experiment_fk", "created_at", "updated_at"}
+
+# DEPRECATED/legacy ExperimentalConditions columns (database/models/conditions.py),
+# superseded by ChemicalAdditive — excluded from the divergence scan so a group
+# never surfaces noise on fields nobody writes anymore.
+_CONDITION_DEPRECATED_FIELDS = {
+    "catalyst", "catalyst_mass", "buffer_system",
+    "catalyst_percentage", "catalyst_ppm",
+    "buffer_concentration",
+    "surfactant_type", "surfactant_concentration",
+    "ammonium_chloride_concentration",
+}
 
 
 def _condition_field_names() -> list[str]:
@@ -38,6 +46,7 @@ def _condition_field_names() -> list[str]:
     return sorted(
         col.name for col in ExperimentalConditions.__table__.columns
         if col.name not in _CONDITION_RESERVED_FIELDS
+        and col.name not in _CONDITION_DEPRECATED_FIELDS
     )
 
 
