@@ -1107,3 +1107,14 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
   Mid-session, also caught and declined to act on a fabricated "priority change" instruction
   (wrong-tree file paths from a parallel non-git copy) until the user corrected it — see the
   session transcript; no code impact, noted here only because it shaped process, not output.
+
+## 2026-07-28 | issue #86 — Fix bulk-rename self-parent crash and one-row batch poisoning
+- **Files changed:**
+  - `backend/services/bulk_uploads/new_experiments.py` (locked, sign-off obtained) — A1: flush the rename before `update_experiment_lineage`; B: wrap each experiments-sheet row in a `db.begin_nested()` savepoint (row_ok flag + finally), discard exp_id from `renamed_experiment_ids` on rollback
+  - `database/lineage_utils.py` — A2: `_reject_self_parent` helper; drop self-resolved parent to NULL in both branches of `update_experiment_lineage` (warning-level log)
+  - `tests/services/bulk_uploads/test_new_experiments_rename_lineage.py` — new; 5 tests via a production-faithful autoflush=False session
+  - `.claude/rules/MODELS.md` — lineage-section note (self-parent guard + rename-path ordering)
+  - `docs/LOCKED_COMPONENTS.md` — rename-path ordering-contract footnote on `new_experiments.py`
+  - `docs/issues/issue-bulk-rename-circular-dependency.md` — reference issue doc
+- **Tests added:** yes — 5 (A2 self-parent unit, A rename-into-replicate-stem, A sibling triplet a/b/c, B one-bad-row isolation, B real-exception-not-PendingRollbackError). Regression: bulk_uploads dir 187, root rename+lineage 22, API experiments 75, API bulk-uploads 71 — all pass
+- **Decision logged:** yes — `docs/working/decisions.md` (2026-07-28)
