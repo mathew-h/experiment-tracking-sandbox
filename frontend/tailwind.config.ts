@@ -33,8 +33,8 @@ export default {
         // Text hierarchy
         ink: {
           primary:   '#F0F4F8',
-          secondary: '#8BACC8',
-          muted:     '#4d6e8a',
+          secondary: '#C5D9EA',
+          muted:     '#A3C2DC',
           accent:    '#FD4437',
         },
         // Status colors

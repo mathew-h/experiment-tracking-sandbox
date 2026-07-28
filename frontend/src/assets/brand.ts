@@ -19,8 +19,8 @@ export const colors = {
 
   // Text
   inkPrimary:   '#F0F4F8',
-  inkSecondary: '#8BACC8',
-  inkMuted:     '#4d6e8a',
+  inkSecondary: '#C5D9EA',
+  inkMuted:     '#A3C2DC',
 
   // Status
   statusOngoing:   '#22c55e',

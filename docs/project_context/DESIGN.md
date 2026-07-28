@@ -30,6 +30,20 @@
 
 ---
 
+## Text Hierarchy
+
+Three ink tiers, each guaranteed to clear WCAG AA (4.5:1) against all three navy surfaces (`surface.base` `#05172B`, `surface.raised` `#0a2440`, `surface.overlay` `#0e3158`). Tokens live in `frontend/src/assets/brand.ts` (source of truth), mirrored in `frontend/src/styles/tokens.css` and `frontend/tailwind.config.ts`; a vitest regression test (`frontend/src/test/contrast.test.ts`) enforces the AA floor and the tier ordering.
+
+| Token | Hex | On `base` | On `raised` | On `overlay` | Use for |
+|---|---|---|---|---|---|
+| `ink.primary` | `#F0F4F8` | 16.33:1 | 14.19:1 | 11.88:1 | Primary body/heading text |
+| `ink.secondary` | `#C5D9EA` | 12.45:1 | 10.82:1 | 9.06:1 | Secondary text, chart axis/legend labels |
+| `ink.muted` | `#A3C2DC` | 9.72:1 | 8.44:1 | 7.07:1 | Recessive labels — table `Th`, chart axis lines, unit/sub-labels |
+
+**AA floor:** every tier must clear 4.5:1 on every surface. Don't add a tier or change these hexes without recomputing contrast against all three surfaces.
+
+---
+
 ## Web App Usage
 
 - **Backgrounds:** `#05172B` for main/sidebar; slightly lighter tints for cards/panels if needed.
