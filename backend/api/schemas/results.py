@@ -131,6 +131,7 @@ class ResultWithFlagsResponse(BaseModel):
     brine_modification_description: Optional[str] = None
     # Key scalar values for the list (None if no scalar)
     grams_per_ton_yield: Optional[float] = None
+    h2_concentration: Optional[float] = None
     h2_grams_per_ton_yield: Optional[float] = None
     h2_micromoles: Optional[float] = None
     gross_ammonium_concentration_mM: Optional[float] = None
@@ -212,6 +213,8 @@ class RollupTimepointResponse(BaseModel):
     sd_gross_ammonium_mM: Optional[float] = None
     mean_net_ammonium_mM: Optional[float] = None
     sd_net_ammonium_mM: Optional[float] = None
+    mean_h2_ppm: Optional[float] = None
+    sd_h2_ppm: Optional[float] = None
     mean_h2_micromoles: Optional[float] = None
     sd_h2_micromoles: Optional[float] = None
     mean_h2_grams_per_ton: Optional[float] = None

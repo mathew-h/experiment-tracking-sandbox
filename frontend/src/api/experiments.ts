@@ -73,6 +73,7 @@ export interface ResultWithFlags {
   has_brine_modification: boolean
   brine_modification_description: string | null
   grams_per_ton_yield: number | null
+  h2_concentration: number | null
   h2_grams_per_ton_yield: number | null
   h2_micromoles: number | null
   gross_ammonium_concentration_mM: number | null
@@ -137,6 +138,8 @@ export interface RollupTimepoint {
   sd_gross_ammonium_mM: number | null
   mean_net_ammonium_mM: number | null
   sd_net_ammonium_mM: number | null
+  mean_h2_ppm: number | null
+  sd_h2_ppm: number | null
   mean_h2_micromoles: number | null
   sd_h2_micromoles: number | null
   mean_h2_grams_per_ton: number | null

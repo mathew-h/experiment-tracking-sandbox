@@ -32,6 +32,7 @@ const ROLLUP: RollupTimepoint[] = [
     base_experiment_id: 'SERUM_001', time_post_reaction_bucket_days: 7, n_replicates: 3,
     mean_gross_ammonium_mM: 2.0, median_gross_ammonium_mM: 2.0, sd_gross_ammonium_mM: 1.0,
     mean_net_ammonium_mM: 1.5, sd_net_ammonium_mM: 0.5,
+    mean_h2_ppm: null, sd_h2_ppm: null,
     mean_h2_micromoles: null, sd_h2_micromoles: null,
     mean_h2_grams_per_ton: 12.3, sd_h2_grams_per_ton: 2.5,
     mean_fe_yield_h2_pct: 1.23, sd_fe_yield_h2_pct: 0.45,

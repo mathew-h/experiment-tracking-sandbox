@@ -78,11 +78,13 @@ def _make_result(db: Session, experiment: Experiment, bucket_days: float) -> Exp
     return er
 
 
-def _make_scalar(db: Session, result: ExperimentalResults, gross_nh4: float) -> ScalarResults:
+def _make_scalar(db: Session, result: ExperimentalResults, gross_nh4: float,
+                 h2_ppm: float | None = None) -> ScalarResults:
     sr = ScalarResults(
         result_id=result.id,
         gross_ammonium_concentration_mM=gross_nh4,
         background_ammonium_concentration_mM=0.2,
+        h2_concentration=h2_ppm,
     )
     db.add(sr)
     db.flush()
@@ -228,6 +230,73 @@ class TestRollupOutlierExclusion:
             text("SELECT 1 FROM v_results_scalar_rollup WHERE base_experiment_id = 'ROLL_OUT_003'")
         ).fetchall()
         assert rows == []
+
+
+class TestRollupH2Ppm:
+    """Issue #90: mean_h2_ppm / sd_h2_ppm aggregate scalar_results.h2_concentration."""
+
+    def test_mean_and_sd_across_three_replicates(self, view_db):
+        exp_a = _make_experiment(view_db, "ROLL_H2_001a", 610)
+        exp_b = _make_experiment(view_db, "ROLL_H2_001b", 611)
+        exp_c = _make_experiment(view_db, "ROLL_H2_001c", 612)
+        for exp, h2 in ((exp_a, 100.0), (exp_b, 200.0), (exp_c, 300.0)):
+            er = _make_result(view_db, exp, bucket_days=7.0)
+            _make_scalar(view_db, er, gross_nh4=1.0, h2_ppm=h2)
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_H2_001' AND time_post_reaction_bucket_days = 7.0
+            """)
+        ).fetchone()
+        assert row is not None
+        mapping = row._mapping
+        assert mapping["n_replicates"] == 3
+        assert mapping["mean_h2_ppm"] == pytest.approx(200.0)
+        assert mapping["sd_h2_ppm"] == pytest.approx(100.0)
+
+    def test_lone_experiment_null_sd(self, view_db):
+        exp = _make_experiment(view_db, "ROLL_H2_LONE_001", 613)
+        er = _make_result(view_db, exp, bucket_days=7.0)
+        _make_scalar(view_db, er, gross_nh4=1.0, h2_ppm=420.0)
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_H2_LONE_001' AND time_post_reaction_bucket_days = 7.0
+            """)
+        ).fetchone()
+        assert row is not None
+        mapping = row._mapping
+        assert mapping["n_replicates"] == 1
+        assert mapping["mean_h2_ppm"] == pytest.approx(420.0)
+        assert mapping["sd_h2_ppm"] is None
+
+    def test_outlier_excluded_from_mean_h2_ppm(self, view_db):
+        exp_a = _make_experiment(view_db, "ROLL_H2_OUT_001a", 614)
+        exp_b = _make_experiment(view_db, "ROLL_H2_OUT_001b", 615)
+        exp_c = _make_experiment(view_db, "ROLL_H2_OUT_001c", 616)
+        for exp, h2 in ((exp_a, 100.0), (exp_b, 200.0), (exp_c, 9000.0)):
+            er = _make_result(view_db, exp, bucket_days=7.0)
+            _make_scalar(view_db, er, gross_nh4=1.0, h2_ppm=h2)
+        exp_c.is_outlier = True
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_replicates, mean_h2_ppm
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_H2_OUT_001' AND time_post_reaction_bucket_days = 7.0
+            """)
+        ).fetchone()
+        assert row is not None
+        mapping = row._mapping
+        assert mapping["n_replicates"] == 2
+        assert mapping["mean_h2_ppm"] == pytest.approx(150.0)
 
 
 class TestRollupTimepointVials:
