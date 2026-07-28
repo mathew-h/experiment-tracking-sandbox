@@ -13,6 +13,7 @@ Supports hybrid delimiter system:
 The experiment ID grammar itself now lives in database/experiment_id_parser.py
 (issue #70 P5 consolidation); parse_experiment_id below delegates to it.
 """
+import logging
 from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
@@ -21,6 +22,35 @@ from .experiment_id_parser import parse_lineage_fields, split_timepoint_token
 
 if TYPE_CHECKING:
     from .models import Experiment
+
+logger = logging.getLogger(__name__)
+
+
+def _reject_self_parent(experiment, parent):
+    """Guard against an experiment being resolved as its own lineage parent.
+
+    A self-referential value on the ``parent_experiment_fk`` FK is never a valid
+    lineage result and makes SQLAlchemy raise ``CircularDependencyError`` at flush
+    (issue #86: a loose normalize match can resolve a renamed row against itself
+    before its rename is flushed). Returns ``None`` when ``parent`` is the
+    experiment itself — by identity or by matching primary key — otherwise returns
+    ``parent`` unchanged. Emits a warning-level log when it drops a self-parent so
+    a future collision is visible rather than silent.
+    """
+    if parent is None:
+        return None
+    if parent is experiment or (
+        parent.id is not None
+        and experiment.id is not None
+        and parent.id == experiment.id
+    ):
+        logger.warning(
+            "Dropping self-referential lineage parent for experiment_id=%r "
+            "(resolved parent is the experiment itself)",
+            experiment.experiment_id,
+        )
+        return None
+    return parent
 
 
 def parse_experiment_id(experiment_id: str) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str]]:
@@ -283,9 +313,11 @@ def update_experiment_lineage(db: Session, experiment):
         # Assign via the relationship (not a raw `.id`): both resolvers can
         # return a row that is itself still pending in the current flush
         # (no primary key yet) — see _find_experiment_by_exact_spelling.
+        parent = _reject_self_parent(experiment, parent)
         experiment.parent = parent
     else:
         parent = get_or_find_parent_experiment(db, experiment.experiment_id)
+        parent = _reject_self_parent(experiment, parent)
         experiment.parent_experiment_fk = parent.id if parent else None
 
     return True
