@@ -220,29 +220,56 @@ Backfill: `reactor_slot = CASE WHEN experiment_type = 'Core Flood' THEN 'CF' ELS
 
 ### 3. Close the write-path gaps
 
-- `new_experiments.py:599-610` and `:673-681` — add `_is_eligible_for_occupancy(conditions.experiment_type)` to both guards, and change `if conditions.reactor_number` to `is not None`.
-- **Decide whether to pass `newer_than` on the new-experiments path.** The docstring says the unconditional behavior is intentional for this path. My read is that it should now pass `newer_than=experiment.date` for consistency, but this changes behavior the team may be relying on for backfill uploads — flagging for a call rather than deciding unilaterally. Whichever way it goes, the `_is_eligible_for_occupancy` fix is unambiguous and should ship regardless.
-- `PATCH /api/experiments/{experiment_id}/status` (`experiments.py:359-375`) — call `manage_reactor_occupancy` (or at minimum reject the write) when transitioning to ONGOING with an occupied slot. **Team decision needed on which:** silently demoting the occupant from a dropdown is surprising, so a 409 with the occupying experiment ID in the detail, and a frontend confirm dialog, is probably the better UX. Worth 60 seconds of discussion before implementing.
+- `new_experiments.py:634` and `:706` — add `_is_eligible_for_occupancy(conditions.experiment_type)` to both guards, and change `if conditions.reactor_number` to `is not None`. **The falsy-zero half of this is confirmed live in production data:** the eight `R00` rows in the 2026-07-28 audit exist because `reactor_number = 0` is falsy, so occupancy management never ran for them. See `audit-2026-07-28-results-and-cleanup.md`.
+- **Pass `newer_than` on the new-experiments path.** Previously flagged as needing a team call, now resolved by the trigger decision in §4. The concern was that failing open (declining to demote when a date is missing) would silently permit a double-booking. Once the trigger exists, failing open produces a **loud row-level error on the upload instead of silent corruption**, which is the behavior we want. So pass `newer_than=experiment.date` and let the trigger be the backstop. The bulk-upload error handling must catch the trigger's `unique_violation` and surface it as a readable per-row message rather than a 500.
+- `PATCH /api/experiments/{experiment_id}/status` (`experiments.py:519-535`) — **decided: return 409, do not demote.** Reject the transition to ONGOING when the target slot is occupied, with the occupying `experiment_id` and its start date in the error detail so the caller can act on it.
+
+  The frontend confirm dialog ("R01 is occupied by HPHT_222, started Jul 24. Complete it and start HPHT_230?") is **deliberately deferred to a follow-up ticket.** The backend is identical with or without it, so shipping the rejection first costs nothing in rework and closes the hole today. Until the dialog exists, the user completes the occupant manually first.
+
+  Rationale for rejecting rather than demoting: `CF_018`, `-2` and `-3` all went ONGOING through this endpoint with nothing objecting, which is how CF01 ended up triple-booked. Silent demotion would have produced the correct result in that specific case, but the endpoint cannot distinguish "I am advancing a sequential re-run" from "I picked the wrong reactor from a dropdown," and only one of those should close someone else's running experiment.
 
 ### 4. Add the uniqueness constraint
 
 This is the important half of the ticket, because it converts a silent corruption path into a loud error.
 
-**Design constraint to be aware of before you start:** the two columns needed are on different tables. `Experiment.status` lives on `experiments`; `reactor_slot` lives on `experimental_conditions`. Postgres partial unique indexes and exclusion constraints are both single-table, so `CREATE UNIQUE INDEX ... WHERE status = 'ONGOING'` is **not** directly expressible. Options, in the order I'd consider them:
+**Design constraint:** the two columns needed are on different tables. `Experiment.status` lives on `experiments`; `reactor_slot` lives on `experimental_conditions`. Postgres partial unique indexes and exclusion constraints are both single-table, so `CREATE UNIQUE INDEX ... WHERE status = 'ONGOING'` is **not** directly expressible.
 
-- **(a) Trigger-enforced check.** One `PL/pgSQL` function raising `unique_violation`, wired to `BEFORE INSERT OR UPDATE` on `experiments` (when `status` changes to ONGOING) and on `experimental_conditions` (when `reactor_slot` or `experiment_type` changes). Smallest schema surface, no new write paths, works regardless of which application path performs the write — including direct DB edits and scripts, which is a stated part of the exposure. Downside: triggers are invisible to anyone reading the SQLAlchemy models, so it needs a loud comment in `conditions.py` pointing at the migration.
-- **(b) An `active_reactor_occupancy` claim table** with `UNIQUE(reactor_slot)` and an FK to `experiments`, written in the same transaction as any ONGOING transition. Idiomatic and self-documenting, but adds a fifth thing to keep in sync and is largely subsumed by the reactors table in the follow-up ticket.
-- **(c) Denormalize status onto `experimental_conditions`** so a partial unique index works. Rejected — it just moves the sync problem and needs a trigger anyway.
+**Decided (2026-07-28): PL/pgSQL trigger.** One function raising `unique_violation`, wired to `BEFORE INSERT OR UPDATE` on `experiments` (when `status` becomes ONGOING) and on `experimental_conditions` (when `reactor_slot` or `experiment_type` changes).
 
-**Recommendation: (a).** It's the least code, and the follow-up reactors ticket can replace it with a proper FK-based constraint cleanly. But this is a real architectural choice, so if you disagree after reading `manage_reactor_occupancy`, say so in the PR description rather than silently picking a different one.
+Rationale: the failure mode in the production data is un-gated code paths and direct writes, and only a trigger covers those. A claim table's advantage is airtightness under concurrency, which is not a real risk at 2-5 users on a LAN; its cost is that every write path must remember to update it, which is precisely the disease this ticket is treating.
 
-Whichever option: expect the migration to fail on existing data. Run the audit query first, resolve any existing double-bookings by hand with the team (do **not** auto-complete anything as part of the migration — that's the exact bug this ticket is about), then add the constraint.
+Rejected alternatives, recorded so this isn't relitigated: an `active_reactor_occupancy` claim table with `UNIQUE(reactor_slot)` (self-documenting and gets a real index, but adds a fifth thing to keep in sync, and is largely subsumed by `reactors.current_experiment_fk` in the follow-up ticket); and denormalizing `status` onto `experimental_conditions` to make a partial unique index work (moves the sync problem and needs a trigger anyway).
+
+**Three things the trigger implementation must get right:**
+
+1. **A loud comment in `database/models/conditions.py`** pointing at the migration. A trigger is invisible to anyone reading the SQLAlchemy models, and that is its one real weakness. Document it in `MODELS.md` too.
+2. **Readable errors on the bulk-upload paths.** A raw Postgres `unique_violation` surfacing as a 500 on a 200-row upload is worse than the bug. `master_bulk_upload.py` and `experiment_status.py` must catch it and emit a per-row message naming the slot and the occupying experiment.
+3. **Take a row lock, not just a `SELECT count(*)`.** A bare count inside the trigger is racy under concurrent transactions. Theoretical at your scale, but `SELECT ... FOR UPDATE` on the candidate occupant costs nothing and removes the caveat.
+
+**Also add: `CHECK (reactor_number IS NULL OR reactor_number > 0)`** — decided 2026-07-28. The eight `R00` rows in the audit exist because zero was permitted, and zero being falsy is what hid them from the occupancy logic (see §3). An upper bound is deliberately *not* added here: the ceiling differs by series (16 HPHT vs 3 CF) and cannot be expressed cleanly without the reactors table, where the foreign key gives you both bounds free.
+
+**Migration ordering — this matters.** Both the trigger and the CHECK will fail against current production data. The prerequisite cleanup is specified in `audit-2026-07-28-results-and-cleanup.md` and must be run, committed, and verified (zero double-booked slots, zero `reactor_number = 0`) **in a separate session, by a human, before this migration runs.** Do not fold the cleanup into the migration: auto-completing experiments as a side effect of a schema change is the exact bug this ticket exists to fix.
 
 ---
 
 ## Verification
 
-### Prerequisite: run this against prod before writing the migration
+### Prerequisite: DONE (2026-07-28)
+
+Both audit queries were run against the lab PC Postgres. Results, decisions, and the
+required cleanup are in **`audit-2026-07-28-results-and-cleanup.md`**. Summary:
+
+- **Q1 returned 2 double-booked slots**, not zero: `CF01` (3 ONGOING Core Flood runs)
+  and `R00` (8 ONGOING Serum vials on `reactor_number = 0`). The constraint cannot be
+  added until the cleanup in that file has been run and committed.
+- **Q2 returned 223 of 984 rows (23%) with a non-canonical `experiment_type`.** No NULLs.
+  The `reactor_slot` backfill must therefore run *after* normalization, or classify
+  `SERUM`/`OTHER`/`AUTO`/`AUTOCLAVE`/`CF` explicitly. Simplest is to sequence this ticket
+  after the cleanup, which normalizes them.
+
+The original queries are retained below for re-running after cleanup.
+
+### The queries
 
 ```sql
 -- Existing double-bookings, by resolved slot. Must be empty before the constraint lands.
@@ -279,7 +306,10 @@ Extend `tests/services/bulk_uploads/test_experiment_status.py` (existing occupan
 - Same, reversed (ONGOING CF in `CF01`, incoming HPHT on `R01`).
 - Same-file upload starting an HPHT in `R01` and a Core Flood in `CF01` → preview succeeds, no `conflict_errors`. Also fails on `main`.
 - `new_experiments` bulk upload: Serum row with `reactor_number = 3` while an HPHT is ONGOING in `R03` → HPHT stays ONGOING. Mirror of `test_apply_no_demotion_for_serum_type_even_with_reactor_number` (line 506) on the other path.
-- `PATCH /status` to ONGOING on an occupied slot → whichever behavior the team picks in §3, asserted.
+- `PATCH /status` to ONGOING on an occupied slot → **409**, occupant unchanged, occupying `experiment_id` present in the error detail.
+- `PATCH /status` to ONGOING on an *empty* slot → 200, no regression.
+- `reactor_number = 0` write → rejected by the CHECK constraint.
+- Bulk upload whose row would violate the trigger → readable per-row error naming the slot and occupant, **not** a 500. This is the test that stops the trigger being worse than the bug.
 - `summary.reactors.ongoing` with one ONGOING HPHT in `R01` and one ONGOING CF in `CF01` → 1 each in `reactors` and `core_floods`, `empty` correct in both. #85 already covers this; keep its assertion.
 - Constraint-level: attempt to create a second ONGOING experiment in the same slot via raw ORM writes (bypassing the service layer) → raises. This is the test that proves the constraint, not the application logic, is doing the work.
 
@@ -294,7 +324,8 @@ Existing tests that should keep passing and are relevant to read first: `tests/a
 | `experimental_conditions.reactor_slot` | New, nullable `String(8)`. Canonical label (`R01`–`R16`, `CF01`–`CF02`). Indexed. Backfilled. |
 | `experimental_conditions.reactor_number` | Unchanged this pass. Retained for Power BI views, the `?reactor_number=` list filter, and the data-migration scripts. |
 | `experimental_conditions.experiment_type` | Unchanged this pass. See `issue-experiment-type-enum-binding.md`. |
-| Occupancy uniqueness | New trigger (or claim table) enforcing one ONGOING experiment per `reactor_slot`. |
+| Occupancy uniqueness | New PL/pgSQL trigger enforcing one ONGOING experiment per `reactor_slot`. Decided 2026-07-28. |
+| `experimental_conditions.reactor_number` | Gains `CHECK (reactor_number IS NULL OR reactor_number > 0)`. Decided 2026-07-28. Upper bound deferred to the reactors-table FK. |
 
 Alembic: current single head is `daae92e908f1` (`alembic/versions/daae92e908f1_backfill_result_timepoint_buckets.py`). Branch from there. Note the repo also has a separate hand-rolled mechanism under `database/data_migrations/` — use Alembic for this, not that.
 
