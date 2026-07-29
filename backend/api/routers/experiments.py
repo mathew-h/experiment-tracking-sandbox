@@ -18,6 +18,7 @@ from backend.api.schemas.experiments import (
     NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
+    DeleteImpactResponse, ExperimentDeletedResponse,
 )
 from backend.services.replicate_groups import (
     GroupData, GroupMemberData, group_exists, resolve_group, resolve_rollup_rows,
@@ -38,6 +39,9 @@ from backend.api.schemas.notion_sync import (
 )
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
+from backend.services.experiment_deletion import (
+    DeleteImpact, collect_delete_impact, delete_experiment_cascade,
+)
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -1266,6 +1270,43 @@ def update_experiment(
     db.commit()
     db.refresh(exp)
     return ExperimentResponse.model_validate(exp)
+
+
+def _impact_to_response(impact: DeleteImpact) -> DeleteImpactResponse:
+    return DeleteImpactResponse(
+        experiment_id=impact.experiment_id,
+        results=impact.results,
+        scalar_results=impact.scalar_results,
+        icp_results=impact.icp_results,
+        result_files=impact.result_files,
+        notes=impact.notes,
+        additives=impact.additives,
+        external_analyses=impact.external_analyses,
+        xrd_phases=impact.xrd_phases,
+        change_requests=impact.change_requests,
+        total=impact.total,
+        background_for=impact.background_for,
+        replicate_children=impact.replicate_children,
+    )
+
+
+@router.get("/{experiment_id}/delete-impact", response_model=DeleteImpactResponse)
+def get_experiment_delete_impact(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> DeleteImpactResponse:
+    """Preview what deleting this experiment would destroy and decouple.
+
+    Read-only; powers the confirmation dialog so it can show consequences
+    instead of a generic warning. 404 if the experiment does not exist.
+    """
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    return _impact_to_response(collect_delete_impact(db, exp))
 
 
 @router.delete("/{experiment_id}", status_code=204)

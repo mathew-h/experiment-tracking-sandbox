@@ -207,3 +207,38 @@ class ReplicateCreateRequest(BaseModel):
 class ReplicateCreateResponse(BaseModel):
     created: list[ExperimentResponse]
     skipped: list[str] = []
+
+
+class DeleteImpactResponse(BaseModel):
+    """What deleting an experiment destroys and decouples (issue #99).
+
+    `total` sums the counts only. `background_for` and `replicate_children`
+    are decoupled -- those experiments survive -- so they are excluded from it.
+    The UI demands a typed-ID confirmation when `total > 0`.
+    """
+    experiment_id: str
+    results: int = 0
+    scalar_results: int = 0
+    icp_results: int = 0
+    result_files: int = 0
+    notes: int = 0
+    additives: int = 0
+    external_analyses: int = 0
+    xrd_phases: int = 0
+    change_requests: int = 0
+    total: int = 0
+    background_for: list[str] = []
+    replicate_children: list[str] = []
+
+
+class ExperimentDeletedResponse(BaseModel):
+    """Body of DELETE /api/experiments/{experiment_id} (issue #99).
+
+    This endpoint returns 200 with a body, NOT 204: the acceptance criteria
+    require it to report which experiments were decoupled, which a 204 cannot
+    carry. `impact` is measured immediately before the delete, so it reflects
+    what actually happened rather than the pre-flight estimate.
+    """
+    experiment_id: str
+    deleted: bool = True
+    impact: DeleteImpactResponse

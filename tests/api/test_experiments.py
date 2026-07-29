@@ -1503,3 +1503,76 @@ def test_id_timepoint_days_in_responses(client, db_session):
     listing = client.get("/api/experiments")
     item = next(i for i in listing.json()["items"] if i["experiment_id"] == "SERUM_074a-t7")
     assert item["id_timepoint_days"] == 7.0
+
+
+# --- Issue #99: delete impact and audited deletion ---
+
+def _experiment_with_dependents(db, experiment_id="IMPACT_001", number=7301):
+    """Experiment with results + scalar + note + XRD phase, for impact tests."""
+    from database.models.results import ExperimentalResults, ScalarResults
+    from database.models.experiments import ExperimentNotes
+    from database.models.xrd import XRDPhase
+
+    exp = Experiment(experiment_id=experiment_id, experiment_number=number,
+                     status=ExperimentStatus.ONGOING)
+    db.add(exp)
+    db.flush()
+    result = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=7.0,
+                                 time_post_reaction_bucket_days=7.0,
+                                 is_primary_timepoint_result=True, description="t7")
+    db.add(result)
+    db.flush()
+    db.add(ScalarResults(result_id=result.id, final_ph=7.2))
+    db.add(ExperimentNotes(experiment_id=experiment_id, experiment_fk=exp.id, note_text="n"))
+    db.add(XRDPhase(experiment_fk=exp.id, experiment_id=experiment_id,
+                    time_post_reaction_days=7, mineral_name="Magnetite", amount=9.0))
+    db.commit()
+    db.refresh(exp)
+    return exp
+
+
+def test_delete_impact_returns_accurate_counts(client, db_session):
+    _experiment_with_dependents(db_session)
+    resp = client.get("/api/experiments/IMPACT_001/delete-impact")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["experiment_id"] == "IMPACT_001"
+    assert body["results"] == 1
+    assert body["scalar_results"] == 1
+    assert body["notes"] == 1
+    assert body["xrd_phases"] == 1
+    assert body["icp_results"] == 0
+    assert body["total"] == 4
+    assert body["background_for"] == []
+    assert body["replicate_children"] == []
+
+
+def test_delete_impact_zero_for_bare_experiment(client, db_session):
+    _make_experiment(db_session, "IMPACT_BARE_001", 7302)
+    body = client.get("/api/experiments/IMPACT_BARE_001/delete-impact").json()
+    assert body["total"] == 0
+
+
+def test_delete_impact_404_for_unknown_experiment(client):
+    assert client.get("/api/experiments/NOPE_999/delete-impact").status_code == 404
+
+
+def test_delete_impact_lists_background_dependents(client, db_session):
+    from database.models.results import ExperimentalResults, ScalarResults
+
+    target = Experiment(experiment_id="IMPACT_BG_TARGET", experiment_number=7303,
+                        status=ExperimentStatus.ONGOING)
+    other = Experiment(experiment_id="IMPACT_BG_USER", experiment_number=7304,
+                       status=ExperimentStatus.ONGOING)
+    db_session.add_all([target, other])
+    db_session.flush()
+    result = ExperimentalResults(experiment_fk=other.id, time_post_reaction_days=0.0,
+                                 is_primary_timepoint_result=True, description="t0")
+    db_session.add(result)
+    db_session.flush()
+    db_session.add(ScalarResults(result_id=result.id,
+                                 background_experiment_id="IMPACT_BG_TARGET"))
+    db_session.commit()
+
+    body = client.get("/api/experiments/IMPACT_BG_TARGET/delete-impact").json()
+    assert body["background_for"] == ["IMPACT_BG_USER"]
