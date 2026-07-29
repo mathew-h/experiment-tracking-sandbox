@@ -611,11 +611,12 @@ All endpoints return `UploadResponse`:
 ```json
 {
   "created": 0, "updated": 0, "skipped": 0,
-  "errors": [], "warnings": [], "feedbacks": [], "message": "", "dry_run": false
+  "errors": [], "warnings": [], "feedbacks": [], "message": "", "dry_run": false,
+  "plan": null, "plan_hash": null
 }
 ```
 
-**`dry_run` (issue #100 item 1):** every POST endpoint below accepts a `dry_run` form field (default `false`). When `true`, the parser still runs in full — the response's `created`/`updated`/`skipped`/`errors`/`warnings` reflect what *would* happen — but the transaction is rolled back instead of committed, so nothing is persisted. The `message` is prefixed `[DRY RUN]` and the response's `dry_run` field is `true`. For `actlabs-rock`, `dry_run` applies to both write paths (the no-conflict direct import and the resolutions-supplied Phase 2 import); Phase 1's preflight-only response (`ConflictCheckResponse`) never writes regardless of `dry_run`. The file-level reject-on-conflict and the plan-hash preview/commit check are a separate, not-yet-implemented part of issue #100.
+**`dry_run` (issue #100 item 1):** every POST endpoint below accepts a `dry_run` form field (default `false`). When `true`, the parser still runs in full — the response's `created`/`updated`/`skipped`/`errors`/`warnings` reflect what *would* happen — but the transaction is rolled back instead of committed, so nothing is persisted. The `message` is prefixed `[DRY RUN]` and the response's `dry_run` field is `true`. For `actlabs-rock`, `dry_run` applies to both write paths (the no-conflict direct import and the resolutions-supplied Phase 2 import); Phase 1's preflight-only response (`ConflictCheckResponse`) never writes regardless of `dry_run`. For `new-experiments` specifically, `dry_run` is also the preview half of the plan-hash handshake described below.
 
 **`plan` (issue #100 item 2, `new-experiments` only):** `UploadResponse.plan` is a structured summary of what the upload did (or, with `dry_run=true`, would have done):
 ```json
@@ -630,11 +631,29 @@ All endpoints return `UploadResponse`:
 ```
 `fields_changed` merges diffs discovered across the experiments sheet (`sample_id`, `researcher`, `status`, `date`) and the conditions sheet (any updatable `ExperimentalConditions` column — the `initial_ph` example above is exactly the issue's own "silently changes from 4 to 9" case) into one entry per `experiment_id`; a brand-new conditions row is not diffed (nothing to have silently overwritten). Additives are reported as a single summary line (`{"field": "additives", "old": "N additive(s)", "new": "M additive(s) provided"}`) rather than per-compound diffed. `conflicts[].kind` is one of `chain_rename_conflict`, `rename_without_overwrite`, `overwrite_old_id_not_found`, `overwrite_nonexistent`, `already_exists`. Every other upload type returns `plan: null` — the schema (`creates`/`renames`/`parent_id`/`copied_from`) is written around `new_experiments.py`'s own concepts (rename, parent-copy) and doesn't generalize cleanly to the other 12 parsers.
 
+**Conflicts reject the whole file (issue #100 item 4, `new-experiments` only):** if `plan.conflicts` is non-empty the entire upload is rolled back — including rows that would have succeeded. The response is still `200` with `created`/`updated`/`skipped` all `0`, one `errors` entry per conflict formatted `Row <n>: [<kind>] <detail>`, and a `message` of `Upload rejected: N problem(s) must be resolved; no changes applied` (`would be rejected` under `dry_run`). `plan` is returned **in full**, including the `creates` that were refused, so the researcher can see what the file would have done and fix it. Partial application is what turned the 2026-07-28 rename incident into a 149-row reconciliation; a skip (e.g. a blank `experiment_id`) is *not* a conflict and does not block the commit. Parser-level `errors` are not folded into this gate — that path is unchanged.
+
+**`plan_hash` preview→commit handshake (issue #100 item 5, `new-experiments` only):** every `new-experiments` response carries `plan_hash`, a sha256 over the plan's `creates`/`renames`/`overwrites`/`skips`/`conflicts` (`counts` is excluded as derived; list order is preserved because rename ordering is meaningful). Pass it back as a `plan_hash` form field on the real submit and the freshly computed plan must match, or the upload is rejected and rolled back with an error telling the user to preview again.
+
+`plan_hash` is **verified when supplied, not required** — the issue text asked for it to be mandatory, but that would break every existing caller, so omitting it preserves the pre-existing behavior exactly. The UI path always sends it.
+
+Because `overwrites[].fields_changed` records the *current* database values as `old`, the fingerprint covers **DB state as well as file bytes** — so it also catches another researcher changing the underlying experiments between preview and commit, not just an edited workbook.
+
+```
+POST /api/bulk-uploads/new-experiments   file=<xlsx>  dry_run=true
+  → 200 { "dry_run": true, "plan": {...}, "plan_hash": "a1b2…" }
+POST /api/bulk-uploads/new-experiments   file=<same xlsx>  plan_hash=a1b2…
+  → 200 { "created": 12, ... }              # plan unchanged, committed
+  → 200 { "created": 0, "errors": ["Plan changed since preview: …"] }   # file or DB changed
+```
+
+Note: the legacy Streamlit uploader (`legacy/streamlit_frontend/bulk_uploads.py`) calls the service directly via `bulk_upsert_from_excel` and is not covered by either gate.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/bulk-uploads/master-results` | Master Results upload. `file` required — the no-file SharePoint sync mode and the GET/PATCH /master-results/config endpoints were removed (issue #74). Runs calc engine on affected `ScalarResults`. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
 | POST | `/api/bulk-uploads/scalar-results` | Bulk-create/update `ScalarResults` rows from Excel template. Runs calc engine. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
-| POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. Returns a structured `plan` (see above). |
+| POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. Returns a structured `plan` + `plan_hash` (see above). Any conflict in the plan rejects the whole file; optional `plan_hash` form field enforces the preview→commit handshake. |
 | POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. |
 | POST | `/api/bulk-uploads/xrd-mineralogy` | Unified XRD upload — auto-detects Aeris or ActLabs format. |
 | POST | `/api/bulk-uploads/timepoint-modifications` | Bulk-set `brine_modification_description` on result rows. Writes audit log. |

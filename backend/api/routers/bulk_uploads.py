@@ -65,6 +65,36 @@ def _plan_to_schema(svc_plan) -> UploadPlanSchema:
     )
 
 
+def _plan_gate_errors(plan: UploadPlanSchema, expected_plan_hash: Optional[str]) -> list[str]:
+    """Reasons this plan must not be committed (issue #100 items 4 and 5).
+
+    Item 4 — any conflict rejects the WHOLE file. The parser records a conflict and
+    `continue`s past the row, which used to leave the remaining rows to commit; that
+    partial application is what turned the 2026-07-28 SERUM_Catalyst rename mistake
+    into a 149-row reconciliation. A skip is not a conflict and does not gate.
+
+    Item 5 — if the caller supplies the plan hash it previewed, the freshly computed
+    plan must be identical. `plan_hash` is verified-when-supplied rather than required,
+    so the ~26 existing callers that post without it keep working; the UI path always
+    sends it.
+
+    Note: parser-level `errors` are deliberately NOT folded in here. That is
+    pre-existing behavior for this endpoint and outside item 4, which is specifically
+    about plan conflicts.
+    """
+    gate: list[str] = []
+    if expected_plan_hash:
+        actual = plan.fingerprint()
+        if expected_plan_hash != actual:
+            gate.append(
+                f"Plan changed since preview: previewed plan hash '{expected_plan_hash}' does not "
+                f"match this file's plan '{actual}'. The workbook or the underlying experiment data "
+                f"changed in between — preview again and review the new plan before committing."
+            )
+    gate.extend(f"Row {c.row}: [{c.kind}] {c.detail}" for c in plan.conflicts)
+    return gate
+
+
 # ---------------------------------------------------------------------------
 # Existing endpoints (preserved exactly)
 # ---------------------------------------------------------------------------
@@ -133,27 +163,57 @@ async def upload_scalar_results(
 async def upload_new_experiments(
     file: UploadFile = File(...),
     dry_run: bool = Form(False),
+    plan_hash: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Upload a New Experiments Excel file."""
+    """Upload a New Experiments Excel file.
+
+    `dry_run=true` previews without persisting and returns the plan plus its
+    `plan_hash`. Passing that hash back on the real submit requires the plan to be
+    unchanged (issue #100 item 5). Any conflict in the plan rejects the entire file
+    (item 4) — the plan is still returned in full so the researcher can fix it.
+    """
     from backend.services.bulk_uploads.new_experiments import NewExperimentsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
         created, updated, skipped, errors, warnings, _info, svc_plan = (
             NewExperimentsUploadService.bulk_upsert_from_excel_ex(db, file_bytes)
         )
-        _finalize_write(db, dry_run)
+        plan = _plan_to_schema(svc_plan)
+        gate_errors = _plan_gate_errors(plan, plan_hash)
+        _finalize_write(db, dry_run, had_errors=bool(gate_errors))
     except Exception as exc:
         db.rollback()
         log.error("new_experiments_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
+
+    if gate_errors:
+        # Nothing was persisted, so the parser's own counts would be a lie — report
+        # zeros and let `plan` carry what the file WOULD have done.
+        log.info("new_experiments_upload_rejected", conflicts=len(plan.conflicts),
+                 gate_errors=len(gate_errors), user=current_user.email, dry_run=dry_run)
+        verb = "would be rejected" if dry_run else "rejected"
+        return UploadResponse(
+            created=0, updated=0, skipped=0,
+            errors=errors + gate_errors,
+            warnings=warnings,
+            message=_finalize_message(
+                f"Upload {verb}: {len(gate_errors)} problem(s) must be resolved; no changes applied",
+                dry_run,
+            ),
+            dry_run=dry_run,
+            plan=plan,
+            plan_hash=plan.fingerprint(),
+        )
+
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
                           warnings=warnings,
                           message=_finalize_message(f"{created} created, {updated} updated, {skipped} skipped", dry_run),
                           dry_run=dry_run,
-                          plan=_plan_to_schema(svc_plan))
+                          plan=plan,
+                          plan_hash=plan.fingerprint())
 
 
 @router.post("/pxrf", response_model=UploadResponse)
