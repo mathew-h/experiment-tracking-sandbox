@@ -9,6 +9,7 @@ from sqlalchemy import func
 
 from database import Experiment, ExperimentalConditions, ChemicalAdditive, Compound, AmountUnit
 from backend.services.calculations.registry import recalculate
+from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 
 
 class ExperimentAdditivesService:
@@ -39,6 +40,11 @@ class ExperimentAdditivesService:
         name_to_compound = {c.name.lower(): c for c in all_compounds}
 
         for idx, row in df.iterrows():
+            # Per-row savepoint isolation (issue #96 Defect B): a failed flush or recalculation
+            # anywhere in this row's processing is confined to its own SAVEPOINT and rolled back,
+            # leaving the session usable for the remaining rows.
+            savepoint = db.begin_nested()
+            row_ok = False
             try:
                 exp_id = str(row.get('experiment_id') or '').strip()
                 comp_name = str(row.get('compound') or '').strip()
@@ -116,6 +122,11 @@ class ExperimentAdditivesService:
                     order_int = None
 
                 method_text = str(method_val).strip() if method_val is not None and str(method_val).strip() != '' else None
+                if method_text and len(method_text) > ADDITION_METHOD_MAX_LENGTH:
+                    errors.append(
+                        f"Row {idx+2}: method truncated to {ADDITION_METHOD_MAX_LENGTH} characters (was {len(method_text)})"
+                    )
+                    method_text = method_text[:ADDITION_METHOD_MAX_LENGTH]
 
                 if existing_add:
                     existing_add.amount = amount_float
@@ -138,8 +149,16 @@ class ExperimentAdditivesService:
                     db.flush()
                     recalculate(new_add, db)
                     created += 1
+
+                # Row body completed without exception or early `continue`.
+                row_ok = True
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
+            finally:
+                if row_ok:
+                    savepoint.commit()
+                else:
+                    savepoint.rollback()
 
         return created, updated, skipped, errors
 
