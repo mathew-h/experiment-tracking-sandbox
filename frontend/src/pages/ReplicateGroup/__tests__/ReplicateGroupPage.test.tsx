@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import userEvent from '@testing-library/user-event'
 
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
@@ -13,7 +14,11 @@ vi.mock('@/api/experiments', () => ({
 
 import { ReplicateGroupPage } from '../index'
 import { experimentsApi } from '@/api/experiments'
-import type { ReplicateGroupDetail } from '@/api/experiments'
+import type {
+  ReplicateGroupDetail,
+  ReplicateGroupMemberDetail,
+  ReplicateLetterGroup,
+} from '@/api/experiments'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -31,24 +36,32 @@ function renderAtBase(baseId: string) {
   )
 }
 
+const ORPHAN_MEMBERS: ReplicateGroupMemberDetail[] = [
+  {
+    id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false,
+    id_timepoint_days: null, researcher: 'MH', date: null, result_count: 2, conditions: {},
+  },
+  {
+    id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING', is_outlier: false,
+    id_timepoint_days: null, researcher: 'MH', date: null, result_count: 2, conditions: {},
+  },
+  {
+    id: 4, experiment_id: 'SERUM_001c', replicate_label: 'c', status: 'COMPLETED', is_outlier: false,
+    id_timepoint_days: null, researcher: 'MH', date: null, result_count: 2, conditions: {},
+  },
+]
+
 const ORPHAN_GROUP: ReplicateGroupDetail = {
   base_experiment_id: 'SERUM_001',
   parent: null,
-  members: [
-    {
-      id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false,
-      id_timepoint_days: null, researcher: 'MH', date: null, result_count: 2, conditions: {},
-    },
-    {
-      id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING', is_outlier: false,
-      id_timepoint_days: null, researcher: 'MH', date: null, result_count: 2, conditions: {},
-    },
-    {
-      id: 4, experiment_id: 'SERUM_001c', replicate_label: 'c', status: 'COMPLETED', is_outlier: false,
-      id_timepoint_days: null, researcher: 'MH', date: null, result_count: 2, conditions: {},
-    },
-  ],
+  members: ORPHAN_MEMBERS,
   member_count: 3,
+  replicate_count: 3,
+  replicates: [
+    { replicate_label: 'a', vials: [ORPHAN_MEMBERS[0]] },
+    { replicate_label: 'b', vials: [ORPHAN_MEMBERS[1]] },
+    { replicate_label: 'c', vials: [ORPHAN_MEMBERS[2]] },
+  ],
   shared_conditions: { experiment_type: 'Serum' },
   divergent_fields: [],
   additives_summary: 'Magnetite 1 g',
@@ -88,12 +101,19 @@ describe('ReplicateGroupPage', () => {
   })
 
   it('renders a divergent field as "varies" in the shared panel and per-member in the table', async () => {
+    const updatedMembers = ORPHAN_GROUP.members.map((m, i) => ({
+      ...m,
+      conditions: { temperature_c: 60 + i },
+    }))
     vi.mocked(experimentsApi.getGroup).mockResolvedValue({
       ...ORPHAN_GROUP,
       divergent_fields: ['temperature_c'],
-      members: ORPHAN_GROUP.members.map((m, i) => ({
-        ...m,
-        conditions: { temperature_c: 60 + i },
+      members: updatedMembers,
+      // Table rows now come from `replicates` (issue #98), which must carry
+      // the same updated conditions as `members` for this fixture to be internally consistent.
+      replicates: ORPHAN_GROUP.replicates.map((r, i) => ({
+        ...r,
+        vials: [updatedMembers[i]],
       })),
     })
     renderAtBase('SERUM_001')
@@ -124,7 +144,10 @@ describe('ReplicateGroupPage', () => {
   it('renders the parent row labeled as replicate 0 when a parent exists', async () => {
     vi.mocked(experimentsApi.getGroup).mockResolvedValue({
       ...ORPHAN_GROUP,
-      parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING', is_outlier: false },
+      parent: {
+        id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING', is_outlier: false,
+        id_timepoint_days: null, researcher: null, date: null, result_count: 0, conditions: {},
+      },
     })
     renderAtBase('SERUM_001')
     await waitFor(() => expect(screen.getByText('0 (parent)')).toBeInTheDocument())
@@ -202,5 +225,91 @@ describe('ReplicateGroupPage', () => {
 
     await waitFor(() => expect(screen.getByText('Temperature C:')).toBeInTheDocument())
     expect(screen.getByText('varies — see members table')).toBeInTheDocument()
+  })
+})
+
+describe('ReplicateGroupPage — issue #98 letter nesting', () => {
+  function vial(
+    id: number, experimentId: string, day: number | null,
+  ): ReplicateGroupMemberDetail {
+    return {
+      id, experiment_id: experimentId, replicate_label: 'a',
+      status: 'ONGOING', is_outlier: false,
+      id_timepoint_days: day, researcher: null, date: null,
+      result_count: 1, conditions: {},
+    }
+  }
+
+  function groupWith(
+    baseId: string, replicates: ReplicateLetterGroup[],
+  ): ReplicateGroupDetail {
+    const members = replicates.flatMap((r) => r.vials)
+    return {
+      base_experiment_id: baseId, parent: null, members,
+      member_count: members.length, replicates,
+      replicate_count: replicates.length,
+      shared_conditions: {}, divergent_fields: [],
+      additives_summary: null, additive_names: null, additives_diverge: false,
+    }
+  }
+
+  it('header counts letters, not vials', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupWith('SERUM_001', [
+        { replicate_label: 'a', vials: [vial(1, 'SERUM_001a-t1', 1), vial(2, 'SERUM_001a-t3', 3)] },
+      ]),
+    )
+    renderAtBase('SERUM_001')
+    // 2 vials, 1 letter -> the header must say "1 replicate".
+    await waitFor(() => expect(screen.getByText('1 replicate')).toBeInTheDocument())
+  })
+
+  it('a multi-vial letter is one collapsed row that expands to its vials', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupWith('SERUM_001', [
+        { replicate_label: 'a', vials: [vial(1, 'SERUM_001a-t1', 1), vial(2, 'SERUM_001a-t3', 3)] },
+      ]),
+    )
+    renderAtBase('SERUM_001')
+
+    await waitFor(() => expect(screen.getByText('2 vials')).toBeInTheDocument())
+    expect(screen.queryByText('SERUM_001a-t1')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /expand replicate a/i }))
+    expect(screen.getByRole('link', { name: 'SERUM_001a-t1' })).toBeInTheDocument()
+    expect(screen.getByText('T+3')).toBeInTheDocument()
+  })
+
+  it('a single-vial letter renders as a plain row with no expander (D10)', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupWith('SERUM_002', [
+        { replicate_label: 'a', vials: [vial(1, 'SERUM_002a', null)] },
+      ]),
+    )
+    renderAtBase('SERUM_002')
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'SERUM_002a' })).toBeInTheDocument()
+    )
+    expect(screen.queryByRole('button', { name: /expand replicate/i })).not.toBeInTheDocument()
+  })
+
+  it('a parent with its own results renders real cells, not em dashes', async () => {
+    const group = groupWith('SERUM_003', [
+      { replicate_label: 'a', vials: [vial(2, 'SERUM_003a', null)] },
+    ])
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...group,
+      parent: {
+        id: 1, experiment_id: 'SERUM_003', replicate_label: null, status: 'ONGOING',
+        is_outlier: false, id_timepoint_days: 5, researcher: 'MH', date: null,
+        result_count: 4, conditions: {},
+      },
+    })
+    renderAtBase('SERUM_003')
+    await waitFor(() => expect(screen.getByText('0 (parent)')).toBeInTheDocument())
+    // Previously hard-coded '—' because `parent` was the narrow member type.
+    expect(screen.getByText('T+5')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
   })
 })

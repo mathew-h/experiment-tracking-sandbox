@@ -183,9 +183,15 @@ export interface ReplicateGroupMemberDetail extends ReplicateGroupMember {
   conditions: Record<string, unknown>
 }
 
+/** Issue #98: one replicate letter and its timepoint vials. */
+export interface ReplicateLetterGroup {
+  replicate_label: string
+  vials: ReplicateGroupMemberDetail[]
+}
+
 export interface ReplicateGroupDetail {
   base_experiment_id: string
-  parent: ReplicateGroupMember | null
+  parent: ReplicateGroupMemberDetail | null
   members: ReplicateGroupMemberDetail[]
   member_count: number
   shared_conditions: Record<string, unknown>
@@ -193,6 +199,9 @@ export interface ReplicateGroupDetail {
   additives_summary: string | null
   additive_names: string | null
   additives_diverge: boolean
+  /** Issue #98: `members` grouped by letter. `member_count` stays per-vial. */
+  replicates: ReplicateLetterGroup[]
+  replicate_count: number
 }
 
 /** Mirrors backend ReplicateCreateResponse: created items are ExperimentResponse-shaped
