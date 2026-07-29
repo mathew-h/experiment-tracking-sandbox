@@ -74,10 +74,14 @@ describe('DeleteExperimentModal', () => {
     vi.mocked(experimentsApi.getDeleteImpact).mockResolvedValue(HEAVY_IMPACT)
     renderModal()
 
-    const confirmBtn = await screen.findByRole('button', { name: /^delete$/i })
+    // Wait for the impact query to resolve and the body to render before
+    // grabbing the button — otherwise the button query can resolve against
+    // the pre-load render (Delete exists but disabled) rather than confirming
+    // its state once impact has actually loaded.
+    const input = await screen.findByLabelText(/type the experiment id/i)
+    const confirmBtn = screen.getByRole('button', { name: /^delete$/i })
     expect(confirmBtn).toBeDisabled()
 
-    const input = screen.getByLabelText(/type the experiment id/i)
     await user.type(input, 'SERUM_001')
     expect(confirmBtn).toBeDisabled()
 
@@ -137,5 +141,22 @@ describe('DeleteExperimentModal', () => {
     await user.click(await screen.findByRole('button', { name: /^delete$/i }))
     expect(await screen.findByText(/experiment not found/i)).toBeInTheDocument()
     expect(onDeleted).not.toHaveBeenCalled()
+  })
+
+  it('shows an error and keeps Delete disabled when the impact fetch fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.getDeleteImpact).mockRejectedValue(new Error('network error'))
+    const { onClose } = renderModal()
+
+    expect(
+      await screen.findByText(/could not load what this deletion would affect/i),
+    ).toBeInTheDocument()
+
+    const confirmBtn = screen.getByRole('button', { name: /^delete$/i })
+    expect(confirmBtn).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: /cancel/i }))
+    expect(onClose).toHaveBeenCalled()
+    expect(experimentsApi.delete).not.toHaveBeenCalled()
   })
 })

@@ -49,7 +49,7 @@ export function DeleteExperimentModal({
     }
   }, [open, experimentId])
 
-  const { data: impact, isLoading } = useQuery({
+  const { data: impact, isLoading, isError } = useQuery({
     queryKey: ['delete-impact', experimentId],
     queryFn: () => experimentsApi.getDeleteImpact(experimentId),
     enabled: open && Boolean(experimentId),
@@ -84,25 +84,25 @@ export function DeleteExperimentModal({
       title="Delete Experiment"
       onClose={onClose}
       footer={
-        // Gated on `impact` (not just `open`) so the Delete button — and its
-        // disabled state — only appear once the impact query has resolved;
-        // otherwise a caller could see an enabled/disabled button before the
-        // typed-ID gate below it has even mounted.
-        impact ? (
-          <>
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button
-              variant="danger"
-              onClick={() => deleteMutation.mutate()}
-              disabled={!canDelete}
-            >
-              Delete
-            </Button>
-          </>
-        ) : undefined
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="danger"
+            onClick={() => deleteMutation.mutate()}
+            disabled={!canDelete}
+          >
+            Delete
+          </Button>
+        </>
       }
     >
       {isLoading && <PageSpinner />}
+
+      {isError && (
+        <p className="text-red-400 text-sm">
+          Could not load what this deletion would affect. Close this dialog and try again.
+        </p>
+      )}
 
       {impact && (
         <div className="space-y-3 text-sm">
