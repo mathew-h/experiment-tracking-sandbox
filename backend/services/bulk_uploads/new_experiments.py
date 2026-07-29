@@ -112,6 +112,8 @@ class NewExperimentsUploadService:
           - overwrite=False and experiment exists: skip with error
           - overwrite=True and experiment exists: update provided fields; if additives sheet has
             rows for that experiment, REPLACE all existing additives with the provided set.
+          - old_experiment_id provided but overwrite is not TRUE: rejected as a conflict and
+            skipped (never falls through to create a duplicate under the new experiment_id).
 
         Returns (created_experiments, updated_experiments, skipped_rows, errors, warnings, info_messages)
         """
@@ -275,6 +277,21 @@ class NewExperimentsUploadService:
                             info_messages.append(f"Rename: '{old_experiment_id}' -> '{exp_id}'")
                         else:
                             warnings.append(f"[experiments] Row {idx+2}: Old experiment_id='{old_experiment_id}' NOT FOUND")
+                    elif old_experiment_id and not overwrite_flag:
+                        # old_experiment_id supplied but overwrite is falsy: this used to fall
+                        # through to standard matching on the NEW id below, which normally finds
+                        # nothing and silently CREATES a duplicate instead of renaming
+                        # 'old_experiment_id' (issue #100 — the 2026-07-28 SERUM_Catalyst incident:
+                        # two intended-rename workbooks with overwrite blank produced 80 creates
+                        # alongside the 80 originals). Block the row instead of guessing.
+                        warnings.append(
+                            f"[experiments] Row {idx+2}: old_experiment_id='{old_experiment_id}' provided but "
+                            f"overwrite is not TRUE. This row would CREATE '{exp_id}' rather than rename "
+                            f"'{old_experiment_id}'. Set overwrite=TRUE to rename."
+                        )
+                        exp_id_norm = ''.join(ch for ch in exp_id.lower() if ch not in ['-', '_', ' '])
+                        failed_experiment_ids.add(exp_id_norm)
+                        continue
                     else:
                         # Standard normalized matching (backward compatible)
                         exp_id_norm = ''.join(ch for ch in exp_id.lower() if ch not in ['-', '_', ' '])
