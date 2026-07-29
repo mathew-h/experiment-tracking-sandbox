@@ -111,20 +111,22 @@ def _add(db, experiment_id: str, number: int, **kw) -> Experiment:
 
 
 class TestTimepointStemExpr:
-    def test_sql_strips_the_token(self, db_session):
-        for i, (experiment_id, _) in enumerate(STEM_CASES):
-            _add(db_session, f"RC1_{i}_{experiment_id}", 8100 + i)
+    def test_sql_strips_the_token_against_real_rows(self, db_session):
+        """The expression applied to an actual column, not a literal."""
+        rows = [
+            ("SERUM_801a-t1", "SERUM_801a"),
+            ("SERUM_802a", "SERUM_802a"),
+            ("SERUM_803a-2", "SERUM_803a-2"),
+        ]
+        for i, (experiment_id, _) in enumerate(rows):
+            _add(db_session, experiment_id, 8100 + i)
         db_session.commit()
-        # Query the expression directly against literal IDs rather than rows, so
-        # the test does not depend on the ID grammar accepting the prefixes above.
-        for experiment_id, expected in STEM_CASES:
-            got = db_session.execute(
-                select(timepoint_stem_expr(Experiment))
-                .select_from(Experiment)
-                .where(Experiment.experiment_id == experiment_id)
-            ).scalar_one_or_none()
-            if got is not None:
-                assert got == expected
+        got = dict(db_session.execute(
+            select(Experiment.experiment_id, timepoint_stem_expr(Experiment))
+            .where(Experiment.experiment_id.in_([r[0] for r in rows]))
+        ).all())
+        # Unconditional: every row must be present and correct.
+        assert got == dict(rows)
 
     def test_sql_and_python_agree(self, db_session):
         """The POSIX pattern and split_timepoint_token must never diverge."""
