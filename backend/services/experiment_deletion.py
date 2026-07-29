@@ -157,3 +157,156 @@ def collect_delete_impact(db: Session, exp: Experiment) -> DeleteImpact:
     ).scalars().all())
 
     return impact
+
+
+def _primitive(value: Any) -> Any:
+    """Coerce a column value to something json/JSONB can hold."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if hasattr(value, "value"):  # enum member (e.g. ExperimentStatus)
+        return value.value
+    if hasattr(value, "isoformat"):  # date / datetime
+        return value.isoformat()
+    return str(value)
+
+
+def _row_to_dict(instance: Any) -> dict[str, Any]:
+    return {
+        col.name: _primitive(getattr(instance, col.name))
+        for col in instance.__table__.columns
+    }
+
+
+def serialize_experiment_snapshot(db: Session, exp: Experiment) -> dict[str, Any]:
+    """A restorable snapshot of the experiment, its conditions, additives and notes.
+
+    Every value is JSON-primitive because this lands in ModificationsLog.old_values
+    (a JSONB column) -- enums and datetimes would otherwise fail the flush.
+    Results/ICP are deliberately excluded: they are bulk-uploadable and would
+    make the audit row unbounded. Their counts are recorded in new_values.
+    """
+    conditions = db.execute(
+        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
+    ).scalar_one_or_none()
+
+    additives: list[dict[str, Any]] = []
+    if conditions is not None:
+        rows = db.execute(
+            select(ChemicalAdditive, Compound.name)
+            .join(Compound, Compound.id == ChemicalAdditive.compound_id)
+            .where(ChemicalAdditive.experiment_id == conditions.id)
+        ).all()
+        for additive, compound_name in rows:
+            entry = _row_to_dict(additive)
+            entry["compound_name"] = compound_name
+            additives.append(entry)
+
+    notes = db.execute(
+        select(ExperimentNotes.note_text)
+        .where(ExperimentNotes.experiment_fk == exp.id)
+        .order_by(ExperimentNotes.created_at)
+    ).scalars().all()
+
+    return {
+        "experiment": _row_to_dict(exp),
+        "conditions": _row_to_dict(conditions) if conditions is not None else None,
+        "additives": additives,
+        "notes": [n for n in notes if n is not None],
+    }
+
+
+def delete_experiment_cascade(
+    db: Session, exp: Experiment, modified_by: str | None
+) -> DeleteImpact:
+    """Decouple, audit, then hard-delete an experiment. Commits.
+
+    Order matters: the impact scan and the snapshot both read rows that the
+    delete destroys, so they run first. The ModificationsLog row is added with
+    experiment_fk=None -- that FK is ondelete="CASCADE", so a populated value
+    would take the audit row down with the experiment.
+    """
+    experiment_id = exp.experiment_id
+    exp_pk = exp.id
+
+    impact = collect_delete_impact(db, exp)
+    snapshot = serialize_experiment_snapshot(db, exp)
+
+    # 1. XRD phases: DELETE, not decouple. Matched on fk OR string so a row
+    #    orphaned by an earlier delete cannot keep holding the unique slot on
+    #    (experiment_id, time_post_reaction_days, mineral_name).
+    db.execute(
+        sql_delete(XRDPhase).where(
+            or_(XRDPhase.experiment_fk == exp_pk,
+                XRDPhase.experiment_id == experiment_id)
+        )
+    )
+
+    # 2. Ammonium background provenance on OTHER experiments' scalar results.
+    #    The string has no FK and is the column actually in use; the fk is
+    #    nulled too so nothing depends on deployed constraint parity.
+    db.execute(
+        update(ScalarResults)
+        .where(or_(ScalarResults.background_experiment_id == experiment_id,
+                   ScalarResults.background_experiment_fk == exp_pk))
+        .values(background_experiment_id=None, background_experiment_fk=None)
+    )
+
+    # 3. Reactor change requests keep their row, lose the reference. Safe
+    #    against uq_change_request_reactor_experiment_date: PostgreSQL treats
+    #    NULL as distinct in unique constraints.
+    db.execute(
+        update(ReactorChangeRequest)
+        .where(ReactorChangeRequest.experiment_id == experiment_id)
+        .values(experiment_id=None)
+    )
+
+    # 4. Replicate children: drop the parent pointer explicitly rather than
+    #    relying on the DB SET NULL. base_experiment_id is untouched, so the
+    #    group stays addressable by string (MODELS.md, issue #87).
+    if impact.replicate_children:
+        db.execute(
+            update(Experiment)
+            .where(Experiment.parent_experiment_fk == exp_pk, Experiment.id != exp_pk)
+            .values(parent_experiment_fk=None)
+        )
+
+    # 5. The audit trail -- experiment_fk=None so it outlives the experiment.
+    db.add(ModificationsLog(
+        experiment_id=experiment_id,
+        experiment_fk=None,
+        sample_id=exp.sample_id,
+        modified_by=modified_by,
+        modification_type="delete",
+        modified_table="experiments",
+        old_values=snapshot,
+        new_values={
+            "impact": {
+                "results": impact.results,
+                "scalar_results": impact.scalar_results,
+                "icp_results": impact.icp_results,
+                "result_files": impact.result_files,
+                "notes": impact.notes,
+                "additives": impact.additives,
+                "external_analyses": impact.external_analyses,
+                "xrd_phases": impact.xrd_phases,
+                "change_requests": impact.change_requests,
+                "total": impact.total,
+            },
+            "decoupled_background_for": impact.background_for,
+            "decoupled_replicate_children": impact.replicate_children,
+        },
+    ))
+    db.flush()
+
+    db.delete(exp)
+    db.commit()
+
+    log.info(
+        "experiment_deleted",
+        experiment_id=experiment_id,
+        user=modified_by,
+        rows_destroyed=impact.total,
+        decoupled_background_for=impact.background_for,
+        decoupled_replicate_children=impact.replicate_children,
+    )
+    return impact
