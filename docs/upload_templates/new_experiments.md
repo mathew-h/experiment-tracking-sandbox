@@ -40,7 +40,7 @@ Supports structured naming conventions:
 Columns map directly to `ExperimentalConditions` model attributes. Certain legacy/deprecated columns (e.g., catalyst, buffer_system, surfactant_type) are blacklisted. The `experiment_type` is auto-populated based on the parsed `experiment_id`.
 
 ### Additives Sheet
-The `unit` column must strictly match `AmountUnit` enum values (e.g., `g`, `mg`, `mM`, `ppm`). Missing compounds are automatically created in the database. When `overwrite=True`, existing additives for the experiment are entirely replaced by the newly provided set.
+The `unit` column must strictly match `AmountUnit` enum values (e.g., `g`, `mg`, `mM`, `ppm`). Missing compounds are automatically created in the database. When `overwrite=True`, existing additives for the experiment are entirely replaced by the newly provided set. The `method` column is free text but capped at `ADDITION_METHOD_MAX_LENGTH` (500) characters — longer values are truncated and a warning is added to the upload's `warnings` list, while the row's other fields (compound/amount/unit) still persist.
 
 ## Output
 Returns `(created_experiments, updated_experiments, skipped_rows, errors, warnings, info_messages)`.

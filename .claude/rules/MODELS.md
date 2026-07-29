@@ -76,7 +76,7 @@ Inventory of chemical reagents.
 ### `ChemicalAdditive`
 Join table linking `ExperimentalConditions` to `Compound` with specific quantities.
 - **Keys**: `experiment_id` (FK to `experimental_conditions.id`), `compound_id` (FK to `compounds.id`); unique per (experiment, compound).
-- **Fields**: `amount`, `unit` (AmountUnit enum: g, mg, mM, ppm, % of Rock, etc.), `addition_order`, `addition_method`, `purity`, `lot_number`, `supplier_lot`.
+- **Fields**: `amount`, `unit` (AmountUnit enum: g, mg, mM, ppm, % of Rock, etc.), `addition_order`, `addition_method` (Text, free-text prep/addition description; app-layer bound of 500 chars enforced by `ADDITION_METHOD_MAX_LENGTH` in `database/models/chemicals.py` — the DB column itself is unbounded, per issue #96), `purity`, `lot_number`, `supplier_lot`.
 - **Calculated Fields**:
   - `mass_in_grams`, `moles_added`, `final_concentration`, `concentration_units`.
   - For catalysts: `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm`.

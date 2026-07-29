@@ -14,6 +14,7 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.bulk_upload import UploadResponse, ConflictCheckResponse, SampleConflict, SampleConflictMatch
 from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
 from backend.config.settings import get_settings
+from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/bulk-uploads", tags=["bulk-uploads"])
@@ -809,7 +810,7 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("unit*", "REQUIRED. One of: g, mg, μg, kg, μL, mL, L, μmol, mmol, mol, ppm, mM, M, %, wt%, % of Rock, wt% of fluid."),
             ("(additives note)", "Additives are NEVER auto-copied from parent experiments. Each experiment's additives must be specified explicitly in this sheet."),
             ("order", "Integer addition order (optional)."),
-            ("method", "Free-text addition method description (optional)."),
+            ("method", f"Free-text addition method description (optional, max {ADDITION_METHOD_MAX_LENGTH} characters — longer values are truncated with a warning)."),
         ]
         for r_idx, (col_name, note) in enumerate(instructions, start=1):
             name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
