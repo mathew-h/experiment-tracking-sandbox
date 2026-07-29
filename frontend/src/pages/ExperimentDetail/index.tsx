@@ -7,6 +7,7 @@ import { StatusBadge, Badge, Button, Input, PageSpinner, useToast } from '@/comp
 import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { CreateReplicatesModal } from '@/components/experiments/CreateReplicatesModal'
+import { DeleteExperimentModal } from '@/components/experiments/DeleteExperimentModal'
 import { ConditionsTab } from './ConditionsTab'
 import { ResultsTab } from './ResultsTab'
 import { NotesTab } from './NotesTab'
@@ -31,6 +32,7 @@ export function ExperimentDetailPage() {
   const [editingSampleId, setEditingSampleId] = useState(false)
   const [sampleDraft, setSampleDraft] = useState('')
   const [replicatesOpen, setReplicatesOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const { data: experiment, isLoading, error } = useQuery({
     queryKey: ['experiment', id],
@@ -380,11 +382,31 @@ export function ExperimentDetailPage() {
             {experiment.is_outlier ? 'Include in rollup' : 'Mark as outlier'}
           </Button>
         )}
+        <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}>
+          Delete Experiment
+        </Button>
       </div>
       <CreateReplicatesModal
         open={replicatesOpen}
         onClose={() => setReplicatesOpen(false)}
         baseExperimentId={experiment.experiment_id}
+      />
+      <DeleteExperimentModal
+        open={deleteOpen}
+        experimentId={experiment.experiment_id}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={() => {
+          setDeleteOpen(false)
+          // Drop this experiment's own cached detail as well as the list and
+          // group caches, so a freed experiment_id reused later does not read
+          // back the deleted row.
+          queryClient.removeQueries({ queryKey: ['experiment', experiment.experiment_id] })
+          queryClient.invalidateQueries({ queryKey: ['experiments'] })
+          queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
+          queryClient.invalidateQueries({ queryKey: ['rollup'] })
+          success('Experiment deleted')
+          navigate('/experiments', { replace: true })
+        }}
       />
 
       {/* Tab bar */}
