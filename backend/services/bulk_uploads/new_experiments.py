@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional, Any
 
 import pandas as pd
@@ -80,9 +81,103 @@ def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment
     return parent
 
 
+@dataclass
+class PlanCreate:
+    """A row that will create a brand-new Experiment (issue #100 item 2)."""
+    row: int
+    experiment_id: str
+    parent_id: Optional[str] = None
+    copied_from: Optional[str] = None
+
+
+@dataclass
+class PlanRename:
+    """A row that renames an existing Experiment via old_experiment_id + overwrite=TRUE."""
+    row: int
+    from_id: str
+    to_id: str
+
+
+@dataclass
+class FieldChange:
+    field: str
+    old: Any
+    new: Any
+
+
+@dataclass
+class PlanOverwrite:
+    """An existing Experiment updated in place (not a rename). One entry per
+    experiment_id, merging field changes discovered across the experiments and
+    conditions sheets — the same experiment can be touched by both."""
+    row: int
+    experiment_id: str
+    fields_changed: List[FieldChange] = field(default_factory=list)
+
+
+@dataclass
+class PlanSkip:
+    row: int
+    experiment_id: Optional[str]
+    reason: str
+
+
+@dataclass
+class PlanConflict:
+    row: int
+    kind: str
+    detail: str
+
+
+@dataclass
+class UploadPlan:
+    """Structured create/rename/overwrite/skip/conflict summary for a New Experiments
+    upload (issue #100 item 2). Only bulk_upsert_from_excel_ex populates this —
+    bulk_upsert_from_excel keeps its original 6-tuple return untouched so none of
+    its existing callers need to change."""
+    creates: List[PlanCreate] = field(default_factory=list)
+    renames: List[PlanRename] = field(default_factory=list)
+    overwrites: List[PlanOverwrite] = field(default_factory=list)
+    skips: List[PlanSkip] = field(default_factory=list)
+    conflicts: List[PlanConflict] = field(default_factory=list)
+
+    @property
+    def counts(self) -> Dict[str, int]:
+        return {
+            "creates": len(self.creates),
+            "renames": len(self.renames),
+            "overwrites": len(self.overwrites),
+            "skips": len(self.skips),
+            "conflicts": len(self.conflicts),
+        }
+
+
 class NewExperimentsUploadService:
     @staticmethod
     def bulk_upsert_from_excel(db: Session, file_bytes: bytes) -> Tuple[int, int, int, List[str], List[str], List[str]]:
+        """Create or update Experiments/ExperimentalConditions/ChemicalAdditives from a
+        multi-sheet Excel workbook. See _bulk_upsert_from_excel_impl for full behavior.
+
+        Kept as a thin wrapper with its original 6-value return so none of its many
+        existing callers need to change (issue #100 item 2). Use bulk_upsert_from_excel_ex
+        for the same behavior plus a structured UploadPlan.
+        """
+        created, updated, skipped, errors, warnings, info, _plan = (
+            NewExperimentsUploadService._bulk_upsert_from_excel_impl(db, file_bytes)
+        )
+        return created, updated, skipped, errors, warnings, info
+
+    @staticmethod
+    def bulk_upsert_from_excel_ex(
+        db: Session, file_bytes: bytes
+    ) -> Tuple[int, int, int, List[str], List[str], List[str], "UploadPlan"]:
+        """Same as bulk_upsert_from_excel, plus a structured UploadPlan (issue #100 item 2)."""
+        return NewExperimentsUploadService._bulk_upsert_from_excel_impl(db, file_bytes)
+
+    @staticmethod
+    def _bulk_upsert_from_excel_impl(
+        db: Session, file_bytes: bytes
+    ) -> Tuple[int, int, int, List[str], List[str], List[str], "UploadPlan"]:
         """
         Create or update Experiments, ExperimentalConditions, and ChemicalAdditives from a
         multi-sheet Excel workbook.
@@ -115,17 +210,22 @@ class NewExperimentsUploadService:
           - old_experiment_id provided but overwrite is not TRUE: rejected as a conflict and
             skipped (never falls through to create a duplicate under the new experiment_id).
 
-        Returns (created_experiments, updated_experiments, skipped_rows, errors, warnings, info_messages)
+        Returns (created_experiments, updated_experiments, skipped_rows, errors, warnings,
+        info_messages, plan) — plan is a structured UploadPlan (issue #100 item 2).
         """
         created_exp = updated_exp = skipped = 0
         errors: List[str] = []
         warnings: List[str] = []
         info_messages: List[str] = []
+        plan = UploadPlan()
+        # Keyed by (current) experiment_id — merges field changes discovered across the
+        # experiments sheet and the conditions sheet into one PlanOverwrite per experiment.
+        overwrite_plan_by_exp_id: Dict[str, PlanOverwrite] = {}
 
         try:
             sheets: Dict[str, pd.DataFrame] = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
         except Exception as e:
-            return 0, 0, 0, [f"Failed to read Excel: {e}"], [], []
+            return 0, 0, 0, [f"Failed to read Excel: {e}"], [], [], UploadPlan()
 
         # Normalize sheet keys
         normalized: Dict[str, pd.DataFrame] = {str(k).strip().lower(): v for k, v in (sheets or {}).items()}
@@ -195,6 +295,7 @@ class NewExperimentsUploadService:
                     exp_id = str(row.get('experiment_id') or '').strip()
                     if not exp_id:
                         skipped += 1
+                        plan.skips.append(PlanSkip(row=idx + 2, experiment_id=None, reason="empty experiment_id"))
                         continue
                     
                     # Validate experiment ID and collect warnings
@@ -265,12 +366,18 @@ class NewExperimentsUploadService:
                             
                             if existing_target and existing_target.id != experiment.id:
                                 # Target ID exists and is a different experiment - chain rename conflict!
-                                warnings.append(
-                                    f"[experiments] Row {idx+2}: ⚠️ CHAIN RENAME CONFLICT: Cannot rename '{old_experiment_id}' "
-                                    f"to '{exp_id}' because '{exp_id}' already exists as a separate experiment. "
-                                    f"If you're renaming '{exp_id}' to something else in a later row, process that row FIRST. "
-                                    f"Correct order: rename experiments AWAY from conflicting names before renaming INTO them."
+                                chain_conflict_detail = (
+                                    f"Cannot rename '{old_experiment_id}' to '{exp_id}' because '{exp_id}' already "
+                                    f"exists as a separate experiment. If you're renaming '{exp_id}' to something "
+                                    f"else in a later row, process that row FIRST. Correct order: rename experiments "
+                                    f"AWAY from conflicting names before renaming INTO them."
                                 )
+                                warnings.append(
+                                    f"[experiments] Row {idx+2}: ⚠️ CHAIN RENAME CONFLICT: {chain_conflict_detail}"
+                                )
+                                plan.conflicts.append(PlanConflict(
+                                    row=idx + 2, kind="chain_rename_conflict", detail=chain_conflict_detail,
+                                ))
                                 failed_experiment_ids.add(target_exp_id_norm)
                                 continue  # Skip this row
                             
@@ -284,11 +391,15 @@ class NewExperimentsUploadService:
                         # 'old_experiment_id' (issue #100 — the 2026-07-28 SERUM_Catalyst incident:
                         # two intended-rename workbooks with overwrite blank produced 80 creates
                         # alongside the 80 originals). Block the row instead of guessing.
-                        warnings.append(
-                            f"[experiments] Row {idx+2}: old_experiment_id='{old_experiment_id}' provided but "
-                            f"overwrite is not TRUE. This row would CREATE '{exp_id}' rather than rename "
-                            f"'{old_experiment_id}'. Set overwrite=TRUE to rename."
+                        rename_conflict_detail = (
+                            f"old_experiment_id='{old_experiment_id}' provided but overwrite is not TRUE. "
+                            f"This row would CREATE '{exp_id}' rather than rename '{old_experiment_id}'. "
+                            f"Set overwrite=TRUE to rename."
                         )
+                        warnings.append(f"[experiments] Row {idx+2}: {rename_conflict_detail}")
+                        plan.conflicts.append(PlanConflict(
+                            row=idx + 2, kind="rename_without_overwrite", detail=rename_conflict_detail,
+                        ))
                         exp_id_norm = ''.join(ch for ch in exp_id.lower() if ch not in ['-', '_', ' '])
                         failed_experiment_ids.add(exp_id_norm)
                         continue
@@ -344,15 +455,27 @@ class NewExperimentsUploadService:
                         # Overwrite requested but experiment does not exist
                         if old_experiment_id:
                             warnings.append(f"[experiments] Row {idx+2}: overwrite=True but old_experiment_id '{old_experiment_id}' not found")
+                            plan.conflicts.append(PlanConflict(
+                                row=idx + 2, kind="overwrite_old_id_not_found",
+                                detail=f"overwrite=True but old_experiment_id '{old_experiment_id}' not found",
+                            ))
                             old_exp_id_norm = ''.join(ch for ch in old_experiment_id.lower() if ch not in ['-', '_', ' '])
                             failed_experiment_ids.add(old_exp_id_norm)
                         else:
                             warnings.append(f"[experiments] Row {idx+2}: overwrite=True but experiment_id '{exp_id}' does not exist")
+                            plan.conflicts.append(PlanConflict(
+                                row=idx + 2, kind="overwrite_nonexistent",
+                                detail=f"overwrite=True but experiment_id '{exp_id}' does not exist",
+                            ))
                             failed_experiment_ids.add(exp_id_norm)  # Use normalized ID for tracking
                         continue
 
                     if experiment is not None and not overwrite_flag:
                         warnings.append(f"[experiments] Row {idx+2}: experiment_id '{exp_id}' already exists; set overwrite=True to update")
+                        plan.conflicts.append(PlanConflict(
+                            row=idx + 2, kind="already_exists",
+                            detail=f"experiment_id '{exp_id}' already exists; set overwrite=True to update",
+                        ))
                         failed_experiment_ids.add(exp_id_norm)  # Use normalized ID for tracking
                         continue
 
@@ -405,11 +528,17 @@ class NewExperimentsUploadService:
                                 f"Experiment {exp_id}: Sequential/treatment experiment created without parent "
                                 f"(expected parent not found). Suggest providing complete conditions in upload."
                             )
+                        plan.creates.append(PlanCreate(
+                            row=idx + 2, experiment_id=exp_id,
+                            parent_id=parent.experiment_id if parent else None,
+                            copied_from=parent.experiment_id if parent else None,
+                        ))
                     else:
                         current_step = "updating existing experiment"
                         # Update provided fields only
                         # IMPORTANT: Update experiment_id FIRST if it's a rename (old_experiment_id provided)
-                        
+                        rename_occurred = False
+
                         if old_experiment_id and experiment.experiment_id != exp_id:
                             try:
                                 experiment.experiment_id = exp_id
@@ -442,6 +571,7 @@ class NewExperimentsUploadService:
                                 
                                 # Flush rename changes so subsequent queries see the new ID
                                 db.flush()
+                                rename_occurred = True
                             except Exception as rename_error:
                                 # Check if this is a UNIQUE constraint error (chain rename ordering issue)
                                 error_str = str(rename_error).lower()
@@ -462,12 +592,45 @@ class NewExperimentsUploadService:
                                     # Some other error - re-raise with context
                                     raise
                         
+                        if rename_occurred:
+                            plan.renames.append(PlanRename(row=idx + 2, from_id=old_experiment_id, to_id=exp_id))
+                        else:
+                            # Diff old vs new BEFORE the assignments below overwrite them — this is
+                            # the fields_changed the issue calls "the highest-value part" (issue #100
+                            # item 2). Renames are reported separately (from_id/to_id only, no diff).
+                            _fields_changed: List[FieldChange] = []
+                            if sample_id is not None and sample_id != experiment.sample_id:
+                                _fields_changed.append(
+                                    FieldChange(field="sample_id", old=experiment.sample_id, new=sample_id)
+                                )
+                            if researcher is not None and researcher != experiment.researcher:
+                                _fields_changed.append(
+                                    FieldChange(field="researcher", old=experiment.researcher, new=researcher)
+                                )
+                            if status_val is not None and status_val != experiment.status:
+                                _fields_changed.append(FieldChange(
+                                    field="status",
+                                    old=experiment.status.value if experiment.status else None,
+                                    new=status_val.value,
+                                ))
+                            _new_date = None if date_val is None else date_val.to_pydatetime()
+                            if date_val is not None and _new_date != experiment.date:
+                                _fields_changed.append(FieldChange(
+                                    field="date",
+                                    old=experiment.date.isoformat() if experiment.date else None,
+                                    new=_new_date.isoformat() if _new_date else None,
+                                ))
+                            if _fields_changed:
+                                overwrite_plan_by_exp_id.setdefault(
+                                    exp_id, PlanOverwrite(row=idx + 2, experiment_id=exp_id)
+                                ).fields_changed.extend(_fields_changed)
+
                         # Clear existing notes when overwrite=True (full data replacement)
                         current_step = "clearing existing notes for overwrite"
                         db.query(ExperimentNotes).filter(
                             ExperimentNotes.experiment_fk == experiment.id
                         ).delete(synchronize_session=False)
-                        
+
                         if sample_id is not None:
                             experiment.sample_id = sample_id
                         if researcher is not None:
@@ -598,6 +761,9 @@ class NewExperimentsUploadService:
                             .filter(ExperimentalConditions.experiment_fk == experiment.id)
                             .first()
                         )
+                        # A brand-new conditions row has no prior value to diff against — only a
+                        # pre-existing row's changes count as an overwrite (issue #100 item 2).
+                        conditions_was_new = conditions is None
                         if not conditions:
                             conditions = ExperimentalConditions(
                                 experiment_id=experiment.experiment_id,
@@ -618,18 +784,32 @@ class NewExperimentsUploadService:
 
                         # Then override with user-provided values from Excel row (requirement 2a)
                         updated_fields = []
+                        _cond_fields_changed: List[FieldChange] = []
                         for col_name, val in row.items():
                             actual_attr = lower_to_actual.get(col_name)
                             if actual_attr:
+                                _old_val = getattr(conditions, actual_attr, None)
                                 # Convert empty strings to None
                                 if isinstance(val, str) and val.strip() == '':
                                     setattr(conditions, actual_attr, None)
+                                    if not conditions_was_new and _old_val is not None:
+                                        _cond_fields_changed.append(
+                                            FieldChange(field=actual_attr, old=_old_val, new=None)
+                                        )
                                 elif not pd.isna(val):  # Only override if value is not NaN/blank
                                     try:
                                         setattr(conditions, actual_attr, val)
                                         updated_fields.append(f"{actual_attr}={val}")
+                                        if not conditions_was_new and _old_val != val:
+                                            _cond_fields_changed.append(
+                                                FieldChange(field=actual_attr, old=_old_val, new=val)
+                                            )
                                     except Exception as set_error:
                                         warnings.append(f"[conditions] Row {idx+2}: Failed to set {actual_attr}={val}: {set_error}")
+                        if _cond_fields_changed:
+                            overwrite_plan_by_exp_id.setdefault(
+                                exp_id, PlanOverwrite(row=idx + 2, experiment_id=exp_id)
+                            ).fields_changed.extend(_cond_fields_changed)
                         # Persist updated fields so later phases see the changed values
                         if updated_fields:
                             db.flush()
@@ -798,7 +978,15 @@ class NewExperimentsUploadService:
                         db.flush()
 
                     replace_all = bool(overwrite_by_exp_id.get(exp_id, False))
+                    _prior_additives_summary = None
                     if replace_all:
+                        # Snapshot before delete — this is the "old" side of the additives
+                        # fields_changed summary (issue #100 item 2). Per-compound diffing was
+                        # scoped out for this pass; a full replace is reported as one line.
+                        _prior_count = db.query(ChemicalAdditive).filter(
+                            ChemicalAdditive.experiment_id == conditions.id
+                        ).count()
+                        _prior_additives_summary = f"{_prior_count} additive(s)" if _prior_count else "no additives"
                         # Delete all existing additives for this experiment's conditions
                         db.query(ChemicalAdditive).filter(
                             ChemicalAdditive.experiment_id == conditions.id
@@ -944,6 +1132,18 @@ class NewExperimentsUploadService:
                                 if new_compound_key is not None and name_to_compound.get(new_compound_key) is comp:
                                     del name_to_compound[new_compound_key]
 
-        return created_exp, updated_exp, skipped, errors, warnings, info_messages
+                    if replace_all:
+                        _new_additives_summary = f"{len(group)} additive(s) provided"
+                        overwrite_plan_by_exp_id.setdefault(
+                            exp_id, PlanOverwrite(row=int(group.index[0]) + 2, experiment_id=exp_id)
+                        ).fields_changed.append(FieldChange(
+                            field="additives", old=_prior_additives_summary, new=_new_additives_summary,
+                        ))
+
+        # Merge all overwrite entries discovered across the experiments/conditions/additives
+        # sheets into the plan (issue #100 item 2) — one entry per experiment_id.
+        plan.overwrites.extend(overwrite_plan_by_exp_id.values())
+
+        return created_exp, updated_exp, skipped, errors, warnings, info_messages, plan
 
 

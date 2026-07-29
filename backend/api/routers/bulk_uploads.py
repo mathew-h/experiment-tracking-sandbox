@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
-from backend.api.schemas.bulk_upload import UploadResponse, ConflictCheckResponse, SampleConflict, SampleConflictMatch
+from backend.api.schemas.bulk_upload import (
+    UploadResponse, ConflictCheckResponse, SampleConflict, SampleConflictMatch,
+    UploadPlan as UploadPlanSchema, PlanCreate as PlanCreateSchema, PlanRename as PlanRenameSchema,
+    PlanOverwrite as PlanOverwriteSchema, PlanSkip as PlanSkipSchema, PlanConflict as PlanConflictSchema,
+    PlanFieldChange as PlanFieldChangeSchema,
+)
 from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
 from backend.config.settings import get_settings
 from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
@@ -34,6 +39,30 @@ def _finalize_write(db: Session, dry_run: bool, had_errors: bool = False) -> Non
 
 def _finalize_message(message: str, dry_run: bool) -> str:
     return f"[DRY RUN] {message}" if dry_run else message
+
+
+def _plan_to_schema(svc_plan) -> UploadPlanSchema:
+    """Convert new_experiments.py's UploadPlan dataclass into the API schema
+    (issue #100 item 2). The service layer stays free of Pydantic/API concerns."""
+    return UploadPlanSchema(
+        creates=[
+            PlanCreateSchema(row=c.row, experiment_id=c.experiment_id, parent_id=c.parent_id, copied_from=c.copied_from)
+            for c in svc_plan.creates
+        ],
+        renames=[PlanRenameSchema(row=r.row, from_id=r.from_id, to_id=r.to_id) for r in svc_plan.renames],
+        overwrites=[
+            PlanOverwriteSchema(
+                row=o.row, experiment_id=o.experiment_id,
+                fields_changed=[
+                    PlanFieldChangeSchema(field=fc.field, old=fc.old, new=fc.new) for fc in o.fields_changed
+                ],
+            )
+            for o in svc_plan.overwrites
+        ],
+        skips=[PlanSkipSchema(row=s.row, experiment_id=s.experiment_id, reason=s.reason) for s in svc_plan.skips],
+        conflicts=[PlanConflictSchema(row=c.row, kind=c.kind, detail=c.detail) for c in svc_plan.conflicts],
+        counts=svc_plan.counts,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +140,8 @@ async def upload_new_experiments(
     from backend.services.bulk_uploads.new_experiments import NewExperimentsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
-        created, updated, skipped, errors, warnings, _info = (
-            NewExperimentsUploadService.bulk_upsert_from_excel(db, file_bytes)
+        created, updated, skipped, errors, warnings, _info, svc_plan = (
+            NewExperimentsUploadService.bulk_upsert_from_excel_ex(db, file_bytes)
         )
         _finalize_write(db, dry_run)
     except Exception as exc:
@@ -123,7 +152,8 @@ async def upload_new_experiments(
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
                           warnings=warnings,
                           message=_finalize_message(f"{created} created, {updated} updated, {skipped} skipped", dry_run),
-                          dry_run=dry_run)
+                          dry_run=dry_run,
+                          plan=_plan_to_schema(svc_plan))
 
 
 @router.post("/pxrf", response_model=UploadResponse)

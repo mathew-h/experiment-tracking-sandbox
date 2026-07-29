@@ -97,6 +97,53 @@ runs too late to be useful.
    real round-trip against `new-experiments` proving no row persists with
    `dry_run=true`). Full backend suite: 880 passed, no regressions.
 
+0.6. **Item 2 shipped (2026-07-29), scoped to `new-experiments` only:** the plan
+   schema (`creates`/`renames`/`overwrites` with `fields_changed`) is written around
+   `new_experiments.py`'s own concepts (rename via `old_experiment_id`, parent-copy,
+   overwrite-diffing) — none of the other 12 parsers have renames or parent-copy, and
+   most have no natural "fields changed" diff either, so generalizing the schema to
+   all 13 upload types was explicitly deferred as a separate, much larger effort.
+   `new_experiments.py` gained `PlanCreate`/`PlanRename`/`FieldChange`/`PlanOverwrite`/
+   `PlanSkip`/`PlanConflict`/`UploadPlan` dataclasses (mirroring the existing
+   `experiment_status.py` dataclass-preview pattern) and a `bulk_upsert_from_excel_ex`
+   entry point returning the original 6-tuple plus `plan`. The existing
+   `bulk_upsert_from_excel` keeps its exact signature/behavior — its body was extracted
+   into a private `_bulk_upsert_from_excel_impl` that both public methods call, so
+   **none of its ~26 existing callers needed to change**. `backend/api/schemas/
+   bulk_upload.py` gained a Pydantic mirror (`UploadPlan`/`PlanCreate`/etc.) and
+   `UploadResponse.plan: Optional[UploadPlan] = None`; the router converts the
+   dataclass to the schema via `_plan_to_schema()`, keeping the service layer free of
+   API/Pydantic concerns. Only `new-experiments` populates `plan`; every other upload
+   type returns `plan: null`.
+   `fields_changed` merges diffs from the experiments sheet (`sample_id`, `researcher`,
+   `status`, `date`) and the conditions sheet (any updatable `ExperimentalConditions`
+   column — this is where the issue's own `initial_ph` 4→9 example lives) into one
+   `PlanOverwrite` per `experiment_id`, keyed across both sheet-processing loops via a
+   shared `overwrite_plan_by_exp_id` dict. A brand-new conditions row (no prior value)
+   is never diffed — there's nothing to have silently overwritten. Renames are reported
+   separately (`from_id`/`to_id` only, no `fields_changed`) even though the same code
+   path that performs a rename also updates the other four experiments-sheet fields —
+   diffing those alongside a rename was judged not useful (the ID change is the
+   headline event) and was explicitly scoped out. Additives are a single summary line
+   per experiment (`"N additive(s)"` → `"M additive(s) provided"`), not per-compound
+   diffed — full additive diffing needs a pre-delete snapshot and was scoped out as
+   lower-value, higher-effort for this pass.
+   Tests: new `tests/services/bulk_uploads/test_new_experiments_plan.py` (13 tests:
+   create, sequential-create parent/copied_from, rename-not-overwrite, experiments-
+   field diff, conditions-field diff (the `initial_ph` case), conditions-only overwrite
+   with no experiments-sheet diff, brand-new-conditions-not-diffed, skip, three
+   conflict kinds, multi-row counts-match-lengths, and a
+   bulk_upsert_from_excel-vs-`_ex` parity check); one new API-level test proving the
+   plan reaches `UploadResponse.plan` through the real (unmocked) service. Full backend
+   suite: 903 passed, no regressions.
+   Caught during test-writing: my first draft of the test IDs (`HPHT_PLAN_0NN`)
+   accidentally triggered the 3-part `Type_Initials_Index` ID grammar — the parser read
+   `"PLAN"` as researcher initials and auto-populated a real (unintended) `researcher`
+   field change, breaking the "brand-new conditions is not diffed" and multi-row-counts
+   tests. Renamed to 2-part IDs (`HPHT_9NNN`) to avoid the collision — not a bug in the
+   plan logic, a test-fixture-naming footgun worth remembering for future ID-parser-
+   adjacent tests in this file.
+
 1. Add `dry_run: bool = False` to every `POST /api/bulk-uploads/*` endpoint in
    `backend/api/routers/bulk_uploads.py`. When true, run the full parse and resolution
    inside a transaction that is unconditionally rolled back.
