@@ -1304,8 +1304,34 @@ class TestGroupedListMode:
         data = resp.json()
         assert data["total"] == 1
         (item,) = data["items"]
+        assert item["experiment_id"] == "T98LL_001"   # bare stem wins on NULLS FIRST
         assert item["group_display_id"] == "T98LL_001"
         assert item["vial_count"] == 2
+
+    def test_grouped_letterless_t_vial_does_not_hide_lettered_members(self, client, db_session):
+        """Regression: the letterless -t vial wins the representative rank
+        (replicate_label IS NULL -> is_parent_like = 0) with no bare-stem row
+        present. If the Python bucket_key mirror does not strip the token, the
+        membership query returns nothing and a/b disappear from the response."""
+        db_session.add(Experiment(experiment_id="T98HIDE_001-t7", experiment_number=9680,
+                                  status=ExperimentStatus.ONGOING))
+        for i, letter in enumerate("ab"):
+            db_session.add(Experiment(
+                experiment_id=f"T98HIDE_001{letter}", experiment_number=9681 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=T98HIDE_001")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["experiment_id"] == "T98HIDE_001-t7"
+        assert item["group_display_id"] == "T98HIDE_001"
+        assert item["replicate_letters"] == ["a", "b"]
+        assert item["vial_count"] == 3
+        assert [r["group_display_id"] for r in item["replicates"]] == [
+            "T98HIDE_001a", "T98HIDE_001b",
+        ]
 
     def test_grouped_no_timepoint_data_is_unchanged(self, client, db_session):
         """Issue #98 AC4 regression guard for grouped mode."""
@@ -1358,6 +1384,9 @@ class TestGroupedListMode:
         expansion has one row per STEM, so a letter with a sequential re-run
         yields "2 replicates: a, b" expanding to three child rows. Rare, and
         deliberate -- SERUM_001a-2 is not a timepoint variant of SERUM_001a."""
+        # `a` vs `a-2` share replicate_label='a' and NULL id_timepoint_days, so
+        # their relative order here breaks on experiment_number: it depends on
+        # 9690 < 9691, not on any letter/sequence-aware tiebreak.
         for i, suffix in enumerate(("a", "a-2", "b")):
             db_session.add(Experiment(
                 experiment_id=f"T98D12_001{suffix}", experiment_number=9690 + i,

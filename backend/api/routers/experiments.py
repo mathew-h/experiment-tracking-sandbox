@@ -211,10 +211,14 @@ def list_experiments(
                     partition_by=full_bucket_key,
                     order_by=(
                         is_parent_like,
-                        # D7 / gap 8: a flagged vial must never represent the
-                        # group while a clean sibling exists -- the
+                        # D7 / gap 8: among rows at the same parent-like rank,
+                        # a flagged vial must never represent the group while
+                        # a clean sibling at that same rank exists -- the
                         # representative supplies the row's Sample, Reactor,
-                        # Date, Description and Additives columns.
+                        # Date, Description and Additives columns. This does
+                        # NOT protect against an outlier PARENT: is_parent_like
+                        # is ranked first, so an outlier parent still
+                        # represents its group over a clean lettered member.
                         Experiment.is_outlier.asc(),
                         Experiment.replicate_label.asc(),
                         Experiment.id_timepoint_days.asc().nulls_first(),
@@ -301,7 +305,11 @@ def list_experiments(
             ):
                 bucket_key = exp.base_experiment_id
             else:
-                bucket_key = exp.experiment_id
+                # Must mirror _bucket_key_expr's else_ branch, which strips the
+                # '-t<days>' token (issue #98) -- otherwise a letterless '-t'
+                # vial's bucket key does not round-trip and the membership
+                # query below matches nothing.
+                bucket_key = split_timepoint_token(exp.experiment_id)[0]
             # Every row in this bucket, resolved from the UNFILTERED table so a
             # filtered query still describes the whole group. Matching on the
             # bucket-key expression (rather than base_experiment_id) is what
