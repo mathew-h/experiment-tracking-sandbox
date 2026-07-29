@@ -352,7 +352,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete as sql_delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from database.models.analysis import ExternalAnalysis
@@ -764,9 +764,12 @@ def delete_experiment_cascade(
     # 1. XRD phases: DELETE, not decouple. Matched on fk OR string so a row
     #    orphaned by an earlier delete cannot keep holding the unique slot on
     #    (experiment_id, time_post_reaction_days, mineral_name).
-    db.query(XRDPhase).filter(
-        or_(XRDPhase.experiment_fk == exp_pk, XRDPhase.experiment_id == experiment_id)
-    ).delete(synchronize_session=False)
+    db.execute(
+        sql_delete(XRDPhase).where(
+            or_(XRDPhase.experiment_fk == exp_pk,
+                XRDPhase.experiment_id == experiment_id)
+        )
+    )
 
     # 2. Ammonium background provenance on OTHER experiments' scalar results.
     #    The string has no FK and is the column actually in use; the fk is
