@@ -60,8 +60,14 @@ only when rows differ solely by timepoint") and additionally handles letterless
 
 **Computed inline in SQL** as `regexp_replace(experiment_id, '-t[0-9]+(\.[0-9]+)?$', '')`
 — no new column, no migration, nothing to backfill or keep in sync. Postgres-specific,
-which is acceptable: production is Postgres-only. The cost is that this becomes a
-fourth copy of the timepoint-token regex and must stay aligned with the other three.
+which is acceptable: production is Postgres-only.
+
+The cost is one new copy of the timepoint-token pattern, bringing the total to
+**three**: the canonical Python regex (`database/experiment_id_parser.py:69`), the
+TypeScript mirror (`frontend/src/utils/experimentId.ts:4`), and this POSIX form for
+Postgres. Python-side stripping reuses the canonical
+`split_timepoint_token` rather than adding a fourth, and a test asserts the SQL and
+Python forms agree across every ID shape the grammar produces.
 
 ### D2 — Row identity is a new `group_display_id` field; `experiment_id` stays truthful
 
@@ -167,16 +173,21 @@ re-run, the badge counts letters while the expansion shows one row per stem, so
 
 ### 4.1 New module — `backend/services/replicate_collapse.py`
 
-Two pure exports:
+Pure exports, all about the stem key and nothing else:
 
+- `TIMEPOINT_TOKEN_SQL_PATTERN` → the POSIX form of the token pattern.
 - `timepoint_stem_expr(col)` → the D1 `regexp_replace` SQLAlchemy expression, usable
   against either the `Experiment` class or a subquery's `.c` collection, matching the
   existing `_bucket_key_expr(col)` convention in `experiments.py`.
-- `group_vials_by_letter(members)` → ordered per-letter groups for the group service.
+- `collapse_by_stem(rows)` → `StemGroup(stem, representative, vial_count)` per stem,
+  for the Python-side collapse of a grouped row's letter children.
 
-The module docstring records that the timepoint-token regex now exists in four places
-— `database/experiment_id_parser.py:69`, `frontend/src/utils/experimentId.ts:4`, this
-module, and (transitively) the SQL it emits — and that they must stay aligned.
+Letter grouping (`group_vials_by_letter`) lives in `replicate_groups.py` instead,
+next to the `GroupMemberData` dataclass it operates on — putting it here would
+either invert the dependency or force duck typing.
+
+The module docstring records the three-way pattern duplication from D1 and names the
+test that guards it.
 
 ### 4.2 List endpoint — `backend/api/routers/experiments.py`
 
@@ -312,9 +323,18 @@ draws one series per letter.
 `_fetch_members` requires `replicate_label IS NOT NULL`, so a **letterless** `-t` vial
 (`SERUM_001-t7`) never appears on the group page — yet `v_results_scalar_rollup`
 groups it under `SERUM_001` and counts it in `n_replicates`. The rollup table and the
-members table therefore disagree about who is in the group. Pre-existing, orthogonal
-to the 2×2 repro, and fixing it requires deciding what a letterless timepoint vial
-*is* (group parent? unlettered replicate?). File as its own issue.
+members table therefore disagree about who is in the group.
+
+**The list half is fixed here, because D1 forces it.** `_bucket_key_expr`'s `else_`
+branch buckets non-lettered rows on their raw `experiment_id`, so once rows are
+labeled by stem a letterless `-t` vial would render as a *second* top-level row
+carrying the same visible label as the real `SERUM_001` row. That branch therefore
+strips the token too, and the vial joins its parent's bucket. A no-op for every ID
+without a token, so no existing bucket moves.
+
+**The group-page half is deferred**: whether such a vial belongs in `members`
+requires deciding what a letterless timepoint vial *is* (group parent? unlettered
+replicate?), which is orthogonal to the 2×2 repro. File as its own issue.
 
 ---
 
