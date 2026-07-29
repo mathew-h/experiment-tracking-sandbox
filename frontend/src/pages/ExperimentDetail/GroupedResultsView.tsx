@@ -57,20 +57,33 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     queryFn: () => experimentsApi.getGroupRollup(baseExperimentId),
   })
 
-  // Series entities in fixed order: parent (replicate 0) first, then a, b, c…
-  // Only the first chartColors.series.length entities are overlaid (never cycle hues).
-  const seriesEntities = useMemo(() => {
-    const entities = [
-      ...(group?.parent ? [group.parent] : []),
-      ...(group?.members ?? []),
+  // Issue #98: one series per REPLICATE LETTER, not per vial. A letter
+  // sacrificed across timepoints is several rows whose single result each form
+  // one time course. Outlier vials contribute no points, matching
+  // v_results_scalar_rollup's exclusion so the overlay and the mean agree (D11).
+  const seriesLetters = useMemo(() => {
+    const letters = [
+      ...(group?.parent ? [{ key: 'parent', label: 'replicate 0', vials: [group.parent] }] : []),
+      ...(group?.replicates ?? []).map((r) => ({
+        key: r.replicate_label,
+        label: `replicate ${r.replicate_label}`,
+        vials: r.vials,
+      })),
     ]
-    return entities.slice(0, chartColors.series.length)
+    return letters.slice(0, chartColors.series.length)
   }, [group])
 
-  const memberResults = useQueries({
-    queries: seriesEntities.map((m) => ({
-      queryKey: ['experiment-results', m.experiment_id],
-      queryFn: () => experimentsApi.getResults(m.experiment_id),
+  // One fetch per vial (results are stored per experiment row), flattened into
+  // its letter's series below.
+  const allVials = useMemo(
+    () => seriesLetters.flatMap((l) => l.vials.map((v) => ({ letterKey: l.key, vial: v }))),
+    [seriesLetters],
+  )
+
+  const vialResults = useQueries({
+    queries: allVials.map(({ vial }) => ({
+      queryKey: ['experiment-results', vial.experiment_id],
+      queryFn: () => experimentsApi.getResults(vial.experiment_id),
       enabled: showIndividual,
     })),
   })
@@ -85,16 +98,23 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           mean: r[metric.mean] as number | null,
           sd: metric.sd ? ((r[metric.sd] as number | null) ?? 0) : 0,
         }
-        seriesEntities.forEach((m, i) => {
-          const results = memberResults[i]?.data ?? []
-          const match = results.find(
-            (res) => res.time_post_reaction_bucket_days === r.time_post_reaction_bucket_days
-          )
-          row[m.experiment_id] = match ? metric.individual(match) : null
+        seriesLetters.forEach((letter) => {
+          let value: number | null = null
+          allVials.forEach(({ letterKey, vial }, i) => {
+            if (letterKey !== letter.key || vial.is_outlier) return
+            const match = (vialResults[i]?.data ?? []).find(
+              (res) => res.time_post_reaction_bucket_days === r.time_post_reaction_bucket_days
+            )
+            if (match) {
+              const v = metric.individual(match)
+              if (v != null) value = v
+            }
+          })
+          row[letter.key] = value
         })
         return row
       })
-  }, [rollup, metric, seriesEntities, memberResults])
+  }, [rollup, metric, seriesLetters, allVials, vialResults])
 
   if (isLoading) return <Spinner />
   if (!rollup?.length) {
@@ -123,15 +143,15 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           />
           Show individual replicates
         </label>
-        <div className="ml-auto flex items-center gap-2 text-xs text-ink-secondary pb-2">
-          {seriesEntities.map((m) => (
+        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-ink-secondary pb-2">
+          {allVials.map(({ vial }) => (
             <Link
-              key={m.id}
-              to={`/experiments/${m.experiment_id}`}
-              className={`font-mono-data ${m.is_outlier ? 'text-ink-muted line-through hover:text-ink-secondary' : 'text-red-400 hover:text-red-300'}`}
+              key={vial.id}
+              to={`/experiments/${vial.experiment_id}`}
+              className={`font-mono-data ${vial.is_outlier ? 'text-ink-muted line-through hover:text-ink-secondary' : 'text-red-400 hover:text-red-300'}`}
             >
-              {m.experiment_id}
-              {m.is_outlier ? ' (outlier)' : ''}
+              {vial.experiment_id}
+              {vial.is_outlier ? ' (outlier)' : ''}
             </Link>
           ))}
         </div>
@@ -157,10 +177,9 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
             />
             <Legend wrapperStyle={{ fontSize: 11, color: chartColors.label }} />
             {showIndividual &&
-              seriesEntities.map((m, i) => (
+              seriesLetters.map((letter, i) => (
                 <Line
-                  key={m.id} dataKey={m.experiment_id}
-                  name={`${m.replicate_label ? `replicate ${m.replicate_label}` : 'replicate 0'}${m.is_outlier ? ' (outlier)' : ''}`}
+                  key={letter.key} dataKey={letter.key} name={letter.label}
                   stroke={chartColors.series[i]} strokeWidth={1.5}
                   dot={{ r: 4, fill: chartColors.series[i] }} connectNulls
                 />
