@@ -17,6 +17,7 @@ from database import (
     ExperimentStatus,
     AmountUnit,
 )
+from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryService
 from backend.services.bulk_uploads.experiment_status import ExperimentStatusService
 from backend.services.experiment_validation import parse_experiment_id as parse_exp_id_validation, validate_experiment_id, extract_lineage_info
@@ -790,6 +791,12 @@ class NewExperimentsUploadService:
                     # Users must explicitly provide all additives for each experiment
                     
                     for ridx, row in group.iterrows():
+                        # Per-row savepoint isolation (issue #96 Defect B, mirrors issue #86's
+                        # experiments-sheet loop): a failed flush anywhere in this row's processing
+                        # is confined to its own SAVEPOINT and rolled back, leaving the session
+                        # usable for the remaining additive rows.
+                        savepoint = db.begin_nested()
+                        row_ok = False
                         try:
                             comp_name = str(row.get('compound') or '').strip()
                             if not comp_name:
@@ -832,6 +839,12 @@ class NewExperimentsUploadService:
                             except Exception:
                                 order_int = None
                             method_text = str(row.get('method')).strip() if 'method' in df_add.columns and row.get('method') is not None and str(row.get('method')).strip() != '' else None
+                            if method_text and len(method_text) > ADDITION_METHOD_MAX_LENGTH:
+                                warnings.append(
+                                    f"[additives] Row {int(ridx)+2}: method truncated to {ADDITION_METHOD_MAX_LENGTH} "
+                                    f"characters (was {len(method_text)})"
+                                )
+                                method_text = method_text[:ADDITION_METHOD_MAX_LENGTH]
 
                             if replace_all:
                                 # Always insert fresh records
@@ -873,8 +886,16 @@ class NewExperimentsUploadService:
                                     db.add(new_add)
                                     db.flush()
                                     recalculate(new_add, db)
+
+                            # Row body completed without exception or early `continue`.
+                            row_ok = True
                         except Exception as e:
                             warnings.append(f"[additives] Row {int(ridx)+2}: {e}")
+                        finally:
+                            if row_ok:
+                                savepoint.commit()
+                            else:
+                                savepoint.rollback()
 
         return created_exp, updated_exp, skipped, errors, warnings, info_messages
 
