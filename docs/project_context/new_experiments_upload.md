@@ -90,6 +90,8 @@ column header cell explaining the field and its expected units.
 | experiment_id * | compound * | amount * | unit * | order | method |
 |---|---|---|---|---|---|
 
+The `method` column is free text but capped at 500 characters (`ADDITION_METHOD_MAX_LENGTH`) — longer values are truncated with a warning, and the row's other fields persist.
+
 **Sheet 4: INSTRUCTIONS**
 
 Plain-text guide explaining the experiment ID format rules:
