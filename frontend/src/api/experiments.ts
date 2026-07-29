@@ -20,7 +20,15 @@ export interface ExperimentListItem {
   replicate_label: string | null
   is_outlier: boolean
   id_timepoint_days: number | null
-  /** Grouped-list mode only: lettered children of this group parent. */
+  /** Issue #98: what the ID column renders — the group stem in grouped mode,
+   *  the timepoint-stripped stem in flat mode. `experiment_id` above still
+   *  names the real representative row. */
+  group_display_id?: string | null
+  /** Number of experiment rows this row stands for (1 = an ordinary row). */
+  vial_count?: number
+  /** Grouped mode only: the group's distinct replicate letters, for the badge. */
+  replicate_letters?: string[] | null
+  /** Grouped-list mode only: one entry per replicate letter-row of this group. */
   replicates?: ExperimentListItem[] | null
 }
 

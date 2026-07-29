@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { experimentsApi, type ExperimentListItem, type ExperimentStatus } from '@/api/experiments'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
-  Button, Input, Select, PageSpinner,
+  Button, Input, Select, PageSpinner, StatusBadge,
 } from '@/components/ui'
 
 const STATUS_OPTIONS = [
@@ -229,7 +229,11 @@ export function ExperimentListPage() {
                               className="ml-2 inline-flex items-center gap-1 rounded bg-surface-raised px-1.5 py-0.5 text-2xs text-ink-secondary hover:text-ink-primary"
                             >
                               <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
-                              {exp.replicates!.length} replicates: {exp.replicates!.map((r) => r.replicate_label).join(', ')}
+                              {exp.replicate_letters?.length ?? exp.replicates!.length}
+                              {' '}replicates:{' '}
+                              {(exp.replicate_letters
+                                ?? exp.replicates!.map((r) => r.replicate_label)
+                              ).join(', ')}
                             </button>
                           ) : null
                         }
@@ -288,6 +292,18 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // Issue #98: a row that stands for more than one experiment must not offer an
+  // inline status edit -- the PATCH would silently hit only the representative
+  // vial (D3). Grouped rows carry `replicates`; collapsed flat rows carry a
+  // vial_count above 1.
+  const isGroupRow = !!exp.replicates?.length
+  const isMultiVial = isGroupRow || (exp.vial_count ?? 1) > 1
+  // AC1: the '-t<days>' token is an internal encoding and never reaches this page.
+  const displayId = exp.group_display_id ?? exp.experiment_id
+  const target = isGroupRow
+    ? `/experiments/groups/${encodeURIComponent(displayId)}`
+    : `/experiments/${encodeURIComponent(exp.experiment_id)}`
+
   const statusMutation = useMutation({
     mutationFn: ({ experimentId, status }: { experimentId: string; status: ExperimentStatus }) =>
       experimentsApi.patchStatus(experimentId, status),
@@ -295,21 +311,13 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
   })
 
   return (
-    <TableRow
-      className="cursor-pointer"
-      onClick={() => navigate(`/experiments/${exp.experiment_id}`)}
-    >
+    <TableRow className="cursor-pointer" onClick={() => navigate(target)}>
       <Td className={`font-mono-data text-ink-muted ${child ? 'pl-6' : ''}`}>{exp.experiment_number}</Td>
       <Td>
         <span className={`font-mono-data text-red-400 hover:text-red-300 ${child ? 'pl-6 inline-flex items-center gap-1' : ''}`}>
           {child && <span className="text-ink-muted">↳ {exp.replicate_label}</span>}
-          {exp.experiment_id}
+          {displayId}
         </span>
-        {exp.id_timepoint_days != null && (
-          <span className="ml-1 rounded bg-surface-raised px-1.5 py-0.5 text-2xs text-ink-secondary">
-            day {exp.id_timepoint_days}
-          </span>
-        )}
         {groupBadge}
       </Td>
       <Td className="text-xs text-ink-secondary max-w-48 truncate">
@@ -322,26 +330,32 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
         {exp.reactor_number ?? <span className="text-ink-muted">—</span>}
       </Td>
       <Td onClick={(e) => e.stopPropagation()}>
-        <div className="relative inline-block">
-          <select
-            className={[
-              'appearance-none bg-surface-overlay border border-surface-border rounded',
-              'pl-2 pr-6 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-red/50',
-              STATUS_TEXT_CLASS[exp.status ?? ''] ?? 'text-ink-secondary',
-            ].join(' ')}
-            value={exp.status ?? ''}
-            onMouseDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onChange={(e) =>
-              statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value as ExperimentStatus })
-            }
-          >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-ink-muted text-2xs">▾</span>
-        </div>
+        {isMultiVial ? (
+          // Read-only: this row stands for several experiments (issue #98 D3).
+          exp.status ? <StatusBadge status={exp.status} /> : <span className="text-ink-muted">—</span>
+        ) : (
+          <div className="relative inline-block">
+            <select
+              aria-label="Row status"
+              className={[
+                'appearance-none bg-surface-overlay border border-surface-border rounded',
+                'pl-2 pr-6 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-red/50',
+                STATUS_TEXT_CLASS[exp.status ?? ''] ?? 'text-ink-secondary',
+              ].join(' ')}
+              value={exp.status ?? ''}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) =>
+                statusMutation.mutate({ experimentId: exp.experiment_id, status: e.target.value as ExperimentStatus })
+              }
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-ink-muted text-2xs">▾</span>
+          </div>
+        )}
       </Td>
       <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? exp.date.slice(0, 10) : '—'}</Td>
       <Td className="text-xs text-ink-secondary max-w-48 truncate">
