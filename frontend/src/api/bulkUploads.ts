@@ -8,6 +8,62 @@ export interface BulkUploadResult {
   warnings: string[]
   feedbacks: Record<string, unknown>[]
   message: string
+  /** True when the server rolled back instead of committing. */
+  dry_run?: boolean
+  /** Structured plan — new-experiments only; null elsewhere. */
+  plan?: UploadPlan | null
+  /** sha256 of the plan; replay it on commit to prove the plan is unchanged. */
+  plan_hash?: string | null
+}
+
+// ─── Upload plan (issue #100 items 2, 6-9) ───────────────────────────────────
+// Mirrors backend/api/schemas/bulk_upload.py. Currently populated only by the
+// new-experiments endpoint; every other upload type returns plan: null.
+
+export interface PlanFieldChange {
+  field: string
+  old: unknown
+  new: unknown
+}
+
+export interface PlanCreate {
+  row: number
+  experiment_id: string
+  parent_id: string | null
+  copied_from: string | null
+}
+
+export interface PlanRename {
+  row: number
+  from_id: string
+  to_id: string
+}
+
+export interface PlanOverwrite {
+  row: number
+  experiment_id: string
+  fields_changed: PlanFieldChange[]
+}
+
+export interface PlanSkip {
+  row: number
+  experiment_id: string | null
+  reason: string
+}
+
+export interface PlanConflict {
+  row: number
+  kind: string
+  detail: string
+}
+
+export interface UploadPlan {
+  creates: PlanCreate[]
+  renames: PlanRename[]
+  overwrites: PlanOverwrite[]
+  skips: PlanSkip[]
+  conflicts: PlanConflict[]
+  counts: Record<string, number>
 }
 
 export interface SampleConflictMatch {
@@ -84,9 +140,18 @@ export const bulkUploadsApi = {
   uploadScalarResults: (file: File) =>
     post<BulkUploadResult>('/bulk-uploads/scalar-results', fileForm(file)),
 
-  // Card 5 — New Experiments
-  uploadNewExperiments: (file: File) =>
-    post<BulkUploadResult>('/bulk-uploads/new-experiments', fileForm(file)),
+  // Card 5 — New Experiments. Preview-first: the UI always calls this with
+  // { dryRun: true } first, then replays the returned plan_hash to commit
+  // (issue #100 items 5-6).
+  uploadNewExperiments: (
+    file: File,
+    opts: { dryRun?: boolean; planHash?: string } = {},
+  ) => {
+    const fd = fileForm(file)
+    if (opts.dryRun) fd.append('dry_run', 'true')
+    if (opts.planHash) fd.append('plan_hash', opts.planHash)
+    return post<BulkUploadResult>('/bulk-uploads/new-experiments', fd)
+  },
 
   // Card 6 — Timepoint Modifications
   uploadTimepointModifications: (file: File) =>
