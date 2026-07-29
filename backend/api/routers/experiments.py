@@ -1309,22 +1309,33 @@ def get_experiment_delete_impact(
     return _impact_to_response(collect_delete_impact(db, exp))
 
 
-@router.delete("/{experiment_id}", status_code=204)
+@router.delete("/{experiment_id}", response_model=ExperimentDeletedResponse)
 def delete_experiment(
     experiment_id: str,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> Response:
-    """Delete an experiment and all cascaded records."""
+) -> ExperimentDeletedResponse:
+    """Hard-delete an experiment, its dependents, and every reference to it.
+
+    Returns 200 with the impact actually applied -- NOT 204 -- so the caller
+    learns which other experiments were decoupled (issue #99). Available to any
+    approved researcher; the controls are the ModificationsLog snapshot written
+    here and the typed-ID confirmation in the UI. See
+    backend/services/experiment_deletion.py for why a bare db.delete() is not
+    sufficient.
+    """
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    db.delete(exp)
-    db.commit()
-    log.info("experiment_deleted", experiment_id=experiment_id, user=current_user.email)
-    return Response(status_code=204)
+
+    impact = delete_experiment_cascade(db, exp, modified_by=current_user.email)
+    return ExperimentDeletedResponse(
+        experiment_id=experiment_id,
+        deleted=True,
+        impact=_impact_to_response(impact),
+    )
 
 
 @router.post("/{experiment_id}/notes", response_model=NoteResponse, status_code=201)

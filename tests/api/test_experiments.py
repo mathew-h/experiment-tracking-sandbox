@@ -72,10 +72,20 @@ def test_patch_rename_success(client, db_session):
 
 
 def test_delete_experiment(client, db_session):
+    """Issue #99: was 204 No Content; now 200 with an impact body so the
+    caller learns what was decoupled."""
     _make_experiment(db_session, "DELETE_ME_001", 8005)
     resp = client.delete("/api/experiments/DELETE_ME_001")
-    assert resp.status_code == 204
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["experiment_id"] == "DELETE_ME_001"
+    assert body["deleted"] is True
+    assert body["impact"]["total"] == 0
     assert client.get("/api/experiments/DELETE_ME_001").status_code == 404
+
+
+def test_delete_experiment_404_for_unknown(client):
+    assert client.delete("/api/experiments/NOT_THERE_999").status_code == 404
 
 
 # --- B2: next-id and auto-numbering ---
@@ -1545,6 +1555,81 @@ def test_delete_impact_returns_accurate_counts(client, db_session):
     assert body["total"] == 4
     assert body["background_for"] == []
     assert body["replicate_children"] == []
+
+
+def test_delete_reports_impact_and_leaves_no_xrd_orphans(client, db_session):
+    from database.models.xrd import XRDPhase
+    from sqlalchemy import func, select as sa_select
+
+    _experiment_with_dependents(db_session, "DELETE_DEEP_001", 7401)
+    body = client.delete("/api/experiments/DELETE_DEEP_001").json()
+
+    assert body["impact"]["results"] == 1
+    assert body["impact"]["scalar_results"] == 1
+    assert body["impact"]["xrd_phases"] == 1
+    assert db_session.execute(
+        sa_select(func.count()).select_from(XRDPhase)
+        .where(XRDPhase.experiment_id == "DELETE_DEEP_001")
+    ).scalar_one() == 0
+
+
+def test_delete_succeeds_when_experiment_is_anothers_background(client, db_session):
+    """Acceptance criterion: succeeds AND names the decoupled experiment."""
+    from database.models.results import ExperimentalResults, ScalarResults
+
+    target = Experiment(experiment_id="DELETE_BG_TARGET", experiment_number=7402,
+                        status=ExperimentStatus.ONGOING)
+    other = Experiment(experiment_id="DELETE_BG_USER", experiment_number=7403,
+                       status=ExperimentStatus.ONGOING)
+    db_session.add_all([target, other])
+    db_session.flush()
+    result = ExperimentalResults(experiment_fk=other.id, time_post_reaction_days=0.0,
+                                 is_primary_timepoint_result=True, description="t0")
+    db_session.add(result)
+    db_session.flush()
+    db_session.add(ScalarResults(result_id=result.id,
+                                 background_experiment_id="DELETE_BG_TARGET",
+                                 background_ammonium_concentration_mM=0.2))
+    db_session.commit()
+
+    resp = client.delete("/api/experiments/DELETE_BG_TARGET")
+    assert resp.status_code == 200
+    assert resp.json()["impact"]["background_for"] == ["DELETE_BG_USER"]
+
+    from sqlalchemy import select as sa_select
+    scalar = db_session.execute(
+        sa_select(ScalarResults).where(ScalarResults.result_id == result.id)
+    ).scalar_one()
+    assert scalar.background_experiment_id is None
+    assert scalar.background_ammonium_concentration_mM == 0.2  # number preserved
+    assert client.get("/api/experiments/DELETE_BG_USER").status_code == 200
+
+
+def test_delete_frees_the_experiment_id_for_reuse(client, db_session):
+    """The actual need behind the SERUM_Catalyst incident."""
+    _experiment_with_dependents(db_session, "REUSE_ME_001", 7404)
+    assert client.delete("/api/experiments/REUSE_ME_001").status_code == 200
+    resp = client.post("/api/experiments",
+                       json={"experiment_id": "REUSE_ME_001", "experiment_number": 7405})
+    assert resp.status_code == 201
+
+
+def test_delete_audit_entry_survives_and_holds_a_snapshot(client, db_session):
+    from database.models.experiments import ModificationsLog
+    from sqlalchemy import select as sa_select
+
+    _experiment_with_dependents(db_session, "AUDIT_ME_001", 7406)
+    assert client.delete("/api/experiments/AUDIT_ME_001").status_code == 200
+
+    entry = db_session.execute(
+        sa_select(ModificationsLog).where(
+            ModificationsLog.experiment_id == "AUDIT_ME_001",
+            ModificationsLog.modification_type == "delete",
+        )
+    ).scalar_one()
+    assert entry.experiment_fk is None
+    assert entry.modified_by == "test@addisenergy.com"  # conftest _FAKE_USER
+    assert entry.old_values["experiment"]["experiment_number"] == 7406
 
 
 def test_delete_impact_zero_for_bare_experiment(client, db_session):
