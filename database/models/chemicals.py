@@ -1,8 +1,13 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, UniqueConstraint, Enum
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, UniqueConstraint, Enum, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
 from .enums import AmountUnit
+
+# Practical free-text bound for ChemicalAdditive.addition_method (issue #96). The DB column
+# itself is unbounded Text; this is the single source of truth for the app-layer cap enforced
+# by backend/api/schemas/chemicals.py (reject) and both bulk-upload parsers (truncate + warn).
+ADDITION_METHOD_MAX_LENGTH = 500
 
 
 class Compound(Base):
@@ -56,7 +61,7 @@ class ChemicalAdditive(Base):
 
     # Optional metadata
     addition_order = Column(Integer, nullable=True)         # Order of addition (1st, 2nd, etc.)
-    addition_method = Column(String(50), nullable=True)    # "solid", "solution", "dropwise", etc.
+    addition_method = Column(Text, nullable=True)  # Free-text addition/prep description; see ADDITION_METHOD_MAX_LENGTH
     final_concentration = Column(Float, nullable=True)      # Calculated final concentration in mixture
     concentration_units = Column(String(20), nullable=True) # "mM", "M", "ppm", etc.
 
