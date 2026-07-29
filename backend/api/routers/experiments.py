@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.enums import ExperimentStatus
+from backend.services.replicate_collapse import timepoint_stem_expr
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
@@ -223,12 +224,55 @@ def list_experiments(
         )
         rows = db.execute(page_stmt.offset(skip).limit(limit)).scalars().all()
     else:
-        total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-        rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
+        # Flat mode: collapse rows that differ ONLY by the trailing '-t<days>'
+        # token (issue #98 D1). SERUM_001a-t1 / SERUM_001a-t3 are one replicate
+        # sampled twice, so they render as ONE row labeled SERUM_001a.
+        #
+        # Unlike the grouped branch above -- which resolves bucket membership
+        # from the UNFILTERED table so that filtering to "b" still resolves
+        # representative "a" -- this collapses only rows that PASSED the
+        # filters. A filter therefore never produces a row claiming vials it
+        # excluded, and vial_count always describes visible data.
+        matched_sq = stmt.subquery()
+        stem = timepoint_stem_expr(matched_sq.c)
+        ranked_sq = select(
+            matched_sq.c.id.label("id"),
+            stem.label("stem"),
+            func.row_number().over(
+                partition_by=stem,
+                order_by=(
+                    matched_sq.c.is_outlier.asc(),
+                    matched_sq.c.id_timepoint_days.asc().nulls_first(),
+                    matched_sq.c.experiment_number.asc(),
+                ),
+            ).label("rn"),
+            func.count().over(partition_by=stem).label("vial_count"),
+        ).subquery()
+        reps_sq = (
+            select(ranked_sq.c.id, ranked_sq.c.stem, ranked_sq.c.vial_count)
+            .where(ranked_sq.c.rn == 1)
+            .subquery()
+        )
+        total = db.execute(select(func.count()).select_from(reps_sq)).scalar_one()
+        rep_rows = db.execute(
+            select(Experiment, reps_sq.c.stem, reps_sq.c.vial_count)
+            .join(reps_sq, reps_sq.c.id == Experiment.id)
+            .order_by(Experiment.experiment_number.desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+        rows = [row[0] for row in rep_rows]
+        flat_collapse = {row[0].id: (row[1], row[2]) for row in rep_rows}
 
     items = []
     for exp in rows:
         item_data = _build_list_item(db, exp)
+        if not group_replicates:
+            # Issue #98: label the row by its timepoint stem so the internal
+            # '-t<days>' token never reaches the UI.
+            stem, vial_count = flat_collapse[exp.id]
+            item_data["group_display_id"] = stem
+            item_data["vial_count"] = vial_count
         if group_replicates:
             # Bucket key for this representative -- mirrors Block A: a
             # lettered representative (orphan-set case) buckets on its own

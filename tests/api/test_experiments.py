@@ -1154,6 +1154,101 @@ class TestGroupedListMode:
             "HPHT_012a", "HPHT_012b", "HPHT_012c",
         }
 
+    def _make_2x2(self, db_session, prefix: str, start: int) -> None:
+        """2 letters x 2 timepoints, no parent row and no bare lettered rows --
+        the issue #98 repro shape."""
+        n = start
+        for letter in ("a", "b"):
+            for day in (1, 3):
+                db_session.add(Experiment(
+                    experiment_id=f"{prefix}_001{letter}-t{day}",
+                    experiment_number=n,
+                    status=ExperimentStatus.ONGOING,
+                ))
+                n += 1
+        db_session.commit()
+
+    def test_ungrouped_collapses_timepoint_vials_per_letter(self, client, db_session):
+        """Issue #98 AC3: the 2x2 set renders exactly two rows, one per letter."""
+        self._make_2x2(db_session, "T98UG", 9800)
+        resp = client.get("/api/experiments?search=T98UG_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["items"]) == 2
+        assert {i["group_display_id"] for i in data["items"]} == {
+            "T98UG_001a", "T98UG_001b",
+        }
+        assert all(i["vial_count"] == 2 for i in data["items"])
+
+    def test_ungrouped_no_timepoint_data_is_unchanged(self, client, db_session):
+        """Issue #98 AC4 regression guard: no -t vials -> identical to today."""
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"T98PLAIN_001{letter}", experiment_number=9810 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        resp = client.get("/api/experiments?search=T98PLAIN_001")
+        data = resp.json()
+        assert data["total"] == 3
+        assert {i["experiment_id"] for i in data["items"]} == {
+            "T98PLAIN_001a", "T98PLAIN_001b", "T98PLAIN_001c",
+        }
+        assert all(i["vial_count"] == 1 for i in data["items"])
+        # group_display_id equals the ID itself when there is nothing to strip.
+        assert all(i["group_display_id"] == i["experiment_id"] for i in data["items"])
+
+    def test_ungrouped_sequential_rerun_is_not_collapsed_into_its_letter(self, client, db_session):
+        """D1: SERUM_001a-2 shares base AND letter with SERUM_001a but is a
+        re-run, not a timepoint variant. It must stay its own row."""
+        db_session.add(Experiment(experiment_id="T98RR_001a", experiment_number=9820,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.add(Experiment(experiment_id="T98RR_001a-t5", experiment_number=9821,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.add(Experiment(experiment_id="T98RR_001a-2", experiment_number=9822,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?search=T98RR_001a")
+        data = resp.json()
+        assert data["total"] == 2
+        assert {i["group_display_id"] for i in data["items"]} == {
+            "T98RR_001a", "T98RR_001a-2",
+        }
+
+    def test_ungrouped_collapse_respects_filters(self, client, db_session):
+        """Unlike grouped mode, ungrouped collapsing sees only matched rows, so a
+        filter never yields a row claiming vials it excluded."""
+        self._make_2x2(db_session, "T98FLT", 9830)
+        resp = client.get("/api/experiments?search=T98FLT_001a-t3")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["group_display_id"] == "T98FLT_001a"
+        assert item["vial_count"] == 1
+
+    def test_ungrouped_representative_skips_outlier_vial(self, client, db_session):
+        """D7: an is_outlier vial never represents a collapsed row."""
+        db_session.add(Experiment(experiment_id="T98OUT_001a-t1", experiment_number=9840,
+                                  status=ExperimentStatus.ONGOING, is_outlier=True))
+        db_session.add(Experiment(experiment_id="T98OUT_001a-t3", experiment_number=9841,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?search=T98OUT_001a")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["experiment_id"] == "T98OUT_001a-t3"
+        assert item["group_display_id"] == "T98OUT_001a"
+
+    def test_ungrouped_pagination_counts_collapsed_rows(self, client, db_session):
+        """Gap 7: pagination must page over collapsed rows, not raw vials."""
+        self._make_2x2(db_session, "T98PAGE", 9850)
+        resp = client.get("/api/experiments?search=T98PAGE_001&limit=1")
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["items"]) == 1
+
 
 class TestCreateReplicatesEndpoint:
     def test_create_replicates_batch(self, client, db_session):

@@ -63,8 +63,19 @@ class ExperimentListItem(BaseModel):
     additives_summary: Optional[str] = None
     # First note text
     condition_note: Optional[str] = None
-    # Grouped-list mode only (group_replicates=true): lettered children of this
-    # group parent, ordered by replicate_label. None in flat mode / for non-parents.
+    # Issue #98. What the ID column should render: the group stem in grouped
+    # mode, the timepoint-stripped stem in flat mode. `experiment_id` above
+    # continues to name the real representative row -- do not conflate them.
+    group_display_id: Optional[str] = None
+    # Number of experiment rows this row stands for (1 = an ordinary row).
+    vial_count: int = 1
+    # Grouped mode only: the group's DISTINCT replicate letters, for the badge.
+    # None in flat mode and for rows that are not groups.
+    replicate_letters: Optional[list[str]] = None
+    # Grouped-list mode only (group_replicates=true): one entry per replicate
+    # letter-row of this group, collapsed on the timepoint stem (issue #98 D8 --
+    # this includes the representative's own letter). None in flat mode and for
+    # rows that are not groups.
     replicates: Optional[list["ExperimentListItem"]] = None
 
 
