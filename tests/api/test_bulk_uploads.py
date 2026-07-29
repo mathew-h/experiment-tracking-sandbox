@@ -134,8 +134,10 @@ def test_scalar_results_dry_run_rolls_back(client, db_session):
 
 
 def test_new_experiments_returns_upload_response_shape(client):
+    from backend.services.bulk_uploads.new_experiments import UploadPlan as _RealUploadPlan
+
     mock_svc = MagicMock()
-    mock_svc.bulk_upsert_from_excel.return_value = (2, 0, 0, [], [], {})
+    mock_svc.bulk_upsert_from_excel_ex.return_value = (2, 0, 0, [], [], {}, _RealUploadPlan())
     fake_mod = MagicMock()
     fake_mod.NewExperimentsUploadService = mock_svc
 
@@ -145,12 +147,16 @@ def test_new_experiments_returns_upload_response_shape(client):
             files={"file": ("test.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
         )
     assert resp.status_code == 200
-    _assert_upload_shape(resp.json())
+    body = resp.json()
+    _assert_upload_shape(body)
+    assert body["plan"]["counts"] == {"creates": 0, "renames": 0, "overwrites": 0, "skips": 0, "conflicts": 0}
 
 
 def test_new_experiments_dry_run_rolls_back(client, db_session):
+    from backend.services.bulk_uploads.new_experiments import UploadPlan as _RealUploadPlan
+
     mock_svc = MagicMock()
-    mock_svc.bulk_upsert_from_excel.return_value = (2, 0, 0, [], [], {})
+    mock_svc.bulk_upsert_from_excel_ex.return_value = (2, 0, 0, [], [], {}, _RealUploadPlan())
     fake_mod = MagicMock()
     fake_mod.NewExperimentsUploadService = mock_svc
 
@@ -201,6 +207,31 @@ def test_new_experiments_dry_run_leaves_db_unchanged(client, db_session):
         .first()
     )
     assert persisted is None, "dry_run=True must not persist the created experiment"
+
+
+def test_new_experiments_plan_reaches_the_response(client):
+    """issue #100 item 2: the real (unmocked) plan reaches UploadResponse.plan."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "experiments"
+    ws.append(["experiment_id", "status"])
+    ws.append(["HPHT_PLANRESP_001", "ONGOING"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    resp = client.post(
+        "/api/bulk-uploads/new-experiments",
+        files={"file": ("test.xlsx", buf, "application/vnd.ms-excel")},
+        data={"dry_run": "true"},
+    )
+    assert resp.status_code == 200
+    plan = resp.json()["plan"]
+    assert plan["counts"]["creates"] == 1
+    assert plan["creates"][0]["experiment_id"] == "HPHT_PLANRESP_001"
+    assert plan["creates"][0]["parent_id"] is None
 
 
 def test_pxrf_returns_upload_response_shape(client):

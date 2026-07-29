@@ -615,13 +615,26 @@ All endpoints return `UploadResponse`:
 }
 ```
 
-**`dry_run` (issue #100 item 1):** every POST endpoint below accepts a `dry_run` form field (default `false`). When `true`, the parser still runs in full — the response's `created`/`updated`/`skipped`/`errors`/`warnings` reflect what *would* happen — but the transaction is rolled back instead of committed, so nothing is persisted. The `message` is prefixed `[DRY RUN]` and the response's `dry_run` field is `true`. For `actlabs-rock`, `dry_run` applies to both write paths (the no-conflict direct import and the resolutions-supplied Phase 2 import); Phase 1's preflight-only response (`ConflictCheckResponse`) never writes regardless of `dry_run`. Structured create/rename/overwrite plan output and the plan-hash preview/commit check are a separate, not-yet-implemented part of issue #100.
+**`dry_run` (issue #100 item 1):** every POST endpoint below accepts a `dry_run` form field (default `false`). When `true`, the parser still runs in full — the response's `created`/`updated`/`skipped`/`errors`/`warnings` reflect what *would* happen — but the transaction is rolled back instead of committed, so nothing is persisted. The `message` is prefixed `[DRY RUN]` and the response's `dry_run` field is `true`. For `actlabs-rock`, `dry_run` applies to both write paths (the no-conflict direct import and the resolutions-supplied Phase 2 import); Phase 1's preflight-only response (`ConflictCheckResponse`) never writes regardless of `dry_run`. The file-level reject-on-conflict and the plan-hash preview/commit check are a separate, not-yet-implemented part of issue #100.
+
+**`plan` (issue #100 item 2, `new-experiments` only):** `UploadResponse.plan` is a structured summary of what the upload did (or, with `dry_run=true`, would have done):
+```json
+{
+  "creates":    [{ "row": 2, "experiment_id": "HPHT_072", "parent_id": null, "copied_from": null }],
+  "renames":    [{ "row": 3, "from_id": "HPHT_071", "to_id": "HPHT_071_Renamed" }],
+  "overwrites": [{ "row": 4, "experiment_id": "HPHT_070", "fields_changed": [{ "field": "initial_ph", "old": 4.0, "new": 9.0 }] }],
+  "skips":      [{ "row": 5, "experiment_id": null, "reason": "empty experiment_id" }],
+  "conflicts":  [{ "row": 6, "kind": "already_exists", "detail": "experiment_id 'HPHT_070' already exists; set overwrite=True to update" }],
+  "counts": { "creates": 1, "renames": 1, "overwrites": 1, "skips": 1, "conflicts": 1 }
+}
+```
+`fields_changed` merges diffs discovered across the experiments sheet (`sample_id`, `researcher`, `status`, `date`) and the conditions sheet (any updatable `ExperimentalConditions` column — the `initial_ph` example above is exactly the issue's own "silently changes from 4 to 9" case) into one entry per `experiment_id`; a brand-new conditions row is not diffed (nothing to have silently overwritten). Additives are reported as a single summary line (`{"field": "additives", "old": "N additive(s)", "new": "M additive(s) provided"}`) rather than per-compound diffed. `conflicts[].kind` is one of `chain_rename_conflict`, `rename_without_overwrite`, `overwrite_old_id_not_found`, `overwrite_nonexistent`, `already_exists`. Every other upload type returns `plan: null` — the schema (`creates`/`renames`/`parent_id`/`copied_from`) is written around `new_experiments.py`'s own concepts (rename, parent-copy) and doesn't generalize cleanly to the other 12 parsers.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/bulk-uploads/master-results` | Master Results upload. `file` required — the no-file SharePoint sync mode and the GET/PATCH /master-results/config endpoints were removed (issue #74). Runs calc engine on affected `ScalarResults`. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
 | POST | `/api/bulk-uploads/scalar-results` | Bulk-create/update `ScalarResults` rows from Excel template. Runs calc engine. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
-| POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. |
+| POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. Returns a structured `plan` (see above). |
 | POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. |
 | POST | `/api/bulk-uploads/xrd-mineralogy` | Unified XRD upload — auto-detects Aeris or ActLabs format. |
 | POST | `/api/bulk-uploads/timepoint-modifications` | Bulk-set `brine_modification_description` on result rows. Writes audit log. |
