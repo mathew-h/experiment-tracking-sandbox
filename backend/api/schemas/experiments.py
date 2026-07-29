@@ -214,9 +214,13 @@ class DeleteImpactResponse(BaseModel):
 
     `total` sums the counts only. `background_for` and `replicate_children`
     are decoupled -- those experiments survive -- so they are excluded from it.
-    The UI demands a typed-ID confirmation when `total > 0`.
+    The UI demands a typed-ID confirmation when anything is destroyed OR
+    decoupled.
     """
     experiment_id: str
+    # The setup row, hard-deleted by the ORM cascade. Counted so the dialog
+    # cannot report "nothing else is affected" while destroying it.
+    conditions: int = 0
     results: int = 0
     scalar_results: int = 0
     icp_results: int = 0

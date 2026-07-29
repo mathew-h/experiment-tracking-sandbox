@@ -14,7 +14,7 @@ import type { DeleteImpact } from '@/api/experiments'
 
 const EMPTY_IMPACT: DeleteImpact = {
   experiment_id: 'SERUM_001a',
-  results: 0, scalar_results: 0, icp_results: 0, result_files: 0,
+  conditions: 0, results: 0, scalar_results: 0, icp_results: 0, result_files: 0,
   notes: 0, additives: 0, external_analyses: 0, xrd_phases: 0,
   change_requests: 0, total: 0, background_for: [], replicate_children: [],
 }
@@ -104,6 +104,35 @@ describe('DeleteExperimentModal', () => {
     expect(confirmBtn).toBeEnabled()
     await user.click(confirmBtn)
     await waitFor(() => expect(experimentsApi.delete).toHaveBeenCalledWith('SERUM_001a'))
+  })
+
+  it('itemizes a conditions-only impact and still demands the typed id', async () => {
+    // The commonest live shape (44 dev-DB experiments). Before `conditions` was
+    // counted this rendered "nothing else is affected" and enabled Delete on a
+    // single click while a full setup record was destroyed.
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.getDeleteImpact).mockResolvedValue({
+      ...EMPTY_IMPACT, conditions: 1, total: 1,
+    })
+    renderModal()
+
+    expect(await screen.findByText(/1 conditions record/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no dependent records/i)).not.toBeInTheDocument()
+
+    const confirmBtn = screen.getByRole('button', { name: /^delete$/i })
+    expect(confirmBtn).toBeDisabled()
+    await user.type(await screen.findByLabelText(/type the experiment id/i), 'SERUM_001a')
+    await waitFor(() => expect(confirmBtn).toBeEnabled())
+  })
+
+  it('demands the typed id when nothing is destroyed but something is decoupled', async () => {
+    vi.mocked(experimentsApi.getDeleteImpact).mockResolvedValue({
+      ...EMPTY_IMPACT, total: 0, background_for: ['SERUM_009a'],
+    })
+    renderModal()
+
+    expect(await screen.findByLabelText(/type the experiment id/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeDisabled()
   })
 
   it('cancel is a no-op — closes without deleting', async () => {

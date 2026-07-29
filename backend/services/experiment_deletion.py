@@ -5,10 +5,15 @@ are the ModificationsLog snapshot written by delete_experiment_cascade() and
 the typed-ID confirmation in the UI -- there is no role gate (locked decision,
 2026-07-29).
 
-Why this module exists rather than a bare db.delete(exp): three references to
-an experiment are NOT covered by the cascade="all, delete-orphan" relationships
-on Experiment (database/models/experiments.py:30-35), and one of them has no
-DB-level protection at all:
+Governing principle (product owner, 2026-07-29): deleting an experiment PURGES
+everything it owns. The one hard boundary is that "owns" stops at rows belonging
+to THIS experiment -- another experiment's data is never destroyed, only
+decoupled (see items 2 and 4 below).
+
+Why this module exists rather than a bare db.delete(exp): four references to an
+experiment are NOT handled correctly by the cascade="all, delete-orphan"
+relationships on Experiment (database/models/experiments.py:30-35), and two of
+them have no usable DB-level protection:
 
   1. xrd_phases -- experiment_fk is ondelete="SET NULL" and the relationship
      (experiments.py:44) declares no cascade, so rows survive with a stale
@@ -20,11 +25,24 @@ DB-level protection at all:
      practice (0 of 1056 rows as of 2026-07-29; only the string is ever written,
      see backend/services/scalar_results_service.py:155), so the DB-level
      SET NULL on the FK protects nothing that matters. Both are NULLed out.
-     This is provenance only -- the background NUMBER lives in
-     background_ammonium_concentration_mM, so nulling it changes no derived
-     value and needs no recalculate() call.
-  3. reactor_change_requests.experiment_id -- ondelete="SET NULL"; nulled
-     explicitly so behavior does not depend on deployed constraint parity.
+     This is a DECOUPLING of another experiment's row: provenance only -- the
+     background NUMBER lives in background_ammonium_concentration_mM, which is
+     left intact, so no derived value changes and no recalculate() is needed.
+  3. reactor_change_requests.experiment_id -- ondelete="SET NULL", but these
+     rows are PURGED (product decision, 2026-07-29): they belong to this
+     experiment, and change_requests is summed into DeleteImpact.total, which is
+     documented as rows destroyed. Purging makes that count truthful.
+  4. Replicate children -- parent_experiment_fk is dropped, nothing else. Their
+     base_experiment_id and replicate_label stay, because replicate groups are
+     addressed by the base-ID string (issue #87). A DECOUPLING, not a purge.
+  5. elemental_analysis -- external_analysis_id is nullable=False, yet the
+     relationship (characterization.py:43) is a bare backref with no cascade and
+     no passive_deletes. When the ORM cascade-deletes this experiment's
+     external_analyses it therefore tries to NULL that child FK BEFORE the
+     DB-level ON DELETE CASCADE can act, raising NotNullViolation and failing
+     the whole delete with a 500. These rows are DELETED up front, in the
+     service: database/models/ is locked and models are storage-only here, so
+     the fix cannot be a passive_deletes=True on the relationship.
 
 Deployed constraints are not guaranteed to match the model declarations: the
 dev and test DBs are built with Base.metadata.create_all (which honors the
@@ -42,6 +60,7 @@ from sqlalchemy import delete as sql_delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from database.models.analysis import ExternalAnalysis
+from database.models.characterization import ElementalAnalysis
 from database.models.chemicals import ChemicalAdditive, Compound
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -59,6 +78,12 @@ class DeleteImpact:
     """What deleting one experiment destroys (counts) and decouples (lists)."""
 
     experiment_id: str
+    # The setup row (temperature, initial pH, rock mass, water volume, reactor
+    # number, pressures, total_ferrous_iron_g). Hard-deleted by the ORM cascade,
+    # so it must be counted: 44 dev-DB experiments have conditions and nothing
+    # else, and an uncounted destruction leaves total == 0, which makes the
+    # dialog claim "nothing else is affected" and drops the typed-ID gate.
+    conditions: int = 0
     results: int = 0
     scalar_results: int = 0
     icp_results: int = 0
@@ -82,8 +107,8 @@ class DeleteImpact:
         are decoupled and survive. The UI gates typed-ID confirmation on this.
         """
         return (
-            self.results + self.scalar_results + self.icp_results
-            + self.result_files + self.notes + self.additives
+            self.conditions + self.results + self.scalar_results
+            + self.icp_results + self.result_files + self.notes + self.additives
             + self.external_analyses + self.xrd_phases + self.change_requests
         )
 
@@ -110,6 +135,7 @@ def collect_delete_impact(db: Session, exp: Experiment) -> DeleteImpact:
 
     impact = DeleteImpact(
         experiment_id=exp.experiment_id,
+        conditions=len(condition_ids),
         results=len(result_ids),
         notes=_count(db, select(func.count()).select_from(ExperimentNotes)
                      .where(ExperimentNotes.experiment_fk == exp.id)),
@@ -178,12 +204,24 @@ def _row_to_dict(instance: Any) -> dict[str, Any]:
 
 
 def serialize_experiment_snapshot(db: Session, exp: Experiment) -> dict[str, Any]:
-    """A restorable snapshot of the experiment, its conditions, additives and notes.
+    """A record of WHAT WAS DELETED -- not a restore point.
+
+    Captures the experiment header row, its conditions row, its additives (with
+    the compound name) and its note TEXT. Deletion is an explicit purge, and the
+    following are NOT reconstructable from this snapshot:
+
+      - every ExperimentalResults / ScalarResults / ICPResults / ResultFiles
+        value (deliberately excluded: bulk-uploadable and unbounded -- only the
+        counts are kept, in new_values);
+      - purged xrd_phases rows (mineral_name, amount, time_post_reaction_days,
+        rwp) and ExternalAnalysis rows with their metadata and files;
+      - note timestamps, and the experiment's prior ModificationsLog history,
+        which is purged with it;
+      - lineage: parent_experiment_fk is stored as a stale integer PK that can no
+        longer be resolved to an experiment.
 
     Every value is JSON-primitive because this lands in ModificationsLog.old_values
     (a JSONB column) -- enums and datetimes would otherwise fail the flush.
-    Results/ICP are deliberately excluded: they are bulk-uploadable and would
-    make the audit row unbounded. Their counts are recorded in new_values.
     """
     conditions = db.execute(
         select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
@@ -218,12 +256,19 @@ def serialize_experiment_snapshot(db: Session, exp: Experiment) -> dict[str, Any
 def delete_experiment_cascade(
     db: Session, exp: Experiment, modified_by: str | None
 ) -> DeleteImpact:
-    """Decouple, audit, then hard-delete an experiment. Commits.
+    """Purge an experiment and everything it owns; decouple, audit, then delete.
 
     Order matters: the impact scan and the snapshot both read rows that the
     delete destroys, so they run first. The ModificationsLog row is added with
     experiment_fk=None -- that FK is ondelete="CASCADE", so a populated value
     would take the audit row down with the experiment.
+
+    The experiment's PRIOR ModificationsLog history is purged with it, via
+    Experiment.modifications (cascade="all, delete-orphan") -- accepted product
+    decision (2026-07-29), consistent with purging everything it owns. The single
+    delete-snapshot row written here is the surviving trace, and it is what
+    justifies opening this endpoint to any approved researcher with no role gate.
+    Commits.
     """
     experiment_id = exp.experiment_id
     exp_pk = exp.id
@@ -251,14 +296,29 @@ def delete_experiment_cascade(
         .values(background_experiment_id=None, background_experiment_fk=None)
     )
 
-    # 3. Reactor change requests keep their row, lose the reference. Safe
-    #    against uq_change_request_reactor_experiment_date: PostgreSQL treats
-    #    NULL as distinct in unique constraints.
+    # 3. Reactor change requests are PURGED, not unlinked (product decision,
+    #    2026-07-29): they belong to this experiment, and change_requests is
+    #    already summed into impact.total, which is documented as rows destroyed.
     db.execute(
-        update(ReactorChangeRequest)
+        sql_delete(ReactorChangeRequest)
         .where(ReactorChangeRequest.experiment_id == experiment_id)
-        .values(experiment_id=None)
     )
+
+    # 3b. elemental_analysis children of THIS experiment's external analyses.
+    #     external_analysis_id is nullable=False but its relationship is a bare
+    #     backref, so the ORM would try to NULL it when the parent
+    #     ExternalAnalysis is cascade-deleted -> NotNullViolation, 500, no
+    #     delete. Purged here because database/models/ is locked (no
+    #     passive_deletes=True available) and these rows are owned by the
+    #     experiment anyway.
+    ext_ids = db.execute(
+        select(ExternalAnalysis.id).where(ExternalAnalysis.experiment_fk == exp_pk)
+    ).scalars().all()
+    if ext_ids:
+        db.execute(
+            sql_delete(ElementalAnalysis)
+            .where(ElementalAnalysis.external_analysis_id.in_(ext_ids))
+        )
 
     # 4. Replicate children: drop the parent pointer explicitly rather than
     #    relying on the DB SET NULL. base_experiment_id is untouched, so the
@@ -281,6 +341,7 @@ def delete_experiment_cascade(
         old_values=snapshot,
         new_values={
             "impact": {
+                "conditions": impact.conditions,
                 "results": impact.results,
                 "scalar_results": impact.scalar_results,
                 "icp_results": impact.icp_results,

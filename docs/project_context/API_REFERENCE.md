@@ -266,6 +266,7 @@ powers the delete confirmation dialog. `404` if the experiment does not exist.
 ```json
 {
   "experiment_id": "SERUM_001a",
+  "conditions": 1,
   "results": 3,
   "scalar_results": 3,
   "icp_results": 2,
@@ -275,22 +276,42 @@ powers the delete confirmation dialog. `404` if the experiment does not exist.
   "external_analyses": 0,
   "xrd_phases": 4,
   "change_requests": 0,
-  "total": 15,
+  "total": 16,
   "background_for": ["SERUM_002a"],
   "replicate_children": []
 }
 ```
 
+`conditions` is the `ExperimentalConditions` setup row (temperature, initial pH,
+rock mass, water volume, reactor number, pressures). It is hard-deleted with the
+experiment, so it is counted — an experiment with conditions and nothing else
+reports `total: 1`, not `0`.
+
 `total` sums the counts only. `background_for` (experiments naming this one as
 their ammonium background) and `replicate_children` (experiments whose
 `parent_experiment_fk` points here) are **decoupled, not deleted** — those
-experiments survive — so they are excluded from `total`. The UI requires the
-user to type the experiment ID whenever `total > 0`.
+experiments survive, and `background_ammonium_concentration_mM` on the citing
+rows is left intact — so they are excluded from `total`. The UI requires the user
+to type the experiment ID whenever anything is destroyed **or** decoupled, i.e.
+`total > 0` or either list is non-empty.
 
 ### DELETE /api/experiments/{experiment_id}
 
-Hard-deletes the experiment, its dependent records, and every reference to it.
-Available to any approved researcher. `404` if the experiment does not exist.
+Hard-deletes the experiment and **purges everything it owns**. Available to any
+approved researcher. `404` if the experiment does not exist.
+
+Purged: the conditions row and its chemical additives, all results (scalar, ICP,
+result files), notes, external analyses **and their `elemental_analysis` rows**,
+XRD phase rows, this experiment's `reactor_change_requests` rows, and its prior
+`ModificationsLog` history.
+
+Decoupled but **not** destroyed — a deletion never touches another experiment's
+data: other experiments' `scalar_results` that cite this one as their ammonium
+background have `background_experiment_id` / `background_experiment_fk` cleared
+while the row and its `background_ammonium_concentration_mM` value survive; and
+replicate siblings lose only `parent_experiment_fk`, keeping
+`base_experiment_id` and `replicate_label` so the group stays addressable by
+string (issue #87).
 
 **Returns `200` with a body, not `204`** — the caller needs to know what was
 decoupled:
@@ -304,10 +325,16 @@ decoupled:
 ```
 
 `impact` is measured immediately before the delete, so it reports what actually
-happened rather than the pre-flight estimate. Every call writes a
-`ModificationsLog` entry with a restorable snapshot; see the deletion-path notes
-in `.claude/rules/MODELS.md` for the orphan-prevention details and the
-`experiment_fk = NULL` requirement on that log row.
+happened rather than the pre-flight estimate.
+
+Every call writes one `ModificationsLog` entry (`modification_type='delete'`,
+`experiment_fk = NULL`) whose `old_values` is a **record of what was deleted, not
+a restore point**: the experiment header, its conditions, its additives and its
+note text. Results/ICP values, XRD phase rows, external-analysis metadata and
+files, note timestamps, the purged prior audit history and resolvable lineage are
+**not** recoverable from it. That single row is the only surviving trace of the
+deletion — see the deletion-path notes in `.claude/rules/MODELS.md` for the
+orphan-prevention details and the `experiment_fk = NULL` requirement.
 
 ### PATCH /api/experiments/{experiment_id}
 

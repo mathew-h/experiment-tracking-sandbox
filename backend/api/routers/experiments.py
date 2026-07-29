@@ -1275,6 +1275,7 @@ def update_experiment(
 def _impact_to_response(impact: DeleteImpact) -> DeleteImpactResponse:
     return DeleteImpactResponse(
         experiment_id=impact.experiment_id,
+        conditions=impact.conditions,
         results=impact.results,
         scalar_results=impact.scalar_results,
         icp_results=impact.icp_results,

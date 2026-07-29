@@ -12,6 +12,7 @@ from database.models.conditions import ExperimentalConditions
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.results import ExperimentalResults, ScalarResults, ICPResults, ResultFiles
 from database.models.analysis import ExternalAnalysis
+from database.models.characterization import Analyte, ElementalAnalysis
 from database.models.xrd import XRDPhase
 from database.models.notion_sync import ReactorChangeRequest
 
@@ -91,6 +92,7 @@ def test_collect_impact_counts_every_dependent_record(db):
     impact = collect_delete_impact(db, exp)
 
     assert impact.experiment_id == "DEL_FULL_001"
+    assert impact.conditions == 1
     assert impact.results == 1
     assert impact.scalar_results == 1
     assert impact.icp_results == 1
@@ -100,7 +102,28 @@ def test_collect_impact_counts_every_dependent_record(db):
     assert impact.external_analyses == 1
     assert impact.xrd_phases == 1
     assert impact.change_requests == 1
-    assert impact.total == 9
+    assert impact.total == 10
+
+
+def test_collect_impact_counts_the_conditions_row(db):
+    """The commonest live shape: conditions and nothing else (44 experiments in
+    the dev DB). The conditions row is hard-deleted by the ORM cascade, so it
+    must be counted -- otherwise total == 0 and the dialog says "nothing else is
+    affected" while a full setup record is destroyed."""
+    from backend.services.experiment_deletion import collect_delete_impact
+
+    exp = Experiment(experiment_id="DEL_COND_001", experiment_number=7112,
+                     status=ExperimentStatus.ONGOING)
+    db.add(exp)
+    db.flush()
+    db.add(ExperimentalConditions(experiment_fk=exp.id, experiment_id="DEL_COND_001",
+                                  temperature_c=90.0, rock_mass_g=10.0))
+    db.commit()
+    db.refresh(exp)
+
+    impact = collect_delete_impact(db, exp)
+    assert impact.conditions == 1
+    assert impact.total == 1  # counted, so the typed-ID gate engages
 
 
 def test_collect_impact_is_zero_for_a_bare_experiment(db):
@@ -285,17 +308,55 @@ def test_delete_decouples_background_string_and_fk(db):
     assert scalar.background_ammonium_concentration_mM == 0.2
 
 
-def test_delete_nulls_change_request_references(db):
+def test_delete_purges_change_requests(db):
+    """Product decision (2026-07-29): change requests are PURGED with the
+    experiment, not unlinked. This also makes `change_requests` -- already summed
+    into `total`, which is documented as rows destroyed -- truthful."""
     from backend.services.experiment_deletion import delete_experiment_cascade
 
     exp = _full_experiment(db, "DEL_CR_001", 7207)
     delete_experiment_cascade(db, exp, modified_by="tester@addisenergy.com")
 
-    rows = db.execute(
-        select(ReactorChangeRequest).where(ReactorChangeRequest.reactor_label == "R01")
-    ).scalars().all()
-    assert rows, "the change request row itself must survive"
-    assert all(r.experiment_id is None for r in rows)
+    assert db.execute(
+        select(func.count()).select_from(ReactorChangeRequest)
+        .where(ReactorChangeRequest.reactor_label == "R01")
+    ).scalar_one() == 0
+
+
+def test_delete_purges_elemental_analysis_children(db):
+    """F1 regression guard.
+
+    ElementalAnalysis.external_analysis_id is nullable=False, but the
+    relationship is a bare backref with no cascade and no passive_deletes, so
+    when Experiment.external_analyses cascade-deletes the parent the ORM first
+    emits `UPDATE elemental_analysis SET external_analysis_id=NULL` -- a
+    NotNullViolation, HTTP 500, and the delete never completes. Without the
+    service-side purge this test raises instead of failing an assert.
+    """
+    from backend.services.experiment_deletion import delete_experiment_cascade
+
+    exp = _full_experiment(db, "DEL_ELEM_001", 7211)
+    ext = db.execute(
+        select(ExternalAnalysis).where(ExternalAnalysis.experiment_fk == exp.id)
+    ).scalar_one()
+    analyte = Analyte(analyte_symbol="FeO_7211", unit="%")
+    db.add(analyte)
+    db.flush()
+    db.add(ElementalAnalysis(external_analysis_id=ext.id, analyte_id=analyte.id,
+                             analyte_composition=8.5))
+    db.commit()
+    ext_id = ext.id
+
+    delete_experiment_cascade(db, exp, modified_by="tester@addisenergy.com")
+
+    assert db.execute(
+        select(func.count()).select_from(ElementalAnalysis)
+        .where(ElementalAnalysis.external_analysis_id == ext_id)
+    ).scalar_one() == 0, "elemental_analysis rows left behind"
+    assert db.execute(
+        select(func.count()).select_from(ExternalAnalysis)
+        .where(ExternalAnalysis.id == ext_id)
+    ).scalar_one() == 0
 
 
 def test_delete_leaves_no_orphan_rows_anywhere(db):

@@ -18,6 +18,29 @@ import { ChangeRequestsTab } from './ChangeRequestsTab'
 const TABS = ['Conditions', 'Results', 'Notes', 'Reactor Modifications', 'Analysis', 'Entry Logs'] as const
 type Tab = typeof TABS[number]
 
+/**
+ * Query-key prefixes whose second element is an experiment ID. All are EVICTED
+ * (not invalidated) after a delete: the delete frees the experiment ID, so a new
+ * experiment can claim it, and a surviving-but-stale entry would render the dead
+ * experiment's data until the refetch lands.
+ *
+ * Not reachable this way: ['scalar', resultId] and ['icp', resultId] are keyed
+ * by result ID, so they cannot be targeted from the experiment ID alone. They
+ * are harmless — a reused experiment ID never gets the old result IDs back.
+ */
+const PER_EXPERIMENT_QUERY_KEYS = [
+  'experiment',
+  'delete-impact',
+  'conditions',
+  'additives',
+  'experiment-results',
+  'changeRequests',
+  'reactorModificationRecent',
+  'xrd',
+  'external-analysis',
+  'replicate-group',
+] as const
+
 /** Full experiment detail page with tabbed navigation (Results, Conditions, Analysis, Notes, Modifications). */
 export function ExperimentDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -397,11 +420,11 @@ export function ExperimentDetailPage() {
         onClose={() => setDeleteOpen(false)}
         onDeleted={() => {
           setDeleteOpen(false)
-          // Drop this experiment's own cached detail as well as the list and
-          // group caches, so a freed experiment_id reused later does not read
-          // back the deleted row.
-          queryClient.removeQueries({ queryKey: ['experiment', experiment.experiment_id] })
-          queryClient.removeQueries({ queryKey: ['delete-impact', experiment.experiment_id] })
+          // Drop every cache keyed by this experiment's ID, so a freed
+          // experiment_id reused later cannot read back the deleted row.
+          PER_EXPERIMENT_QUERY_KEYS.forEach((key) =>
+            queryClient.removeQueries({ queryKey: [key, experiment.experiment_id] }),
+          )
           queryClient.invalidateQueries({ queryKey: ['experiments'] })
           queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
           queryClient.invalidateQueries({ queryKey: ['group-rollup'] })

@@ -71,6 +71,9 @@ export interface ExperimentDetail {
  *  `total` sums the counts only — the listed experiments survive. */
 export interface DeleteImpact {
   experiment_id: string
+  /** The setup row (temperature, pH, rock mass, reactor…) — destroyed with the
+   *  experiment, so it is counted in `total`. */
+  conditions: number
   results: number
   scalar_results: number
   icp_results: number

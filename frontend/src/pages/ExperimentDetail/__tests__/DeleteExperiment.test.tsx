@@ -38,6 +38,7 @@ const BASE_DETAIL: ExperimentDetail = {
 
 const EMPTY_IMPACT: DeleteImpact = {
   experiment_id: 'SERUM_050',
+  conditions: 0,
   results: 0, scalar_results: 0, icp_results: 0, result_files: 0, notes: 0,
   additives: 0, external_analyses: 0, xrd_phases: 0, change_requests: 0,
   total: 0, background_for: [], replicate_children: [],
@@ -105,8 +106,15 @@ describe('experiment deletion from the detail page', () => {
     await user.click(await screen.findByRole('button', { name: /^delete$/i }))
     await waitFor(() => expect(experimentsApi.delete).toHaveBeenCalledWith('SERUM_050'))
 
-    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ['experiment', 'SERUM_050'] })
-    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ['delete-impact', 'SERUM_050'] })
+    // Every cache keyed by the experiment ID must be evicted, not invalidated:
+    // the freed ID can be reused, so a stale entry must not be readable at all.
+    for (const key of [
+      'experiment', 'delete-impact', 'conditions', 'additives',
+      'experiment-results', 'changeRequests', 'reactorModificationRecent',
+      'xrd', 'external-analysis', 'replicate-group',
+    ]) {
+      expect(removeSpy).toHaveBeenCalledWith({ queryKey: [key, 'SERUM_050'] })
+    }
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['group-rollup'] })
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['rollup'] })
 

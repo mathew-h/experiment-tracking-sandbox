@@ -1552,9 +1552,27 @@ def test_delete_impact_returns_accurate_counts(client, db_session):
     assert body["notes"] == 1
     assert body["xrd_phases"] == 1
     assert body["icp_results"] == 0
+    assert body["conditions"] == 0  # this fixture creates no conditions row
     assert body["total"] == 4
     assert body["background_for"] == []
     assert body["replicate_children"] == []
+
+
+def test_delete_impact_counts_the_conditions_row(client, db_session):
+    """A conditions row is hard-deleted by the cascade, so it must be reported.
+    Without it the commonest live shape (conditions and nothing else) returns
+    total == 0 and the dialog drops its typed-ID gate."""
+    from database.models.conditions import ExperimentalConditions
+
+    exp = _make_experiment(db_session, "IMPACT_COND_001", 7305)
+    db_session.add(ExperimentalConditions(experiment_fk=exp.id,
+                                          experiment_id="IMPACT_COND_001",
+                                          temperature_c=85.0))
+    db_session.commit()
+
+    body = client.get("/api/experiments/IMPACT_COND_001/delete-impact").json()
+    assert body["conditions"] == 1
+    assert body["total"] == 1
 
 
 def test_delete_reports_impact_and_leaves_no_xrd_orphans(client, db_session):

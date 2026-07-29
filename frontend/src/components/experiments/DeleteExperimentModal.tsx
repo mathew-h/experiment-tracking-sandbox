@@ -13,6 +13,7 @@ interface DeleteExperimentModalProps {
 
 /** Human-readable label per impact field, in the order shown. */
 const IMPACT_ROWS: Array<[keyof DeleteImpact, string]> = [
+  ['conditions', 'conditions record'],
   ['results', 'result timepoints'],
   ['scalar_results', 'scalar measurement rows'],
   ['icp_results', 'ICP measurement rows'],
@@ -69,7 +70,13 @@ export function DeleteExperimentModal({
     },
   })
 
-  const needsTypedId = (impact?.total ?? 0) > 0
+  // Demand the typed ID whenever anything is destroyed OR decoupled — being
+  // another experiment's ammonium background, or a replicate parent, is a
+  // consequence worth confirming even though those rows survive.
+  const needsTypedId =
+    (impact?.total ?? 0) > 0 ||
+    (impact?.background_for.length ?? 0) > 0 ||
+    (impact?.replicate_children.length ?? 0) > 0
   const canDelete =
     Boolean(impact) && !deleteMutation.isPending &&
     (!needsTypedId || typed.trim() === experimentId)

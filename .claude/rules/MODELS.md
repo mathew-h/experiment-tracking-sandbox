@@ -21,9 +21,11 @@ The central hub for all experimental data.
   - `is_outlier` (Boolean, non-null, default `false`): flags a bad vial (leak, cracked septum). Flagged experiments are excluded from `v_results_scalar_rollup` aggregates **including `n_replicates`**, but remain fully visible in all per-row views (`v_results_scalar`, `v_results_h2`, `v_results_icp`, `v_primary_experiment_results`) and on their own pages.
   - **Deletion path (issue #99):** `DELETE /api/experiments/{experiment_id}` is a
     **hard** delete available to any approved researcher (no role gate) and returns
-    **200 with a body** reporting what was decoupled — not 204. All orphan
-    prevention lives in `backend/services/experiment_deletion.py`, not in the
-    relationship cascades, because three references are not covered by
+    **200 with a body** reporting what was decoupled — not 204. Deletion **purges
+    everything the experiment owns**; the one boundary is that it never destroys
+    another experiment's data. All orphan prevention lives in
+    `backend/services/experiment_deletion.py`, not in the relationship cascades,
+    because these references are not handled correctly by
     `cascade="all, delete-orphan"`:
     - `xrd_phases` rows are **deleted**, matched on `experiment_fk` **or** the
       `experiment_id` string. Nulling the FK alone would leave rows whose stale
@@ -31,29 +33,72 @@ The central hub for all experimental data.
       `(experiment_id, time_post_reaction_days, mineral_name)`, blocking
       re-creation of that experiment's XRD data.
     - `scalar_results.background_experiment_id` / `background_experiment_fk` on
-      **other** experiments are NULLed. The string is the column actually in use
-      (`background_experiment_fk` was set on 0 of 1056 rows as of 2026-07-29) and
-      it has **no FK**, so nothing at the DB level protects it. This is provenance
-      only — `background_ammonium_concentration_mM` holds the number the
-      calculation engine reads, so no derived field changes and no
-      `recalculate()` is needed.
-    - `reactor_change_requests.experiment_id` is NULLed; the request row survives.
-      Safe against `uq_change_request_reactor_experiment_date` because PostgreSQL
-      treats `NULL` as distinct in unique constraints.
+      **other** experiments are NULLed — a **DECOUPLING, never a purge**: the row
+      and its `background_ammonium_concentration_mM` value both survive. The
+      string is the column actually in use (`background_experiment_fk` was set on
+      0 of 1056 rows as of 2026-07-29) and it has **no FK**, so nothing at the DB
+      level protects it. This is provenance only —
+      `background_ammonium_concentration_mM` holds the number the calculation
+      engine reads, so no derived field changes and no `recalculate()` is needed.
+    - `reactor_change_requests` rows for this experiment are **PURGED**, not
+      unlinked (product decision, 2026-07-29). They belong to the experiment, and
+      `change_requests` is summed into `total`, which is documented as rows
+      destroyed — nulling instead of deleting made that count overstate
+      destruction.
+    - `elemental_analysis` rows belonging to this experiment's
+      `external_analyses` are **PURGED** before `db.delete(exp)`.
+      `ElementalAnalysis.external_analysis_id` is `nullable=False` but its
+      relationship (`characterization.py:43`) is a bare backref with no cascade
+      and no `passive_deletes`, so the ORM would emit
+      `UPDATE elemental_analysis SET external_analysis_id=NULL` when the parent
+      `ExternalAnalysis` is cascade-deleted → `NotNullViolation` → HTTP 500 and no
+      delete at all. The fix is in the service, **not** a `passive_deletes=True`
+      on the model: `database/models/` is locked and models are storage-only here.
+      (`AnalysisFiles` and `XRDAnalysis` already cascade; `XRDPhase.external_analysis_id`
+      is nullable with no reverse collection.)
 
     Replicate children keep their `base_experiment_id` and `replicate_label`; only
-    `parent_experiment_fk` is dropped. Groups are addressed by the base-ID
-    *string* (issue #87), so the group page and `v_results_scalar_rollup` are
-    unaffected — the affected IDs are reported in the response so the researcher
-    is told.
+    `parent_experiment_fk` is dropped — also a **DECOUPLING, never a purge**.
+    Groups are addressed by the base-ID *string* (issue #87), so the group page and
+    `v_results_scalar_rollup` are unaffected — the affected IDs are reported in the
+    response so the researcher is told.
 
-    Every delete writes a `ModificationsLog` row with `modification_type='delete'`,
-    `modified_table='experiments'`, `old_values` holding a snapshot of the
-    experiment plus its conditions, additives and notes, and `new_values` holding
-    the impact counts. **The row must be written with `experiment_fk = NULL`** —
-    that FK is `ondelete="CASCADE"`, so a populated value would delete the audit
-    row along with the experiment. Results and ICP data are deliberately excluded
-    from the snapshot (bulk-uploadable, unbounded); only their counts are kept.
+    **Impact counts.** `DeleteImpact` counts `conditions`, `results`,
+    `scalar_results`, `icp_results`, `result_files`, `notes`, `additives`,
+    `external_analyses`, `xrd_phases`, `change_requests`; `total` is their sum.
+    `conditions` (the `ExperimentalConditions` setup row — temperature, initial pH,
+    rock mass, water volume, reactor number, pressures, `total_ferrous_iron_g`) is
+    counted because the ORM cascade hard-deletes it: while it was uncounted, an
+    experiment with conditions and nothing else (44 in the dev DB) reported
+    `total == 0`, so the dialog said "nothing else is affected" and enabled Delete
+    on a single click. Adding a counted field requires all five layers — the
+    dataclass, its `total`, `collect_delete_impact`, `DeleteImpactResponse`,
+    `_impact_to_response`, the TS `DeleteImpact` interface, and the modal's
+    `IMPACT_ROWS` — or the dialog silently under-reports.
+
+    **Audit row.** Every delete writes one `ModificationsLog` row with
+    `modification_type='delete'`, `modified_table='experiments'`, `old_values`
+    holding the deletion snapshot and `new_values` holding the impact counts.
+    **The row must be written with `experiment_fk = NULL`** — that FK is
+    `ondelete="CASCADE"`, so a populated value would delete the audit row along
+    with the experiment. This row is the only surviving trace of the deletion and
+    is what justifies opening the endpoint to any approved researcher.
+
+    The snapshot in `old_values` is a **record of what was deleted, not a restore
+    point**: it holds the experiment header row, its conditions row, its additives
+    (with compound name) and its note **text**. NOT recoverable from it — all
+    `ExperimentalResults` / `ScalarResults` / `ICPResults` / `ResultFiles` values
+    (deliberately excluded: bulk-uploadable and unbounded, counts only), purged
+    `xrd_phases` rows (`mineral_name`, `amount`, `time_post_reaction_days`, `rwp`),
+    `ExternalAnalysis` rows and their metadata/files, note timestamps, the purged
+    prior audit history, and lineage (`parent_experiment_fk` is stored as a stale
+    integer PK that can no longer be resolved).
+
+    **The experiment's prior `ModificationsLog` history is purged with it** via
+    `Experiment.modifications` (`cascade="all, delete-orphan"`) — up to 654 rows
+    for a single experiment, 13,374 across the dev DB. Accepted product decision
+    (2026-07-29), consistent with purging everything the experiment owns; the
+    `experiment_fk = NULL` delete-snapshot row above is what survives.
 
     **Constraint-parity caveat:** the dev and test DBs are built with
     `Base.metadata.create_all`, which honors the model `ondelete` clauses; the lab
