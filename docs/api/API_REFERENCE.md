@@ -258,6 +258,57 @@ Batch-create lettered replicates copying a base experiment's setup.
 - `404 Not Found` — no base/parent experiment exists for `base_experiment_id` (create the base experiment first)
 - `409 Conflict` — unexpected IntegrityError on creation (distinct from the normal skip path above)
 
+### GET /api/experiments/{experiment_id}/delete-impact
+
+Preview what deleting an experiment would destroy and decouple. Read-only;
+powers the delete confirmation dialog. `404` if the experiment does not exist.
+
+```json
+{
+  "experiment_id": "SERUM_001a",
+  "results": 3,
+  "scalar_results": 3,
+  "icp_results": 2,
+  "result_files": 0,
+  "notes": 1,
+  "additives": 2,
+  "external_analyses": 0,
+  "xrd_phases": 4,
+  "change_requests": 0,
+  "total": 15,
+  "background_for": ["SERUM_002a"],
+  "replicate_children": []
+}
+```
+
+`total` sums the counts only. `background_for` (experiments naming this one as
+their ammonium background) and `replicate_children` (experiments whose
+`parent_experiment_fk` points here) are **decoupled, not deleted** — those
+experiments survive — so they are excluded from `total`. The UI requires the
+user to type the experiment ID whenever `total > 0`.
+
+### DELETE /api/experiments/{experiment_id}
+
+Hard-deletes the experiment, its dependent records, and every reference to it.
+Available to any approved researcher. `404` if the experiment does not exist.
+
+**Returns `200` with a body, not `204`** — the caller needs to know what was
+decoupled:
+
+```json
+{
+  "experiment_id": "SERUM_001a",
+  "deleted": true,
+  "impact": { "...": "same shape as GET /delete-impact" }
+}
+```
+
+`impact` is measured immediately before the delete, so it reports what actually
+happened rather than the pre-flight estimate. Every call writes a
+`ModificationsLog` entry with a restorable snapshot; see the deletion-path notes
+in `.claude/rules/MODELS.md` for the orphan-prevention details and the
+`experiment_fk = NULL` requirement on that log row.
+
 ### PATCH /api/experiments/{experiment_id}
 
 Update experiment properties.

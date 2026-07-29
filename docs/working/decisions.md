@@ -104,3 +104,21 @@ Append-only lasting decisions from milestone, issue, or inline work (newest at b
 **Consequence:** The stem key is duplicated three ways — the canonical Python regex (`database/experiment_id_parser.py`), the TypeScript mirror (`frontend/src/utils/experimentId.ts`), and the POSIX form for Postgres — guarded by `tests/services/test_replicate_collapse.py::test_sql_and_python_agree`. Separately, `_bucket_key_expr` (SQL) has a **hand-written Python mirror** in the grouped item loop of `backend/api/routers/experiments.py`; a divergence between that pair during implementation caused the branch's worst defect (a letterless `-t` vial hid its lettered siblings from the list response entirely, fixed in `a76659e`). Any future edit to either must change both. The list's bucket-membership predicate wraps `experiment_id` in `regexp_replace` inside a `CASE`, so it cannot use the `experiment_id`/`base_experiment_id` indexes — accepted at LAN/single-lab-PC scale, revisit if the table grows. The asymmetry in D12 means a group whose letter also has a sequential re-run shows a badge counting letters (`2 replicates: a, b`) that expands to three rows; the extra row is self-identifying by its `-2` suffix.
 
 **Scope:** Any new surface presenting replicate groups must state which grain it uses. Inline status editing follows a related rule: the Experiments list offers the Status dropdown **iff the displayed label names the row that would be PATCHed** (`group_display_id === experiment_id`) — never gated on `vial_count`, which includes the parent and would silently strip the affordance from every parent-led group. Still open and tracked separately: a letterless `-t` vial (`SERUM_001-t7`) is counted in `v_results_scalar_rollup`'s `n_replicates` but absent from the group page's members table, because `_fetch_members` requires `replicate_label IS NOT NULL` — draft at `docs/working/issues/06-letterless-t-vial-group-membership.md`.
+
+## 2026-07-29 — Experiment deletion: any approved researcher, hard delete, single-experiment only
+
+**Decision:** Three product calls for issue #99, settled with the user before implementation:
+
+1. **Any approved researcher may delete an experiment — no admin role gate.** The `role` custom claim stays unwired, per `.claude/rules/AUTH.md`.
+2. **Hard delete, not soft delete.**
+3. **Single-experiment delete only.** No "Delete selected" bulk action in this pass.
+
+**Why:**
+
+1. The issue exists to remove a single-person bottleneck (previously only Mat could delete an experiment). The controls that make an unrestricted delete safe are the server-side audit snapshot (`ModificationsLog`, `experiment_fk=NULL`, full old-values snapshot) and the UI's typed-exact-ID confirmation gate — not a role check.
+2. Soft delete would not free the `experiment_id` string for reuse, which was the actual need behind the 2026-07-28 SERUM_Catalyst incident, and would require filtering every `v_*` reporting view in `database/event_listeners.py` plus every list/detail query for a soft-deleted flag.
+3. Bulk "Delete selected" (reusing the existing selection `Set` in `ExperimentList.tsx:224`) would have handled the 69-row SERUM_Catalyst incident directly, but is deferred to a follow-up issue until single delete is proven in the lab.
+
+**Supporting decision:** All orphan prevention (deleting `xrd_phases`, NULLing `background_experiment_id`/`background_experiment_fk` and `reactor_change_requests.experiment_id` and `parent_experiment_fk`) lives in application code (`backend/services/experiment_deletion.py`), not in a migration normalizing FK `ondelete` clauses. Dev/test DBs are built via `Base.metadata.create_all` (which honors the model `ondelete` clauses); the lab PC came up through the Alembic chain, whose initial migration declared none — so constraint parity with production is unverified, and app-level handling is correct regardless of what the DB does underneath it.
+
+**Scope:** Do not gate `DELETE /api/experiments/{experiment_id}` on `role`/`approved` claims without a fresh product decision and an update to `.claude/rules/AUTH.md`. Do not add a soft-delete flag to `Experiment` without revisiting every `v_*` view. A future bulk-delete endpoint should reuse `backend/services/experiment_deletion.py::delete_experiment` per-row rather than duplicating its orphan-handling logic.

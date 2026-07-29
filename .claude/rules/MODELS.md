@@ -19,6 +19,47 @@ The central hub for all experimental data.
   - `sample_id`: FK to `SampleInfo`.
   - `researcher`, `date` (optional).
   - `is_outlier` (Boolean, non-null, default `false`): flags a bad vial (leak, cracked septum). Flagged experiments are excluded from `v_results_scalar_rollup` aggregates **including `n_replicates`**, but remain fully visible in all per-row views (`v_results_scalar`, `v_results_h2`, `v_results_icp`, `v_primary_experiment_results`) and on their own pages.
+  - **Deletion path (issue #99):** `DELETE /api/experiments/{experiment_id}` is a
+    **hard** delete available to any approved researcher (no role gate) and returns
+    **200 with a body** reporting what was decoupled — not 204. All orphan
+    prevention lives in `backend/services/experiment_deletion.py`, not in the
+    relationship cascades, because three references are not covered by
+    `cascade="all, delete-orphan"`:
+    - `xrd_phases` rows are **deleted**, matched on `experiment_fk` **or** the
+      `experiment_id` string. Nulling the FK alone would leave rows whose stale
+      string still holds the `uq_xrd_phase_experiment_time_mineral` slot on
+      `(experiment_id, time_post_reaction_days, mineral_name)`, blocking
+      re-creation of that experiment's XRD data.
+    - `scalar_results.background_experiment_id` / `background_experiment_fk` on
+      **other** experiments are NULLed. The string is the column actually in use
+      (`background_experiment_fk` was set on 0 of 1056 rows as of 2026-07-29) and
+      it has **no FK**, so nothing at the DB level protects it. This is provenance
+      only — `background_ammonium_concentration_mM` holds the number the
+      calculation engine reads, so no derived field changes and no
+      `recalculate()` is needed.
+    - `reactor_change_requests.experiment_id` is NULLed; the request row survives.
+      Safe against `uq_change_request_reactor_experiment_date` because PostgreSQL
+      treats `NULL` as distinct in unique constraints.
+
+    Replicate children keep their `base_experiment_id` and `replicate_label`; only
+    `parent_experiment_fk` is dropped. Groups are addressed by the base-ID
+    *string* (issue #87), so the group page and `v_results_scalar_rollup` are
+    unaffected — the affected IDs are reported in the response so the researcher
+    is told.
+
+    Every delete writes a `ModificationsLog` row with `modification_type='delete'`,
+    `modified_table='experiments'`, `old_values` holding a snapshot of the
+    experiment plus its conditions, additives and notes, and `new_values` holding
+    the impact counts. **The row must be written with `experiment_fk = NULL`** —
+    that FK is `ondelete="CASCADE"`, so a populated value would delete the audit
+    row along with the experiment. Results and ICP data are deliberately excluded
+    from the snapshot (bulk-uploadable, unbounded); only their counts are kept.
+
+    **Constraint-parity caveat:** the dev and test DBs are built with
+    `Base.metadata.create_all`, which honors the model `ondelete` clauses; the lab
+    PC came up through the Alembic chain, whose initial migration declared none.
+    The deletion service therefore never relies on DB-level behavior — every
+    decoupling is explicit in application code.
 - **Lineage Tracking**:
   - `base_experiment_id`: Tracks the root of a series (e.g., "HPHT_001" for "HPHT_001-2").
   - **Group addressing (issue #87):** `base_experiment_id` is a parsed string, not guaranteed to reference an existing `Experiment` row — lettered-only replicate sets (e.g. `SERUM_001a/b/c` with no bare `SERUM_001` row) are the common case. The replicate group is therefore addressed by this base-ID string via `GET /api/experiments/groups/{base_id}` and the `/experiments/groups/{baseId}` UI page, not by an experiment row lookup.
