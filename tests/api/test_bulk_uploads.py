@@ -105,6 +105,34 @@ def test_scalar_results_requires_file(client):
     assert resp.status_code == 422
 
 
+def test_scalar_results_dry_run_rolls_back(client, db_session):
+    mock_vc = MagicMock()
+    mock_vc.SCALAR_RESULTS_TEMPLATE_HEADERS = []
+    mock_svc = MagicMock()
+    mock_svc.bulk_upsert_from_excel_ex.return_value = (1, 0, 0, [], [])
+    fake_mod = MagicMock()
+    fake_mod.ScalarResultsUploadService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": mock_vc,
+        "backend.services.bulk_uploads.scalar_results": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/scalar-results",
+            files={"file": ("test.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    assert "DRY RUN" in body["message"]
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
 def test_new_experiments_returns_upload_response_shape(client):
     mock_svc = MagicMock()
     mock_svc.bulk_upsert_from_excel.return_value = (2, 0, 0, [], [], {})
@@ -118,6 +146,61 @@ def test_new_experiments_returns_upload_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_new_experiments_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.bulk_upsert_from_excel.return_value = (2, 0, 0, [], [], {})
+    fake_mod = MagicMock()
+    fake_mod.NewExperimentsUploadService = mock_svc
+
+    with patch.dict(sys.modules, {"backend.services.bulk_uploads.new_experiments": fake_mod}), \
+            patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/new-experiments",
+            files={"file": ("test.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    assert "DRY RUN" in body["message"]
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
+def test_new_experiments_dry_run_leaves_db_unchanged(client, db_session):
+    """Flagship round-trip: the REAL (unmocked) parser runs and reports a create,
+    but with dry_run=True nothing is actually persisted."""
+    import openpyxl
+    from database import Experiment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "experiments"
+    ws.append(["experiment_id", "status"])
+    ws.append(["HPHT_DRYRUN_001", "ONGOING"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    resp = client.post(
+        "/api/bulk-uploads/new-experiments",
+        files={"file": ("test.xlsx", buf, "application/vnd.ms-excel")},
+        data={"dry_run": "true"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] == 1, f"parser should still report the would-be create: {body}"
+    assert body["dry_run"] is True
+
+    persisted = (
+        db_session.query(Experiment)
+        .filter_by(experiment_id="HPHT_DRYRUN_001")
+        .first()
+    )
+    assert persisted is None, "dry_run=True must not persist the created experiment"
 
 
 def test_pxrf_returns_upload_response_shape(client):
@@ -141,6 +224,32 @@ def test_pxrf_returns_upload_response_shape(client):
     _assert_upload_shape(resp.json())
 
 
+def test_pxrf_dry_run_rolls_back(client, db_session):
+    mock_vc = MagicMock()
+    mock_pxrf = MagicMock()
+    mock_pxrf.ingest_from_bytes.return_value = (3, 0, 0, [], [])
+    fake_mod = MagicMock()
+    fake_mod.PXRFUploadService = mock_pxrf
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": mock_vc,
+        "backend.services.bulk_uploads.pxrf_data": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/pxrf",
+            files={"file": ("test.csv", io.BytesIO(b"fake"), "text/csv")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
 def test_aeris_xrd_returns_upload_response_shape(client):
     mock_svc = MagicMock()
     mock_svc.bulk_upsert_from_excel.return_value = (5, 2, 0, [])
@@ -154,6 +263,27 @@ def test_aeris_xrd_returns_upload_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_aeris_xrd_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.bulk_upsert_from_excel.return_value = (5, 2, 0, [])
+    fake_mod = MagicMock()
+    fake_mod.AerisXRDUploadService = mock_svc
+
+    with patch.dict(sys.modules, {"backend.services.bulk_uploads.aeris_xrd": fake_mod}), \
+            patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/aeris-xrd",
+            files={"file": ("test.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +303,27 @@ def test_master_results_upload_returns_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_master_results_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.from_bytes.return_value = (3, 1, 0, [], [])
+    fake_mod = MagicMock()
+    fake_mod.MasterBulkUploadService = mock_svc
+
+    with patch.dict(sys.modules, {"backend.services.bulk_uploads.master_bulk_upload": fake_mod}), \
+            patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/master-results",
+            files={"file": ("master.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 def test_master_results_no_file_returns_422(client):
@@ -220,6 +371,40 @@ def test_icp_oes_returns_upload_response_shape(client):
     _assert_upload_shape(resp.json())
 
 
+def test_icp_oes_dry_run_rolls_back(client, db_session):
+    """Note: bulk_create_icp_results returns (results, updated_count, errors) — a
+    3-tuple, per the M8 signature change. The pre-existing shape test at
+    test_icp_oes_returns_upload_response_shape still mocks a stale 2-tuple, so it
+    silently exercises the exception-fallback path rather than the real success
+    path; not fixed here (pre-existing, out of scope), but this test uses the
+    correct 3-tuple so it actually proves the dry_run behavior."""
+    stub_vc = MagicMock()
+    stub_vc.ICP_FIXED_ELEMENT_FIELDS = ["fe", "si", "mg"]
+    mock_icp = MagicMock()
+    mock_icp.parse_and_process_icp_file.return_value = ([{"experiment_fk": 1}], [])
+    mock_icp.bulk_create_icp_results.return_value = ([MagicMock()], 0, [])
+    fake_mod = MagicMock()
+    fake_mod.ICPService = mock_icp
+
+    with patch.dict(sys.modules, {
+        "frontend": MagicMock(),
+        "frontend.config": MagicMock(),
+        "frontend.config.variable_config": stub_vc,
+        "backend.services.icp_service": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/icp-oes",
+            files={"file": ("icp.csv", io.BytesIO(b"fake"), "text/csv")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
 def test_xrd_mineralogy_returns_upload_response_shape(client):
     mock_svc = MagicMock()
     mock_svc.upload.return_value = (4, 1, 0, [])
@@ -233,6 +418,27 @@ def test_xrd_mineralogy_returns_upload_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_xrd_mineralogy_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.upload.return_value = (4, 1, 0, [])
+    fake_mod = MagicMock()
+    fake_mod.XRDAutoDetectService = mock_svc
+
+    with patch.dict(sys.modules, {"backend.services.bulk_uploads.xrd_upload": fake_mod}), \
+            patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/xrd-mineralogy",
+            files={"file": ("xrd.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 def test_timepoint_modifications_returns_upload_response_shape(client):
@@ -255,6 +461,28 @@ def test_timepoint_modifications_returns_upload_response_shape(client):
     assert body["created"] == 0  # timepoint endpoint always returns created=0
 
 
+def test_timepoint_modifications_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.bulk_set_from_bytes.return_value = (3, 0, [], [])
+    fake_mod = MagicMock()
+    fake_mod.TimepointModificationsService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.timepoint_modifications": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/timepoint-modifications",
+            files={"file": ("mods.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"overwrite_existing": "false", "dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
 def test_rock_inventory_returns_upload_response_shape(client):
     mock_svc = MagicMock()
     mock_svc.bulk_upsert_samples.return_value = (2, 1, 0, 0, [], [])
@@ -268,6 +496,27 @@ def test_rock_inventory_returns_upload_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_rock_inventory_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.bulk_upsert_samples.return_value = (2, 1, 0, 0, [], [])
+    fake_mod = MagicMock()
+    fake_mod.RockInventoryService = mock_svc
+
+    with patch.dict(sys.modules, {"backend.services.bulk_uploads.rock_inventory": fake_mod}), \
+            patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/rock-inventory",
+            files={"file": ("rocks.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 def test_chemical_inventory_returns_upload_response_shape(client):
@@ -287,6 +536,28 @@ def test_chemical_inventory_returns_upload_response_shape(client):
     _assert_upload_shape(resp.json())
 
 
+def test_chemical_inventory_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.bulk_upsert_from_excel.return_value = (5, 2, 0, [])
+    fake_mod = MagicMock()
+    fake_mod.ChemicalInventoryService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.chemical_inventory": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/chemical-inventory",
+            files={"file": ("chems.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
 def test_elemental_composition_returns_upload_response_shape(client):
     mock_svc = MagicMock()
     mock_svc.bulk_upsert_wide_from_excel.return_value = (10, 3, 0, [])
@@ -304,6 +575,28 @@ def test_elemental_composition_returns_upload_response_shape(client):
     _assert_upload_shape(resp.json())
 
 
+def test_elemental_composition_dry_run_rolls_back(client, db_session):
+    mock_svc = MagicMock()
+    mock_svc.bulk_upsert_wide_from_excel.return_value = (10, 3, 0, [])
+    fake_mod = MagicMock()
+    fake_mod.ElementalCompositionService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.actlabs_titration_data": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/elemental-composition",
+            files={"file": ("elem.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
 def test_actlabs_rock_returns_upload_response_shape(client):
     mock_svc = MagicMock()
     mock_svc.import_excel.return_value = (6, 1, 0, [])
@@ -319,6 +612,33 @@ def test_actlabs_rock_returns_upload_response_shape(client):
         )
     assert resp.status_code == 200
     _assert_upload_shape(resp.json())
+
+
+def test_actlabs_rock_dry_run_rolls_back(client, db_session):
+    """dry_run applies to Phase 2 (resolutions provided) — Phase 1 preflight never writes.
+
+    Unlike the other services, ActlabsRockTitrationService is imported eagerly at
+    router module load time (`from ... import ActlabsRockTitrationService` at the top
+    of bulk_uploads.py, not a lazy in-function import), so patch.dict(sys.modules, ...)
+    — the pattern every other test in this file uses — never reaches it: the router
+    already holds its own reference. It must be patched on the router module directly.
+    """
+    mock_svc = MagicMock()
+    mock_svc.import_excel.return_value = (6, 1, 0, [])
+
+    with patch("backend.api.routers.bulk_uploads.ActlabsRockTitrationService", mock_svc), \
+            patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/actlabs-rock",
+            files={"file": ("rock.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"resolutions": "{}", "dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
 
 
 def test_experiment_status_returns_upload_response_shape(client):
@@ -407,6 +727,41 @@ def test_experiment_status_rolls_back_on_apply_errors(client, db_session):
     _assert_upload_shape(body)
     assert "Error applying status changes: boom" in body["errors"]
     assert body["updated"] == 0
+    mock_rollback.assert_called_once()
+    mock_commit.assert_not_called()
+
+
+def test_experiment_status_dry_run_rolls_back(client, db_session):
+    mock_preview = MagicMock()
+    mock_preview.errors = []
+    mock_preview.missing_ids = []
+
+    mock_result = MagicMock()
+    mock_result.status_changes_applied = 1
+    mock_result.demotions_applied = 0
+    mock_result.reactor_updates = 0
+    mock_result.date_updates = 0
+    mock_result.warnings = []
+    mock_result.errors = []
+
+    mock_svc = MagicMock()
+    mock_svc.preview_status_changes_from_excel.return_value = mock_preview
+    mock_svc.apply_status_changes.return_value = mock_result
+    fake_mod = MagicMock()
+    fake_mod.ExperimentStatusService = mock_svc
+
+    with patch.dict(sys.modules, {
+        "backend.services.bulk_uploads.experiment_status": fake_mod,
+    }), patch.object(db_session, "commit") as mock_commit, \
+            patch.object(db_session, "rollback") as mock_rollback:
+        resp = client.post(
+            "/api/bulk-uploads/experiment-status",
+            files={"file": ("status.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
     mock_rollback.assert_called_once()
     mock_commit.assert_not_called()
 

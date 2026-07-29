@@ -11,6 +11,7 @@ class UploadResponse(BaseModel):
     message: str
     warnings: list[str] = []
     feedbacks: list[dict] = []
+    dry_run: bool = False
 
 
 class SampleConflictMatch(BaseModel):

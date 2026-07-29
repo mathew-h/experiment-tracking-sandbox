@@ -69,6 +69,34 @@ runs too late to be useful.
    file-level rejection, plan-hash check) and the frontend items 6-9 are still open.
    Test: `tests/services/bulk_uploads/test_new_experiments.py::test_old_experiment_id_without_overwrite_conflicts_not_creates`.
 
+0.5. **Item 1 shipped (2026-07-29):** every `POST /api/bulk-uploads/*` endpoint in
+   `backend/api/routers/bulk_uploads.py` now accepts `dry_run: bool = Form(False)`.
+   No parser file changes were needed — the parsers already run their full create/
+   update/flush logic to produce real counts and warnings; `dry_run` only changes
+   whether the router calls `db.commit()` or `db.rollback()` afterward (helpers
+   `_finalize_write`/`_finalize_message` at the top of the router). `UploadResponse`
+   gained a `dry_run: bool = False` field and the message is prefixed `[DRY RUN]`.
+   `actlabs-rock` needed care: it has three outcomes, not two — Phase 1 preflight-only
+   (no conflicts found is NOT the same as "no write": a conflict-free preflight falls
+   straight through to `import_excel` + commit in the same request), Phase 1 with
+   conflicts (`ConflictCheckResponse`, never writes), and Phase 2 (resolutions
+   supplied). `dry_run` applies to both of the first and third; the conflict-response
+   path is unaffected since it never writes regardless.
+   Discovered along the way (documented, not fixed — pre-existing, out of scope):
+   two of the *existing* API-level shape tests were silently testing only their
+   exception-fallback path rather than the mocked success path — `actlabs-rock`'s
+   test patches `sys.modules`, but `ActlabsRockTitrationService` is imported eagerly
+   at router module load time (not lazily inside the endpoint like every other
+   service here), so the patch never reaches it; `icp-oes`'s test mocks
+   `bulk_create_icp_results` with a stale 2-tuple against the real 3-tuple signature
+   from the M8 return-value change. Both "passed" only because the generic
+   `except Exception` fallback still satisfies the loose shape assertion. My new
+   `dry_run` tests for those two endpoints use the correct mock target/shape so they
+   actually exercise the intended path.
+   Tests: `tests/api/test_bulk_uploads.py`, 14 new tests (13 endpoints + one flagship
+   real round-trip against `new-experiments` proving no row persists with
+   `dry_run=true`). Full backend suite: 880 passed, no regressions.
+
 1. Add `dry_run: bool = False` to every `POST /api/bulk-uploads/*` endpoint in
    `backend/api/routers/bulk_uploads.py`. When true, run the full parse and resolution
    inside a transaction that is unconditionally rolled back.
