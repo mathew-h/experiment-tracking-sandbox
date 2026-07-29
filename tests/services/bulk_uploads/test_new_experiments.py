@@ -176,6 +176,36 @@ def test_duplicate_replicate_id_skips_with_clear_warning_not_crash(db_session: S
     )
 
 
+def test_old_experiment_id_without_overwrite_conflicts_not_creates(db_session: Session):
+    """issue #100: old_experiment_id provided with overwrite falsy must not silently
+    fall through to standard matching and CREATE a duplicate — it must emit an
+    explicit conflict naming both IDs and skip the row (2026-07-28 SERUM_Catalyst
+    incident: 80 intended renames became 80 creates this way)."""
+    _seed_experiment(db_session, "SERUM_I100_001", 100001, status=ExperimentStatus.ONGOING)
+
+    xlsx = _experiments_excel([
+        ["SERUM_I100_001_New", "SERUM_I100_001", None, None, None, None, None, False],
+    ])
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == []
+    assert created == 0, "row must not silently create a duplicate experiment"
+    assert updated == 0
+
+    ghost = db_session.query(Experiment).filter_by(experiment_id="SERUM_I100_001_New").first()
+    assert ghost is None, "duplicate experiment was created instead of being blocked"
+
+    original = db_session.query(Experiment).filter_by(experiment_id="SERUM_I100_001").first()
+    assert original is not None, "original experiment must be untouched"
+
+    assert any(
+        "SERUM_I100_001" in w and "SERUM_I100_001_New" in w and "overwrite" in w.lower()
+        for w in warnings
+    ), f"expected an explicit conflict warning naming both IDs, got: {warnings}"
+
+
 def test_creating_three_replicates_via_bulk_upload(db_session: Session):
     """Creating SERUM_001a/b/c in one upload yields three experiments sharing a base."""
     xlsx = _experiments_excel([
