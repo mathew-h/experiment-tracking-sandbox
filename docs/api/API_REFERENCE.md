@@ -89,7 +89,7 @@ Example grouped item (`group_replicates=true`) — letter `a` was sacrificed acr
   "is_outlier": false,
   "id_timepoint_days": null,
   "group_display_id": "SERUM_001",
-  "vial_count": 3,
+  "vial_count": 4,
   "replicate_letters": ["a", "b"],
   "replicates": [
     { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "id_timepoint_days": 1.0, "group_display_id": "SERUM_001a", "vial_count": 2, "replicates": null },
