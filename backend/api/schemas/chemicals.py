@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from database.models.enums import AmountUnit
+from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 
 
 class CompoundCreate(BaseModel):
@@ -81,7 +82,7 @@ class ChemicalAdditiveUpsert(BaseModel):
     amount: float = Field(gt=0)
     unit: AmountUnit
     addition_order: Optional[int] = None
-    addition_method: Optional[str] = None
+    addition_method: Optional[str] = Field(None, max_length=ADDITION_METHOD_MAX_LENGTH)
     purity: Optional[float] = None
     lot_number: Optional[str] = None
 
@@ -92,7 +93,7 @@ class AdditiveUpdate(BaseModel):
     amount: Optional[float] = Field(None, gt=0)
     unit: Optional[AmountUnit] = None
     addition_order: Optional[int] = None
-    addition_method: Optional[str] = None
+    addition_method: Optional[str] = Field(None, max_length=ADDITION_METHOD_MAX_LENGTH)
     purity: Optional[float] = None
     lot_number: Optional[str] = None
 
@@ -102,7 +103,7 @@ class AdditiveCreate(BaseModel):
     amount: float = Field(gt=0)
     unit: AmountUnit
     addition_order: Optional[int] = None
-    addition_method: Optional[str] = None
+    addition_method: Optional[str] = Field(None, max_length=ADDITION_METHOD_MAX_LENGTH)
     purity: Optional[float] = None
     lot_number: Optional[str] = None
 
@@ -114,6 +115,8 @@ class AdditiveResponse(BaseModel):
     compound_id: int
     amount: float
     unit: AmountUnit
+    addition_order: Optional[int] = None
+    addition_method: Optional[str] = None
     mass_in_grams: Optional[float] = None
     moles_added: Optional[float] = None
     final_concentration: Optional[float] = None

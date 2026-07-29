@@ -169,3 +169,27 @@ def test_delete_additive_writes_modifications_log(client, db_session):
     assert log_entry is not None
     assert log_entry.old_values["compound_id"] == compound.id
     assert log_entry.new_values is None
+
+
+# --- Issue #96 addition_method length guard ---
+
+def test_patch_additive_method_over_max_length_returns_422(client, db_session):
+    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+    _, _, _, additive = _setup_experiment_with_additive(db_session, "ADDTEST_I96_001", 96001)
+    resp = client.patch(
+        f"/api/additives/{additive.id}",
+        json={"addition_method": "x" * (ADDITION_METHOD_MAX_LENGTH + 1)},
+    )
+    assert resp.status_code == 422
+
+
+def test_patch_additive_method_at_max_length_succeeds(client, db_session):
+    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+    _, _, _, additive = _setup_experiment_with_additive(db_session, "ADDTEST_I96_002", 96002)
+    method_text = "x" * ADDITION_METHOD_MAX_LENGTH
+    resp = client.patch(
+        f"/api/additives/{additive.id}",
+        json={"addition_method": method_text},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["addition_method"] == method_text

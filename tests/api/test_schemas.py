@@ -207,3 +207,39 @@ def test_result_create_missing_description_fails():
     import pytest
     with pytest.raises(ValidationError):
         ResultCreate(experiment_fk=1)
+
+
+# --- Issue #96 addition_method length guard ---
+
+def test_additive_update_method_over_max_length_rejected():
+    from backend.api.schemas.chemicals import AdditiveUpdate
+    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+    with pytest.raises(ValidationError):
+        AdditiveUpdate(addition_method="x" * (ADDITION_METHOD_MAX_LENGTH + 1))
+
+
+def test_additive_update_method_at_max_length_accepted():
+    from backend.api.schemas.chemicals import AdditiveUpdate
+    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+    u = AdditiveUpdate(addition_method="x" * ADDITION_METHOD_MAX_LENGTH)
+    assert len(u.addition_method) == ADDITION_METHOD_MAX_LENGTH
+
+
+def test_additive_create_method_over_max_length_rejected():
+    from backend.api.schemas.chemicals import AdditiveCreate
+    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+    with pytest.raises(ValidationError):
+        AdditiveCreate(
+            compound_id=1, amount=1.0, unit=AmountUnit.GRAM,
+            addition_method="x" * (ADDITION_METHOD_MAX_LENGTH + 1),
+        )
+
+
+def test_chemical_additive_upsert_method_over_max_length_rejected():
+    from backend.api.schemas.chemicals import ChemicalAdditiveUpsert
+    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+    with pytest.raises(ValidationError):
+        ChemicalAdditiveUpsert(
+            amount=1.0, unit=AmountUnit.GRAM,
+            addition_method="x" * (ADDITION_METHOD_MAX_LENGTH + 1),
+        )
