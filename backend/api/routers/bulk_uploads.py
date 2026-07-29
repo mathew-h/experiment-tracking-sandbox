@@ -20,6 +20,22 @@ log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/bulk-uploads", tags=["bulk-uploads"])
 
 
+def _finalize_write(db: Session, dry_run: bool, had_errors: bool = False) -> None:
+    """Commit on a clean, non-dry-run pass; roll back otherwise (issue #100 item 1).
+
+    dry_run runs the full parser (creates, updates, flushes) so the reported counts
+    and warnings are real, then discards everything via rollback instead of persisting.
+    """
+    if dry_run or had_errors:
+        db.rollback()
+    else:
+        db.commit()
+
+
+def _finalize_message(message: str, dry_run: bool) -> str:
+    return f"[DRY RUN] {message}" if dry_run else message
+
+
 # ---------------------------------------------------------------------------
 # Existing endpoints (preserved exactly)
 # ---------------------------------------------------------------------------
@@ -27,6 +43,7 @@ router = APIRouter(prefix="/api/bulk-uploads", tags=["bulk-uploads"])
 @router.post("/scalar-results", response_model=UploadResponse)
 async def upload_scalar_results(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -68,23 +85,25 @@ async def upload_scalar_results(
         created, updated, skipped, errors, feedbacks = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
             db, file_bytes
         )
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("scalar_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
-    log.info("scalar_upload", created=created, updated=updated, user=current_user.email)
+    log.info("scalar_upload", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         feedbacks=feedbacks,
-        message=f"Processed: {created} created, {updated} updated, {skipped} skipped",
+        message=_finalize_message(f"Processed: {created} created, {updated} updated, {skipped} skipped", dry_run),
+        dry_run=dry_run,
     )
 
 
 @router.post("/new-experiments", response_model=UploadResponse)
 async def upload_new_experiments(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -95,7 +114,7 @@ async def upload_new_experiments(
         created, updated, skipped, errors, warnings, _info = (
             NewExperimentsUploadService.bulk_upsert_from_excel(db, file_bytes)
         )
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("new_experiments_upload_failed", error=str(exc))
@@ -103,12 +122,14 @@ async def upload_new_experiments(
                               message="Upload failed")
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
                           warnings=warnings,
-                          message=f"{created} created, {updated} updated, {skipped} skipped")
+                          message=_finalize_message(f"{created} created, {updated} updated, {skipped} skipped", dry_run),
+                          dry_run=dry_run)
 
 
 @router.post("/pxrf", response_model=UploadResponse)
 async def upload_pxrf(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -218,7 +239,7 @@ async def upload_pxrf(
                     )
                     reevaluated_count += 1
 
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("pxrf_upload_failed", error=str(exc))
@@ -231,14 +252,16 @@ async def upload_pxrf(
         if reevaluated_count > 0
         else base_msg
     )
-    log.info("pxrf_upload", created=created, updated=updated, updated_characterized=reevaluated_count, user=current_user.email)
+    log.info("pxrf_upload", created=created, updated=updated, updated_characterized=reevaluated_count, user=current_user.email, dry_run=dry_run)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
-                          message=message, warnings=svc_warnings)
+                          message=_finalize_message(message, dry_run), warnings=svc_warnings,
+                          dry_run=dry_run)
 
 
 @router.post("/aeris-xrd", response_model=UploadResponse)
 async def upload_aeris_xrd(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -247,14 +270,15 @@ async def upload_aeris_xrd(
     file_bytes = await file.read()
     try:
         created, updated, skipped, errors = AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("aeris_xrd_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
-                          message=f"XRD: {created} created, {updated} updated")
+                          message=_finalize_message(f"XRD: {created} created, {updated} updated", dry_run),
+                          dry_run=dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +288,7 @@ async def upload_aeris_xrd(
 @router.post("/master-results", response_model=UploadResponse)
 async def upload_master_results(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -277,17 +302,18 @@ async def upload_master_results(
     try:
         file_bytes = await file.read()
         created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(db, file_bytes)
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("master_results_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
-    log.info("master_results", created=created, updated=updated, user=current_user.email)
+    log.info("master_results", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         feedbacks=feedbacks,
-        message=f"Master Results: {created} created, {updated} updated, {skipped} skipped",
+        message=_finalize_message(f"Master Results: {created} created, {updated} updated, {skipped} skipped", dry_run),
+        dry_run=dry_run,
     )
 
 
@@ -295,6 +321,7 @@ async def upload_master_results(
 async def upload_icp_oes(
     file: UploadFile = File(...),
     overwrite: bool = Form(False),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -328,17 +355,18 @@ async def upload_icp_oes(
             db, processed_data, overwrite=overwrite
         )
         all_errors = parse_errors + ingest_errors
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("icp_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
     new_count = len(created_rows) - updated_count
-    log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email)
+    log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=new_count, updated=updated_count, skipped=0, errors=all_errors,
-        message=f"ICP-OES: {new_count} created, {updated_count} updated",
+        message=_finalize_message(f"ICP-OES: {new_count} created, {updated_count} updated", dry_run),
+        dry_run=dry_run,
     )
 
 
@@ -346,6 +374,7 @@ async def upload_icp_oes(
 async def upload_xrd_mineralogy(
     file: UploadFile = File(...),
     overwrite: bool = Form(False),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -360,7 +389,7 @@ async def upload_xrd_mineralogy(
         created, updated, skipped, errors = XRDAutoDetectService.upload(
             db, file_bytes, overwrite=overwrite
         )
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("xrd_upload_failed", error=str(exc))
@@ -368,7 +397,8 @@ async def upload_xrd_mineralogy(
                               message="Upload failed")
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
-        message=f"XRD: {created} created, {updated} updated",
+        message=_finalize_message(f"XRD: {created} created, {updated} updated", dry_run),
+        dry_run=dry_run,
     )
 
 
@@ -376,6 +406,7 @@ async def upload_xrd_mineralogy(
 async def upload_timepoint_modifications(
     file: UploadFile = File(...),
     overwrite_existing: bool = Form(False),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -388,10 +419,7 @@ async def upload_timepoint_modifications(
             overwrite_existing=overwrite_existing,
             modified_by=current_user.email,
         )
-        if not errors:
-            db.commit()
-        else:
-            db.rollback()
+        _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
         db.rollback()
         log.error("timepoint_mod_upload_failed", error=str(exc))
@@ -400,13 +428,15 @@ async def upload_timepoint_modifications(
     return UploadResponse(
         created=0, updated=updated, skipped=skipped, errors=errors,
         feedbacks=feedbacks,
-        message=f"Timepoint Modifications: {updated} updated, {skipped} skipped",
+        message=_finalize_message(f"Timepoint Modifications: {updated} updated, {skipped} skipped", dry_run),
+        dry_run=dry_run,
     )
 
 
 @router.post("/rock-inventory", response_model=UploadResponse)
 async def upload_rock_inventory(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -417,10 +447,7 @@ async def upload_rock_inventory(
         created, updated, _images, skipped, errors, warnings = (
             RockInventoryService.bulk_upsert_samples(db, file_bytes, [])
         )
-        if not errors:
-            db.commit()
-        else:
-            db.rollback()
+        _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
         db.rollback()
         log.error("rock_inventory_upload_failed", error=str(exc))
@@ -429,13 +456,15 @@ async def upload_rock_inventory(
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         warnings=warnings,
-        message=f"Rock Inventory: {created} created, {updated} updated",
+        message=_finalize_message(f"Rock Inventory: {created} created, {updated} updated", dry_run),
+        dry_run=dry_run,
     )
 
 
 @router.post("/chemical-inventory", response_model=UploadResponse)
 async def upload_chemical_inventory(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -446,10 +475,7 @@ async def upload_chemical_inventory(
         created, updated, skipped, errors = ChemicalInventoryService.bulk_upsert_from_excel(
             db, file_bytes
         )
-        if not errors:
-            db.commit()
-        else:
-            db.rollback()
+        _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
         db.rollback()
         log.error("chemical_inventory_upload_failed", error=str(exc))
@@ -457,7 +483,8 @@ async def upload_chemical_inventory(
                               message="Upload failed")
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
-        message=f"Chemical Inventory: {created} created, {updated} updated",
+        message=_finalize_message(f"Chemical Inventory: {created} created, {updated} updated", dry_run),
+        dry_run=dry_run,
     )
 
 
@@ -465,6 +492,7 @@ async def upload_chemical_inventory(
 async def upload_elemental_composition(
     file: UploadFile = File(...),
     default_unit: Optional[str] = Form(None),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -480,10 +508,7 @@ async def upload_elemental_composition(
         created, updated, skipped, errors = ElementalCompositionService.bulk_upsert_wide_from_excel(
             db, file_bytes, default_unit=default_unit
         )
-        if not errors:
-            db.commit()
-        else:
-            db.rollback()
+        _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
         db.rollback()
         log.error("elemental_composition_upload_failed", error=str(exc))
@@ -491,7 +516,8 @@ async def upload_elemental_composition(
                               message="Upload failed")
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
-        message=f"Elemental Composition: {created} created, {updated} updated",
+        message=_finalize_message(f"Elemental Composition: {created} created, {updated} updated", dry_run),
+        dry_run=dry_run,
     )
 
 
@@ -499,16 +525,21 @@ async def upload_elemental_composition(
 async def upload_actlabs_rock(
     file: UploadFile = File(...),
     resolutions: Optional[str] = Form(None),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ):
     """Upload an ActLabs Rock Analysis file.
 
     Phase 1 (no resolutions): runs preflight; if conflicts found, returns
-    ConflictCheckResponse without writing anything.
+    ConflictCheckResponse without writing anything. If no conflicts are found,
+    proceeds directly to import.
 
     Phase 2 (resolutions provided as JSON string): executes import with
     caller-supplied conflict resolutions.
+
+    dry_run applies to both write paths (Phase 1's no-conflict direct import and
+    Phase 2) — the preflight-only path never writes regardless of dry_run.
     """
     file_bytes = await file.read()
 
@@ -522,14 +553,15 @@ async def upload_actlabs_rock(
             created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(
                 db, file_bytes, resolutions=resolution_map
             )
-            db.commit()
+            _finalize_write(db, dry_run)
         except Exception as exc:
             db.rollback()
             log.error("actlabs_rock_upload_failed", error=str(exc))
             return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
         return UploadResponse(
             created=created, updated=updated, skipped=skipped, errors=errors,
-            message=f"ActLabs Rock: {created} created, {updated} updated",
+            message=_finalize_message(f"ActLabs Rock: {created} created, {updated} updated", dry_run),
+            dry_run=dry_run,
         )
 
     # Phase 1: preflight conflict check
@@ -563,20 +595,22 @@ async def upload_actlabs_rock(
     # No conflicts — proceed with import
     try:
         created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(db, file_bytes)
-        db.commit()
+        _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
         log.error("actlabs_rock_upload_failed", error=str(exc))
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
-        message=f"ActLabs Rock: {created} created, {updated} updated",
+        message=_finalize_message(f"ActLabs Rock: {created} created, {updated} updated", dry_run),
+        dry_run=dry_run,
     )
 
 
 @router.post("/experiment-status", response_model=UploadResponse)
 async def upload_experiment_status(
     file: UploadFile = File(...),
+    dry_run: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
@@ -592,10 +626,7 @@ async def upload_experiment_status(
                 message="Validation failed — no changes applied",
             )
         result = ExperimentStatusService.apply_status_changes(db, preview)
-        if not result.errors:
-            db.commit()
-        else:
-            db.rollback()
+        _finalize_write(db, dry_run, had_errors=bool(result.errors))
     except Exception as exc:
         db.rollback()
         log.error("experiment_status_upload_failed", error=str(exc))
@@ -613,11 +644,13 @@ async def upload_experiment_status(
             "reactor_updates": result.reactor_updates,
             "date_updates": result.date_updates,
         }],
-        message=(
+        message=_finalize_message(
             f"Status update: {result.status_changes_applied} row(s) applied, "
             f"{result.demotions_applied} reactor demotion(s), "
-            f"{len(preview.missing_ids)} not found"
+            f"{len(preview.missing_ids)} not found",
+            dry_run,
         ),
+        dry_run=dry_run,
     )
 
 

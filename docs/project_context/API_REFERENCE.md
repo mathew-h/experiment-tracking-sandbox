@@ -611,9 +611,11 @@ All endpoints return `UploadResponse`:
 ```json
 {
   "created": 0, "updated": 0, "skipped": 0,
-  "errors": [], "warnings": [], "feedbacks": [], "message": ""
+  "errors": [], "warnings": [], "feedbacks": [], "message": "", "dry_run": false
 }
 ```
+
+**`dry_run` (issue #100 item 1):** every POST endpoint below accepts a `dry_run` form field (default `false`). When `true`, the parser still runs in full — the response's `created`/`updated`/`skipped`/`errors`/`warnings` reflect what *would* happen — but the transaction is rolled back instead of committed, so nothing is persisted. The `message` is prefixed `[DRY RUN]` and the response's `dry_run` field is `true`. For `actlabs-rock`, `dry_run` applies to both write paths (the no-conflict direct import and the resolutions-supplied Phase 2 import); Phase 1's preflight-only response (`ConflictCheckResponse`) never writes regardless of `dry_run`. Structured create/rename/overwrite plan output and the plan-hash preview/commit check are a separate, not-yet-implemented part of issue #100.
 
 | Method | Path | Description |
 |--------|------|-------------|
