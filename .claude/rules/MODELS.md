@@ -29,6 +29,24 @@ The central hub for all experimental data.
   - **Self-parent guard + rename-path ordering (issue #86):** `parent_experiment_fk` can never equal the experiment's own `id`. `update_experiment_lineage` (`database/lineage_utils.py`) drops a self-resolved parent to `NULL` (logging a warning) in both the replicate and sequential/treatment branches — a self-referential FK is never valid lineage and raises `CircularDependencyError` at flush. The trigger was the bulk-upload rename path: with `autoflush=False` (production `SessionLocal`), recomputing lineage before the rename was flushed made the group-parent `SELECT` match the row against its own stale (old) ID when old and new normalize alike (e.g. `X_cation_001` → `X_Cation_001a-t5`). The rename path in `backend/services/bulk_uploads/new_experiments.py` now flushes the new `experiment_id` **before** calling `update_experiment_lineage`, so the lookup resolves against the new ID.
   - **Canonical ID parser:** the experiment ID grammar lives in `database/experiment_id_parser.py` (`parse_lineage_fields` / `parse_experiment_id_full`); `database/lineage_utils.py::parse_experiment_id` is a delegating wrapper. `backend/services/experiment_validation.py::extract_lineage_info` is a frozen **legacy** shim whose divergent behavior (naive trailing `-N`, e.g. `CF-015` → sequential 15 of `CF`; combined `-N_Treatment` suffixes never extract the sequential number) is deliberately pinned because locked bulk-upload code depends on it.
   - `id_timepoint_days` (Float, nullable, indexed): day value parsed from a trailing `-t<days>` ID token (e.g. `SERUM_001a-t7` → 7.0; decimals allowed). NULL = not encoded. The ID is canonical for the vial's timepoint: result creation fills a blank time from it and rejects a conflicting one (guards in `create_scalar_result_ex` and `POST /api/results`; string-level checks in the scalar/master bulk parsers). Set by `update_experiment_lineage` via `split_timepoint_token`; the token is stripped before lineage grouping, so `SERUM_001a-t7` groups under base `SERUM_001` with `replicate_label = a` and rolls up per day bucket with no view changes. A letterless `-t` vial (`SERUM_001-t7`) stays a parent-like row (base = stem, parent NULL).
+    - **Letter vs vial (issue #98):** a replicate *letter* is the scientific unit; a
+      `-t<days>` *vial* is one destructively-sampled instance of it. The two are
+      surfaced at different grains, and the collapse key is the timepoint-stripped
+      `experiment_id` — never `(base_experiment_id, replicate_label)`, because
+      `SERUM_001a-2` (a sequential re-run) shares both base and letter with
+      `SERUM_001a` and must stay a separate row.
+      - `GET /api/experiments` flat mode: one row per stem. `group_display_id`
+        carries the label; `experiment_id` still names the representative row
+        (the earliest non-outlier vial), which also supplies the Sample, Reactor,
+        Date, Description and Additives columns.
+      - `GET /api/experiments` grouped mode: one row per group, labeled by the
+        stem, with `replicate_letters` for the badge and `vial_count` for the
+        total row count.
+      - `GET /api/experiments/groups/{base_id}`: `members`/`member_count` stay
+        **per vial**; `replicates`/`replicate_count` are **per letter**.
+      - The `-t` token is never rendered on `/experiments`, and a row standing for
+        more than one vial shows status read-only, since an inline PATCH would
+        reach only the representative.
 - **Relationships**:
   - `conditions`: One-to-One with `ExperimentalConditions`.
   - `results`: One-to-Many with `ExperimentalResults`.
@@ -233,5 +251,14 @@ One row per `(base_experiment_id, time_post_reaction_bucket_days)`: cross-replic
 - **Note:** the grouping key (`COALESCE(base_experiment_id, experiment_id)`) does not distinguish letter-suffixed replicates from ordinary sequential derivations — a base experiment with sequential re-runs (e.g. `HPHT_001`, `HPHT_001-2`) but no lettered replicates will still produce `n_replicates >= 2` here, since both share `base_experiment_id`. Only treat this view's stats as "replicate statistics" when you know the group in question is actually a lettered replicate set.
 - **Parent inclusion (issue #83 — confirmed intended):** the group parent ("replicate 0") shares the grouping key with its lettered replicates (`COALESCE(base_experiment_id, experiment_id)` resolves to the same base for both), so a parent that has its own results is counted in the group mean/median/std exactly like a lettered member. To exclude a parent whose run should not count as a replicate, flag it `is_outlier` — there is deliberately no separate parent opt-out.
 - **Hand-entered rows (issue #83):** `POST /api/results` (the Add Results modal) sets `time_post_reaction_bucket_days` from the resolved time via `normalize_timepoint`, and a data migration backfilled all pre-existing NULL-bucket rows — so UI-entered results aggregate per day here just like bulk-uploaded ones. When a new primary entry lands in a bucket that already has a primary row, the newest entry wins and the older row is demoted to non-primary.
+- **Letter vs vial (issue #98):** this view's `n_replicates` counts experiment
+  ROWS in the bucket, so a 2-letter × 2-timepoint set yields
+  `n_replicates = 2` per day bucket (one vial per letter contributes to each
+  bucket) — which happens to match the letter count. The group page's
+  individual-replicate overlay draws one series per letter and excludes
+  `is_outlier` vials, so the overlay and this view's mean agree on membership.
+  **Known gap:** a *letterless* `-t` vial (`SERUM_001-t7`) is counted here but
+  is absent from the group page's members table, which requires
+  `replicate_label IS NOT NULL`. Tracked separately.
 
 **Where views are created:** `database/event_listeners.py` runs `DROP VIEW IF EXISTS` then `CREATE VIEW` for each view in a `try` block on module import (using the shared `engine`). Failures are ignored so startup is not blocked if the DB is unavailable; views are also recreated in Alembic migrations when dependent tables change (e.g. new ICP columns), so the canonical definitions stay aligned with the schema documented here.

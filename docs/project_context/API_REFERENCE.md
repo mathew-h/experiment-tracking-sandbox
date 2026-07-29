@@ -58,6 +58,26 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
 - `total` counts top-level rows, not raw experiment rows.
 - Flat mode (`group_replicates=false`, the default) is unchanged — every experiment row is returned individually.
 
+**New fields (letter vs vial, issue #98):**
+- `group_display_id` (string, nullable) — what the UI should render as this row's
+  ID. Grouped mode: the group stem (`SERUM_001`). Flat mode: the
+  timepoint-stripped stem (`SERUM_001a`). `experiment_id` continues to name the
+  real representative row, which is the earliest non-outlier vial and also
+  supplies `sample_id`, `reactor_number`, `date`, `condition_note` and
+  `additives_summary`.
+- `vial_count` (integer, default 1) — how many experiment rows this row stands
+  for. Flat mode counts matched rows sharing the stem; grouped mode counts every
+  row in the bucket, parent included. A row with `vial_count > 1` must not offer
+  an inline status edit — the PATCH would reach only the representative.
+- `replicate_letters` (array of string, nullable) — grouped mode only: the
+  group's DISTINCT replicate letters, for the "N replicates: a, b" badge. Null
+  in flat mode and for rows that are not groups.
+- `replicates` (array, nullable) — grouped mode only: one entry per replicate
+  letter-row, collapsed on the timepoint stem, **including the representative's
+  own letter**. Because the collapse key is the stem rather than the letter, a
+  letter that also has a sequential re-run (`SERUM_001a` plus `SERUM_001a-2`)
+  contributes two entries while `replicate_letters` counts one.
+
 Example grouped item:
 ```json
 {
@@ -154,6 +174,22 @@ Replicate group detail addressed by the base-ID **string** — `base_id` need no
 - `members[].conditions` — only the fields whose values diverge from `shared_conditions`, per member.
 - `shared_conditions` / `divergent_fields` — condition fields identical vs. differing across all members.
 - `additives_summary` / `additive_names` — `null` when `additives_diverge` is `true` (members disagree on additives).
+
+**New fields (letter vs vial, issue #98):**
+- `members` / `member_count` — **per vial**, unchanged. `member_count` always
+  equals `len(members)`.
+- `replicates` (array of `{replicate_label, vials[]}`) — the same members grouped
+  by replicate letter. A letter holds several vials when the set is sacrificed
+  per timepoint.
+- `replicate_count` (integer) — number of LETTERS. This is what the group page
+  header reports; a 2-letter × 2-timepoint set gives `replicate_count = 2` and
+  `member_count = 4`.
+- `parent` — now a full `ReplicateGroupMemberDetail` (was the narrower
+  `ReplicateGroupMember`), so a parent with its own results reports
+  `id_timepoint_days`, `result_count`, and `conditions`.
+- `divergent_fields` — vials with no `conditions` row are excluded from the
+  comparison rather than counting as all-null, so conditions shared across the
+  vials that do have rows stay in `shared_conditions`.
 
 **Errors:**
 - `404 Not Found` — `base_id` matches neither an experiment row nor any `base_experiment_id` value.
