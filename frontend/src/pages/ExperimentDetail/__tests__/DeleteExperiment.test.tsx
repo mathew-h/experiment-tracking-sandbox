@@ -108,17 +108,58 @@ describe('experiment deletion from the detail page', () => {
 
     // Every cache keyed by the experiment ID must be evicted, not invalidated:
     // the freed ID can be reused, so a stale entry must not be readable at all.
+    // Awaited, because the eviction is deliberately deferred until after the
+    // navigation commits (see onDeleted in ../index.tsx).
     for (const key of [
       'experiment', 'delete-impact', 'conditions', 'additives',
       'experiment-results', 'changeRequests', 'reactorModificationRecent',
       'xrd', 'external-analysis', 'replicate-group',
     ]) {
-      expect(removeSpy).toHaveBeenCalledWith({ queryKey: [key, 'SERUM_050'] })
+      await waitFor(() =>
+        expect(removeSpy).toHaveBeenCalledWith({ queryKey: [key, 'SERUM_050'] }),
+      )
     }
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['group-rollup'] })
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['group-rollup'] }),
+    )
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['rollup'] })
 
     removeSpy.mockRestore()
     invalidateSpy.mockRestore()
+  })
+
+  it('evicts caches only after navigating away from the detail page', async () => {
+    // Regression guard for the eviction ORDER. Several evicted keys are still
+    // actively observed by this page, and removing/invalidating an active query
+    // makes React Query refetch it — against an experiment the server just
+    // deleted — which produced a burst of 404s in the console. The fix
+    // navigates first so no observer survives to refetch.
+    //
+    // The 404 burst itself is timing-dependent and does not reproduce under
+    // jsdom, so this asserts the code's ordering guarantee instead: at the
+    // moment the first eviction runs, the list route must already be rendered.
+    // Before the fix, the detail page was still mounted here.
+    let detailStillMountedAtEviction: boolean | null = null
+    const original = queryClient.removeQueries.bind(queryClient)
+    const removeSpy = vi
+      .spyOn(queryClient, 'removeQueries')
+      .mockImplementation((filters?: Parameters<typeof original>[0]) => {
+        if (detailStillMountedAtEviction === null) {
+          detailStillMountedAtEviction = screen.queryByText('Experiments List') === null
+        }
+        return original(filters)
+      })
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /delete experiment/i }))
+    await user.click(await screen.findByRole('button', { name: /^delete$/i }))
+    await waitFor(() => expect(experimentsApi.delete).toHaveBeenCalledWith('SERUM_050'))
+    expect(await screen.findByText('Experiments List')).toBeInTheDocument()
+
+    await waitFor(() => expect(detailStillMountedAtEviction).not.toBeNull())
+    expect(detailStillMountedAtEviction).toBe(false)
+
+    removeSpy.mockRestore()
   })
 })

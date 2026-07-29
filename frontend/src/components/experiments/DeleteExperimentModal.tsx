@@ -12,17 +12,20 @@ interface DeleteExperimentModalProps {
 }
 
 /** Human-readable label per impact field, in the order shown. */
-const IMPACT_ROWS: Array<[keyof DeleteImpact, string]> = [
-  ['conditions', 'conditions record'],
-  ['results', 'result timepoints'],
-  ['scalar_results', 'scalar measurement rows'],
-  ['icp_results', 'ICP measurement rows'],
-  ['result_files', 'result files'],
-  ['notes', 'notes'],
-  ['additives', 'chemical additives'],
-  ['external_analyses', 'external analyses'],
-  ['xrd_phases', 'XRD phase rows'],
-  ['change_requests', 'reactor change requests'],
+/** Impact field → [singular, plural] label, in the order shown.
+ *  Both forms are spelled out rather than derived: "external analyses" is
+ *  irregular, so appending an "s" would render "external analysises". */
+const IMPACT_ROWS: Array<[keyof DeleteImpact, string, string]> = [
+  ['conditions', 'conditions record', 'conditions records'],
+  ['results', 'result timepoint', 'result timepoints'],
+  ['scalar_results', 'scalar measurement row', 'scalar measurement rows'],
+  ['icp_results', 'ICP measurement row', 'ICP measurement rows'],
+  ['result_files', 'result file', 'result files'],
+  ['notes', 'note', 'notes'],
+  ['additives', 'chemical additive', 'chemical additives'],
+  ['external_analyses', 'external analysis', 'external analyses'],
+  ['xrd_phases', 'XRD phase row', 'XRD phase rows'],
+  ['change_requests', 'reactor change request', 'reactor change requests'],
 ]
 
 /**
@@ -123,11 +126,14 @@ export function DeleteExperimentModal({
             <div>
               <p className="text-ink-secondary">These records are deleted with it:</p>
               <ul className="mt-1 space-y-0.5 text-ink-muted">
-                {rows.map(([key, label]) => (
-                  <li key={key} className="tabular-nums">
-                    {impact[key] as number} {label}
-                  </li>
-                ))}
+                {rows.map(([key, singular, plural]) => {
+                  const count = impact[key] as number
+                  return (
+                    <li key={key} className="tabular-nums">
+                      {count} {count === 1 ? singular : plural}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           ) : (

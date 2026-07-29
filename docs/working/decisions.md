@@ -143,3 +143,26 @@ Two Important findings were also raised: the experiment's prior `ModificationsLo
 **Side benefit:** `change_requests` was already summed into the impact `total` (documented to the user as "rows destroyed"), but before the fix wave the service only nulled those rows rather than deleting them — so `total` had been overstating destruction. Purging (item 4) makes the count truthful.
 
 **Scope:** Do not gate `DELETE /api/experiments/{experiment_id}` on `role`/`approved` claims without a fresh product decision and an update to `.claude/rules/AUTH.md`. Do not add a soft-delete flag to `Experiment` without revisiting every `v_*` view. A future bulk-delete endpoint should reuse `backend/services/experiment_deletion.py::delete_experiment` per-row rather than duplicating its orphan-handling logic. Any future "this experiment owns X" addition to the delete path should extend `scan_delete_impact`'s counted fields and the modal's `IMPACT_ROWS` together, per Critical 2 above — an owned row that is destroyed but not counted silently defeats the typed-ID gate. Two related but out-of-scope staleness gaps were found and left as follow-up tickets, not fixed here: `['replicate-group-detail', baseId]` (`GroupedResultsView.tsx:52`) is reached by neither the eviction loop nor `invalidateQueries(['replicate-group'])` (TanStack Query matches key elements exactly), and `AddResultModal.tsx:57` invalidates a key (`['results', id]`) no query uses. Manual verification in the running app has not been performed for any of this — automated test coverage only.
+
+## 2026-07-29 — Evict per-experiment query caches AFTER navigating away, never before
+
+**Decision:** any handler that deletes an entity and then leaves its detail page must navigate
+first and perform the cache eviction/invalidation afterwards, deferred past the React commit
+(`setTimeout(…, 0)`). See `onDeleted` in `frontend/src/pages/ExperimentDetail/index.tsx`.
+
+**Why:** React Query refetches a query the moment it is removed or invalidated *if that query
+still has an active observer*. The experiment detail page actively observes `['experiment', id]`,
+`['conditions', id]` and `['replicate-group', id]` — all of which the delete handler evicts. Doing
+the eviction while the page is mounted therefore triggers refetches of an experiment the server has
+just deleted, producing a burst of `404`s (4 per delete, observed in the browser). Navigating first
+unmounts the observers, so nothing is left to refetch. A microtask is not enough — it can run
+before React commits the navigation — hence the macrotask.
+
+**Scope:** applies to any future delete-then-redirect flow, including the deferred bulk-delete
+follow-up. The eviction itself must stay `removeQueries`, not `invalidateQueries`, because a hard
+delete frees the `experiment_id` string for reuse and a stale-but-present entry would render the
+dead experiment's data (see the issue #99 entry above).
+
+**Guard:** `DeleteExperiment.test.tsx` asserts the detail page is already unmounted at the moment
+the first eviction runs. Note the 404 burst itself does NOT reproduce under jsdom, so the test
+pins the ordering rather than the symptom — a symptom-based test here passes even without the fix.

@@ -172,6 +172,28 @@ describe('DeleteExperimentModal', () => {
     expect(onDeleted).not.toHaveBeenCalled()
   })
 
+  it('uses singular labels for a count of one and plural for more', async () => {
+    vi.mocked(experimentsApi.getDeleteImpact).mockResolvedValue({
+      ...EMPTY_IMPACT,
+      results: 1,
+      scalar_results: 1,
+      xrd_phases: 1,
+      external_analyses: 1,
+      notes: 2,
+      total: 6,
+    })
+    renderModal()
+
+    // Singular — a plural label against a count of 1 read as "1 XRD phase rows".
+    expect(await screen.findByText('1 result timepoint')).toBeInTheDocument()
+    expect(screen.getByText('1 scalar measurement row')).toBeInTheDocument()
+    expect(screen.getByText('1 XRD phase row')).toBeInTheDocument()
+    // Irregular plural: must be "external analysis", never "external analysises".
+    expect(screen.getByText('1 external analysis')).toBeInTheDocument()
+    // Plural still applies above 1.
+    expect(screen.getByText('2 notes')).toBeInTheDocument()
+  })
+
   it('shows an error and keeps Delete disabled when the impact fetch fails', async () => {
     const user = userEvent.setup()
     vi.mocked(experimentsApi.getDeleteImpact).mockRejectedValue(new Error('network error'))
