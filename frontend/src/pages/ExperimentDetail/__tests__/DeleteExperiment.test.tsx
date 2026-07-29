@@ -95,4 +95,22 @@ describe('experiment deletion from the detail page', () => {
     await waitFor(() => expect(experimentsApi.delete).toHaveBeenCalledWith('SERUM_050'))
     expect(await screen.findByText('Experiments List')).toBeInTheDocument()
   })
+
+  it('evicts the experiment and delete-impact caches and refreshes group-rollup, not the dead rollup key', async () => {
+    const removeSpy = vi.spyOn(queryClient, 'removeQueries')
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /delete experiment/i }))
+    await user.click(await screen.findByRole('button', { name: /^delete$/i }))
+    await waitFor(() => expect(experimentsApi.delete).toHaveBeenCalledWith('SERUM_050'))
+
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ['experiment', 'SERUM_050'] })
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ['delete-impact', 'SERUM_050'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['group-rollup'] })
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['rollup'] })
+
+    removeSpy.mockRestore()
+    invalidateSpy.mockRestore()
+  })
 })

@@ -112,7 +112,7 @@ export function ExperimentDetailPage() {
     onSuccess: (_updated, isOutlier) => {
       queryClient.invalidateQueries({ queryKey: ['experiment'] })
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
-      queryClient.invalidateQueries({ queryKey: ['rollup'] })
+      queryClient.invalidateQueries({ queryKey: ['group-rollup'] })
       queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
       success(isOutlier ? 'Marked as outlier — excluded from group stats' : 'Outlier flag removed')
     },
@@ -401,9 +401,10 @@ export function ExperimentDetailPage() {
           // group caches, so a freed experiment_id reused later does not read
           // back the deleted row.
           queryClient.removeQueries({ queryKey: ['experiment', experiment.experiment_id] })
+          queryClient.removeQueries({ queryKey: ['delete-impact', experiment.experiment_id] })
           queryClient.invalidateQueries({ queryKey: ['experiments'] })
           queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
-          queryClient.invalidateQueries({ queryKey: ['rollup'] })
+          queryClient.invalidateQueries({ queryKey: ['group-rollup'] })
           success('Experiment deleted')
           navigate('/experiments', { replace: true })
         }}
