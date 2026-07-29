@@ -100,16 +100,26 @@ Write-Host "Authenticated as $Email" -ForegroundColor Green
 # Pass 1: inspect. Always runs, in both dry-run and execute mode.
 # ---------------------------------------------------------------------------
 $report = foreach ($id in $ids) {
-    $row = [ordered]@{ experiment_id = $id; exists = $false; status = ''; results = 0; notes = 0; note = '' }
+    $row = [ordered]@{
+        experiment_id = $id; exists = $false; status = ''
+        total = 0; results = 0; conditions = 0; notes = 0; additives = 0
+        external_analyses = 0; xrd_phases = 0; change_requests = 0; note = ''
+    }
     try {
         $detail = Invoke-RestMethod -Method Get -Headers $headers -Uri "$BaseUrl/api/experiments/$id"
         $row.exists = $true
         $row.status = $detail.status
+        # Ask the app what deletion would destroy, rather than guessing. Same
+        # endpoint the DeleteExperimentModal uses (issue #99), so the numbers
+        # here are exactly what the UI would show.
         try {
-            $res = Invoke-RestMethod -Method Get -Headers $headers -Uri "$BaseUrl/api/experiments/$id/results"
-            $row.results = @($res).Count
-        } catch { $row.note = 'results lookup failed' }
-        if ($detail.PSObject.Properties.Name -contains 'notes') { $row.notes = @($detail.notes).Count }
+            $impact = Invoke-RestMethod -Method Get -Headers $headers `
+                -Uri "$BaseUrl/api/experiments/$id/delete-impact"
+            foreach ($f in @('total','results','conditions','notes','additives',
+                             'external_analyses','xrd_phases','change_requests')) {
+                if ($impact.PSObject.Properties.Name -contains $f) { $row.$f = $impact.$f }
+            }
+        } catch { $row.note = "delete-impact lookup failed: $($_.Exception.Message)" }
     } catch {
         if ($_.Exception.Response.StatusCode.value__ -eq 404) { $row.note = 'not found' }
         else { $row.note = "lookup error: $($_.Exception.Message)" }
@@ -126,11 +136,12 @@ Write-Host ""
 Write-Host "Found:        $(@($report | Where-Object exists).Count)" -ForegroundColor Cyan
 Write-Host "Not found:    $($missing.Count)" -ForegroundColor $(if ($missing.Count) { 'Yellow' } else { 'Cyan' })
 Write-Host "With results: $($withData.Count)" -ForegroundColor $(if ($withData.Count) { 'Red' } else { 'Cyan' })
+Write-Host "Total dependent rows to be destroyed: $(($report | Measure-Object -Property total -Sum).Sum)" -ForegroundColor Cyan
 
 if ($withData.Count -gt 0) {
     Write-Host ""
     Write-Host "STOP. The following carry result rows. Confirm they are disposable before deleting:" -ForegroundColor Red
-    $withData | ForEach-Object { Write-Host "  $($_.experiment_id)  ($($_.results) result(s))" -ForegroundColor Red }
+    $withData | ForEach-Object { Write-Host "  $($_.experiment_id)  ($($_.results) result timepoint(s))" -ForegroundColor Red }
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
