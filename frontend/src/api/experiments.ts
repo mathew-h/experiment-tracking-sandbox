@@ -20,7 +20,15 @@ export interface ExperimentListItem {
   replicate_label: string | null
   is_outlier: boolean
   id_timepoint_days: number | null
-  /** Grouped-list mode only: lettered children of this group parent. */
+  /** Issue #98: what the ID column renders — the group stem in grouped mode,
+   *  the timepoint-stripped stem in flat mode. `experiment_id` above still
+   *  names the real representative row. */
+  group_display_id?: string | null
+  /** Number of experiment rows this row stands for (1 = an ordinary row). */
+  vial_count?: number
+  /** Grouped mode only: the group's distinct replicate letters, for the badge. */
+  replicate_letters?: string[] | null
+  /** Grouped-list mode only: one entry per replicate letter-row of this group. */
   replicates?: ExperimentListItem[] | null
 }
 
@@ -175,9 +183,15 @@ export interface ReplicateGroupMemberDetail extends ReplicateGroupMember {
   conditions: Record<string, unknown>
 }
 
+/** Issue #98: one replicate letter and its timepoint vials. */
+export interface ReplicateLetterGroup {
+  replicate_label: string
+  vials: ReplicateGroupMemberDetail[]
+}
+
 export interface ReplicateGroupDetail {
   base_experiment_id: string
-  parent: ReplicateGroupMember | null
+  parent: ReplicateGroupMemberDetail | null
   members: ReplicateGroupMemberDetail[]
   member_count: number
   shared_conditions: Record<string, unknown>
@@ -185,6 +199,9 @@ export interface ReplicateGroupDetail {
   additives_summary: string | null
   additive_names: string | null
   additives_diverge: boolean
+  /** Issue #98: `members` grouped by letter. `member_count` stays per-vial. */
+  replicates: ReplicateLetterGroup[]
+  replicate_count: number
 }
 
 /** Mirrors backend ReplicateCreateResponse: created items are ExperimentResponse-shaped

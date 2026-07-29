@@ -8,17 +8,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.enums import ExperimentStatus
+from database.experiment_id_parser import split_timepoint_token
+from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
-    ReplicateGroupMemberDetail, ReplicateGroupDetailResponse,
+    ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
 )
 from backend.services.replicate_groups import (
-    GroupData, group_exists, resolve_group, resolve_rollup_rows,
+    GroupData, GroupMemberData, group_exists, resolve_group, resolve_rollup_rows,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
@@ -188,7 +190,12 @@ def list_experiments(
                     ),
                     col.base_experiment_id,
                 ),
-                else_=col.experiment_id,
+                # Issue #98: strip a trailing '-t<days>' token here. Without
+                # this, a letterless timepoint vial (SERUM_001-t7) buckets on
+                # its own raw ID and renders as a SECOND top-level row carrying
+                # the same displayed label as the real SERUM_001 row. A no-op
+                # for every ID without the token, so no existing bucket moves.
+                else_=timepoint_stem_expr(col),
             )
 
         matched_sq = stmt.subquery()
@@ -204,6 +211,15 @@ def list_experiments(
                     partition_by=full_bucket_key,
                     order_by=(
                         is_parent_like,
+                        # D7 / gap 8: among rows at the same parent-like rank,
+                        # a flagged vial must never represent the group while
+                        # a clean sibling at that same rank exists -- the
+                        # representative supplies the row's Sample, Reactor,
+                        # Date, Description and Additives columns. This does
+                        # NOT protect against an outlier PARENT: is_parent_like
+                        # is ranked first, so an outlier parent still
+                        # represents its group over a clean lettered member.
+                        Experiment.is_outlier.asc(),
                         Experiment.replicate_label.asc(),
                         Experiment.id_timepoint_days.asc().nulls_first(),
                         Experiment.experiment_number.asc(),
@@ -223,12 +239,55 @@ def list_experiments(
         )
         rows = db.execute(page_stmt.offset(skip).limit(limit)).scalars().all()
     else:
-        total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-        rows = db.execute(stmt.offset(skip).limit(limit)).scalars().all()
+        # Flat mode: collapse rows that differ ONLY by the trailing '-t<days>'
+        # token (issue #98 D1). SERUM_001a-t1 / SERUM_001a-t3 are one replicate
+        # sampled twice, so they render as ONE row labeled SERUM_001a.
+        #
+        # Unlike the grouped branch above -- which resolves bucket membership
+        # from the UNFILTERED table so that filtering to "b" still resolves
+        # representative "a" -- this collapses only rows that PASSED the
+        # filters. A filter therefore never produces a row claiming vials it
+        # excluded, and vial_count always describes visible data.
+        matched_sq = stmt.subquery()
+        stem = timepoint_stem_expr(matched_sq.c)
+        ranked_sq = select(
+            matched_sq.c.id.label("id"),
+            stem.label("stem"),
+            func.row_number().over(
+                partition_by=stem,
+                order_by=(
+                    matched_sq.c.is_outlier.asc(),
+                    matched_sq.c.id_timepoint_days.asc().nulls_first(),
+                    matched_sq.c.experiment_number.asc(),
+                ),
+            ).label("rn"),
+            func.count().over(partition_by=stem).label("vial_count"),
+        ).subquery()
+        reps_sq = (
+            select(ranked_sq.c.id, ranked_sq.c.stem, ranked_sq.c.vial_count)
+            .where(ranked_sq.c.rn == 1)
+            .subquery()
+        )
+        total = db.execute(select(func.count()).select_from(reps_sq)).scalar_one()
+        rep_rows = db.execute(
+            select(Experiment, reps_sq.c.stem, reps_sq.c.vial_count)
+            .join(reps_sq, reps_sq.c.id == Experiment.id)
+            .order_by(Experiment.experiment_number.desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+        rows = [row[0] for row in rep_rows]
+        flat_collapse = {row[0].id: (row[1], row[2]) for row in rep_rows}
 
     items = []
     for exp in rows:
         item_data = _build_list_item(db, exp)
+        if not group_replicates:
+            # Issue #98: label the row by its timepoint stem so the internal
+            # '-t<days>' token never reaches the UI.
+            stem, vial_count = flat_collapse[exp.id]
+            item_data["group_display_id"] = stem
+            item_data["vial_count"] = vial_count
         if group_replicates:
             # Bucket key for this representative -- mirrors Block A: a
             # lettered representative (orphan-set case) buckets on its own
@@ -246,25 +305,53 @@ def list_experiments(
             ):
                 bucket_key = exp.base_experiment_id
             else:
-                bucket_key = exp.experiment_id
-            members = db.execute(
+                # Must mirror _bucket_key_expr's else_ branch, which strips the
+                # '-t<days>' token (issue #98) -- otherwise a letterless '-t'
+                # vial's bucket key does not round-trip and the membership
+                # query below matches nothing.
+                bucket_key = split_timepoint_token(exp.experiment_id)[0]
+            # Every row in this bucket, resolved from the UNFILTERED table so a
+            # filtered query still describes the whole group. Matching on the
+            # bucket-key expression (rather than base_experiment_id) is what
+            # picks up letterless '-t' vials; it costs a scan per page row,
+            # which is fine at this table's size and matches the existing
+            # per-row queries in _build_list_item.
+            bucket_rows = db.execute(
                 select(Experiment)
-                .where(
-                    Experiment.base_experiment_id == bucket_key,
-                    Experiment.replicate_label.isnot(None),
-                )
+                .where(_bucket_key_expr(Experiment) == bucket_key)
                 .order_by(
-                    Experiment.replicate_label.asc(),
+                    Experiment.replicate_label.asc().nulls_first(),
                     Experiment.id_timepoint_days.asc().nulls_first(),
                     Experiment.experiment_number.asc(),
                 )
             ).scalars().all()
-            siblings = [m for m in members if m.id != exp.id]
-            if siblings:
-                item_data["replicates"] = [
-                    ExperimentListItem.model_validate(_build_list_item(db, ch))
-                    for ch in siblings
-                ]
+            members = [m for m in bucket_rows if m.replicate_label is not None]
+            item_data["vial_count"] = len(bucket_rows)
+
+            if len(bucket_rows) > 1 and members:
+                # A real group: label the row by the group stem (issue #98 D2).
+                item_data["group_display_id"] = bucket_key
+                item_data["replicate_letters"] = sorted(
+                    {m.replicate_label for m in members}
+                )
+                # One child per letter-row, collapsed on the timepoint stem
+                # (D1/D12) -- so SERUM_001a + SERUM_001a-t3 is one child, while
+                # SERUM_001a-2 stays its own. Includes the representative's own
+                # letter (D8), unlike the pre-#98 siblings-only list.
+                item_data["replicates"] = []
+                for group in collapse_by_stem(members):
+                    child = _build_list_item(db, group.representative)
+                    child["group_display_id"] = group.stem
+                    child["vial_count"] = group.vial_count
+                    item_data["replicates"].append(
+                        ExperimentListItem.model_validate(child)
+                    )
+            else:
+                # Not a group (standalone row, or a lone vial): show this row's
+                # own stem so the '-t' token still never reaches the UI.
+                item_data["group_display_id"] = split_timepoint_token(
+                    exp.experiment_id
+                )[0]
         items.append(ExperimentListItem.model_validate(item_data))
 
     return ExperimentListResponse(items=items, total=total, skip=skip, limit=limit)
@@ -340,9 +427,23 @@ def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
 def _group_data_to_detail_response(group: GroupData) -> ReplicateGroupDetailResponse:
     return ReplicateGroupDetailResponse(
         base_experiment_id=group.base_experiment_id,
-        parent=ReplicateGroupMember.model_validate(group.parent) if group.parent else None,
+        parent=(
+            _group_member_to_detail(GroupMemberData(
+                experiment=group.parent,
+                result_count=group.parent_result_count,
+            ))
+            if group.parent else None
+        ),
         members=[_group_member_to_detail(m) for m in group.members],
         member_count=len(group.members),
+        replicates=[
+            ReplicateLetterGroup(
+                replicate_label=letter.replicate_label,
+                vials=[_group_member_to_detail(v) for v in letter.vials],
+            )
+            for letter in group.replicates
+        ],
+        replicate_count=len(group.replicates),
         shared_conditions=group.shared_conditions,
         divergent_fields=group.divergent_fields,
         additives_summary=group.additives_summary,
@@ -497,7 +598,14 @@ def get_replicate_group(
                 Experiment.parent_experiment_fk == parent.id,
                 Experiment.replicate_label.isnot(None),
             )
-            .order_by(Experiment.replicate_label.asc())
+            .order_by(
+                Experiment.replicate_label.asc(),
+                # Gap 5: labels are not unique -- a '-t<days>' vial shares its
+                # letter with its parent vial, so without this tiebreak member
+                # order is nondeterministic.
+                Experiment.id_timepoint_days.asc().nulls_first(),
+                Experiment.experiment_number.asc(),
+            )
         ).scalars().all()
     else:
         # Orphan member: parent row doesn't exist yet; list siblings by base stem.
@@ -507,7 +615,14 @@ def get_replicate_group(
                 Experiment.base_experiment_id == base,
                 Experiment.replicate_label.isnot(None),
             )
-            .order_by(Experiment.replicate_label.asc())
+            .order_by(
+                Experiment.replicate_label.asc(),
+                # Gap 5: labels are not unique -- a '-t<days>' vial shares its
+                # letter with its parent vial, so without this tiebreak member
+                # order is nondeterministic.
+                Experiment.id_timepoint_days.asc().nulls_first(),
+                Experiment.experiment_number.asc(),
+            )
         ).scalars().all()
     return ReplicateGroupResponse(
         base_experiment_id=base,

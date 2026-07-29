@@ -1,10 +1,11 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import type {
   ReplicateGroupDetail,
-  ReplicateGroupMember,
   ReplicateGroupMemberDetail,
+  ReplicateLetterGroup,
 } from '@/api/experiments'
 import {
   Badge,
@@ -50,25 +51,75 @@ function hasValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== ''
 }
 
-function isMemberDetail(
-  member: ReplicateGroupMember | ReplicateGroupMemberDetail,
-): member is ReplicateGroupMemberDetail {
-  return 'result_count' in member
+interface LetterRowsProps {
+  letter: ReplicateLetterGroup
+  divergentFields: string[]
+  expanded: boolean
+  onToggle: () => void
+}
+
+/** One replicate letter. A letter with a single vial renders exactly as it did
+ *  before issue #98 — a plain member row with no expander. A letter sacrificed
+ *  across several timepoints renders a collapsed summary row that expands into
+ *  one row per vial, so `T+N` and result counts stay per vial. */
+function LetterRows({ letter, divergentFields, expanded, onToggle }: LetterRowsProps) {
+  if (letter.vials.length === 1) {
+    return (
+      <MemberRow
+        member={letter.vials[0]}
+        isParent={false}
+        divergentFields={divergentFields}
+      />
+    )
+  }
+  return (
+    <>
+      <TableRow>
+        <Td className="font-mono-data">{letter.replicate_label}</Td>
+        <Td>
+          <button
+            aria-label={`Expand replicate ${letter.replicate_label}`}
+            onClick={onToggle}
+            className="inline-flex items-center gap-1 text-ink-secondary hover:text-ink-primary"
+          >
+            <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+            {letter.vials.length} vials
+          </button>
+        </Td>
+        <Td className="font-mono-data text-ink-muted">—</Td>
+        <Td className="text-ink-muted">—</Td>
+        <Td className="text-ink-muted">—</Td>
+        <Td className="font-mono-data">
+          {letter.vials.reduce((sum, v) => sum + v.result_count, 0)}
+        </Td>
+        {divergentFields.map((field) => (
+          <Td key={field} className="font-mono-data text-ink-muted">—</Td>
+        ))}
+      </TableRow>
+      {expanded && letter.vials.map((v) => (
+        <MemberRow key={v.id} member={v} isParent={false} divergentFields={divergentFields} child />
+      ))}
+    </>
+  )
 }
 
 interface MemberRowProps {
-  member: ReplicateGroupMember | ReplicateGroupMemberDetail
+  member: ReplicateGroupMemberDetail
   isParent: boolean
   divergentFields: string[]
+  /** Rendered as a nested vial beneath its letter row (issue #98). */
+  child?: boolean
 }
 
-/** One members-table row. Keyed by `id` at the call site — never by `replicate_label`,
- *  since a `-t` timepoint vial shares its letter with its parent vial. */
-function MemberRow({ member, isParent, divergentFields }: MemberRowProps) {
-  const detail = isMemberDetail(member) ? member : null
+/** One members-table row. Keyed by `id` at the call site — never by
+ *  `replicate_label`, since a `-t` timepoint vial shares its letter with its
+ *  parent vial. */
+function MemberRow({ member, isParent, divergentFields, child }: MemberRowProps) {
   return (
     <TableRow>
-      <Td className="font-mono-data">{isParent ? '0 (parent)' : (member.replicate_label ?? '—')}</Td>
+      <Td className={`font-mono-data ${child ? 'pl-6' : ''}`}>
+        {isParent ? '0 (parent)' : (member.replicate_label ?? '—')}
+      </Td>
       <Td>
         <Link
           to={`/experiments/${member.experiment_id}`}
@@ -78,14 +129,14 @@ function MemberRow({ member, isParent, divergentFields }: MemberRowProps) {
         </Link>
       </Td>
       <Td className="font-mono-data">
-        {detail?.id_timepoint_days != null ? `T+${detail.id_timepoint_days}` : '—'}
+        {member.id_timepoint_days != null ? `T+${member.id_timepoint_days}` : '—'}
       </Td>
       <Td>{member.status ? <StatusBadge status={member.status} /> : '—'}</Td>
       <Td>{member.is_outlier ? <Badge variant="warning">Outlier</Badge> : '—'}</Td>
-      <Td className="font-mono-data">{detail ? detail.result_count : '—'}</Td>
+      <Td className="font-mono-data">{member.result_count}</Td>
       {divergentFields.map((field) => (
         <Td key={field} className="font-mono-data">
-          {detail ? formatValue(detail.conditions[field]) : '—'}
+          {formatValue(member.conditions[field])}
         </Td>
       ))}
     </TableRow>
@@ -99,10 +150,7 @@ interface ReplicateGroupContentProps {
 
 function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
   const experimentType = group.shared_conditions['experiment_type']
-  const rows: Array<{ member: ReplicateGroupMember | ReplicateGroupMemberDetail; isParent: boolean }> = [
-    ...(group.parent ? [{ member: group.parent, isParent: true }] : []),
-    ...group.members.map((m) => ({ member: m, isParent: false })),
-  ]
+  const [expandedLetters, setExpandedLetters] = useState<Set<string>>(new Set())
 
   return (
     <div className="space-y-4">
@@ -116,7 +164,7 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold text-ink-primary font-mono-data">{baseId}</h1>
           <span className="text-xs text-ink-muted">
-            {group.member_count} {group.member_count === 1 ? 'replicate' : 'replicates'}
+            {group.replicate_count} {group.replicate_count === 1 ? 'replicate' : 'replicates'}
           </span>
           {typeof experimentType === 'string' && experimentType && (
             <span className="text-xs text-ink-muted">· {experimentType}</span>
@@ -141,12 +189,28 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
           </tr>
         </TableHead>
         <TableBody>
-          {rows.map(({ member, isParent }) => (
+          {group.parent && (
             <MemberRow
-              key={member.id}
-              member={member}
-              isParent={isParent}
+              key={group.parent.id}
+              member={group.parent}
+              isParent
               divergentFields={group.divergent_fields}
+            />
+          )}
+          {group.replicates.map((letter) => (
+            <LetterRows
+              key={letter.replicate_label}
+              letter={letter}
+              divergentFields={group.divergent_fields}
+              expanded={expandedLetters.has(letter.replicate_label)}
+              onToggle={() =>
+                setExpandedLetters((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(letter.replicate_label)) next.delete(letter.replicate_label)
+                  else next.add(letter.replicate_label)
+                  return next
+                })
+              }
             />
           ))}
         </TableBody>

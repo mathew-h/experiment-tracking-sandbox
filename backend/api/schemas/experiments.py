@@ -63,8 +63,19 @@ class ExperimentListItem(BaseModel):
     additives_summary: Optional[str] = None
     # First note text
     condition_note: Optional[str] = None
-    # Grouped-list mode only (group_replicates=true): lettered children of this
-    # group parent, ordered by replicate_label. None in flat mode / for non-parents.
+    # Issue #98. What the ID column should render: the group stem in grouped
+    # mode, the timepoint-stripped stem in flat mode. `experiment_id` above
+    # continues to name the real representative row -- do not conflate them.
+    group_display_id: Optional[str] = None
+    # Number of experiment rows this row stands for (1 = an ordinary row).
+    vial_count: int = 1
+    # Grouped mode only: the group's DISTINCT replicate letters, for the badge.
+    # None in flat mode and for rows that are not groups.
+    replicate_letters: Optional[list[str]] = None
+    # Grouped-list mode only (group_replicates=true): one entry per replicate
+    # letter-row of this group, collapsed on the timepoint stem (issue #98 D8 --
+    # this includes the representative's own letter). None in flat mode and for
+    # rows that are not groups.
     replicates: Optional[list["ExperimentListItem"]] = None
 
 
@@ -152,6 +163,16 @@ class ReplicateGroupMemberDetail(ReplicateGroupMember):
     conditions: dict[str, Any] = {}
 
 
+class ReplicateLetterGroup(BaseModel):
+    """One replicate letter and its vials (issue #98).
+
+    A letter maps to several vials when the replicate set is sacrificed per
+    timepoint: letter "a" of SERUM_001 is SERUM_001a-t1 plus SERUM_001a-t3.
+    """
+    replicate_label: str
+    vials: list[ReplicateGroupMemberDetail] = []
+
+
 class ReplicateGroupDetailResponse(BaseModel):
     """Response for GET /api/experiments/groups/{base_id}.
 
@@ -160,9 +181,17 @@ class ReplicateGroupDetailResponse(BaseModel):
     (the common case for lettered-only replicate sets).
     """
     base_experiment_id: str
-    parent: Optional[ReplicateGroupMember] = None
+    # Widened from ReplicateGroupMember (issue #98) so a parent that has its own
+    # results can render its Timepoint / Results / divergent cells instead of
+    # hard-coding em dashes.
+    parent: Optional[ReplicateGroupMemberDetail] = None
     members: list[ReplicateGroupMemberDetail] = []
+    # Per-VIAL count -- unchanged meaning, still equal to len(members).
     member_count: int = 0
+    # Issue #98: the same members grouped by replicate letter, plus the count of
+    # LETTERS. `member_count` above stays per-vial; these are additive.
+    replicates: list[ReplicateLetterGroup] = []
+    replicate_count: int = 0
     shared_conditions: dict[str, Any] = {}
     divergent_fields: list[str] = []
     additives_summary: Optional[str] = None

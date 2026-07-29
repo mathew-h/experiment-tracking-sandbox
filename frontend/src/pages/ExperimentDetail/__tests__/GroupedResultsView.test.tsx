@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -14,7 +14,19 @@ vi.mock('@/api/experiments', () => ({
 
 import { GroupedResultsView } from '../GroupedResultsView'
 import { experimentsApi } from '@/api/experiments'
-import type { RollupTimepoint } from '@/api/experiments'
+import type { ReplicateGroupDetail, ReplicateGroupMemberDetail, ReplicateLetterGroup, RollupTimepoint } from '@/api/experiments'
+
+// Recharts' ResponsiveContainer reads the container's real layout box before
+// it will render any children (Legend included) — jsdom never lays anything
+// out, so getBoundingClientRect() defaults to all-zero and the chart (and its
+// legend) silently never mounts. Stub a non-zero box so the legend text this
+// file asserts on actually renders.
+beforeAll(() => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    width: 800, height: 300, top: 0, left: 0, bottom: 300, right: 800,
+    x: 0, y: 0, toJSON: () => {},
+  } as DOMRect)
+})
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -41,30 +53,46 @@ const ROLLUP: RollupTimepoint[] = [
   },
 ]
 
+function detailVial(
+  id: number, experimentId: string, day: number | null, isOutlier: boolean,
+): ReplicateGroupMemberDetail {
+  return {
+    id, experiment_id: experimentId,
+    replicate_label: experimentId.match(/_\d+([a-z])/)?.[1] ?? null,
+    status: 'ONGOING', is_outlier: isOutlier,
+    id_timepoint_days: day, researcher: null, date: null,
+    result_count: 1, conditions: {},
+  }
+}
+
+function groupOf(
+  baseId: string,
+  replicates: ReplicateLetterGroup[],
+  parent: ReplicateGroupMemberDetail | null = null,
+): ReplicateGroupDetail {
+  const members = replicates.flatMap((r) => r.vials)
+  return {
+    base_experiment_id: baseId, parent, members, member_count: members.length,
+    replicates, replicate_count: replicates.length,
+    shared_conditions: {}, divergent_fields: [],
+    additives_summary: null, additive_names: null, additives_diverge: false,
+  }
+}
+
 beforeEach(() => {
   queryClient.clear()
   vi.clearAllMocks()
   vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue(ROLLUP)
-  vi.mocked(experimentsApi.getGroup).mockResolvedValue({
-    base_experiment_id: 'SERUM_001',
-    parent: { id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING', is_outlier: false },
-    members: [
-      {
-        id: 2, experiment_id: 'SERUM_001a', replicate_label: 'a', status: 'ONGOING', is_outlier: false,
-        id_timepoint_days: null, researcher: null, date: null, result_count: 1, conditions: {},
-      },
-      {
-        id: 3, experiment_id: 'SERUM_001b', replicate_label: 'b', status: 'ONGOING', is_outlier: true,
-        id_timepoint_days: null, researcher: null, date: null, result_count: 1, conditions: {},
-      },
-    ],
-    member_count: 2,
-    shared_conditions: {},
-    divergent_fields: [],
-    additives_summary: null,
-    additive_names: null,
-    additives_diverge: false,
-  })
+  vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+    groupOf('SERUM_001', [
+      { replicate_label: 'a', vials: [detailVial(2, 'SERUM_001a', null, false)] },
+      { replicate_label: 'b', vials: [detailVial(3, 'SERUM_001b', null, true)] },
+    ], {
+      id: 1, experiment_id: 'SERUM_001', replicate_label: null, status: 'ONGOING',
+      is_outlier: false, id_timepoint_days: null, researcher: null, date: null,
+      result_count: 1, conditions: {},
+    }),
+  )
   vi.mocked(experimentsApi.getResults).mockResolvedValue([])
 })
 
@@ -145,5 +173,75 @@ describe('GroupedResultsView', () => {
     expect(screen.getByRole('columnheader', { name: 'Fe²⁺ → H₂ (%)' })).toBeInTheDocument()
     expect(screen.getByText('12.3 ± 2.5')).toBeInTheDocument()
     expect(screen.getByText('1.23 ± 0.45')).toBeInTheDocument()
+  })
+})
+
+describe('GroupedResultsView — issue #98 per-letter series', () => {
+  it('draws one series per letter for a 2x2 set, not one per vial', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_001', [
+        { replicate_label: 'a', vials: [
+          detailVial(1, 'SERUM_001a-t1', 1, false),
+          detailVial(2, 'SERUM_001a-t3', 3, false),
+        ] },
+        { replicate_label: 'b', vials: [
+          detailVial(3, 'SERUM_001b-t1', 1, false),
+          detailVial(4, 'SERUM_001b-t3', 3, false),
+        ] },
+      ]),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    // AC7: the legend carries two replicate series for four vials.
+    expect(screen.getAllByText(/^replicate [ab]$/)).toHaveLength(2)
+  })
+
+  it('keeps an outlier vial reachable while excluding it from the series', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_002', [
+        { replicate_label: 'a', vials: [
+          detailVial(1, 'SERUM_002a-t1', 1, true),
+          detailVial(2, 'SERUM_002a-t3', 3, false),
+        ] },
+      ]),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_002" />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    // One letter -> one series, even though one of its two vials is flagged.
+    expect(screen.getAllByText(/^replicate a$/)).toHaveLength(1)
+    // D11: the flagged vial contributes no points but stays linked.
+    const link = screen.getByRole('link', { name: /SERUM_002a-t1/ })
+    expect(link).toBeInTheDocument()
+    expect(link.className).toContain('line-through')
+  })
+
+  it('labels a fully-outlier letter series so an empty series reads as deliberate', async () => {
+    // Reuses the top-level beforeEach fixture: letter b is a single vial
+    // flagged is_outlier -- EVERY vial of that letter is flagged, so its
+    // series has no points at all.
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByText(/^replicate b \(outlier\)$/)).toBeInTheDocument()
+    // Letter a has no flagged vials -- no suffix.
+    expect(screen.getByText(/^replicate a$/)).toBeInTheDocument()
+  })
+
+  it('does not label a letter with a mix of flagged and clean vials', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_002', [
+        { replicate_label: 'a', vials: [
+          detailVial(1, 'SERUM_002a-t1', 1, true),
+          detailVial(2, 'SERUM_002a-t3', 3, false),
+        ] },
+      ]),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_002" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    // The drill-in link for the flagged vial itself still says "(outlier)"
+    // (D11) -- only the series/legend label for the *letter* is under test here.
+    expect(screen.getByText(/^replicate a$/)).toBeInTheDocument()
+    expect(screen.queryByText(/^replicate a \(outlier\)$/)).not.toBeInTheDocument()
   })
 })

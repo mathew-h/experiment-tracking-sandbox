@@ -54,11 +54,31 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
 - A row is top-level when `replicate_label IS NULL OR parent_experiment_fk IS NULL`.
 - A lettered replicate that matches the active filters is represented by its parent row instead of itself — i.e. filtering that matches only `SERUM_001b` still pulls `SERUM_001` (the parent) into the page, with `b` attached as a child.
 - Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, `is_outlier`, and `id_timepoint_days`.
-- In grouped mode, each parent row additionally gets a `replicates` array: its lettered children (`replicate_label IS NOT NULL`, `parent_experiment_fk` pointing at this row), ordered by letter. Children are attached in full regardless of whether they individually matched the filters — that's the point of grouping. Non-parent items have `replicates: null`.
+- In grouped mode, the representative row of a real lettered group (parent-led or an orphan stem with no parent row) additionally gets a `replicates` array. Membership is resolved by matching every row's bucket key (base stem), **not** by `parent_experiment_fk`, and the array includes the representative's own letter — see *New fields* below for the exact rules and the letter + sequential-rerun caveat. Rows attach in full regardless of whether they individually matched the filters — that's the point of grouping. Non-group items have `replicates: null`.
 - `total` counts top-level rows, not raw experiment rows.
-- Flat mode (`group_replicates=false`, the default) is unchanged — every experiment row is returned individually.
+- Flat mode (`group_replicates=false`, the default) is **not** a raw pass-through: among the matched rows, any that differ only by a trailing `-t<days>` token are collapsed into one row per stem (issue #98) — e.g. `SERUM_001a-t1` and `SERUM_001a-t3` (one replicate sampled twice) render as a single row. `group_display_id` carries the collapsed label and `vial_count` the number of rows folded into it. Collapsing only ever happens among rows that passed the active filters — see *New fields* below.
 
-Example grouped item:
+**New fields (letter vs vial, issue #98):**
+- `group_display_id` (string, nullable) — what the UI should render as this row's
+  ID. Grouped mode: the group stem (`SERUM_001`). Flat mode: the
+  timepoint-stripped stem (`SERUM_001a`). `experiment_id` continues to name the
+  real representative row, which is the earliest non-outlier vial and also
+  supplies `sample_id`, `reactor_number`, `date`, `condition_note` and
+  `additives_summary`.
+- `vial_count` (integer, default 1) — how many experiment rows this row stands
+  for. Flat mode counts matched rows sharing the stem; grouped mode counts every
+  row in the bucket, parent included. A row with `vial_count > 1` must not offer
+  an inline status edit — the PATCH would reach only the representative.
+- `replicate_letters` (array of string, nullable) — grouped mode only: the
+  group's DISTINCT replicate letters, for the "N replicates: a, b" badge. Null
+  in flat mode and for rows that are not groups.
+- `replicates` (array, nullable) — grouped mode only: one entry per replicate
+  letter-row, collapsed on the timepoint stem, **including the representative's
+  own letter**. Because the collapse key is the stem rather than the letter, a
+  letter that also has a sequential re-run (`SERUM_001a` plus `SERUM_001a-2`)
+  contributes two entries while `replicate_letters` counts one.
+
+Example grouped item (`group_replicates=true`) — letter `a` was sacrificed across two timepoints, letter `b` is a single flagged vial:
 ```json
 {
   "id": 210,
@@ -68,12 +88,16 @@ Example grouped item:
   "replicate_label": null,
   "is_outlier": false,
   "id_timepoint_days": null,
+  "group_display_id": "SERUM_001",
+  "vial_count": 4,
+  "replicate_letters": ["a", "b"],
   "replicates": [
-    { "id": 211, "experiment_id": "SERUM_001a-t7", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "id_timepoint_days": 7.0, "replicates": null },
-    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "id_timepoint_days": null, "replicates": null }
+    { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "id_timepoint_days": 1.0, "group_display_id": "SERUM_001a", "vial_count": 2, "replicates": null },
+    { "id": 213, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "id_timepoint_days": null, "group_display_id": "SERUM_001b", "vial_count": 1, "replicates": null }
   ]
 }
 ```
+`SERUM_001a-t3`, the sibling timepoint collapsed into the `SERUM_001a` child above, is not itself listed — it is folded into `vial_count: 2` on that child. `experiment_id` on the top-level item still names the group's representative row, not a rendering label; the UI renders `group_display_id`.
 
 ### GET /api/experiments/{experiment_id}/rollup
 
@@ -132,15 +156,30 @@ Replicate group detail addressed by the base-ID **string** — `base_id` need no
 
 **Auth:** Required (Firebase token)
 
-**Response `200`** (`ReplicateGroupDetailResponse`):
+**Response `200`** (`ReplicateGroupDetailResponse`) — a 2-letter set where letter `a` was sacrificed across two timepoints:
 ```json
 {
   "base_experiment_id": "SERUM_001",
-  "parent": { "id": 210, "experiment_id": "SERUM_001", "..." : "..." } ,
+  "parent": {
+    "id": 210, "experiment_id": "SERUM_001", "replicate_label": null, "status": "ONGOING", "is_outlier": false,
+    "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": {}
+  },
   "members": [
-    { "id": 211, "experiment_id": "SERUM_001a", "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": { "rock_mass_g": 5.2 } }
+    { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 1.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } },
+    { "id": 212, "experiment_id": "SERUM_001a-t3", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 3.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } },
+    { "id": 213, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING", "is_outlier": true, "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": {} }
   ],
   "member_count": 3,
+  "replicates": [
+    { "replicate_label": "a", "vials": [
+      { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 1.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } },
+      { "id": 212, "experiment_id": "SERUM_001a-t3", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 3.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } }
+    ] },
+    { "replicate_label": "b", "vials": [
+      { "id": 213, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING", "is_outlier": true, "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": {} }
+    ] }
+  ],
+  "replicate_count": 2,
   "shared_conditions": { "temperature_c": 200.0 },
   "divergent_fields": ["rock_mass_g"],
   "additives_summary": "Mg(OH)2 5 g" ,
@@ -154,6 +193,23 @@ Replicate group detail addressed by the base-ID **string** — `base_id` need no
 - `members[].conditions` — only the fields whose values diverge from `shared_conditions`, per member.
 - `shared_conditions` / `divergent_fields` — condition fields identical vs. differing across all members.
 - `additives_summary` / `additive_names` — `null` when `additives_diverge` is `true` (members disagree on additives).
+
+**New fields (letter vs vial, issue #98):**
+- `members` / `member_count` — **per vial**, unchanged. `member_count` always
+  equals `len(members)`.
+- `replicates` (array of `{replicate_label, vials[]}`) — the same members grouped
+  by replicate letter. A letter holds several vials when the set is sacrificed
+  per timepoint.
+- `replicate_count` (integer) — number of LETTERS. This is what the group page
+  header reports; a 2-letter × 2-timepoint set gives `replicate_count = 2` and
+  `member_count = 4`.
+- `parent` — now a full `ReplicateGroupMemberDetail` (was the narrower
+  `ReplicateGroupMember`). `id_timepoint_days` and `result_count` reflect the
+  parent's own row; `conditions` is always `{}` because the parent is
+  deliberately excluded from the group's divergence scan.
+- `divergent_fields` — vials with no `conditions` row are excluded from the
+  comparison rather than counting as all-null, so conditions shared across the
+  vials that do have rows stay in `shared_conditions`.
 
 **Errors:**
 - `404 Not Found` — `base_id` matches neither an experiment row nor any `base_experiment_id` value.

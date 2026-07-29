@@ -215,9 +215,12 @@ function makeGroupedItem(): ExperimentListItem {
   }
   return {
     ...base, id: 1, experiment_id: 'SERUM_001', experiment_number: 100,
+    group_display_id: 'SERUM_001', vial_count: 4,
+    replicate_letters: ['a', 'b', 'c'],
     replicates: ['a', 'b', 'c'].map((letter, i) => ({
       ...base, id: 10 + i, experiment_id: `SERUM_001${letter}`, experiment_number: 101 + i,
       base_experiment_id: 'SERUM_001', parent_experiment_fk: 1, replicate_label: letter,
+      group_display_id: `SERUM_001${letter}`, vial_count: 1,
     })),
   }
 }
@@ -258,7 +261,7 @@ describe('ExperimentListPage — replicate grouping', () => {
   })
 })
 
-describe('ExperimentListPage — id_timepoint_days chip', () => {
+describe('ExperimentListPage — issue #98: the -t token is never rendered', () => {
   const base = {
     status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
@@ -269,20 +272,179 @@ describe('ExperimentListPage — id_timepoint_days chip', () => {
 
   afterEach(() => { vi.clearAllMocks() })
 
-  it('renders a day chip when id_timepoint_days is set, and none when null', async () => {
+  it('renders group_display_id instead of the raw -t id, with no day chip', async () => {
     vi.mocked(experimentsApi.list).mockResolvedValue({
       items: [
-        { ...base, id: 1, experiment_id: 'SERUM_001a-t7', experiment_number: 100, id_timepoint_days: 7 },
-        { ...base, id: 2, experiment_id: 'SERUM_002', experiment_number: 101, id_timepoint_days: null },
+        { ...base, id: 1, experiment_id: 'SERUM_001a-t7', experiment_number: 100,
+          id_timepoint_days: 7, group_display_id: 'SERUM_001a', vial_count: 1 },
+        { ...base, id: 2, experiment_id: 'SERUM_002', experiment_number: 101,
+          id_timepoint_days: null, group_display_id: 'SERUM_002', vial_count: 1 },
       ],
       total: 2, skip: 0, limit: 25,
     })
 
-    render(<ExperimentListPage />, { wrapper })
+    const { container } = render(<ExperimentListPage />, { wrapper })
 
-    await waitFor(() => expect(screen.getByText('SERUM_001a-t7')).toBeInTheDocument())
-    expect(screen.getByText('day 7')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('SERUM_001a')).toBeInTheDocument())
     expect(screen.getByText('SERUM_002')).toBeInTheDocument()
-    expect(screen.getAllByText(/^day /)).toHaveLength(1)
+    // AC1: no -t substring and no day chip anywhere on the page.
+    expect(container.textContent).not.toMatch(/-t\d/)
+    expect(screen.queryByText(/^day /)).not.toBeInTheDocument()
+  })
+
+  it('falls back to experiment_id when group_display_id is absent', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{ ...base, id: 1, experiment_id: 'SERUM_003', experiment_number: 102,
+                id_timepoint_days: null }],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_003')).toBeInTheDocument())
+  })
+})
+
+describe('ExperimentListPage — issue #98: group rows', () => {
+  const base = {
+    status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
+    created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
+    additives_summary: null, condition_note: null,
+    base_experiment_id: 'SERUM_001' as string | null,
+    parent_experiment_fk: null as number | null,
+    replicate_label: 'a' as string | null, is_outlier: false,
+    id_timepoint_days: 1 as number | null,
+  }
+
+  function twoByTwo(): ExperimentListItem {
+    return {
+      ...base, id: 1, experiment_id: 'SERUM_001a-t1', experiment_number: 100,
+      group_display_id: 'SERUM_001', vial_count: 4, replicate_letters: ['a', 'b'],
+      replicates: [
+        { ...base, id: 2, experiment_id: 'SERUM_001a-t1', experiment_number: 100,
+          replicate_label: 'a', group_display_id: 'SERUM_001a', vial_count: 2 },
+        { ...base, id: 3, experiment_id: 'SERUM_001b-t1', experiment_number: 102,
+          replicate_label: 'b', group_display_id: 'SERUM_001b', vial_count: 2 },
+      ],
+    }
+  }
+
+  beforeEach(() => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [twoByTwo()], total: 1, skip: 0, limit: 25,
+    })
+  })
+  afterEach(() => { vi.clearAllMocks() })
+
+  it('badge counts distinct letters, not sibling rows', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    expect(screen.getByText('2 replicates: a, b')).toBeInTheDocument()
+  })
+
+  it('expands to one row per letter, still with no -t token', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /expand replicates/i }))
+    expect(screen.getByText('SERUM_001a')).toBeInTheDocument()
+    expect(screen.getByText('SERUM_001b')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/-t\d/)
+  })
+
+  it('renders status read-only on a multi-vial row', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    // The editable dropdown must be absent while the row stands for 4 vials.
+    expect(screen.queryByRole('combobox', { name: /row status/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps the status dropdown on a single-vial row', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{ ...base, id: 9, experiment_id: 'SERUM_009', experiment_number: 109,
+                replicate_label: null, id_timepoint_days: null,
+                group_display_id: 'SERUM_009', vial_count: 1 }],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_009')).toBeInTheDocument())
+    expect(screen.getByRole('combobox', { name: /row status/i })).toBeInTheDocument()
+  })
+})
+
+describe('ExperimentListPage — issue #98: status editable iff label names the patched row', () => {
+  const base = {
+    status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
+    created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
+    additives_summary: null, condition_note: null,
+    base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
+    replicate_label: null as string | null, is_outlier: false,
+    id_timepoint_days: null as number | null,
+  }
+
+  afterEach(() => { vi.clearAllMocks() })
+
+  it('a parent-led group (label == experiment_id) keeps the editable dropdown', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{
+        ...base, id: 1, experiment_id: 'SERUM_001', experiment_number: 100,
+        group_display_id: 'SERUM_001', vial_count: 3,
+        replicate_letters: ['a', 'b'],
+        replicates: [
+          { ...base, id: 2, experiment_id: 'SERUM_001a', experiment_number: 101,
+            replicate_label: 'a', group_display_id: 'SERUM_001a', vial_count: 1 },
+          { ...base, id: 3, experiment_id: 'SERUM_001b', experiment_number: 102,
+            replicate_label: 'b', group_display_id: 'SERUM_001b', vial_count: 1 },
+        ],
+      }],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    expect(screen.getByRole('combobox', { name: /row status/i })).toBeInTheDocument()
+  })
+
+  it('a stem-labeled orphan set (label != experiment_id) is read-only', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{
+        ...base, id: 1, experiment_id: 'SERUM_002a', experiment_number: 100,
+        group_display_id: 'SERUM_002', vial_count: 2,
+        replicate_letters: ['a', 'b'],
+        replicates: [
+          { ...base, id: 2, experiment_id: 'SERUM_002a', experiment_number: 100,
+            replicate_label: 'a', group_display_id: 'SERUM_002a', vial_count: 1 },
+          { ...base, id: 3, experiment_id: 'SERUM_002b', experiment_number: 101,
+            replicate_label: 'b', group_display_id: 'SERUM_002b', vial_count: 1 },
+        ],
+      }],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_002')).toBeInTheDocument())
+    expect(screen.queryByRole('combobox', { name: /row status/i })).not.toBeInTheDocument()
+  })
+
+  it('a flat collapsed row (label != experiment_id, no replicates) is read-only', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{
+        ...base, id: 1, experiment_id: 'SERUM_003a-t1', experiment_number: 100,
+        group_display_id: 'SERUM_003a', vial_count: 2, id_timepoint_days: 1,
+      }],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_003a')).toBeInTheDocument())
+    expect(screen.queryByRole('combobox', { name: /row status/i })).not.toBeInTheDocument()
+  })
+
+  it('a standalone row (label == experiment_id, vial_count 1) is editable', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{
+        ...base, id: 1, experiment_id: 'SERUM_004', experiment_number: 100,
+        group_display_id: 'SERUM_004', vial_count: 1,
+      }],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_004')).toBeInTheDocument())
+    expect(screen.getByRole('combobox', { name: /row status/i })).toBeInTheDocument()
   })
 })
