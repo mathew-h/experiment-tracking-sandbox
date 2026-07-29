@@ -797,6 +797,13 @@ class NewExperimentsUploadService:
                         # usable for the remaining additive rows.
                         savepoint = db.begin_nested()
                         row_ok = False
+                        # Tracks the name_to_compound cache key ONLY if this row is the one that
+                        # auto-created a brand-new Compound (issue #96 review finding). If the row
+                        # then fails and its savepoint is rolled back, the new Compound INSERT is
+                        # undone too, but the dict would otherwise keep a reference to that now-
+                        # invalid ORM object — poisoning any later row in the same upload that
+                        # references the same (still-novel) compound name. Cleared in `finally`.
+                        new_compound_key: Optional[str] = None
                         try:
                             comp_name = str(row.get('compound') or '').strip()
                             if not comp_name:
@@ -831,6 +838,7 @@ class NewExperimentsUploadService:
                                 db.add(comp)
                                 db.flush()
                                 name_to_compound[comp_name.lower()] = comp
+                                new_compound_key = comp_name.lower()
 
                             # order and method
                             order_val = row.get('order') if 'order' in df_add.columns else None
@@ -896,6 +904,12 @@ class NewExperimentsUploadService:
                                 savepoint.commit()
                             else:
                                 savepoint.rollback()
+                                # This row's savepoint rollback undid the new Compound INSERT
+                                # (if any) — evict it from the cache so a later row referencing
+                                # the same name re-queries/re-creates a fresh Compound instead of
+                                # reusing the now-rolled-back ORM object.
+                                if new_compound_key is not None and name_to_compound.get(new_compound_key) is comp:
+                                    del name_to_compound[new_compound_key]
 
         return created_exp, updated_exp, skipped, errors, warnings, info_messages
 
