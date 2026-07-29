@@ -16,11 +16,11 @@ from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
-    ReplicateGroupMemberDetail, ReplicateGroupDetailResponse,
+    ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
 )
 from backend.services.replicate_groups import (
-    GroupData, group_exists, resolve_group, resolve_rollup_rows,
+    GroupData, GroupMemberData, group_exists, resolve_group, resolve_rollup_rows,
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
@@ -427,9 +427,20 @@ def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
 def _group_data_to_detail_response(group: GroupData) -> ReplicateGroupDetailResponse:
     return ReplicateGroupDetailResponse(
         base_experiment_id=group.base_experiment_id,
-        parent=ReplicateGroupMember.model_validate(group.parent) if group.parent else None,
+        parent=(
+            _group_member_to_detail(GroupMemberData(experiment=group.parent))
+            if group.parent else None
+        ),
         members=[_group_member_to_detail(m) for m in group.members],
         member_count=len(group.members),
+        replicates=[
+            ReplicateLetterGroup(
+                replicate_label=letter.replicate_label,
+                vials=[_group_member_to_detail(v) for v in letter.vials],
+            )
+            for letter in group.replicates
+        ],
+        replicate_count=len(group.replicates),
         shared_conditions=group.shared_conditions,
         divergent_fields=group.divergent_fields,
         additives_summary=group.additives_summary,
@@ -584,7 +595,14 @@ def get_replicate_group(
                 Experiment.parent_experiment_fk == parent.id,
                 Experiment.replicate_label.isnot(None),
             )
-            .order_by(Experiment.replicate_label.asc())
+            .order_by(
+                Experiment.replicate_label.asc(),
+                # Gap 5: labels are not unique -- a '-t<days>' vial shares its
+                # letter with its parent vial, so without this tiebreak member
+                # order is nondeterministic.
+                Experiment.id_timepoint_days.asc().nulls_first(),
+                Experiment.experiment_number.asc(),
+            )
         ).scalars().all()
     else:
         # Orphan member: parent row doesn't exist yet; list siblings by base stem.
@@ -594,7 +612,14 @@ def get_replicate_group(
                 Experiment.base_experiment_id == base,
                 Experiment.replicate_label.isnot(None),
             )
-            .order_by(Experiment.replicate_label.asc())
+            .order_by(
+                Experiment.replicate_label.asc(),
+                # Gap 5: labels are not unique -- a '-t<days>' vial shares its
+                # letter with its parent vial, so without this tiebreak member
+                # order is nondeterministic.
+                Experiment.id_timepoint_days.asc().nulls_first(),
+                Experiment.experiment_number.asc(),
+            )
         ).scalars().all()
     return ReplicateGroupResponse(
         base_experiment_id=base,

@@ -4,9 +4,10 @@ Views are DDL created inside the test transaction (rolled back per test),
 mirroring tests/views/test_v_results_scalar_rollup.py's view_db fixture.
 """
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from database.models import Experiment, ExperimentalResults, ScalarResults
+from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 
 
@@ -246,3 +247,144 @@ class TestRollupFromHandEnteredResults:
         assert day7["mean_gross_ammonium_mM"] == pytest.approx(2.0)
         assert day14["n_replicates"] == 1
         assert day14["mean_gross_ammonium_mM"] == pytest.approx(5.0)
+
+
+class TestGroupLettersVsVials:
+    """Issue #98: the group response must distinguish replicates from vials."""
+
+    def _make_2x2(self, db_session, prefix: str, start: int):
+        n = start
+        for letter in ("a", "b"):
+            for day in (1, 3):
+                db_session.add(Experiment(
+                    experiment_id=f"{prefix}_001{letter}-t{day}",
+                    experiment_number=n, status=ExperimentStatus.ONGOING,
+                ))
+                n += 1
+        db_session.commit()
+
+    def test_reports_two_replicates_and_four_vials(self, client, db_session, reporting_views):
+        """Issue #98 AC5."""
+        self._make_2x2(db_session, "G98AC5", 9910)
+        resp = client.get("/api/experiments/groups/G98AC5_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["replicate_count"] == 2
+        assert data["member_count"] == 4          # unchanged per-vial meaning
+        assert len(data["members"]) == 4
+        assert [r["replicate_label"] for r in data["replicates"]] == ["a", "b"]
+        assert [
+            [v["experiment_id"] for v in r["vials"]] for r in data["replicates"]
+        ] == [
+            ["G98AC5_001a-t1", "G98AC5_001a-t3"],
+            ["G98AC5_001b-t1", "G98AC5_001b-t3"],
+        ]
+
+    def test_vials_carry_timepoint_and_result_count(self, client, db_session, reporting_views):
+        """Gap 6: result_count is per vial, not per letter."""
+        self._make_2x2(db_session, "G98RC", 9920)
+        vial = db_session.execute(
+            select(Experiment).where(Experiment.experiment_id == "G98RC_001a-t1")
+        ).scalar_one()
+        db_session.add(ExperimentalResults(
+            experiment_fk=vial.id,
+            time_post_reaction_days=1.0, time_post_reaction_bucket_days=1.0,
+            is_primary_timepoint_result=True, description="t1",
+        ))
+        db_session.commit()
+
+        resp = client.get("/api/experiments/groups/G98RC_001")
+        letter_a = resp.json()["replicates"][0]
+        by_id = {v["experiment_id"]: v for v in letter_a["vials"]}
+        assert by_id["G98RC_001a-t1"]["result_count"] == 1
+        assert by_id["G98RC_001a-t1"]["id_timepoint_days"] == 1.0
+        assert by_id["G98RC_001a-t3"]["result_count"] == 0
+
+    def test_single_vial_letters_still_produce_one_vial_each(self, client, db_session, reporting_views):
+        """D10 regression guard: a plain a/b/c set nests one vial per letter."""
+        for i, letter in enumerate("abc"):
+            db_session.add(Experiment(
+                experiment_id=f"G98PLAIN_001{letter}", experiment_number=9930 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        data = client.get("/api/experiments/groups/G98PLAIN_001").json()
+        assert data["replicate_count"] == 3
+        assert data["member_count"] == 3
+        assert all(len(r["vials"]) == 1 for r in data["replicates"])
+
+
+class TestGroupConditionsDivergence:
+    """Issue #98 AC8 / D5: a vial with no conditions row must not push every
+    field into divergent_fields."""
+
+    def test_missing_conditions_row_does_not_amplify_divergence(self, client, db_session, reporting_views):
+        a = Experiment(experiment_id="G98DIV_001a-t1", experiment_number=9940,
+                       status=ExperimentStatus.ONGOING)
+        b = Experiment(experiment_id="G98DIV_001b-t1", experiment_number=9941,
+                       status=ExperimentStatus.ONGOING)
+        no_cond = Experiment(experiment_id="G98DIV_001b-t3", experiment_number=9942,
+                             status=ExperimentStatus.ONGOING)
+        db_session.add_all([a, b, no_cond])
+        db_session.flush()
+        for exp in (a, b):
+            db_session.add(ExperimentalConditions(
+                experiment_fk=exp.id, experiment_id=exp.experiment_id,
+                temperature_c=90.0, experiment_type="Serum", rock_mass_g=5.0,
+            ))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/G98DIV_001").json()
+
+        assert data["shared_conditions"]["temperature_c"] == 90.0
+        assert data["shared_conditions"]["rock_mass_g"] == 5.0
+        assert "temperature_c" not in data["divergent_fields"]
+        assert "rock_mass_g" not in data["divergent_fields"]
+
+    def test_real_divergence_is_still_reported(self, db_session, client, reporting_views):
+        """D6: the comparison grain stays per-vial, so genuinely differing
+        values still surface -- including between two vials of one letter."""
+        a1 = Experiment(experiment_id="G98REAL_001a-t1", experiment_number=9950,
+                        status=ExperimentStatus.ONGOING)
+        a3 = Experiment(experiment_id="G98REAL_001a-t3", experiment_number=9951,
+                        status=ExperimentStatus.ONGOING)
+        db_session.add_all([a1, a3])
+        db_session.flush()
+        db_session.add(ExperimentalConditions(
+            experiment_fk=a1.id, experiment_id=a1.experiment_id, rock_mass_g=5.0))
+        db_session.add(ExperimentalConditions(
+            experiment_fk=a3.id, experiment_id=a3.experiment_id, rock_mass_g=5.4))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/G98REAL_001").json()
+
+        assert "rock_mass_g" in data["divergent_fields"]
+        vials = data["replicates"][0]["vials"]
+        assert {v["conditions"]["rock_mass_g"] for v in vials} == {5.0, 5.4}
+
+    def test_all_vials_missing_conditions_yields_empty_scan(self, client, db_session, reporting_views):
+        for i, letter in enumerate("ab"):
+            db_session.add(Experiment(
+                experiment_id=f"G98NONE_001{letter}", experiment_number=9960 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        data = client.get("/api/experiments/groups/G98NONE_001").json()
+        assert data["divergent_fields"] == []
+        assert data["shared_conditions"] == {}
+
+
+class TestReplicateGroupWrapperOrdering:
+    """Gap 5: /{experiment_id}/replicate-group ordered by replicate_label only,
+    so member order was nondeterministic for duplicate labels."""
+
+    def test_member_order_is_deterministic_for_duplicate_labels(self, client, db_session):
+        db_session.add(Experiment(experiment_id="G98ORD_001a-t3", experiment_number=9971,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.add(Experiment(experiment_id="G98ORD_001a-t1", experiment_number=9970,
+                                   status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        data = client.get("/api/experiments/G98ORD_001a-t1/replicate-group").json()
+        assert [m["experiment_id"] for m in data["members"]] == [
+            "G98ORD_001a-t1", "G98ORD_001a-t3",
+        ]

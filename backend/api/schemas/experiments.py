@@ -163,6 +163,16 @@ class ReplicateGroupMemberDetail(ReplicateGroupMember):
     conditions: dict[str, Any] = {}
 
 
+class ReplicateLetterGroup(BaseModel):
+    """One replicate letter and its vials (issue #98).
+
+    A letter maps to several vials when the replicate set is sacrificed per
+    timepoint: letter "a" of SERUM_001 is SERUM_001a-t1 plus SERUM_001a-t3.
+    """
+    replicate_label: str
+    vials: list[ReplicateGroupMemberDetail] = []
+
+
 class ReplicateGroupDetailResponse(BaseModel):
     """Response for GET /api/experiments/groups/{base_id}.
 
@@ -171,9 +181,17 @@ class ReplicateGroupDetailResponse(BaseModel):
     (the common case for lettered-only replicate sets).
     """
     base_experiment_id: str
-    parent: Optional[ReplicateGroupMember] = None
+    # Widened from ReplicateGroupMember (issue #98) so a parent that has its own
+    # results can render its Timepoint / Results / divergent cells instead of
+    # hard-coding em dashes.
+    parent: Optional[ReplicateGroupMemberDetail] = None
     members: list[ReplicateGroupMemberDetail] = []
+    # Per-VIAL count -- unchanged meaning, still equal to len(members).
     member_count: int = 0
+    # Issue #98: the same members grouped by replicate letter, plus the count of
+    # LETTERS. `member_count` above stays per-vial; these are additive.
+    replicates: list[ReplicateLetterGroup] = []
+    replicate_count: int = 0
     shared_conditions: dict[str, Any] = {}
     divergent_fields: list[str] = []
     additives_summary: Optional[str] = None
