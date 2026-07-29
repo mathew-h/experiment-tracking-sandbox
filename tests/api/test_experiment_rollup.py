@@ -313,6 +313,30 @@ class TestGroupLettersVsVials:
         assert data["member_count"] == 3
         assert all(len(r["vials"]) == 1 for r in data["replicates"])
 
+    def test_parent_reports_its_own_result_count(self, client, db_session, reporting_views):
+        """Regression: the parent's result_count was hardcoded 0, so a parent
+        with results displayed "0" on the group page (worse than the "--" it
+        showed before the parent field was widened)."""
+        parent = Experiment(experiment_id="G98PAR_001", experiment_number=9690,
+                            status=ExperimentStatus.ONGOING)
+        db_session.add(parent)
+        db_session.add(Experiment(experiment_id="G98PAR_001a", experiment_number=9691,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.flush()
+        for day in (1.0, 3.0):
+            db_session.add(ExperimentalResults(
+                experiment_fk=parent.id,
+                time_post_reaction_days=day, time_post_reaction_bucket_days=day,
+                is_primary_timepoint_result=True, description=f"t{day}",
+            ))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/G98PAR_001").json()
+
+        assert data["parent"]["result_count"] == 2
+        assert data["parent"]["conditions"] == {}   # deliberately not computed
+        assert data["member_count"] == 1            # parent is NOT a member
+
 
 class TestGroupConditionsDivergence:
     """Issue #98 AC8 / D5: a vial with no conditions row must not push every

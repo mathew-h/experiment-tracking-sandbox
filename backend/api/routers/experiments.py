@@ -428,7 +428,10 @@ def _group_data_to_detail_response(group: GroupData) -> ReplicateGroupDetailResp
     return ReplicateGroupDetailResponse(
         base_experiment_id=group.base_experiment_id,
         parent=(
-            _group_member_to_detail(GroupMemberData(experiment=group.parent))
+            _group_member_to_detail(GroupMemberData(
+                experiment=group.parent,
+                result_count=group.parent_result_count,
+            ))
             if group.parent else None
         ),
         members=[_group_member_to_detail(m) for m in group.members],

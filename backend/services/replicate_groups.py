@@ -82,6 +82,12 @@ class GroupData:
     additives_summary: Optional[str]
     additive_names: Optional[str]
     additives_diverge: bool
+    # The parent's own result count (issue #98 follow-up). The parent is never
+    # a member (member_count stays len(members)), but it has its own results
+    # like any experiment, and the group page renders this value directly --
+    # defaulting it to 0 would show a confident wrong count instead of the "--"
+    # shown before the parent field was widened to ReplicateGroupMemberDetail.
+    parent_result_count: int = 0
 
 
 def _fetch_members(db: Session, base_id: str) -> list[Experiment]:
@@ -239,7 +245,10 @@ def resolve_group(db: Session, base_id: str) -> GroupData:
 
     shared_conditions, divergent_fields, per_member_divergent = _compare_conditions(members)
     additives_summary, additive_names, additives_diverge = _resolve_additives(db, members)
-    result_counts = _result_counts(db, [m.id for m in members])
+    result_counts = _result_counts(
+        db,
+        [m.id for m in members] + ([parent.id] if parent is not None else []),
+    )
 
     member_data = [
         GroupMemberData(
@@ -260,6 +269,7 @@ def resolve_group(db: Session, base_id: str) -> GroupData:
         additives_summary=additives_summary,
         additive_names=additive_names,
         additives_diverge=additives_diverge,
+        parent_result_count=result_counts.get(parent.id, 0) if parent is not None else 0,
     )
 
 

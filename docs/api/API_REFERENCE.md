@@ -185,8 +185,9 @@ Replicate group detail addressed by the base-ID **string** — `base_id` need no
   header reports; a 2-letter × 2-timepoint set gives `replicate_count = 2` and
   `member_count = 4`.
 - `parent` — now a full `ReplicateGroupMemberDetail` (was the narrower
-  `ReplicateGroupMember`), so a parent with its own results reports
-  `id_timepoint_days`, `result_count`, and `conditions`.
+  `ReplicateGroupMember`). `id_timepoint_days` and `result_count` reflect the
+  parent's own row; `conditions` is always `{}` because the parent is
+  deliberately excluded from the group's divergence scan.
 - `divergent_fields` — vials with no `conditions` row are excluded from the
   comparison rather than counting as all-null, so conditions shared across the
   vials that do have rows stay in `shared_conditions`.
