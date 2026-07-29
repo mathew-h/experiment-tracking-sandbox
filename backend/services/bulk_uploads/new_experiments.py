@@ -900,10 +900,26 @@ class NewExperimentsUploadService:
                         except Exception as e:
                             warnings.append(f"[additives] Row {int(ridx)+2}: {e}")
                         finally:
+                            # savepoint.commit() (RELEASE SAVEPOINT) flushes the session first,
+                            # so a dirty instance left over by recalculate() can still fail here
+                            # even though row_ok is True. If that commit itself raises, it must
+                            # not escape this `finally` uncaught (issue #96 review finding) --
+                            # an uncaught raise here would unwind the whole additives phase for
+                            # this experiment group, reproducing the original all-or-nothing
+                            # failure mode from a different trigger point. Roll back and record
+                            # a row-scoped warning instead, exactly like an in-body failure.
+                            commit_failed = False
                             if row_ok:
-                                savepoint.commit()
+                                try:
+                                    savepoint.commit()
+                                except Exception as commit_error:
+                                    savepoint.rollback()
+                                    commit_failed = True
+                                    warnings.append(f"[additives] Row {int(ridx)+2}: {commit_error}")
                             else:
                                 savepoint.rollback()
+
+                            if not row_ok or commit_failed:
                                 # This row's savepoint rollback undid the new Compound INSERT
                                 # (if any) — evict it from the cache so a later row referencing
                                 # the same name re-queries/re-creates a fresh Compound instead of

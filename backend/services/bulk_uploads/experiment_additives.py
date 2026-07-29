@@ -122,6 +122,15 @@ class ExperimentAdditivesService:
                     order_int = None
 
                 method_text = str(method_val).strip() if method_val is not None and str(method_val).strip() != '' else None
+                # Design note: this is a non-fatal, row-scoped notice, but it is routed into
+                # `errors` (not a separate `warnings` list) per this file's original spec. The
+                # only current caller -- legacy/streamlit_frontend/bulk_uploads.py, which treats
+                # ANY non-empty `errors` as a full-batch rollback -- will therefore discard an
+                # otherwise-successful upload over a mere truncation notice. Today's blast radius
+                # is zero (that caller is retired Streamlit; this service has no FastAPI route).
+                # A future live caller of this service should treat `errors` non-fatally per-row
+                # (mirroring how new_experiments.py's API layer already treats its separate
+                # `warnings` list) rather than blanket-failing the batch on any entry.
                 if method_text and len(method_text) > ADDITION_METHOD_MAX_LENGTH:
                     errors.append(
                         f"Row {idx+2}: method truncated to {ADDITION_METHOD_MAX_LENGTH} characters (was {len(method_text)})"
@@ -155,8 +164,19 @@ class ExperimentAdditivesService:
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
             finally:
+                # savepoint.commit() (RELEASE SAVEPOINT) flushes the session first, so a dirty
+                # instance left over by recalculate() can still fail here even though row_ok is
+                # True. If that commit itself raises, it must not escape this `finally` uncaught
+                # (issue #96 review finding) -- an uncaught raise here would unwind the whole
+                # upload past this row's own isolation, reproducing the original all-or-nothing
+                # failure mode from a different trigger point. Roll back and record a row-scoped
+                # error instead, exactly like an in-body failure.
                 if row_ok:
-                    savepoint.commit()
+                    try:
+                        savepoint.commit()
+                    except Exception as commit_error:
+                        savepoint.rollback()
+                        errors.append(f"Row {idx+2}: {commit_error}")
                 else:
                     savepoint.rollback()
 

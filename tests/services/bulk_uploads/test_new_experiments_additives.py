@@ -185,3 +185,66 @@ def test_stale_compound_cache_evicted_after_row_rollback(db_session: Session, mo
     # a stale cached reference to the rolled-back row).
     compounds = db_session.query(Compound).filter(Compound.name == marker_name).all()
     assert len(compounds) == 1, f"Expected exactly one Compound row for '{marker_name}', got: {len(compounds)}"
+
+
+def test_savepoint_commit_failure_isolated_from_other_rows(db_session: Session, monkeypatch):
+    """Regression test for the final-review finding on issue #96: `savepoint.commit()` itself
+    (a RELEASE SAVEPOINT, which flushes the session first) can raise even when the row body
+    completed without exception. That failure must be caught in `finally`, rolled back, and
+    recorded as a row-scoped warning -- not allowed to escape and poison the rest of the
+    additives phase for this upload (the exact failure mode issue #96 originally fixed, just
+    from a different trigger point)."""
+    _seed_experiment(db_session, "ADD_I96_A006", 960006)
+
+    real_begin_nested = db_session.begin_nested
+    call_count = {"n": 0}
+
+    def fake_begin_nested():
+        call_count["n"] += 1
+        savepoint = real_begin_nested()
+        if call_count["n"] == 2:
+            # Row 2 (sheet row 3) is the target: force its own SAVEPOINT release to fail,
+            # simulating a post-flush error (e.g. a bad derived value) at commit time.
+            def failing_commit():
+                raise RuntimeError("Simulated SAVEPOINT commit failure")
+            monkeypatch.setattr(savepoint, "commit", failing_commit)
+        return savepoint
+
+    monkeypatch.setattr(db_session, "begin_nested", fake_begin_nested)
+
+    xlsx = make_excel_multisheet({
+        "experiments": (_EXP_HEADERS, []),
+        "additives": (_ADD_HEADERS, [
+            ["ADD_I96_A006", "Commit Fail Compound A", 5.0, "g", 1, "row 1 - must land"],
+            ["ADD_I96_A006", "Commit Fail Compound B", 3.0, "g", 2, "row 2 - commit fails"],
+            ["ADD_I96_A006", "Commit Fail Compound C", 2.0, "g", 3, "row 3 - must still land"],
+        ]),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+    assert errors == [], f"Unexpected top-level errors: {errors}"
+
+    # (a) The failure is recorded against the correct row, not silently swallowed or misattributed.
+    row2_warnings = [w for w in warnings if w.startswith("[additives] Row 3:")]
+    assert len(row2_warnings) == 1, f"Expected exactly one warning for row 2 (sheet row 3), got: {warnings}"
+    assert "Simulated SAVEPOINT commit failure" in row2_warnings[0]
+
+    # (b) The session must not be poisoned: a subsequent query must succeed cleanly.
+    count = db_session.query(Experiment).count()
+    assert count >= 1
+
+    # (c) Rows 1 and 3, in the SAME batch, must still have committed successfully.
+    surviving_names = sorted(
+        a.compound.name for a in (
+            db_session.query(ChemicalAdditive)
+            .join(Compound)
+            .filter(Compound.name.in_([
+                "Commit Fail Compound A", "Commit Fail Compound B", "Commit Fail Compound C",
+            ]))
+            .all()
+        )
+    )
+    assert surviving_names == ["Commit Fail Compound A", "Commit Fail Compound C"], (
+        f"Row 2's additive must have been rolled back by the failed commit, got: {surviving_names}"
+    )
