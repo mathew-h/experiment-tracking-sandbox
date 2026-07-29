@@ -1060,12 +1060,17 @@ class TestGroupedListMode:
         assert data["total"] == 1
         (item,) = data["items"]
         assert item["experiment_id"] == "GRP_ORPHSET_001a"
-        assert [r["replicate_label"] for r in item["replicates"]] == ["b", "c"]
+        # Issue #98 D8: `replicates` lists ALL letter-rows, including the
+        # representative's own letter, because the row is now labeled by stem
+        # and the badge must be able to read "3 replicates: a, b, c".
+        assert [r["replicate_label"] for r in item["replicates"]] == ["a", "b", "c"]
+        assert item["group_display_id"] == "GRP_ORPHSET_001"
+        assert item["replicate_letters"] == ["a", "b", "c"]
 
-    def test_timepoint_variant_shares_letter_no_dedupe(self, client, db_session):
-        """A '-t<days>' vial shares its letter with its parent vial. Grouping
-        must not dedupe by replicate_label -- both rows attach as separate
-        replicates, identified by id."""
+    def test_timepoint_variant_collapses_into_its_letter(self, client, db_session):
+        """Issue #98: a '-t<days>' vial shares its letter with its parent vial
+        and must COLLAPSE into that letter's single row -- superseding the
+        pre-#98 behavior where both attached as separate replicates."""
         _make_experiment(db_session, experiment_id="GRPT_001", number=9730)
         db_session.add(Experiment(experiment_id="GRPT_001a", experiment_number=9731,
                                    status=ExperimentStatus.ONGOING))
@@ -1078,9 +1083,13 @@ class TestGroupedListMode:
         assert data["total"] == 1
         item = data["items"][0]
         assert item["experiment_id"] == "GRPT_001"
-        replicate_ids = {r["experiment_id"] for r in item["replicates"]}
-        assert replicate_ids == {"GRPT_001a", "GRPT_001a-t7"}
-        assert [r["replicate_label"] for r in item["replicates"]] == ["a", "a"]
+        assert item["group_display_id"] == "GRPT_001"
+        assert item["replicate_letters"] == ["a"]
+        assert item["vial_count"] == 3
+        # ONE letter-row, represented by the bare vial (NULLS FIRST on timepoint).
+        assert [r["experiment_id"] for r in item["replicates"]] == ["GRPT_001a"]
+        assert item["replicates"][0]["vial_count"] == 2
+        assert item["replicates"][0]["group_display_id"] == "GRPT_001a"
 
     def test_standalone_experiment_has_no_replicates(self, client, db_session):
         _make_experiment(db_session, experiment_id="GRP_STANDALONE_001", number=9745)
@@ -1119,8 +1128,11 @@ class TestGroupedListMode:
         by_id = {i["experiment_id"]: i for i in data["items"]}
 
         group_item = by_id["GRPMIX_001a"]
+        # Issue #98 D8: `replicates` lists ALL letter-rows including the
+        # representative's own letter. The load-bearing assertion here is
+        # unchanged -- the sequential re-run GRPMIX_001-2 is still absent.
         assert {r["experiment_id"] for r in group_item["replicates"]} == {
-            "GRPMIX_001b", "GRPMIX_001c",
+            "GRPMIX_001a", "GRPMIX_001b", "GRPMIX_001c",
         }
 
         seq_item = by_id["GRPMIX_001-2"]
@@ -1248,6 +1260,118 @@ class TestGroupedListMode:
         data = resp.json()
         assert data["total"] == 2
         assert len(data["items"]) == 1
+
+    def test_grouped_2x2_is_one_row_labeled_by_stem(self, client, db_session):
+        """Issue #98 AC2: one row, badge data for 2 letters, 4 vials."""
+        self._make_2x2(db_session, "T98GR", 9860)
+        resp = client.get("/api/experiments?group_replicates=true&search=T98GR_001")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["group_display_id"] == "T98GR_001"
+        assert item["replicate_letters"] == ["a", "b"]
+        assert item["vial_count"] == 4
+        # One child row per letter -- not per vial.
+        assert [r["group_display_id"] for r in item["replicates"]] == [
+            "T98GR_001a", "T98GR_001b",
+        ]
+        assert all(r["vial_count"] == 2 for r in item["replicates"])
+
+    def test_grouped_lone_timepoint_vial_shows_its_own_stem(self, client, db_session):
+        """A single -t vial is not a group: it keeps its own letter identity
+        rather than being relabeled with the bare base stem."""
+        db_session.add(Experiment(experiment_id="T98LONE_001a-t1", experiment_number=9870,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=T98LONE_001")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["group_display_id"] == "T98LONE_001a"
+        assert item["vial_count"] == 1
+        assert item["replicates"] is None
+        assert item["replicate_letters"] is None
+
+    def test_grouped_letterless_timepoint_vial_joins_its_parent_row(self, client, db_session):
+        """A letterless -t vial buckets on its stem, so it joins the real parent
+        row instead of becoming a second row with the same displayed label."""
+        _make_experiment(db_session, experiment_id="T98LL_001", number=9880)
+        db_session.add(Experiment(experiment_id="T98LL_001-t7", experiment_number=9881,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=T98LL_001")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["group_display_id"] == "T98LL_001"
+        assert item["vial_count"] == 2
+
+    def test_grouped_no_timepoint_data_is_unchanged(self, client, db_session):
+        """Issue #98 AC4 regression guard for grouped mode."""
+        _make_experiment(db_session, experiment_id="T98GPLAIN_001", number=9890)
+        for i, letter in enumerate("ab"):
+            db_session.add(Experiment(
+                experiment_id=f"T98GPLAIN_001{letter}", experiment_number=9891 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=T98GPLAIN_001")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["experiment_id"] == "T98GPLAIN_001"
+        assert item["group_display_id"] == "T98GPLAIN_001"
+        assert item["replicate_letters"] == ["a", "b"]
+        assert item["vial_count"] == 3
+        assert [r["experiment_id"] for r in item["replicates"]] == [
+            "T98GPLAIN_001a", "T98GPLAIN_001b",
+        ]
+
+    def test_grouped_representative_skips_outlier_vial(self, client, db_session):
+        """Gap 8 / D7: an outlier vial must not supply the row's Sample and
+        Additives columns while a clean sibling exists."""
+        db_session.add(Experiment(experiment_id="T98GOUT_001a", experiment_number=9900,
+                                  status=ExperimentStatus.ONGOING, is_outlier=True))
+        db_session.add(Experiment(experiment_id="T98GOUT_001b", experiment_number=9901,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=T98GOUT_001")
+        data = resp.json()
+        (item,) = data["items"]
+        assert item["experiment_id"] == "T98GOUT_001b"
+        assert item["replicate_letters"] == ["a", "b"]
+
+    def test_grouped_pagination_with_multi_timepoint_set(self, client, db_session):
+        """Gap 7: a 2x2 set plus a standalone row is 2 pages of 1, not 5 rows."""
+        self._make_2x2(db_session, "T98GPAGE", 9700)
+        _make_experiment(db_session, experiment_id="T98GPAGE_SOLO_001", number=9709)
+        resp = client.get(
+            "/api/experiments?group_replicates=true&search=T98GPAGE&limit=1"
+        )
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["items"]) == 1
+
+    def test_grouped_letter_plus_rerun_expands_to_three_rows(self, client, db_session):
+        """D12 consequence, made explicit: the badge counts LETTERS while the
+        expansion has one row per STEM, so a letter with a sequential re-run
+        yields "2 replicates: a, b" expanding to three child rows. Rare, and
+        deliberate -- SERUM_001a-2 is not a timepoint variant of SERUM_001a."""
+        for i, suffix in enumerate(("a", "a-2", "b")):
+            db_session.add(Experiment(
+                experiment_id=f"T98D12_001{suffix}", experiment_number=9690 + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db_session.commit()
+        resp = client.get("/api/experiments?group_replicates=true&search=T98D12_001")
+        data = resp.json()
+        assert data["total"] == 1
+        (item,) = data["items"]
+        assert item["replicate_letters"] == ["a", "b"]
+        assert [r["group_display_id"] for r in item["replicates"]] == [
+            "T98D12_001a", "T98D12_001a-2", "T98D12_001b",
+        ]
 
 
 class TestCreateReplicatesEndpoint:
