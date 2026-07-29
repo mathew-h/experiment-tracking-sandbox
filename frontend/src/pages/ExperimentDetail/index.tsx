@@ -419,17 +419,27 @@ export function ExperimentDetailPage() {
         experimentId={experiment.experiment_id}
         onClose={() => setDeleteOpen(false)}
         onDeleted={() => {
+          const deletedId = experiment.experiment_id
           setDeleteOpen(false)
-          // Drop every cache keyed by this experiment's ID, so a freed
-          // experiment_id reused later cannot read back the deleted row.
-          PER_EXPERIMENT_QUERY_KEYS.forEach((key) =>
-            queryClient.removeQueries({ queryKey: [key, experiment.experiment_id] }),
-          )
-          queryClient.invalidateQueries({ queryKey: ['experiments'] })
-          queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
-          queryClient.invalidateQueries({ queryKey: ['group-rollup'] })
           success('Experiment deleted')
+          // Navigate BEFORE touching the cache. Several of the keys below are
+          // still actively observed by this page, and removing/invalidating an
+          // active query makes React Query refetch it — against an experiment
+          // that no longer exists, producing a burst of 404s in the console.
           navigate('/experiments', { replace: true })
+          // Deferred to a macrotask so the eviction lands after React has
+          // committed the navigation and unmounted this page's observers.
+          // A microtask is not enough: it can still run before that commit.
+          setTimeout(() => {
+            // Drop every cache keyed by this experiment's ID, so a freed
+            // experiment_id reused later cannot read back the deleted row.
+            PER_EXPERIMENT_QUERY_KEYS.forEach((key) =>
+              queryClient.removeQueries({ queryKey: [key, deletedId] }),
+            )
+            queryClient.invalidateQueries({ queryKey: ['experiments'] })
+            queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
+            queryClient.invalidateQueries({ queryKey: ['group-rollup'] })
+          }, 0)
         }}
       />
 
