@@ -294,12 +294,18 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
 
   // Issue #98: a row that stands for more than one experiment must not offer an
   // inline status edit -- the PATCH would silently hit only the representative
-  // vial (D3). Grouped rows carry `replicates`; collapsed flat rows carry a
-  // vial_count above 1.
+  // vial (D3). Grouped rows carry `replicates`.
   const isGroupRow = !!exp.replicates?.length
-  const isMultiVial = isGroupRow || (exp.vial_count ?? 1) > 1
   // AC1: the '-t<days>' token is an internal encoding and never reaches this page.
   const displayId = exp.group_display_id ?? exp.experiment_id
+  // Issue #98: the inline PATCH targets `exp.experiment_id`. Offer it only when
+  // the label the user sees IS that row -- otherwise the edit would silently
+  // write somewhere other than what the row appears to name. A parent-led group
+  // (label SERUM_001 == the parent's own id) therefore keeps the dropdown it had
+  // before this issue; a stem-labeled orphan set (label SERUM_001, representative
+  // SERUM_001a) and a flat collapsed row (label SERUM_001a, representative
+  // SERUM_001a-t1) do not.
+  const statusReadOnly = displayId !== exp.experiment_id
   const target = isGroupRow
     ? `/experiments/groups/${encodeURIComponent(displayId)}`
     : `/experiments/${encodeURIComponent(exp.experiment_id)}`
@@ -330,8 +336,8 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
         {exp.reactor_number ?? <span className="text-ink-muted">—</span>}
       </Td>
       <Td onClick={(e) => e.stopPropagation()}>
-        {isMultiVial ? (
-          // Read-only: this row stands for several experiments (issue #98 D3).
+        {statusReadOnly ? (
+          // Read-only: the displayed label doesn't name the row a PATCH would hit (issue #98 D3).
           exp.status ? <StatusBadge status={exp.status} /> : <span className="text-ink-muted">—</span>
         ) : (
           <div className="relative inline-block">

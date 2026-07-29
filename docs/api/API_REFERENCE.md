@@ -54,9 +54,9 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
 - A row is top-level when `replicate_label IS NULL OR parent_experiment_fk IS NULL`.
 - A lettered replicate that matches the active filters is represented by its parent row instead of itself — i.e. filtering that matches only `SERUM_001b` still pulls `SERUM_001` (the parent) into the page, with `b` attached as a child.
 - Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, `is_outlier`, and `id_timepoint_days`.
-- In grouped mode, each parent row additionally gets a `replicates` array: its lettered children (`replicate_label IS NOT NULL`, `parent_experiment_fk` pointing at this row), ordered by letter. Children are attached in full regardless of whether they individually matched the filters — that's the point of grouping. Non-parent items have `replicates: null`.
+- In grouped mode, the representative row of a real lettered group (parent-led or an orphan stem with no parent row) additionally gets a `replicates` array. Membership is resolved by matching every row's bucket key (base stem), **not** by `parent_experiment_fk`, and the array includes the representative's own letter — see *New fields* below for the exact rules and the letter + sequential-rerun caveat. Rows attach in full regardless of whether they individually matched the filters — that's the point of grouping. Non-group items have `replicates: null`.
 - `total` counts top-level rows, not raw experiment rows.
-- Flat mode (`group_replicates=false`, the default) is unchanged — every experiment row is returned individually.
+- Flat mode (`group_replicates=false`, the default) is **not** a raw pass-through: among the matched rows, any that differ only by a trailing `-t<days>` token are collapsed into one row per stem (issue #98) — e.g. `SERUM_001a-t1` and `SERUM_001a-t3` (one replicate sampled twice) render as a single row. `group_display_id` carries the collapsed label and `vial_count` the number of rows folded into it. Collapsing only ever happens among rows that passed the active filters — see *New fields* below.
 
 **New fields (letter vs vial, issue #98):**
 - `group_display_id` (string, nullable) — what the UI should render as this row's
@@ -78,7 +78,7 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
   letter that also has a sequential re-run (`SERUM_001a` plus `SERUM_001a-2`)
   contributes two entries while `replicate_letters` counts one.
 
-Example grouped item:
+Example grouped item (`group_replicates=true`) — letter `a` was sacrificed across two timepoints, letter `b` is a single flagged vial:
 ```json
 {
   "id": 210,
@@ -88,12 +88,16 @@ Example grouped item:
   "replicate_label": null,
   "is_outlier": false,
   "id_timepoint_days": null,
+  "group_display_id": "SERUM_001",
+  "vial_count": 3,
+  "replicate_letters": ["a", "b"],
   "replicates": [
-    { "id": 211, "experiment_id": "SERUM_001a-t7", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "id_timepoint_days": 7.0, "replicates": null },
-    { "id": 212, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "id_timepoint_days": null, "replicates": null }
+    { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "parent_experiment_fk": 210, "is_outlier": false, "id_timepoint_days": 1.0, "group_display_id": "SERUM_001a", "vial_count": 2, "replicates": null },
+    { "id": 213, "experiment_id": "SERUM_001b", "replicate_label": "b", "parent_experiment_fk": 210, "is_outlier": true, "id_timepoint_days": null, "group_display_id": "SERUM_001b", "vial_count": 1, "replicates": null }
   ]
 }
 ```
+`SERUM_001a-t3`, the sibling timepoint collapsed into the `SERUM_001a` child above, is not itself listed — it is folded into `vial_count: 2` on that child. `experiment_id` on the top-level item still names the group's representative row, not a rendering label; the UI renders `group_display_id`.
 
 ### GET /api/experiments/{experiment_id}/rollup
 
@@ -152,15 +156,30 @@ Replicate group detail addressed by the base-ID **string** — `base_id` need no
 
 **Auth:** Required (Firebase token)
 
-**Response `200`** (`ReplicateGroupDetailResponse`):
+**Response `200`** (`ReplicateGroupDetailResponse`) — a 2-letter set where letter `a` was sacrificed across two timepoints:
 ```json
 {
   "base_experiment_id": "SERUM_001",
-  "parent": { "id": 210, "experiment_id": "SERUM_001", "..." : "..." } ,
+  "parent": {
+    "id": 210, "experiment_id": "SERUM_001", "replicate_label": null, "status": "ONGOING", "is_outlier": false,
+    "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": {}
+  },
   "members": [
-    { "id": 211, "experiment_id": "SERUM_001a", "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": { "rock_mass_g": 5.2 } }
+    { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 1.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } },
+    { "id": 212, "experiment_id": "SERUM_001a-t3", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 3.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } },
+    { "id": 213, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING", "is_outlier": true, "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": {} }
   ],
   "member_count": 3,
+  "replicates": [
+    { "replicate_label": "a", "vials": [
+      { "id": 211, "experiment_id": "SERUM_001a-t1", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 1.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } },
+      { "id": 212, "experiment_id": "SERUM_001a-t3", "replicate_label": "a", "status": "ONGOING", "is_outlier": false, "id_timepoint_days": 3.0, "researcher": "MH", "date": "2026-03-01", "result_count": 1, "conditions": { "rock_mass_g": 5.2 } }
+    ] },
+    { "replicate_label": "b", "vials": [
+      { "id": 213, "experiment_id": "SERUM_001b", "replicate_label": "b", "status": "ONGOING", "is_outlier": true, "id_timepoint_days": null, "researcher": "MH", "date": "2026-03-01", "result_count": 4, "conditions": {} }
+    ] }
+  ],
+  "replicate_count": 2,
   "shared_conditions": { "temperature_c": 200.0 },
   "divergent_fields": ["rock_mass_g"],
   "additives_summary": "Mg(OH)2 5 g" ,

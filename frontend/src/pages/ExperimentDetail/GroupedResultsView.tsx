@@ -61,16 +61,23 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
   // sacrificed across timepoints is several rows whose single result each form
   // one time course. Outlier vials contribute no points, matching
   // v_results_scalar_rollup's exclusion so the overlay and the mean agree (D11).
+  // When EVERY vial of a letter is flagged is_outlier, the series has no points
+  // at all -- label it '(outlier)' so an empty legend entry reads as a
+  // deliberate exclusion rather than missing data. A letter with a mix of
+  // flagged and clean vials still has real points and stays unlabeled.
   const seriesLetters = useMemo(() => {
     const letters = [
-      ...(group?.parent ? [{ key: 'parent', label: 'replicate 0', vials: [group.parent] }] : []),
+      ...(group?.parent ? [{ key: 'parent', baseLabel: 'replicate 0', vials: [group.parent] }] : []),
       ...(group?.replicates ?? []).map((r) => ({
         key: r.replicate_label,
-        label: `replicate ${r.replicate_label}`,
+        baseLabel: `replicate ${r.replicate_label}`,
         vials: r.vials,
       })),
     ]
-    return letters.slice(0, chartColors.series.length)
+    return letters.slice(0, chartColors.series.length).map((letter) => {
+      const allOutliers = letter.vials.length > 0 && letter.vials.every((v) => v.is_outlier)
+      return { ...letter, label: `${letter.baseLabel}${allOutliers ? ' (outlier)' : ''}` }
+    })
   }, [group])
 
   // One fetch per vial (results are stored per experiment row), flattened into

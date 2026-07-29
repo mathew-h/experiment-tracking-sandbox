@@ -216,4 +216,32 @@ describe('GroupedResultsView — issue #98 per-letter series', () => {
     expect(link).toBeInTheDocument()
     expect(link.className).toContain('line-through')
   })
+
+  it('labels a fully-outlier letter series so an empty series reads as deliberate', async () => {
+    // Reuses the top-level beforeEach fixture: letter b is a single vial
+    // flagged is_outlier -- EVERY vial of that letter is flagged, so its
+    // series has no points at all.
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByText(/^replicate b \(outlier\)$/)).toBeInTheDocument()
+    // Letter a has no flagged vials -- no suffix.
+    expect(screen.getByText(/^replicate a$/)).toBeInTheDocument()
+  })
+
+  it('does not label a letter with a mix of flagged and clean vials', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_002', [
+        { replicate_label: 'a', vials: [
+          detailVial(1, 'SERUM_002a-t1', 1, true),
+          detailVial(2, 'SERUM_002a-t3', 3, false),
+        ] },
+      ]),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_002" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    // The drill-in link for the flagged vial itself still says "(outlier)"
+    // (D11) -- only the series/legend label for the *letter* is under test here.
+    expect(screen.getByText(/^replicate a$/)).toBeInTheDocument()
+    expect(screen.queryByText(/^replicate a \(outlier\)$/)).not.toBeInTheDocument()
+  })
 })
