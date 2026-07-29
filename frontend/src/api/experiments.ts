@@ -67,6 +67,32 @@ export interface ExperimentDetail {
   }>
 }
 
+/** Issue #99: what deleting an experiment destroys (counts) and decouples (lists).
+ *  `total` sums the counts only — the listed experiments survive. */
+export interface DeleteImpact {
+  experiment_id: string
+  results: number
+  scalar_results: number
+  icp_results: number
+  result_files: number
+  notes: number
+  additives: number
+  external_analyses: number
+  xrd_phases: number
+  change_requests: number
+  total: number
+  /** Other experiments that named this one as their ammonium background. */
+  background_for: string[]
+  /** Replicates whose parent pointer is dropped; their group ID is unaffected. */
+  replicate_children: string[]
+}
+
+export interface ExperimentDeleted {
+  experiment_id: string
+  deleted: boolean
+  impact: DeleteImpact
+}
+
 export interface ResultWithFlags {
   id: number
   experiment_fk: number
@@ -298,8 +324,15 @@ export const experimentsApi = {
       .post<ChangeRequestEntry>(`/experiments/${experimentId}/change-requests`, payload)
       .then((r) => r.data),
 
+  getDeleteImpact: (experimentId: string) =>
+    apiClient
+      .get<DeleteImpact>(`/experiments/${encodeURIComponent(experimentId)}/delete-impact`)
+      .then((r) => r.data),
+
   delete: (experimentId: string) =>
-    apiClient.delete(`/experiments/${experimentId}`).then((r) => r.data),
+    apiClient
+      .delete<ExperimentDeleted>(`/experiments/${encodeURIComponent(experimentId)}`)
+      .then((r) => r.data),
 
   getRollup: (experimentId: string) =>
     apiClient.get<RollupTimepoint[]>(`/experiments/${experimentId}/rollup`).then((r) => r.data),
