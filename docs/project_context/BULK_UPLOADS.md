@@ -46,6 +46,15 @@ You no longer put averages or standard deviations on the sheet. Enter each
 vial's own reading; the app computes the replicate mean and SD and shows them on
 the experiment group page.
 
+**The `-t<days>` token in the ID sets the timepoint.** It is the vial's elapsed
+days of record. If the `Duration (Days)` column disagrees with it, the ID wins
+and the reading is still uploaded — the disagreement appears under **Warnings**
+so you can reconcile the sheet at your leisure. This means you can keep real
+sampling dates in the Sampling sheet without a derived duration blocking the
+upload. (Hand-entered results via the Add Results modal are stricter: there a
+conflicting time is rejected outright, because a single entry has one author who
+can correct it.)
+
 **Hydrogen columns.** `FL H2 (ppm)` (Full Loop) is used whenever it has a value;
 `DI H2 (ppm)` is used only when the Full Loop cell is blank. Gas volume and
 pressure are taken from whichever block supplied the concentration, so do not
@@ -61,7 +70,7 @@ than being ignored.
 | Column | Required | Notes |
 |--------|----------|-------|
 | Experiment ID | ✓ | Must match an existing experiment |
-| Duration (Days) | ✓ | Float; rows with missing duration are skipped |
+| Duration (Days) | ✓ (column) | The **column** must exist; the **value** may be blank. Blank defers to the day in the ID's `-t<days>` token. A cell holding only spaces counts as blank — that is what the Sampling sheet's `=IF(ISBLANK([Date Started]), " ", …)` formula produces for an undated row. Blank *and* no `-t` token → the row is skipped |
 | Description | | Free text |
 | Sample Date | | Date |
 | NMR Run Date | | Date |
