@@ -1311,7 +1311,11 @@ Expected: `test_duplicate_vial_and_timepoint_is_an_error`, `test_duplicate_detec
 
 - [ ] **Step 3: Extract identity resolution**
 
-Move the ID-and-time resolution currently inline in the loop (the `split_timepoint_token` / `combine_replicate_id` / Duration block, roughly lines 136-193) into a helper placed after `_resolve_h2`:
+Move the ID-and-time resolution currently inline in the loop into a helper placed after `_resolve_h2`.
+
+**Match on content, not line numbers.** As of commit `575c51e` the block to move runs from `row_num = idx + 2` down to the end of the Duration `else:` branch (the `apply_id_timepoint` try/except) — currently lines 322-380, immediately above `description = str(row.get("Description") or "").strip() or None`. Tasks 1-3 have already shifted this region twice; verify by reading before you cut.
+
+Move it **verbatim**, comments included. The error strings, the skip-vs-error split, and the order of the three checks (blank ID → calibration standard → replicate combination → Duration) are all pinned by existing tests. The only changes are `continue` / `skipped += 1` / `errors.append(...)` becoming return values.
 
 ```python
 def _resolve_row_identity(
@@ -1381,7 +1385,11 @@ def _resolve_row_identity(
 
 - [ ] **Step 4: Restructure the loop into pre-pass plus upsert pass**
 
-Replace the head of `for idx, row in df.iterrows():` — everything from `row_num = idx + 2` down to and including the Duration block — with a resolved-rows pre-pass placed *before* the loop:
+Replace the head of `for idx, row in df.iterrows():` — everything from `row_num = idx + 2` down to and including the Duration block — with a resolved-rows pre-pass placed *before* the loop.
+
+The pre-pass goes **after** the three file-level warning blocks that Task 3 added (`stale_wide_di`, `unmapped_h2`, and the no-recognized-H2 check) and before the row loop. Those blocks stay exactly where they are; do not move or reorder them.
+
+`errors`, `warnings`, `feedbacks`, `created`, `updated` and `skipped` are already in scope — Task 3 bound the first three to the `MasterUploadResult` fields at the top of `_process_bytes`. Keep using them; do not introduce new accumulators.
 
 ```python
     # Phase 1 — resolve every row's identity, then find collisions. v3 is one
