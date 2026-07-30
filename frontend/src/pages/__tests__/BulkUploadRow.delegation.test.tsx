@@ -39,6 +39,7 @@ describe('UploadRow — onUploadSuccess override', () => {
     renderRow()
     await dropFile()
     await waitFor(() => expect(screen.getByText('Created: 5')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Upload complete/)).toBeInTheDocument())
   })
 
   it('delegates and renders no result summary when an override is supplied', async () => {
@@ -48,5 +49,6 @@ describe('UploadRow — onUploadSuccess override', () => {
     await waitFor(() => expect(onUploadSuccess).toHaveBeenCalledWith(DRY_RUN))
     expect(screen.queryByText('Created: 5')).not.toBeInTheDocument()
     expect(screen.queryByText(/Uploaded/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Upload complete/)).not.toBeInTheDocument()
   })
 })
