@@ -41,10 +41,10 @@ UPDATE experimental_conditions
 SET reactor_slot = CASE
     WHEN lower(btrim(regexp_replace(coalesce(experiment_type, ''), '\\s+', ' ', 'g')))
          IN ('core flood', 'coreflood', 'cf')
-        THEN 'CF' || lpad(reactor_number::text, 2, '0')
+        THEN 'CF' || lpad(reactor_number::text, GREATEST(2, length(reactor_number::text)), '0')
     WHEN lower(btrim(regexp_replace(coalesce(experiment_type, ''), '\\s+', ' ', 'g')))
          = 'hpht'
-        THEN 'R' || lpad(reactor_number::text, 2, '0')
+        THEN 'R' || lpad(reactor_number::text, GREATEST(2, length(reactor_number::text)), '0')
     ELSE NULL
 END
 WHERE reactor_number IS NOT NULL

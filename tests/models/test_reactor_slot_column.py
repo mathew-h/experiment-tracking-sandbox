@@ -29,17 +29,22 @@ def test_reactor_slot_column_exists_and_is_indexed(db_session: Session):
     assert "reactor_slot" in indexed
 
 
-# The SQL expression below must stay character-identical to the one in the
-# Alembic migration's upgrade(). If you change one, change both and this test
-# will tell you if they disagree.
+# The SQL expression below is structurally equivalent to the one in the
+# Alembic migration's upgrade(), not character-identical: the migration reads
+# a bare `reactor_number::text` column reference inside an UPDATE, while this
+# is a parametrized `(:rnum)::int::text` inside a SELECT so it can be driven
+# from Python for every case below. That cast is the deliberate difference.
+# What this test actually pins is semantic equivalence over real
+# experiment_type spellings and number widths — if you change one CASE,
+# change the other and this test will tell you if they disagree.
 _BACKFILL_SQL = """
 SELECT CASE
     WHEN lower(btrim(regexp_replace(coalesce(:etype, ''), '\\s+', ' ', 'g')))
          IN ('core flood', 'coreflood', 'cf')
-        THEN 'CF' || lpad((:rnum)::int::text, 2, '0')
+        THEN 'CF' || lpad((:rnum)::int::text, GREATEST(2, length((:rnum)::int::text)), '0')
     WHEN lower(btrim(regexp_replace(coalesce(:etype, ''), '\\s+', ' ', 'g')))
          = 'hpht'
-        THEN 'R' || lpad((:rnum)::int::text, 2, '0')
+        THEN 'R' || lpad((:rnum)::int::text, GREATEST(2, length((:rnum)::int::text)), '0')
     ELSE NULL
 END AS slot
 """
@@ -60,6 +65,8 @@ END AS slot
         (8, "AUTO"),
         (9, "Other"),
         (10, None),
+        (100, "HPHT"),
+        (1234, "Core Flood"),
     ],
 )
 def test_backfill_sql_matches_python_deriver(db_session: Session, rnum, etype):
