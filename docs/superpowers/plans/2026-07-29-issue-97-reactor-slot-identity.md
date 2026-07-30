@@ -1597,10 +1597,43 @@ def test_zero_reactor_number_does_not_demote_anyone(db_session: Session):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/pytest tests/services/bulk_uploads/test_new_experiments.py -q -k "demote or occupant or zero_reactor"`
-Expected: **exactly two fail** — `test_serum_row_with_reactor_number_does_not_demote_hpht_occupant` and `test_core_flood_row_does_not_demote_hpht_in_same_number`, both with `assert <ExperimentStatus.COMPLETED> == <ExperimentStatus.ONGOING>`: the occupant was wrongly demoted. That is the live bug reproducing on this path.
+**CORRECTED 2026-07-30 — the original prediction here was wrong, measured against unmodified source.**
 
-The other two (`..._still_demotes_the_occupant_of_the_same_slot`, `..._zero_reactor_number_does_not_demote_anyone`) pass already. They are regression guards, not TDD drivers, and each says so in its docstring. Do not "fix" them into failing.
+Run: `.venv/Scripts/pytest tests/services/bulk_uploads/test_new_experiments.py -q`
+
+Actual pre-change result: **1 failed, 10 passed** (1.56s). The single failure is
+`test_hpht_row_still_demotes_the_occupant_of_the_same_slot`, and only on its final
+assertion `any("R14" in m for m in info)` — the pre-change message reads
+`"Reactor 14: Auto-completed 1 …"`. The demotion itself already fires.
+
+The two tests this plan predicted would fail — the Serum cross-type and Core Flood
+cross-series cases — **pass before the change**. Task 4 already fixed them
+transitively: the fallback it added inside `manage_reactor_occupancy`
+(`experiment_status.py:401-410`) derives the slot from
+`new_experiment.conditions.experiment_type` whenever `reactor_slot` is omitted, and
+both call sites here omit it. So a Serum row already returned `(0, [])` and a Core
+Flood row already scoped to `CF01` rather than `R01`. The falsy-zero half is
+equivalent too: `if conditions.reactor_number` skipped `0` before, and
+`derive_reactor_slot(0, …) → None` skips it now.
+
+**So this task is not a live-bug fix.** What it genuinely delivers:
+1. **Explicitness** — passing `reactor_slot=` removes the dependency on a lazy
+   `.conditions` relationship load inside the service, which is fragile for a
+   freshly constructed, unflushed conditions row.
+2. **`is not None`** removes the falsy-zero footgun (same outcome, no trap for a
+   future refactor that treats `0` as truthy).
+3. **The info message names the slot**, consistent with Task 4's warnings. This is
+   the one user-visible change and the only genuine RED driver.
+
+Two consequences for the implementer, both required:
+- The Serum and Core Flood tests' docstrings must **not** claim to reproduce a live
+  bug. Write them as regression guards attributing the protection to Task 4's
+  fallback.
+- Add a test for the **auto-copy call site** (`:905`), which the Task 4 review
+  flagged as having no coverage. It reaches that branch only when the experiment has
+  a parent AND no conditions-sheet row — a workbook with a conditions sheet silently
+  takes the `:833` path instead and proves nothing. Verified outcome: the auto-copy
+  path already demoted correctly, so Task 4 introduced no defect there.
 
 - [ ] **Step 3: Gate both call sites**
 
