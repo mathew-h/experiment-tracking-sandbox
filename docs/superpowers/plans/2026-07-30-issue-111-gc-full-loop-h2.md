@@ -1182,7 +1182,7 @@ EOF
 
 Enforces the pivot. Two rows claiming the same vial at the same day are two measurements colliding on one timepoint; today the second silently overwrites the first or demotes it to non-primary. Both rows are reported and **neither** is written.
 
-This needs a pre-pass, because by the time the loop reaches the second row the first has already been committed by `create_scalar_result_ex`. Identity resolution is therefore lifted out of the loop into a helper that both phases share — do not copy the resolution logic.
+This needs a pre-pass, because a collision is only discoverable once the later row has been read, by which point the earlier row has already been flushed, counted, and given a feedback record. Identity resolution is therefore lifted out of the loop into a helper that both phases share — do not copy the resolution logic.
 
 **Files:**
 - Modify: `backend/services/bulk_uploads/master_bulk_upload.py` (extract `_resolve_row_identity`, add the pre-pass)
@@ -1640,7 +1640,7 @@ The number that matters here is **duplicate-row errors**. If v3 still contains r
 
 - [ ] **Step 4: Confirm the rollback left nothing behind**
 
-Re-run Step 1's count and confirm it is unchanged. If it moved, `create_scalar_result_ex`'s per-row commits outran the outer rollback — report that to the user before going further; do not attempt a cleanup delete.
+Re-run Step 1's count and confirm it is unchanged. If it moved, something committed inside the parse that should not have — the upload is supposed to commit only at the endpoint via `_finalize_write` — report that to the user before going further; do not attempt a cleanup delete.
 
 - [ ] **Step 5: No commit** — this task produces no tracked files.
 
@@ -1696,8 +1696,10 @@ _HEADER_ALIASES.
 `backend/services/bulk_uploads/master_bulk_upload.py`, in the Phase 1 comment above `resolved: List[...]`, currently ends with:
 
 ```python
-    # rejected, so this has to happen before any row is committed —
-    # create_scalar_result_ex commits per row.
+    # rejected. A collision is only discoverable once the LATER row has been
+    # read, by which point the earlier row has already been flushed, counted
+    # and given a feedback record — hence a pre-pass rather than an in-loop
+    # check. (The upload commits once, at the endpoint, via _finalize_write.)
 ```
 
 That claim is **false** and was inherited from an earlier draft of this plan. `create_scalar_result_ex` flushes (`backend/services/scalar_results_service.py:209`); it never commits. The upload commits once, at the endpoint, via `_finalize_write` (`backend/api/routers/bulk_uploads.py:28-37`). Per-row commits are a property of `delete_experiment_cascade` on the bulk-deletion path (issue #109), not this one. Replace those two lines with:

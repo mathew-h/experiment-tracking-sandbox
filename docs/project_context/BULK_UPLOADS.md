@@ -68,14 +68,17 @@ than being ignored.
 | ICP Run Date | | Date |
 | GC Run Date | | Date |
 | NH4 (mM) | | Ammonium concentration |
-| H2 (ppm) | | H₂ concentration in ppm vol/vol |
-| Gas Volume (mL) | | |
-| Gas Pressure (psi) | | Converted to MPa automatically |
+| FL H2 (ppm) | | Full Loop H₂ in ppm vol/vol. Takes precedence over `DI H2 (ppm)`. Also accepted: `H2 (ppm)` |
+| FL Gas Volume (mL) | | Also accepted: `Gas Volume (mL)` |
+| FL Gas Pressure (psi) | | Converted to MPa automatically. Also accepted: `Gas Pressure (psi)` |
+| DI H2 (ppm) | | Direct-injection H₂, used only when `FL H2 (ppm)` is blank. Also accepted: `DI avg H2 (ppm)` |
+| DI gas volume (mL) | | Used only when the DI reading wins |
+| DI gas pressure (psi) | | Used only when the DI reading wins |
 | Sample pH | | |
 | Sample Conductivity (mS/cm) | | |
 | Sampled Solution Volume (mL) | | Volume of production fluid collected at this timepoint (mL) |
 | Modification | | Brine modification note |
-| Overwrite | | `TRUE` / `FALSE` — overwrite existing result row at same timepoint |
+| OVERWRITE | | `TRUE` / `FALSE` — overwrite existing result row at same timepoint. Also accepted: `Overwrite` |
 
 Rows where both Experiment ID and Duration (Days) are present create or update a
 `ScalarResults` record. The calc engine re-runs for every affected row.

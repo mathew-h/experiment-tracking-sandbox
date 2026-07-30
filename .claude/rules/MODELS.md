@@ -222,10 +222,13 @@ Stores solution chemistry measurements.
   - **GC source precedence (issue #111):** `h2_concentration` holds a single ppm
     value and there is no stored notion of which GC method produced it. On a
     Master Results upload the parser picks Full Loop over direct injection and
-    writes only the winner; the discarded DI reading is reported in the upload's
-    per-row feedback (`h2_source`, `h2_di_superseded`) and is not persisted.
-    Making that a stored provenance field would be an additive `ScalarResults`
-    column and a schema-checklist run.
+    writes only the winner; the discarded DI reading is present in the upload's
+    API response (`h2_source`, `h2_di_superseded` in each row's feedback) but
+    is not persisted and is not currently surfaced in the UI — the frontend
+    types `feedbacks` (`frontend/src/api/bulkUploads.ts`) but nothing renders
+    it, so a researcher cannot see this from the app today.
+    Making the discarded reading a stored provenance field would be an
+    additive `ScalarResults` column and a schema-checklist run.
   - **One row per vial (issue #111):** the v3 Dashboard carries one row per
     unique `experiment_id`; replicate letters are separate vials with their own
     IDs, not columns. The upload rejects two rows sharing an ID and timepoint.

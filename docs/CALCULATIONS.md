@@ -125,7 +125,7 @@ h2_mass_ug    = h2_mol × 2.01588 × 1,000,000     [µg; MW H₂ = 2.01588 g/mol
 
 - Temperature fixed at 20°C (293.15 K)
 - `h2_concentration` always stored in ppm (vol/vol)
-- All three inputs required and > 0; otherwise both outputs are `None`
+- Gas volume and pressure must both be present and > 0; concentration must be present and non-negative. A concentration of exactly `0` is valid and yields `0` outputs — it is a real "no H₂ detected" reading, not a missing one.
 
 **Where the inputs come from on a Master Results upload (issue #111):** all
 three inputs are read from a single GC block. Full Loop (`FL H2 (ppm)`,
