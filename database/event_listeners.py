@@ -1,7 +1,10 @@
 import logging
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session, attributes
-from .models import ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment, ExperimentalConditions
+from .models import (
+    ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment,
+    ExperimentalConditions,
+)
 from .database import engine
 from .lineage_utils import update_experiment_lineage, update_orphaned_derivations
 
