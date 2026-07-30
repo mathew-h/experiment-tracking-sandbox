@@ -740,11 +740,21 @@ def test_zero_reactor_number_never_demotes_anyone(db_session: Session):
 
 def test_manage_reactor_occupancy_derives_slot_when_not_passed(db_session: Session):
     """The legacy Streamlit caller (legacy/streamlit_frontend/new_experiment.py:398)
-    passes no reactor_slot. It must still be scoped by series."""
+    passes no reactor_slot. It must still be scoped by series.
+
+    Seeds an occupant in BOTH the wrong slot (R05, must survive) and the right
+    slot (CF05, must be demoted), so the test can't pass by accident: marked
+    would also read 0 if slot derivation silently failed and the function's
+    None-slot early return fired instead of scoping correctly.
+    """
     from datetime import datetime
 
     hpht = _seed_experiment(
         db_session, "HPHT_SLOT_218", 97213, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=5, date=datetime(2026, 1, 1),
+    )
+    cf_occupant = _seed_experiment(
+        db_session, "CF_SLOT_305", 97215, ExperimentStatus.ONGOING, "Core Flood",
         reactor_number=5, date=datetime(2026, 1, 1),
     )
     cf = _seed_experiment(
@@ -756,6 +766,42 @@ def test_manage_reactor_occupancy_derives_slot_when_not_passed(db_session: Sessi
         db_session, cf, 5, commit=False
     )
 
-    assert marked == 0
+    assert marked == 1
     db_session.refresh(hpht)
     assert hpht.status == ExperimentStatus.ONGOING
+    db_session.refresh(cf_occupant)
+    assert cf_occupant.status == ExperimentStatus.COMPLETED
+
+
+def test_cf_spelled_type_is_occupancy_bearing(db_session: Session):
+    """'CF' is a production spelling the deleted local _OCCUPANCY_TYPES set
+    ({'hpht', 'core flood'}) would have missed. database.reactor_slot treats
+    it as occupancy-bearing (issue #97, approved widening) — confirm an
+    ONGOING experiment typed literally 'CF' contends with a 'Core Flood'-typed
+    row targeting the same numbered rig, and derives a CF.. slot."""
+    from datetime import datetime
+
+    cf_spelled = _seed_experiment(
+        db_session, "CF_SLOT_306", 97216, ExperimentStatus.ONGOING, "CF",
+        reactor_number=20, date=datetime(2026, 1, 1),
+    )
+    core_flood = _seed_experiment(
+        db_session, "CF_SLOT_307", 97217, ExperimentStatus.COMPLETED, "Core Flood",
+        reactor_number=20,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["CF_SLOT_307", "ONGOING", 20, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert len(preview.demotions) == 1
+    demotion = preview.demotions[0]
+    assert demotion.experiment_id == "CF_SLOT_306"
+    assert demotion.reactor_slot == "CF20"
+
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+    assert result.demotions_applied == 1
+    db_session.refresh(cf_spelled)
+    assert cf_spelled.status == ExperimentStatus.COMPLETED

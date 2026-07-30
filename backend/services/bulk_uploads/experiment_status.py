@@ -11,31 +11,11 @@ from sqlalchemy.orm import Session
 from database import Experiment
 from database.models import ExperimentalConditions
 from database.models.enums import ExperimentStatus
-from database.reactor_slot import (
-    derive_reactor_slot,
-    is_occupancy_type,
-    normalize_experiment_type,
-)
+from database.reactor_slot import derive_reactor_slot
 
 
 _VALID_STATUSES = {s.value for s in ExperimentStatus}
 _UNSET = object()
-
-
-def _normalize_type(experiment_type: str | None) -> str:
-    """Lowercase + collapse whitespace so 'HPHT ', 'Core  Flood', etc. compare cleanly."""
-    return normalize_experiment_type(experiment_type)
-
-
-def _is_eligible_for_occupancy(experiment_type: str | None) -> bool:
-    """True for HPHT / Core Flood — the types with physical reactor occupancy.
-
-    Delegates to database.reactor_slot so this and the reactor_slot column can
-    never disagree about what occupies a vessel (issue #97). The local
-    _OCCUPANCY_TYPES set it replaced also missed the 'CF' and 'CoreFlood'
-    spellings that exist in production data.
-    """
-    return is_occupancy_type(experiment_type)
 
 
 def _occupant_is_older(occupant_date: date | None, incoming_date: date | None) -> bool:
@@ -386,7 +366,10 @@ class ExperimentStatusService:
         calendar date) than `newer_than`; occupants with a missing date, or a date
         that is newer-or-equal, are left ONGOING with a warning instead. Omitting
         `newer_than` entirely preserves the original unconditional behavior relied
-        on by the legacy Streamlit create path.
+        on by `backend/services/bulk_uploads/new_experiments.py` (both its create
+        and auto-copy-conditions call sites omit `newer_than` and depend on
+        unconditional demotion — this is a live bulk-upload path, not just the
+        legacy Streamlit create screen) and by the legacy Streamlit create path.
 
         Args:
             db: Database session
