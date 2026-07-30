@@ -239,6 +239,71 @@ def _resolve_h2(
     )
 
 
+def _resolve_row_identity(
+    row: Any, row_num: int
+) -> Tuple[Optional[str], Optional[float], Optional[str], bool]:
+    """Resolve one Dashboard row to its (experiment_id, timepoint).
+
+    Extracted from the upsert loop so the duplicate pre-pass and the loop share
+    one implementation (issue #111). Behavior is unchanged from the inline
+    version — same skips, same error strings.
+
+    Returns (experiment_id, time_post_reaction, error_message, skip):
+      * skip=True      — intentionally passed over; count toward `skipped`
+      * error_message  — per-row error; count toward `errors`
+      * both None/False — a good row
+    """
+    exp_id = str(row.get("Experiment ID") or "").strip()
+    if not exp_id:
+        return None, None, None, True
+
+    # Skip calibration-standard rows (Issue #39)
+    if "standard" in exp_id.lower():
+        return None, None, None, True
+
+    # Split the '-t<days>' token once, up front, so both the replicate
+    # combination below and the Duration fill further down share a single
+    # split (issue #81 I1/M-fix — do not re-split exp_id later).
+    stem, id_timepoint = split_timepoint_token(exp_id)
+
+    # Optional replicate column: resolve base + letter to the sibling ID
+    # before anything downstream sees exp_id (issue #70 P3). A token ID
+    # ("SERUM_001-t7") combined with a real Replicate letter is rejected —
+    # the letter must be encoded in the ID itself (e.g. SERUM_001a-t7).
+    try:
+        combined = combine_replicate_id(
+            stem if id_timepoint is not None else exp_id, row.get("Replicate"),
+        )
+        if id_timepoint is not None and combined != stem:
+            raise ValueError(
+                "Replicate column cannot be combined with a -t<days> ID token; "
+                "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
+            )
+        if id_timepoint is None:
+            exp_id = combined
+    except ValueError as exc:
+        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False
+
+    # Issue #81: '-t<days>' in the experiment ID is canonical for the
+    # timepoint — fill a blank Duration from it, error a conflict.
+    duration_raw = row.get("Duration (Days)")
+    if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
+        if id_timepoint is None:
+            return exp_id, None, None, True
+        return exp_id, id_timepoint, None, False
+
+    time_post_reaction = _parse_float(duration_raw)
+    if time_post_reaction is None:
+        return exp_id, None, f"Row {row_num}: invalid Duration (Days) '{duration_raw}'", False
+
+    try:
+        time_post_reaction = apply_id_timepoint(id_timepoint, time_post_reaction)
+    except ValueError as exc:
+        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False
+
+    return exp_id, time_post_reaction, None, False
+
+
 def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     """
     Parse the Master Results Excel and upsert scalar results.
@@ -318,66 +383,39 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "('FL H2 (ppm)' or 'DI H2 (ppm)') — no hydrogen data was ingested."
         )
 
+    # Phase 1 — resolve every row's identity, then find collisions. v3 is one
+    # row per unique experiment ID (issue #111): two rows claiming the same
+    # vial at the same day are two readings fighting over one timepoint, and
+    # letting the later one win would destroy the earlier silently. Both are
+    # rejected, so this has to happen before any row is committed —
+    # create_scalar_result_ex commits per row.
+    resolved: List[Tuple[int, str, float, Any]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
-        exp_id = str(row.get("Experiment ID") or "").strip()
-        if not exp_id:
+        exp_id, time_post_reaction, error, skip = _resolve_row_identity(row, row_num)
+        if skip:
             skipped += 1
             continue
-
-        # Skip calibration-standard rows (Issue #39)
-        if "standard" in exp_id.lower():
-            skipped += 1
+        if error is not None:
+            errors.append(error)
             continue
+        resolved.append((row_num, exp_id, time_post_reaction, row))
 
-        # Split the '-t<days>' token once, up front, so both the replicate
-        # combination below and the Duration fill further down share a single
-        # split (issue #81 I1/M-fix — do not re-split exp_id later).
-        stem, id_timepoint = split_timepoint_token(exp_id)
+    key_counts: Dict[Tuple[str, float], int] = {}
+    for _, exp_id, time_post_reaction, _row in resolved:
+        key = (exp_id, time_post_reaction)
+        key_counts[key] = key_counts.get(key, 0) + 1
 
-        # Optional replicate column: resolve base + letter to the sibling ID
-        # before anything downstream sees exp_id (issue #70 P3). A token ID
-        # ("SERUM_001-t7") combined with a real Replicate letter is rejected —
-        # the letter must be encoded in the ID itself (e.g. SERUM_001a-t7).
-        try:
-            combined = combine_replicate_id(
-                stem if id_timepoint is not None else exp_id, row.get("Replicate"),
+    # Phase 2 — upsert what is left.
+    for row_num, exp_id, time_post_reaction, row in resolved:
+        if key_counts[(exp_id, time_post_reaction)] > 1:
+            errors.append(
+                f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
+                f"(day {time_post_reaction}). Each vial gets one row per timepoint "
+                f"— give replicates their own IDs (e.g. {exp_id}a, {exp_id}b). "
+                f"No row for this vial-day was written."
             )
-            if id_timepoint is not None and combined != stem:
-                raise ValueError(
-                    "Replicate column cannot be combined with a -t<days> ID token; "
-                    "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
-                )
-            if id_timepoint is None:
-                exp_id = combined
-        except ValueError as exc:
-            errors.append(f"Row {row_num} ({exp_id}): {exc}")
             continue
-
-        # Issue #81: '-t<days>' in the experiment ID is canonical for the
-        # timepoint — fill a blank Duration from it, error a conflict.
-        # (id_timepoint already computed above.)
-
-        duration_raw = row.get("Duration (Days)")
-        if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
-            if id_timepoint is None:
-                skipped += 1
-                continue
-            time_post_reaction = id_timepoint
-        else:
-            time_post_reaction = _parse_float(duration_raw)
-            if time_post_reaction is None:
-                errors.append(
-                    f"Row {row_num}: invalid Duration (Days) '{duration_raw}'"
-                )
-                continue
-            try:
-                time_post_reaction = apply_id_timepoint(
-                    id_timepoint, time_post_reaction,
-                )
-            except ValueError as exc:
-                errors.append(f"Row {row_num} ({exp_id}): {exc}")
-                continue
 
         description = str(row.get("Description") or "").strip() or None
         sample_date = _parse_date(row.get("Sample Date"))

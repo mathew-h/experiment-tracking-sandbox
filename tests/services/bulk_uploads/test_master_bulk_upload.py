@@ -1135,3 +1135,116 @@ def test_from_bytes_tuple_shape_unchanged(db_session: Session):
     created, updated, skipped, errors, feedbacks = out
     assert created == 1
     assert isinstance(errors, list) and isinstance(feedbacks, list)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate vial-timepoint rejection (issue #111)
+# ---------------------------------------------------------------------------
+
+def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
+    """Two rows for the same vial at the same day are both rejected.
+
+    v3 is one row per unique experiment ID. A repeated (ID, duration) pair is
+    the old wide-format habit leaking through, and silently letting the second
+    row win would destroy the first reading.
+    """
+    _seed_experiment(db_session, "SERUM_DUP01a", 8831)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP01a", 7.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP01a", 7.0, description="second", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert created == 0, "neither row may be written"
+    assert updated == 0
+    assert len(errors) == 2, f"both rows must be reported, got: {errors}"
+    assert all("SERUM_DUP01a" in e for e in errors)
+    assert any("row 2" in e.lower() for e in errors)
+    assert any("row 3" in e.lower() for e in errors)
+
+    assert (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_DUP01a")
+        .count()
+    ) == 0
+
+
+def test_same_vial_different_timepoints_is_fine(db_session: Session):
+    """The same vial at two different days is two legitimate rows."""
+    _seed_experiment(db_session, "SERUM_DUP02a", 8832)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP02a", 1.0, description="day 1", fl_h2=10.0),
+        _v3_row("SERUM_DUP02a", 3.0, description="day 3", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 2
+
+
+def test_replicate_letters_are_distinct_vials(db_session: Session):
+    """SERUM_001a/b/c at one timepoint are three rows, not a duplicate.
+
+    This is the shape the pivot exists to support: three replicate vials, each
+    with its own experiment ID, all at day 1.
+    """
+    for letter, num in (("a", 8841), ("b", 8842), ("c", 8843)):
+        _seed_experiment(db_session, f"SERUM_DUP03{letter}", num)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP03a", 1.0, fl_h2=10.0),
+        _v3_row("SERUM_DUP03b", 1.0, fl_h2=20.0),
+        _v3_row("SERUM_DUP03c", 1.0, fl_h2=30.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 3
+
+
+def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session):
+    """'SERUM_X-t7' with a blank Duration collides with 'SERUM_X' at day 7.
+
+    Duplicate detection runs on the RESOLVED (id, time) pair, not on the raw
+    cells — the -t token fills a blank Duration, so these are the same vial-day.
+    """
+    _seed_experiment(db_session, "SERUM_DUP04-t7", 8851)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP04-t7", None, description="from token", fl_h2=10.0),
+        _v3_row("SERUM_DUP04-t7", 7.0, description="explicit", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert created == 0
+    assert len(errors) == 2
+
+
+def test_duplicate_does_not_block_other_rows(db_session: Session):
+    """A duplicate pair is rejected; unrelated rows in the same file still land."""
+    _seed_experiment(db_session, "SERUM_DUP05a", 8861)
+    _seed_experiment(db_session, "SERUM_DUP05b", 8862)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP05a", 7.0, description="dup one", fl_h2=10.0),
+        _v3_row("SERUM_DUP05a", 7.0, description="dup two", fl_h2=20.0),
+        _v3_row("SERUM_DUP05b", 7.0, description="fine", fl_h2=30.0),
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert created == 1
+    assert len(errors) == 2
+    assert [f["experiment_id"] for f in feedbacks] == ["SERUM_DUP05b"]
