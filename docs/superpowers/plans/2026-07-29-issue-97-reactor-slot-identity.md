@@ -2663,6 +2663,29 @@ gh issue create --title "bug: nothing enforces one ONGOING experiment per reacto
 
 Record the returned issue number back into the file's header and into the status blockquote from Step 3. If any label does not exist on the repo, drop it rather than creating new labels.
 
+- [ ] **Step 4b: Repair references to the two deleted helpers**
+
+Task 4 deleted `_normalize_type` and `_is_eligible_for_occupancy` from
+`experiment_status.py`, and `_OCCUPANCY_TYPES` with them. Three **live** docs still
+name them as though they exist and will mislead whoever reads them next:
+
+- `docs/issues/issue-reactor-slot-identity-and-occupancy-uniqueness.md` — the source
+  issue for this branch. Note in the relevant passages that the eligibility gate is
+  now `derive_reactor_slot(...) is None` in `database/reactor_slot.py`, not a local
+  type set.
+- `docs/issues/issue-experiment-type-enum-binding.md` — an **open** follow-up ticket.
+  Most important of the three: whoever picks it up will go looking for functions that
+  no longer exist.
+- `docs/issues/audit-2026-07-28-results-and-cleanup.md` — its "settle before writing
+  the trigger" open question is framed around `_OCCUPANCY_TYPES`. Point it at
+  `_SERIES_BY_TYPE` in `database/reactor_slot.py` instead, and record that the
+  autoclave question was answered "no" on 2026-07-29.
+
+Do **not** rewrite these, which are historical records of completed work:
+`docs/superpowers/plans/2026-07-22-issue-66-experiment-status-per-row.md` and
+`docs/working/plan.md`. A finished plan describing the code as it was at the time is
+not stale — it is a record.
+
 - [ ] **Step 5: Append the issue-log entry**
 
 Append a `## 2026-07-29 | issue #97 — ...` entry at the bottom of `docs/working/issue-log.md`, following the shape of the existing entries: files changed with one-line reasons, tests added with real counts from the final run, the scope boundary (what §4 covers and why it was split), the four decisions Mat made at scope confirmation, and anything discovered-but-not-fixed. State test numbers you actually observed — do not estimate.
