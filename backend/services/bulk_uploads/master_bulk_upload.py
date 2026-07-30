@@ -35,7 +35,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
-from backend.services.result_merge_utils import apply_id_timepoint
+from backend.services.result_merge_utils import apply_id_timepoint, normalize_timepoint
 from database.experiment_id_parser import split_timepoint_token
 
 _PSI_TO_MPA = 0.00689476
@@ -269,7 +269,10 @@ def _resolve_row_identity(
       * error_message  — per-row error; count toward `errors`
       * both None/False — a good row
     """
-    exp_id = str(row.get("Experiment ID") or "").strip()
+    raw_id = row.get("Experiment ID")
+    if raw_id is None or (isinstance(raw_id, float) and pd.isna(raw_id)):
+        return None, None, None, True
+    exp_id = str(raw_id).strip()
     if not exp_id:
         return None, None, None, True
 
@@ -388,7 +391,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     if unmapped_h2:
         warnings.append(
             "Unrecognized H2 column(s) ignored: "
-            + ", ".join(f"'{c}'" for c in unmapped_h2)
+            + ", ".join(f"'{c}'" for c in sorted(unmapped_h2))
             + ". No hydrogen value was read from them — check the Dashboard "
               "headers against the parser's expected names."
         )
@@ -419,18 +422,24 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             continue
         resolved.append((row_num, exp_id, time_post_reaction, row))
 
+    # Keyed on the normalized (rounded) timepoint so 7.0 and 7.00005 — which
+    # `find_timepoint_candidates` would merge into the same result row anyway
+    # — collide here too. This narrows the gap but does not close it:
+    # normalization only rounds to 4 decimals, so two values on opposite sides
+    # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
+    # even though they fall within the ±1e-4 tolerance of each other.
     key_counts: Dict[Tuple[str, float], int] = {}
     for _, exp_id, time_post_reaction, _row in resolved:
-        key = (exp_id, time_post_reaction)
+        key = (exp_id, normalize_timepoint(time_post_reaction))
         key_counts[key] = key_counts.get(key, 0) + 1
 
     # Phase 2 — upsert what is left.
     for row_num, exp_id, time_post_reaction, row in resolved:
-        if key_counts[(exp_id, time_post_reaction)] > 1:
+        if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
             errors.append(
                 f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
-                f"(day {time_post_reaction}). Each vial gets one row per timepoint "
-                f"— give replicates their own IDs (e.g. {exp_id}a, {exp_id}b). "
+                f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "
+                f"— give each vial its own ID (e.g. SERUM_001a-t7, SERUM_001b-t7). "
                 f"No row for this vial-day was written."
             )
             continue

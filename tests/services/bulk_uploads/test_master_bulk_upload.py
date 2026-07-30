@@ -904,6 +904,40 @@ def test_di_used_when_full_loop_absent(db_session: Session):
     assert scalar.gas_sampling_pressure_MPa == pytest.approx(15.0 * _PSI_TO_MPA, rel=1e-3)
 
 
+def test_di_wins_ignores_stray_full_loop_gas_geometry(db_session: Session):
+    """When DI supplies the concentration, FL gas volume/pressure are ignored.
+
+    The mirror of test_full_loop_wins_when_both_present. _calculate_hydrogen
+    combines concentration, volume and pressure, so pairing a DI reading with
+    Full Loop geometry would describe an injection that never happened.
+    """
+    _seed_experiment(db_session, "HPHT_MIX01", 8881)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MIX01", 7.0,
+                fl_h2=None, fl_vol=3935.0, fl_psi=90.0,
+                di_h2=42.0, di_vol=10.0, di_psi=15.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_MIX01")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(42.0)
+    assert scalar.gas_sampling_volume_ml == pytest.approx(10.0), (
+        "must be DI's volume, not FL's 3935"
+    )
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(15.0 * _PSI_TO_MPA, rel=1e-3)
+
+
 def test_zero_h2_is_a_real_measurement(db_session: Session):
     """A Full Loop reading of exactly 0 ppm is stored, not treated as blank.
 
@@ -1248,3 +1282,28 @@ def test_duplicate_does_not_block_other_rows(db_session: Session):
     assert created == 1
     assert len(errors) == 2
     assert [f["experiment_id"] for f in feedbacks] == ["SERUM_DUP05b"]
+
+
+def test_blank_nan_experiment_id_is_skipped_not_duplicated(db_session: Session):
+    """An empty Experiment ID cell is a silent skip, not an experiment named "nan".
+
+    float('nan') is truthy, so `str(cell or "")` yields "nan" — blank spacer rows
+    then look like a real experiment, fail lookup, and (since #111 added collision
+    detection) collide with each other on ("nan", day). The team's real workbook
+    has 21 such rows.
+    """
+    _seed_experiment(db_session, "HPHT_NAN01", 8871)
+
+    xlsx = _master_excel_v3([
+        _v3_row(None, 7.0, description="blank spacer", nh4=1.0),
+        _v3_row(None, 7.0, description="another blank", nh4=2.0),
+        _v3_row("HPHT_NAN01", 7.0, description="real row", nh4=3.0),
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"blank rows must not produce errors: {errors}"
+    assert skipped == 2
+    assert created == 1
+    assert [f["experiment_id"] for f in feedbacks] == ["HPHT_NAN01"]
