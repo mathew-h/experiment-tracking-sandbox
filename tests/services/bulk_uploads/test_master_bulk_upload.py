@@ -1055,6 +1055,54 @@ def test_wide_di_columns_warn_about_one_row_per_vial(db_session: Session):
     assert scalar.h2_concentration is None, "wide DI values must not be guessed at"
 
 
+def test_h2s_column_is_not_reported_as_a_dropped_h2_reading(db_session: Session):
+    """'H2S (ppm)' must not be flagged as an unrecognized hydrogen column.
+
+    The warning exists so a researcher trusts it when it fires. A substring
+    match on 'h2' would also hit H2S and H2O and cry wolf about a hydrogen
+    value that was never there.
+    """
+    _seed_experiment(db_session, "HPHT_WARN07", 8827)
+
+    headers = list(_V3_HEADERS) + ["H2S (ppm)", "H2O (%)"]
+    row = _v3_row("HPHT_WARN07", 7.0, fl_h2=115.0) + [12.0, 3.0]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [row])})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert result.warnings == [], f"H2S/H2O must not warn, got: {result.warnings}"
+
+    # A genuine rename still warns — the guard narrows, it does not disable.
+    renamed = list(_V3_HEADERS)
+    renamed[renamed.index("FL H2 (ppm)")] = "GC Loop H2 ppm"
+    xlsx2 = make_excel_multisheet({"Dashboard": (renamed, [
+        _v3_row("HPHT_WARN07", 8.0, fl_h2=115.0),
+    ])})
+    result2 = MasterBulkUploadService.from_bytes_ex(db_session, xlsx2)
+    assert any("GC Loop H2 ppm" in w for w in result2.warnings)
+
+
+def test_superseded_di_flag_comes_from_the_resolver(db_session: Session):
+    """h2_di_superseded is derived from _resolve_h2's own DI parse.
+
+    Guards against the flag and the precedence decision drifting apart if the
+    DI branch later gains unit conversion or a sanity bound.
+    """
+    from backend.services.bulk_uploads.master_bulk_upload import _resolve_h2
+
+    both = {"FL H2 (ppm)": 115.0, "DI H2 (ppm)": 42.0}
+    fl_only = {"FL H2 (ppm)": 115.0, "DI H2 (ppm)": None}
+    di_only = {"FL H2 (ppm)": None, "DI H2 (ppm)": 42.0}
+    neither = {"FL H2 (ppm)": None, "DI H2 (ppm)": None}
+
+    assert _resolve_h2(both)[3:] == ("full_loop", 42.0)
+    assert _resolve_h2(fl_only)[3:] == ("full_loop", None)
+    assert _resolve_h2(di_only)[3:] == ("di", 42.0)
+    assert _resolve_h2(neither)[3:] == (None, None)
+
+
 def test_feedback_records_which_gc_block_was_used(db_session: Session):
     """Each row reports its H2 source so a discarded DI reading is visible."""
     _seed_experiment(db_session, "HPHT_WARN04", 8824)

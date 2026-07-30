@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -50,6 +51,10 @@ _HEADER_ALIASES: Dict[str, str] = {
     "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
     "replicate": "Replicate",
 }
+
+# H2 as a standalone token, so 'H2S (ppm)' and 'H2O' never look like a dropped
+# hydrogen column while a real rename ('GC Loop H2 ppm') still does.
+_H2_TOKEN = re.compile(r"\bh2\b", re.IGNORECASE)
 
 # Columns whose header mentions H2 and that the parser deliberately handles.
 _RECOGNIZED_H2_COLUMNS = {
@@ -182,7 +187,7 @@ def _find_sheet(xls: pd.ExcelFile) -> Optional[str]:
 
 def _resolve_h2(
     row: Any,
-) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str]]:
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str], Optional[float]]:
     """Pick the winning GC reading for one Dashboard row (issue #111).
 
     Full Loop takes precedence over direct injection (Mat, 2026-07-30); DI is
@@ -195,9 +200,15 @@ def _resolve_h2(
     A value of 0 is a real measurement and wins normally; only a blank cell
     falls through.
 
-    Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source), where source is
-    'full_loop', 'di', or None when neither block has a concentration.
+    Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source, di_ppm), where
+    source is 'full_loop', 'di', or None when neither block has a
+    concentration. di_ppm is this row's own DI parse, returned whether or not
+    DI won — callers that need to know whether a DI reading was superseded
+    read it from here rather than re-parsing the cell themselves, so that
+    decision can never drift from the precedence choice made above.
     """
+    di_ppm = _parse_float(row.get("DI H2 (ppm)"))
+
     fl_ppm = _parse_float(row.get("FL H2 (ppm)"))
     if fl_ppm is not None:
         return (
@@ -205,15 +216,16 @@ def _resolve_h2(
             _parse_float(row.get("FL Gas Volume (mL)")),
             _parse_float(row.get("FL Gas Pressure (psi)")),
             "full_loop",
+            di_ppm,
         )
 
-    di_ppm = _parse_float(row.get("DI H2 (ppm)"))
     if di_ppm is not None:
         return (
             di_ppm,
             _parse_float(row.get("DI gas volume (mL)")),
             _parse_float(row.get("DI gas pressure (psi)")),
             "di",
+            di_ppm,
         )
 
     # No concentration in either block. Keep reading the Full Loop gas columns
@@ -223,6 +235,7 @@ def _resolve_h2(
         _parse_float(row.get("FL Gas Volume (mL)")),
         _parse_float(row.get("FL Gas Pressure (psi)")),
         None,
+        di_ppm,
     )
 
 
@@ -280,9 +293,14 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
               "reading in 'DI H2 (ppm)'."
         )
 
+    # Match H2 only as a standalone token. A substring test would also fire on
+    # an H2S or H2O column, telling a researcher a hydrogen reading was dropped
+    # when none was — a false alarm in exactly the place this warning is meant
+    # to be trustworthy. A genuine rename keeps H2 as its own token
+    # ('GC Loop H2 ppm'), so detection is unaffected.
     unmapped_h2 = [
         c for c in df.columns
-        if "h2" in c.lower()
+        if _H2_TOKEN.search(c)
         and c not in _RECOGNIZED_H2_COLUMNS
         and c not in _WIDE_DI_COLUMNS
     ]
@@ -369,7 +387,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         xrd_run_date = _parse_date(row.get("XRD Run Date"))
 
         nh4_mm = _parse_float(row.get("NH4 (mM)"))
-        h2_ppm, gas_vol_ml, gas_psi, h2_source = _resolve_h2(row)
+        h2_ppm, gas_vol_ml, gas_psi, h2_source, di_ppm = _resolve_h2(row)
         gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
@@ -418,10 +436,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                 "experiment_id": exp_id,
                 "action": action,
                 "h2_source": h2_source,
-                "h2_di_superseded": (
-                    h2_source == "full_loop"
-                    and _parse_float(row.get("DI H2 (ppm)")) is not None
-                ),
+                # di_ppm comes from _resolve_h2's own parse — re-reading the
+                # cell here would let this flag drift from the precedence
+                # decision if the DI branch ever gains filtering.
+                "h2_di_superseded": h2_source == "full_loop" and di_ppm is not None,
             })
 
         except ValueError as exc:
