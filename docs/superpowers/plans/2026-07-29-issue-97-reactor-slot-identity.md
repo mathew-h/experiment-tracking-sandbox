@@ -2516,29 +2516,35 @@ with:
     // dropdown snaps back and the user is told nothing. The server's detail
     // names the occupying experiment and its start date, so show it verbatim.
     onError: (err: unknown) => {
-      error(extractErrorDetail(err, 'Could not update status'))
+      toastError(err.message || 'Could not update status')
     },
   })
 ```
 
-Add `error` from the page's existing `useToast()` destructuring (`ReactorGrid.tsx` already imports `useToast` for the inline date edit added in #30 — reuse that, do not add a second hook call inside a different component; if the mutation lives in a component that does not already call `useToast`, add the call at the top of that component).
+**Do NOT write a detail-extraction helper.** `frontend/src/api/client.ts:11-23` already installs an
+Axios response interceptor that copies FastAPI's `detail` onto `error.message`
+(flattening a validation-error array to a comma-joined string). So by the time any
+mutation's `onError` runs, the 409's detail is already `err.message`. The correct
+handler is therefore just:
 
-Apply the same `onError` to `ExperimentList.tsx`'s `statusMutation` (lines 313-317), adding a `useToast()` call to that page if it has none.
-
-Add the shared helper. If `frontend/src/api/` already has an error-detail extractor, use it; grep for `response?.data?.detail` first. If none exists, create `frontend/src/utils/errorDetail.ts`:
-
-```ts
-/** Pull FastAPI's `detail` off an Axios error, falling back to a supplied message.
- *
- * Used for the 409 the reactor-occupancy check raises (issue #97): the server
- * message names the occupying experiment and its start date, which is the only
- * actionable part.
- */
-export function extractErrorDetail(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  return typeof detail === 'string' && detail.length > 0 ? detail : fallback
-}
+```tsx
+    onError: (err: Error) => {
+      toastError(err.message || 'Could not update status')
+    },
 ```
+
+An `extractErrorDetail` util would duplicate the interceptor and give two competing
+answers to the same question. (Five components do extract `response.data.detail`
+inline, but for non-toast purposes; none of them is a precedent to follow here.)
+
+`ReactorGrid.tsx` already imports `useToast` at line 4 and destructures
+`{ success, error: toastError }` at line 269 — but that is in a **different
+component**. The mutation you are changing lives in `StatusBadge` (around line 64),
+which has no `useToast()` call of its own; add one there. Do not reach for the
+other component's binding.
+
+`ExperimentList.tsx` has no `useToast` at all — add the import and the hook call to
+that page.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2557,7 +2563,7 @@ Expected: exactly the 5 known pre-existing errors — `src/components/CompoundFo
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/pages/ReactorGrid.tsx frontend/src/pages/ExperimentList.tsx frontend/src/utils/errorDetail.ts frontend/src/pages/__tests__/ReactorGrid.test.tsx frontend/src/pages/__tests__/ExperimentList.test.tsx
+git add frontend/src/pages/ReactorGrid.tsx frontend/src/pages/ExperimentList.tsx frontend/src/pages/__tests__/ReactorGrid.test.tsx frontend/src/pages/__tests__/ExperimentList.test.tsx
 git commit -m "[#97] Surface reactor occupancy 409 in the UI
 
 - Both status mutations had no onError at all
