@@ -522,6 +522,72 @@ def test_invalid_replicate_is_per_row_error(db_session: Session):
 # ID-encoded timepoints (issue #81)
 # ---------------------------------------------------------------------------
 
+def test_whitespace_duration_counts_as_blank_and_defers_to_the_id(db_session: Session):
+    """A Duration of ' ' is blank, so the '-t' token supplies the day.
+
+    The Dashboard's Duration column mirrors the Sampling sheet, whose formula is
+    `=IF(ISBLANK([Date Started]), " ", D-C)` — an undated row therefore arrives
+    as a single SPACE, not an empty cell. Treating it as a number produced
+    `invalid Duration (Days) ' '` on all 36 rows of a real sheet whose
+    timepoints had deliberately been left blank.
+    """
+    _seed_experiment(db_session, "SERUM_WS_001a-t3", 8901)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_WS_001a-t3", " ", description="undated row", nh4=1.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"a space must not be an invalid Duration: {errors}"
+    assert created == 1
+    assert skipped == 0
+
+    result = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_WS_001a-t3")
+        .one()
+    )
+    assert result.time_post_reaction_days == 3.0
+
+
+def test_whitespace_duration_without_a_token_is_skipped(db_session: Session):
+    """Blank Duration and no '-t' token: nothing identifies the timepoint, so
+    the row is skipped silently — same as a genuinely empty cell."""
+    _seed_experiment(db_session, "SERUM_WS_002", 8902)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_WS_002", "  ", description="no day anywhere", nh4=1.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == []
+    assert created == 0
+    assert skipped == 1
+
+
+def test_non_numeric_duration_is_still_an_error(db_session: Session):
+    """Only whitespace is blank. A real non-numeric value is still reported —
+    the fix must not swallow genuinely bad data."""
+    _seed_experiment(db_session, "SERUM_WS_003a-t3", 8903)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_WS_003a-t3", "three", description="typo", nh4=1.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert created == 0
+    assert len(errors) == 1
+    assert "invalid Duration (Days)" in errors[0]
+    assert "three" in errors[0]
+
+
 def test_master_blank_duration_filled_from_id(db_session: Session):
     """A -t7 ID with an empty Duration (Days) cell is no longer skipped —
     the result lands at day 7."""

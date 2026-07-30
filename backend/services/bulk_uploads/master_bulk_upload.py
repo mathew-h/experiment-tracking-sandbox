@@ -255,6 +255,30 @@ def _resolve_h2(
     )
 
 
+def _is_blank_duration(val: Any) -> bool:
+    """True when the Duration cell carries no timepoint at all.
+
+    A blank Duration is how a researcher defers to the '-t<days>' token in the
+    experiment ID, so what counts as "blank" has to match what the spreadsheet
+    can actually produce. The Dashboard's Duration column is a formula mirroring
+    the Sampling sheet, whose own formula is
+    `=IF(ISBLANK([Date Started]), " ", D-C)` — so an undated row arrives as a
+    **single space**, not as an empty cell. Treating that as a number produced
+    `invalid Duration (Days) ' '` on every row of a sheet whose timepoints were
+    deliberately left blank.
+
+    An empty string is included for the same reason: a formula returning `""`
+    is the other common way Excel expresses "nothing here".
+    """
+    if val is None:
+        return True
+    if isinstance(val, float) and pd.isna(val):
+        return True
+    if isinstance(val, str) and not val.strip():
+        return True
+    return False
+
+
 def _resolve_row_identity(
     row: Any, row_num: int
 ) -> Tuple[Optional[str], Optional[float], Optional[str], bool]:
@@ -311,7 +335,7 @@ def _resolve_row_identity(
     # Issue #81: '-t<days>' in the experiment ID is canonical for the
     # timepoint — fill a blank Duration from it, error a conflict.
     duration_raw = row.get("Duration (Days)")
-    if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
+    if _is_blank_duration(duration_raw):
         if id_timepoint is None:
             return exp_id, None, None, True
         return exp_id, id_timepoint, None, False

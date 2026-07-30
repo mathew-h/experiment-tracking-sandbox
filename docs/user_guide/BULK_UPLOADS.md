@@ -61,7 +61,7 @@ than being ignored.
 | Column | Required | Notes |
 |--------|----------|-------|
 | Experiment ID | ✓ | Must match an existing experiment |
-| Duration (Days) | ✓ | Float; rows with missing duration are skipped |
+| Duration (Days) | ✓ | Float. Leave it blank to use the day encoded in the experiment ID's `-t<days>` token. A cell holding only spaces counts as blank — that is what the Sampling sheet's `=IF(ISBLANK([Date Started]), " ", …)` formula produces for an undated row. Blank with no `-t` token in the ID → the row is skipped |
 | Description | | Free text |
 | Sample Date | | Date |
 | NMR Run Date | | Date |
