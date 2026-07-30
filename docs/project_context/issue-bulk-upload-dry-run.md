@@ -3,6 +3,69 @@
 **Type:** feat
 **Area:** backend (`backend/services/bulk_uploads/`, `routers/bulk_uploads.py`), frontend (`BulkUploads.tsx`, `BulkUploadRow.tsx`)
 **Priority:** high
+**Status:** CLOSED 2026-07-29 — all 9 proposal items shipped; 2 acceptance criteria split out to #107 and #108
+
+---
+
+## Closure (2026-07-29)
+
+All nine numbered proposal items below shipped and merged to `develop`. Five of the
+seven acceptance criteria are met. The remaining two were split into their own issues
+rather than held open under this one, on the user's call.
+
+**Shipped, in order:**
+
+| Item | What | Merged |
+|---|---|---|
+| 3 | explicit conflict on `old_experiment_id` with falsy `overwrite` (per-row skip) | `dbf959d` |
+| 1 | `dry_run: bool = Form(False)` on all 13 endpoints; router decides commit-vs-rollback | `b2b4eab` |
+| 2 | structured `UploadPlan` with `fields_changed`, `new-experiments` only | `9b14d65` |
+| 4, 5 | conflicts reject the whole file; `plan_hash` preview→commit handshake | `5d342e0` |
+| 6–9 | preview-first New Experiments UI (`UploadPlanPanel`, `UploadPlanModal`, `NewExperimentsUploadRow`) | `0b122b8` |
+
+**Acceptance criteria at close:** 2, 3, 4, 5 and 7 met. Criterion 1 met only in part
+(`dry_run` on all 13 endpoints, `plan` on 1) → **#107**
+(`issue-upload-plan-all-endpoints.md`). Criterion 6 (SERUM_Catalyst replay) unmeetable
+as worded — both workbooks are gitignored and absent, the only dump on disk predates the
+incident by two months, and the old→new ID mapping is recorded nowhere → **#108**
+(`issue-serum-catalyst-rename-replay.md`), which documents what *is* recoverable.
+
+**Two decisions worth carrying forward:**
+
+- **`plan_hash` is verified-when-supplied, not required** (deviation from item 5's
+  wording, user-confirmed). Requiring it unconditionally would break every existing
+  caller and contradict criterion 7. The UI always sends it, so the preview path gets
+  the full guarantee at zero blast radius. A side effect stronger than the stated
+  intent: because `overwrites[].fields_changed` records current DB values as `old`, the
+  fingerprint covers **database state as well as file bytes** — it also catches another
+  researcher editing the underlying experiments between preview and commit.
+- **The endpoint returns HTTP 200 for success, gate rejection *and* parser crash**, so
+  the client discriminates structurally on
+  `plan.conflicts.length > 0 || plan_hash !== sentHash`. It deliberately does **not**
+  key on `errors.length > 0`: the success path returns the parser's own row-level errors
+  alongside a real commit, so an `errors`-based check would report "nothing was applied"
+  about a file that applied 8 of 10 rows.
+
+**One process lesson, from three defects reviews caught in items 6–9:** the spec
+specified UI *views* without enumerating which response fields the server actually
+populates and where each surfaces. `new_experiments.py` has ~30 `warnings.append` sites
+against 5 plan-recording sites, so the plan does not mirror the warnings — an ignored
+additives sheet was invisible at preview, and a missing `experiments` sheet returned an
+error with a non-null *empty* plan offering an enabled "Commit 0 changes". For the next
+spec against a 200-for-everything endpoint, write the field-by-field table at design
+time.
+
+**Known gaps at close, not covered by #107 or #108:**
+
+- The legacy Streamlit uploader (`legacy/streamlit_frontend/bulk_uploads.py`) calls
+  `bulk_upsert_from_excel` directly and is covered by neither the plan gate nor the hash
+  handshake.
+- Playwright `02-bulk-upload-experiments.spec.ts` cannot execute on any clean checkout —
+  its fixture `docs/sample_data/new_experiments_template.xlsx` is gitignored and absent.
+  Pre-existing; documented in a comment at the top of the spec.
+- On a conflict preview the same message renders three times (server `errors`, server
+  `warnings`, and the plan's `conflicts` section) because it arrives in three response
+  fields. Repetitive, not wrong.
 
 ---
 
@@ -189,13 +252,13 @@ runs too late to be useful.
 
 ## Acceptance criteria
 
-- [ ] `dry_run=true` on every bulk upload endpoint returns a plan and leaves the database byte-identical (verify with a row-count and `max(updated_at)` check before/after)
-- [ ] A rename workbook with `overwrite` blank produces a conflict naming both IDs, and commit is blocked
-- [ ] A rename workbook with `overwrite=TRUE` and a genuine target collision reports `CHAIN RENAME CONFLICT` at preview time, with the suggested row ordering
-- [ ] Overwrite rows list every changed field with old and new values
-- [ ] Editing the file between preview and commit fails the plan-hash check
-- [ ] Replaying the two 2026-07-28 SERUM_Catalyst workbooks against a snapshot of the pre-incident database yields a plan of 80 renames and 0 creates
-- [ ] Existing bulk upload tests pass unchanged with `dry_run` defaulting to false
+- [~] `dry_run=true` on every bulk upload endpoint returns a plan and leaves the database byte-identical (verify with a row-count and `max(updated_at)` check before/after) — **partial:** `dry_run` and the byte-identical guarantee on all 13; `plan` on `new-experiments` only → **#107**
+- [x] A rename workbook with `overwrite` blank produces a conflict naming both IDs, and commit is blocked
+- [x] A rename workbook with `overwrite=TRUE` and a genuine target collision reports `CHAIN RENAME CONFLICT` at preview time, with the suggested row ordering
+- [x] Overwrite rows list every changed field with old and new values
+- [x] Editing the file between preview and commit fails the plan-hash check
+- [ ] Replaying the two 2026-07-28 SERUM_Catalyst workbooks against a snapshot of the pre-incident database yields a plan of 80 renames and 0 creates — **unmeetable as worded** (workbooks and pre-incident snapshot both absent) → reconstructed equivalent in **#108**
+- [x] Existing bulk upload tests pass unchanged with `dry_run` defaulting to false
 
 ## Notes
 
