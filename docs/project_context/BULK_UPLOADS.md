@@ -139,6 +139,23 @@ The calc engine recalculates H₂ yield, g/t yield, and ammonium yield after eac
 
 Creates `Experiment` records and optional `ExperimentalConditions` rows in bulk.
 
+### Preview before it writes
+
+Dropping a file here does not change anything. It runs the upload against the database
+and then rolls it back, so what you get is a **plan**: every experiment that would be
+created, every rename, every field that would be overwritten (with its current value
+next to the new one), and every row that would be skipped. Nothing is written until you
+press **Commit**.
+
+If the plan contains a conflict — most commonly an `old_experiment_id` filled in without
+`overwrite=TRUE`, which would silently create a duplicate instead of renaming — Commit is
+disabled and the whole file is refused. Fix the workbook and drop it again.
+
+Between previewing and committing, the plan is pinned by a fingerprint. If the workbook
+changes on disk, or another researcher edits one of the experiments the plan would
+overwrite, the commit is refused and you are shown the new plan to review before you can
+proceed.
+
 The expanded card shows **Next ID chips** (e.g. "Next HPHT: 072 · Next Serum: 043 · Next CF: 008")
 so you can fill the template with the correct experiment IDs before uploading.
 

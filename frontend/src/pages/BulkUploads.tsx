@@ -4,6 +4,7 @@ import { Select } from '@/components/ui'
 import { bulkUploadsApi, NextIds } from '@/api/bulkUploads'
 import { UploadRow, IconChevron } from './BulkUploadRow'
 import { ActlabsUploadRow } from './ActlabsUploadRow'
+import { NewExperimentsUploadRow } from './NewExperimentsUploadRow'
 
 // ─── Next-ID chips (New Experiments card) ────────────────────────────────────
 function NextIdChips({ data }: { data: NextIds | undefined }) {
@@ -255,15 +256,8 @@ export function BulkUploadsPage() {
           onToggle={() => toggle('xrd-mineralogy')}
         />
 
-        {/* 4 — New Experiments */}
-        <UploadRow
-          id="new-experiments"
-          title="New Experiments"
-          description="Bulk-create experiments from a structured Excel template"
-          helpText="Use the template for correct column formatting. The file must have an 'experiments' sheet; a 'conditions' sheet is optional. Replicates: write a lowercase letter after the number (SERUM_001a, _001b, _001c) — the bare SERUM_001 (or SERUM_001-0) is replicate 0, the group parent. Replicate timepoints are separate vials: encode the sample day in the ID with -t<days> (SERUM_001a-t0, SERUM_001a-t7, decimals allowed like -t0.5). The day is locked to the ID for all results."
-          accept=".xlsx,.xls"
-          uploadFn={(file) => bulkUploadsApi.uploadNewExperiments(file)}
-          templateType="new-experiments"
+        {/* 4 — New Experiments — preview-first (issue #100 items 6-9) */}
+        <NewExperimentsUploadRow
           topContent={<NextIdChips data={nextIds} />}
           prominent
           isOpen={isOpen('new-experiments')}
