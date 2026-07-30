@@ -843,9 +843,18 @@ def set_reactor_slot(mapper, connection, target):
 
     Issue #97. A mapper-level listener rather than per-write-site assignment,
     because "every path that writes reactor_number must remember to also update
-    the slot" is precisely the failure mode the column exists to eliminate. This
-    covers both bulk-upload parsers, the conditions router, the legacy Streamlit
-    app and the database/data_migrations/ scripts with one hook.
+    the slot" is precisely the failure mode the column exists to eliminate.
+
+    This fires for every path that loads an ExperimentalConditions instance and
+    mutates its attributes: both bulk-upload parsers, the conditions router,
+    experimental_conditions_service.py, and the legacy Streamlit app.
+
+    It does NOT fire for a bulk Query.update() / Core UPDATE, which compiles to
+    SQL without per-row mapper events. database/data_migrations/
+    swap_reactor_4_7_015.py:96-109 is the existing precedent for that idiom. A
+    script changing reactor_number or experiment_type that way must either avoid
+    Query.update() for those columns or recompute reactor_slot explicitly in the
+    same script, or it will silently leave the slot stale.
 
     Same pattern as calculate_additive_derived_values above: mutating a column
     attribute in before_insert/before_update is included in the emitted
@@ -2533,6 +2542,7 @@ In the `### ExperimentalConditions` section of `.claude/rules/MODELS.md`, add un
     - **Derived — never set it by hand.** `database/reactor_slot.py::derive_reactor_slot` is the only definition of the mapping; the `before_insert`/`before_update` listener `set_reactor_slot` in `database/event_listeners.py` writes it on every ORM write. A direct assignment is overwritten on the next flush.
     - **This is the key for every occupancy comparison** (issue #97). `reactor_number` alone conflates `R01` with `CF01` — two different vessels sharing the number 1 — which let a Core Flood going ONGOING silently set a running HPHT to COMPLETED. Sites now keyed on it: `experiment_status.py` (both occupant queries and the same-file conflict map), `new_experiments.py` (both occupancy call sites), `PATCH /api/experiments/{id}/status`, `dashboard.py` (reactor cards and `/reactor-status`), `notion_sync/import_.py`, `notion_sync/export.py`.
     - **Pre-flush caveat:** the listener runs *during* flush, so code that has just assigned a new `reactor_number` must call `derive_reactor_slot(...)` rather than read `.reactor_slot`. Production `SessionLocal` sets `autoflush=False`.
+    - **Bulk-update caveat:** the listener does NOT fire for a bulk `Query.update()` / Core `UPDATE`, which compiles to SQL without per-row mapper events. `database/data_migrations/swap_reactor_4_7_015.py:96-109` is the existing precedent for that idiom (it predates this column, and the Task 2 backfill left the DB self-consistent). Any future script changing `reactor_number` or `experiment_type` that way must either avoid `Query.update()` for those columns or recompute `reactor_slot` explicitly in the same script. Every other write path in the codebase loads an ORM instance and mutates attributes, which does fire the listener.
     - `reactor_number` is retained unchanged — Power BI views, `database/data_migrations/swap_reactor_4_7_015.py` and the `GET /api/experiments?reactor_number=` filter all read it.
     - **Still not enforced:** nothing prevents two ONGOING experiments sharing a `reactor_slot`. The one-ONGOING-per-slot trigger and `CHECK (reactor_number > 0)` are tracked in `docs/issues/issue-reactor-occupancy-uniqueness-trigger.md`, blocked on the cleanup in `docs/issues/audit-2026-07-28-results-and-cleanup.md`. Until then the `seen_labels` dedup at `dashboard.py:126-140` still hides a double-booked slot from the grid, and `summary.reactors.empty` reads one too high per double-booking.
 ```
