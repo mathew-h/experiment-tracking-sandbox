@@ -614,21 +614,53 @@ def test_master_blank_duration_filled_from_id(db_session: Session):
     assert result.time_post_reaction_days == 7.0
 
 
-def test_master_conflicting_duration_errors_row(db_session: Session):
-    """A -t7 ID with Duration = 3.0 is a per-row error; nothing is created."""
+def test_master_conflicting_duration_warns_and_the_id_wins(db_session: Session):
+    """A -t7 ID with Duration = 3.0 uploads at day 7, with a warning.
+
+    Behaviour changed 2026-07-30 (Mat): the '-t<days>' token IS the vial's
+    elapsed days, so it wins outright rather than the row being rejected. The
+    Duration column on the real sheet is a formula derived from sampling dates,
+    and letting it veto the ID rejected an entire sheet's readings over
+    provenance the ID already settles. Note this deliberately diverges from
+    POST /api/results, which still 400s on the same conflict.
+    """
     _seed_experiment(db_session, "SERUM_091a-t7", 8191)
 
     xlsx = _master_excel([
         ["SERUM_091a-t7", 3.0, "wrong day", None, None, None, None,
          2.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
-        db_session, xlsx
-    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
-    assert created == 0
-    assert len(errors) == 1
-    assert "canonical" in errors[0]
+    assert result.errors == [], f"a conflict must no longer reject the row: {result.errors}"
+    assert result.created == 1
+    assert len(result.warnings) == 1
+    assert "disagrees with the ID's -t token" in result.warnings[0]
+
+    row = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_091a-t7")
+        .one()
+    )
+    assert row.time_post_reaction_days == 7.0, "the ID's day, not the column's 3.0"
+
+
+def test_post_results_still_rejects_a_conflicting_timepoint():
+    """The shared helper is unchanged — only the bulk path became permissive.
+
+    POST /api/results has a single author who can correct the entry, so a
+    conflict there is still a hard 400. Guards against a future refactor
+    'simplifying' the two paths back together.
+    """
+    import pytest as _pytest
+
+    from backend.services.result_merge_utils import apply_id_timepoint
+
+    with _pytest.raises(ValueError, match="canonical"):
+        apply_id_timepoint(7.0, 3.0)
+    assert apply_id_timepoint(7.0, None) == 7.0
+    assert apply_id_timepoint(None, 3.0) == 3.0
 
 
 def test_master_matching_duration_accepted(db_session: Session):

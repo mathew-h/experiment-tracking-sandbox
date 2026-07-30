@@ -35,7 +35,10 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
-from backend.services.result_merge_utils import apply_id_timepoint, normalize_timepoint
+from backend.services.result_merge_utils import (
+    TIMEPOINT_TOLERANCE_DAYS,
+    normalize_timepoint,
+)
 from database.experiment_id_parser import split_timepoint_token
 
 _PSI_TO_MPA = 0.00689476
@@ -288,10 +291,11 @@ def _resolve_row_identity(
     one implementation (issue #111). Behavior is unchanged from the inline
     version — same skips, same error strings.
 
-    Returns (experiment_id, time_post_reaction, error_message, skip):
+    Returns (experiment_id, time_post_reaction, error_message, skip, warning):
       * skip=True      — intentionally passed over; count toward `skipped`
       * error_message  — per-row error; count toward `errors`
-      * both None/False — a good row
+      * warning        — the row still uploads, but say something about it
+      * error None / skip False — a good row
     """
     raw_id = row.get("Experiment ID")
     # A numeric 0 in this column is a stale/blank Excel formula cache, never a
@@ -300,14 +304,14 @@ def _resolve_row_identity(
     if (raw_id is None
             or (isinstance(raw_id, float) and pd.isna(raw_id))
             or (isinstance(raw_id, (int, float)) and raw_id == 0)):
-        return None, None, None, True
+        return None, None, None, True, None
     exp_id = str(raw_id).strip()
     if not exp_id:
-        return None, None, None, True
+        return None, None, None, True, None
 
     # Skip calibration-standard rows (Issue #39)
     if "standard" in exp_id.lower():
-        return None, None, None, True
+        return None, None, None, True, None
 
     # Split the '-t<days>' token once, up front, so both the replicate
     # combination below and the Duration fill further down share a single
@@ -330,26 +334,38 @@ def _resolve_row_identity(
         if id_timepoint is None:
             exp_id = combined
     except ValueError as exc:
-        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False
+        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False, None
 
     # Issue #81: '-t<days>' in the experiment ID is canonical for the
     # timepoint — fill a blank Duration from it, error a conflict.
     duration_raw = row.get("Duration (Days)")
     if _is_blank_duration(duration_raw):
         if id_timepoint is None:
-            return exp_id, None, None, True
-        return exp_id, id_timepoint, None, False
+            return exp_id, None, None, True, None
+        return exp_id, id_timepoint, None, False, None
 
     time_post_reaction = _parse_float(duration_raw)
     if time_post_reaction is None:
-        return exp_id, None, f"Row {row_num}: invalid Duration (Days) '{duration_raw}'", False
+        return exp_id, None, f"Row {row_num}: invalid Duration (Days) '{duration_raw}'", False, None
 
-    try:
-        time_post_reaction = apply_id_timepoint(id_timepoint, time_post_reaction)
-    except ValueError as exc:
-        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False
+    # The '-t<days>' token defines the vial's elapsed days (Mat, 2026-07-30), so
+    # it wins outright — a disagreeing Duration is reported, not rejected. This
+    # deliberately differs from POST /api/results, which still 400s on a
+    # conflict via apply_id_timepoint: a hand-entered result has one author to
+    # correct, whereas the Duration column here is a formula derived from
+    # sampling dates, and letting it veto the ID would reject a whole sheet's
+    # readings over provenance the ID already settles.
+    warning = None
+    if id_timepoint is not None:
+        if abs(time_post_reaction - id_timepoint) > TIMEPOINT_TOLERANCE_DAYS:
+            warning = (
+                f"Row {row_num} ({exp_id}): Duration (Days) {time_post_reaction:g} "
+                f"disagrees with the ID's -t token ({id_timepoint:g} days). The ID "
+                f"is canonical — this reading was recorded at day {id_timepoint:g}."
+            )
+        time_post_reaction = id_timepoint
 
-    return exp_id, time_post_reaction, None, False
+    return exp_id, time_post_reaction, None, False, warning
 
 
 def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
@@ -442,7 +458,9 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     resolved: List[Tuple[int, str, float, Any]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
-        exp_id, time_post_reaction, error, skip = _resolve_row_identity(row, row_num)
+        exp_id, time_post_reaction, error, skip, warning = _resolve_row_identity(row, row_num)
+        if warning is not None:
+            warnings.append(warning)
         if skip:
             skipped += 1
             continue
