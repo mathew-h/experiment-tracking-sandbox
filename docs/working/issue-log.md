@@ -1458,9 +1458,11 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
 - **Scope boundary — §4 split out, why:** the PL/pgSQL uniqueness trigger and
   `CHECK (reactor_number > 0)` (§4 of the source issue) are blocked on a prerequisite
   data cleanup (`audit-2026-07-28-results-and-cleanup.md`, Parts A+B) that has not
-  been run: as of this branch, the dev DB still has 5 double-booked slots (`CF01`×6,
-  `CF03`×5, `R00`×8, `R01`×6, `R06`×2) and 13 rows with `reactor_number = 0`. A
-  migration that fails against live data on the lab PC's nightly `alembic upgrade
+  been run: as of 2026-07-30 (queried against the stored `reactor_slot` column), the
+  dev DB has **4** double-booked slots (`CF01`×6, `CF03`×5, `R01`×6, `R06`×2 —
+  `R00` is NOT one of them, since #97 already nulls its slot) and 13 rows with
+  `reactor_number = 0`, a separate prerequisite blocking only the `CHECK`; see #112
+  for the full detail. A migration that fails against live data on the lab PC's nightly `alembic upgrade
   head` breaks the whole deploy pipeline until fixed by hand — so the trigger cannot
   land until that cleanup is run, committed and verified in its own separate,
   human-run session. Filed as **#112**. Two direct consequences documented as

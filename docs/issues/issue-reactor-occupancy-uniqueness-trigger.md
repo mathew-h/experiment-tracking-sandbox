@@ -260,4 +260,6 @@ here would blur what this ticket is actually blocked on:
 
 ## Labels
 
-`bug`, `data-integrity`, `database`
+`bug` (applied on GitHub). `data-integrity` and `database` were the original
+proposal but do not exist on this repo and were deliberately not created —
+dropped rather than adding new labels; see `gh label list`.
