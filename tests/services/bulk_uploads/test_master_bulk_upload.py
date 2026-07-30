@@ -1255,6 +1255,38 @@ def test_feedback_records_which_gc_block_was_used(db_session: Session):
     assert by_id["HPHT_WARN05"]["h2_source"] == "di"
     assert by_id["HPHT_WARN05"]["h2_di_superseded"] is False
 
+    superseded = [w for w in result.warnings if "instead of direct injection" in w]
+    assert len(superseded) == 1, (
+        f"exactly one file-level warning, not one per row, got: {result.warnings}"
+    )
+    assert "1 row" in superseded[0], superseded[0]
+    assert "(2)" in superseded[0], (
+        f"the warning must name the sheet row so it can be found, got: {superseded[0]}"
+    )
+
+
+def test_no_supersede_warning_when_precedence_is_uncontested(db_session: Session):
+    """The warning fires only when a DI value actually lost.
+
+    A warning that appears on ordinary sheets is a warning researchers learn to
+    ignore. FL-only, DI-only and neither-block rows are all the normal case —
+    measured on the v3 Dashboard, 0 of 499 rows carry a reading in both blocks.
+    """
+    _seed_experiment(db_session, "HPHT_SUP01", 8891)
+    _seed_experiment(db_session, "HPHT_SUP02", 8892)
+    _seed_experiment(db_session, "HPHT_SUP03", 8893)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_SUP01", 7.0, fl_h2=115.0),              # FL only
+        _v3_row("HPHT_SUP02", 7.0, di_h2=42.0, di_vol=30.0),  # DI only
+        _v3_row("HPHT_SUP03", 7.0, nh4=5.0),                  # neither
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 3
+    assert [w for w in result.warnings if "direct injection" in w] == []
+
 
 def test_from_bytes_tuple_shape_unchanged(db_session: Session):
     """from_bytes() still returns the legacy 5-tuple — no caller breaks."""

@@ -492,6 +492,9 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         key_counts[key] = key_counts.get(key, 0) + 1
 
     # Phase 2 — upsert what is left.
+    # Rows where Full Loop overrode a populated direct-injection cell. Reported
+    # once, at file level, after the loop (issue #114 item 1).
+    superseded_rows: List[int] = []
     for row_num, exp_id, time_post_reaction, row in resolved:
         if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
             row_errors.append((row_num, (
@@ -554,15 +557,18 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             else:
                 updated += 1
             savepoint.commit()
+            # di_ppm comes from _resolve_h2's own parse — re-reading the cell
+            # here would let this flag drift from the precedence decision if the
+            # DI branch ever gains filtering.
+            di_superseded = h2_source == "full_loop" and di_ppm is not None
+            if di_superseded:
+                superseded_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
                 "experiment_id": exp_id,
                 "action": action,
                 "h2_source": h2_source,
-                # di_ppm comes from _resolve_h2's own parse — re-reading the
-                # cell here would let this flag drift from the precedence
-                # decision if the DI branch ever gains filtering.
-                "h2_di_superseded": h2_source == "full_loop" and di_ppm is not None,
+                "h2_di_superseded": di_superseded,
             })
 
         except ValueError as exc:
@@ -571,6 +577,26 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         except Exception as exc:
             savepoint.rollback()
             row_errors.append((row_num, f"Row {row_num} ({exp_id}): unexpected error — {exc}"))
+
+    # The per-row h2_di_superseded flag above reaches the client in `feedbacks`
+    # and nothing renders it, so a researcher could not learn from the app why a
+    # stored value is not the DI number they entered — and the discarded reading
+    # is not persisted either. One file-level warning says it in the panel the UI
+    # already draws (issue #114 item 1). Deliberately silent when precedence was
+    # never contested: 0 of 499 rows on the v3 Dashboard (2026-07-30) carry a
+    # reading in both blocks, and a warning that fires on ordinary sheets is one
+    # researchers learn to ignore.
+    if superseded_rows:
+        shown = ", ".join(str(r) for r in superseded_rows[:10])
+        if len(superseded_rows) > 10:
+            shown += f", and {len(superseded_rows) - 10} more"
+        label = "row" if len(superseded_rows) == 1 else "rows"
+        warnings.append(
+            f"Full Loop reading used instead of direct injection on "
+            f"{len(superseded_rows)} {label} ({shown}). 'DI H2 (ppm)' also held a "
+            "value there and Full Loop takes precedence, so the direct-injection "
+            "reading was not stored and cannot be recovered from the database."
+        )
 
     # Stable sort — two errors on one row keep the order they were found in.
     out.errors.extend(message for _, message in sorted(row_errors, key=lambda item: item[0]))
