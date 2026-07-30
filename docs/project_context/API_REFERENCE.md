@@ -366,6 +366,20 @@ Update experiment properties.
 - On rename, `ExperimentalConditions.experiment_id` is updated and a `ModificationsLog` entry is written.
 - On `is_outlier` change, a `ModificationsLog` entry is written recording the old/new value.
 
+### PATCH /api/experiments/{experiment_id}/status
+
+Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
+
+**Auth:** Required (Firebase token)
+
+**Response `200`:** Updated experiment object.
+
+**Errors:**
+- `409 Conflict` — the transition to `ONGOING` was rejected because another experiment is already `ONGOING` in the same physical reactor slot. `detail` names the slot, the occupying `experiment_id` and its start date, e.g. `Reactor R08 is already occupied by ONGOING experiment 'HPHT_222' (started 2026-07-24). Complete or cancel it before starting 'HPHT_230'.` The occupant is **not** demoted — this endpoint cannot distinguish advancing a sequential re-run from a mis-picked reactor. Only the transition *to* `ONGOING` is gated; `COMPLETED` / `CANCELLED` / `QUEUED` are never blocked, and an experiment with no physical slot (Serum, Autoclave, Other, or no `reactor_number`) is never blocked.
+- `422 Unprocessable Entity` — invalid status enum value.
+
+**Not yet built:** no frontend confirm-and-supersede dialog. Until one exists, the caller must complete or cancel the occupant first and retry. Tracked in `docs/issues/issue-reactor-occupancy-uniqueness-trigger.md`.
+
 ## Conditions
 
 | Method | Path | Description |
@@ -374,6 +388,8 @@ Update experiment properties.
 | GET | `/api/conditions/by-experiment/{experiment_id}` | Get conditions by experiment string ID |
 | POST | `/api/conditions` | Create conditions (triggers `water_to_rock_ratio` calc) |
 | PATCH | `/api/conditions/{id}` | Update conditions (recalculates derived fields) |
+
+`ConditionsResponse` also includes `reactor_slot` (string, nullable, **read-only/derived** — issue #97). It is never accepted on `ConditionsCreate`/`ConditionsUpdate`; the backend derives and overwrites it from `(reactor_number, experiment_type)` on every write via `database/reactor_slot.py::derive_reactor_slot`. See `.claude/rules/MODELS.md` for the full mapping and caveats.
 
 ## Additives
 

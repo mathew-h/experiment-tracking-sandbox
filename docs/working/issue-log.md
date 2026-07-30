@@ -1386,3 +1386,132 @@ Test inserts `ExperimentalConditions(experiment_fk=1, ...)` but no `Experiment` 
 - **Docs updated:** yes (3 files; hook synced each to `docs/project_context/`)
 - **Decision logged:** no
 - **PR:** none — branch `chore/issue-100-closeout`
+
+## 2026-07-29 | issue #97 — reactor slot identity is derived, not stored (cross-series occupancy collision)
+
+A physical reactor slot is a *pair*: the series (HPHT vessel vs. Core Flood rig) and
+the number within it. `R01` and `CF01` are different hardware sharing the number 1.
+The database stored only the number, and the `R01`/`CF01` label was re-derived at
+read time in three separate places — so occupancy queries keyed on the bare integer
+let a Core Flood going ONGOING silently auto-complete a running HPHT. Live data
+corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
+`PATCH /status` with nothing objecting).
+
+- **Files changed:**
+  - `database/reactor_slot.py` **(new)** — the single definition of slot identity:
+    `normalize_experiment_type`, `series_prefix`, `is_occupancy_type`,
+    `derive_reactor_slot`, `canonical_slot_label`, private `_format_slot`. Returns
+    `None` for a non-occupancy type (Serum/Autoclave/Other), a missing/unparseable
+    number, or any number `<= 0`.
+  - `database/models/conditions.py` — `reactor_slot` column, `String(8)`, nullable, indexed.
+  - `alembic/versions/1c1ef9b555e0_*.py` **(new)**, revising `293d0ea59422` — adds
+    the column, backfills from `(reactor_number, experiment_type)`.
+  - `database/event_listeners.py` — `set_reactor_slot`, a `before_insert`/`before_update`
+    listener on `ExperimentalConditions` maintaining the column on every ORM write.
+  - `backend/services/bulk_uploads/experiment_status.py` — both occupant queries and
+    the same-file conflict map keyed on `reactor_slot` instead of the bare integer;
+    messages now name the slot (`"Reactor R08 …"` not `"Reactor 8 …"`);
+    `manage_reactor_occupancy` gained a trailing `reactor_slot: str | None = None`;
+    the now-dead `_normalize_type`, `_is_eligible_for_occupancy` and
+    `_OCCUPANCY_TYPES` deleted (zero remaining call sites, verified).
+  - `backend/services/bulk_uploads/new_experiments.py` — both occupancy call sites
+    gated on `derive_reactor_slot(...) is not None` (replacing a falsy `if
+    conditions.reactor_number`, which skipped `reactor_number == 0`) and passing
+    `reactor_slot=` explicitly instead of relying on a lazy `.conditions` load.
+    `newer_than` deliberately still **not** passed — see Scope boundary below.
+  - `backend/api/routers/experiments.py` — `PATCH /api/experiments/{id}/status` now
+    returns **409** (not a silent demotion) when the target slot is occupied by
+    another ONGOING experiment, naming the slot, the occupant and its start date
+    (degrading to "an unrecorded date" when absent). Rejects before any mutation.
+  - `backend/api/routers/dashboard.py`, `backend/services/notion_sync/import_.py`,
+    `backend/services/notion_sync/export.py` — labels are now column reads;
+    `_reactor_label_for` deleted; queries filter `reactor_slot IS NOT NULL` (fixes a
+    latent Notion-export leak: a Serum vial with a stray `reactor_number` used to
+    export as if it occupied a slot).
+  - `frontend/src/pages/ReactorGrid.tsx` (StatusBadge), `frontend/src/pages/ExperimentList.tsx`
+    — both status-change mutations gained `onError` calling
+    `toastError('Update failed', err.message || 'Could not update status')`; the
+    axios interceptor at `frontend/src/api/client.ts:11-23` already puts FastAPI's
+    `detail` on `err.message`, so the 409's slot/occupant/date text surfaces directly.
+  - `.claude/rules/MODELS.md` — `reactor_slot` documented under `ExperimentalConditions`
+    Key Fields (derivation, pre-flush caveat, bulk-update caveat, what's still unenforced).
+  - `docs/api/API_REFERENCE.md` — new `### PATCH /api/experiments/{experiment_id}/status`
+    section documenting the 409; `ConditionsResponse` noted to include `reactor_slot`
+    read-only.
+  - `docs/issues/issue-reactor-slot-identity-and-occupancy-uniqueness.md` — status
+    blockquote marking §1–§3 shipped, §4 split to #112; stale-reference note added
+    (its `_is_eligible_for_occupancy`/`_normalize_type` mentions describe deleted code).
+  - `docs/issues/issue-experiment-type-enum-binding.md` — corrected two passages that
+    named the deleted helpers, pointed at `database/reactor_slot.py::_SERIES_BY_TYPE`
+    and `is_occupancy_type` instead, and corrected a now-false claim that
+    `experiment_status.py` was the only site normalizing case/whitespace.
+  - `docs/issues/audit-2026-07-28-results-and-cleanup.md` — "settle before writing the
+    trigger" section repointed at `_SERIES_BY_TYPE` in `database/reactor_slot.py`;
+    recorded the autoclave-occupancy question as answered "no" on 2026-07-29.
+  - `docs/issues/issue-reactor-occupancy-uniqueness-trigger.md` **(new)** — the §4
+    follow-up, filed as GitHub **#112**.
+- **Tests added:** yes. Backend four-path suite (`tests/api tests/services tests/models tests/views`):
+  **968 passed, 0 failed**. Frontend: **200 passed across 31 files**; `npx tsc --noEmit`
+  clean; `npx eslint src --ext .ts,.tsx` exactly **5 pre-existing errors** on files this
+  branch never touched. Three known pre-existing failures live in
+  `tests/test_pg_backup_restore.py`, outside those four backend paths, unrelated to this branch.
+- **Scope boundary — §4 split out, why:** the PL/pgSQL uniqueness trigger and
+  `CHECK (reactor_number > 0)` (§4 of the source issue) are blocked on a prerequisite
+  data cleanup (`audit-2026-07-28-results-and-cleanup.md`, Parts A+B) that has not
+  been run: as of this branch, the dev DB still has 5 double-booked slots (`CF01`×6,
+  `CF03`×5, `R00`×8, `R01`×6, `R06`×2) and 13 rows with `reactor_number = 0`. A
+  migration that fails against live data on the lab PC's nightly `alembic upgrade
+  head` breaks the whole deploy pipeline until fixed by hand — so the trigger cannot
+  land until that cleanup is run, committed and verified in its own separate,
+  human-run session. Filed as **#112**. Two direct consequences documented as
+  deliberate, not oversights: the `seen_labels` dedup at `dashboard.py:126-140`
+  stays in place (delete only after the constraint is verified), and
+  `summary.reactors.empty` still reads one too high per double-booked slot.
+  `newer_than` on the new-experiments path is also deferred to #112 — the issue's own
+  rationale for passing it was "let the trigger be the backstop," and there was no
+  trigger yet.
+- **Four decisions Mat made at scope confirmation (`/start-task`, 2026-07-29):**
+  1. Ship §1–§3 plus tests only this branch; §4 deferred to a follow-up issue, blocked on the audit cleanup.
+  2. Autoclave is **not** occupancy-bearing — only HPHT and Core Flood claim numbered slots.
+  3. `reactor_slot` is maintained by a SQLAlchemy `before_insert`/`before_update`
+     listener, not by assignment at each write site.
+  4. Locked-component sign-off granted for `database/models/conditions.py`,
+     `backend/services/bulk_uploads/experiment_status.py`, and
+     `backend/services/bulk_uploads/new_experiments.py`.
+- **Discovered but not fixed, tracked separately:**
+  - `experiment_type` is still un-normalized (`SERUM` vs `Serum` vs 8 other spellings)
+    — the #85 Serum KPI still undercounts by ~72%. `database/reactor_slot.py`
+    tolerates every spelling; the KPI predicate at `dashboard.py:212` does not.
+    Tracked in `issue-experiment-type-enum-binding.md`.
+  - The production double-bookings and `reactor_number = 0` rows are untouched —
+    cleaning them is Part A + Part B of `audit-2026-07-28-results-and-cleanup.md`,
+    deliberately a separate human-run session, not folded into this branch.
+  - No frontend confirm-and-supersede dialog for the 409 — deferred by the source
+    issue itself; the toast-only UX is the interim behavior.
+  - The silent `slot is None` early return in `manage_reactor_occupancy` (a
+    typo'd `reactor_number = 0` gets no occupancy check *and* no warning) and the
+    widened `try/except Exception` there (could swallow a `DetachedInstanceError`
+    into `warnings` rather than `errors`) — both routed into #112 since the CHECK
+    constraint that ticket adds closes the first one and the same code region is
+    already being touched for the `unique_violation` handling.
+  - Repo-wide hygiene, deliberately **not** routed into #112 (unrelated to reactor
+    occupancy specifically): no flake8 config exists (bare run uses the 79-char
+    default; project convention is 120), and the test suite cannot tolerate two
+    concurrent runs against the shared `experiments_test` database
+    (`Base.metadata.drop_all` at five sites — same fragility behind the three known
+    `tests/test_pg_backup_restore.py` failures).
+- **Task 5 nuance, worth recording accurately:** Task 4's fallback inside
+  `manage_reactor_occupancy` had already closed the cross-series and eligibility
+  halves of the new-experiments defect transitively, and the falsy-zero half was
+  already equivalent by the time Task 5 ran. Task 5 delivered explicitness (passing
+  `reactor_slot=` instead of depending on a lazy `.conditions` load on an unflushed
+  row), removal of the falsy-zero footgun, and the slot-named message — not a
+  live-bug fix in itself.
+- **Docs updated:** yes — `.claude/rules/MODELS.md`, `docs/api/API_REFERENCE.md`,
+  and four files under `docs/issues/` (one new). The `docs/` writes (all but
+  `MODELS.md`, which lives outside `docs/`) were synced to `docs/project_context/`
+  by the `PostToolUse` hook.
+- **Decision logged:** yes — the four scope decisions above, at `/start-task`.
+- **PR:** none yet — branch `fix/issue-97-reactor-slot-identity`, 9-task
+  subagent-driven build, ledger at
+  `.superpowers/sdd/2026-07-29-issue-97-reactor-slot-identity/progress.md`.
