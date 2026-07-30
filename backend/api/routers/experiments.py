@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.enums import ExperimentStatus
+from database.reactor_slot import derive_reactor_slot
 from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
@@ -642,12 +643,62 @@ def update_experiment_status(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentResponse:
-    """Inline status update without full patch."""
+    """Inline status update without full patch.
+
+    A transition to ONGOING is rejected with 409 when another experiment is
+    already ONGOING in the same physical reactor slot (issue #97, Defect 4).
+    This endpoint deliberately does NOT demote the occupant: it cannot tell
+    "I am advancing a sequential re-run" from "I picked the wrong reactor from a
+    dropdown", and only one of those should close someone else's running
+    experiment. Three CF_018 runs were left simultaneously ONGOING in CF01 in
+    production precisely because this handler had no check at all.
+
+    The occupying experiment_id and its start date are in the error detail so
+    the caller can complete it and retry. A confirm-and-supersede dialog is a
+    deferred follow-up; the backend contract is the same with or without it.
+    """
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
+
+    if payload.status == ExperimentStatus.ONGOING:
+        conditions = exp.conditions
+        slot = derive_reactor_slot(
+            conditions.reactor_number if conditions else None,
+            conditions.experiment_type if conditions else None,
+        )
+        if slot is not None:
+            occupant = db.execute(
+                select(Experiment)
+                .join(
+                    ExperimentalConditions,
+                    ExperimentalConditions.experiment_fk == Experiment.id,
+                )
+                .where(
+                    Experiment.id != exp.id,
+                    Experiment.status == ExperimentStatus.ONGOING,
+                    ExperimentalConditions.reactor_slot == slot,
+                )
+                .order_by(Experiment.id)
+                .limit(1)
+            ).scalar_one_or_none()
+            if occupant is not None:
+                started = (
+                    occupant.date.date().isoformat()
+                    if occupant.date
+                    else "an unrecorded date"
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Reactor {slot} is already occupied by ONGOING experiment "
+                        f"'{occupant.experiment_id}' (started {started}). Complete or "
+                        f"cancel it before starting '{exp.experiment_id}'."
+                    ),
+                )
+
     exp.status = payload.status
     db.commit()
     db.refresh(exp)

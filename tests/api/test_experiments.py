@@ -1,3 +1,5 @@
+import pytest
+
 from database.models.experiments import Experiment
 from database.models.enums import ExperimentStatus
 
@@ -1679,3 +1681,133 @@ def test_delete_impact_lists_background_dependents(client, db_session):
 
     body = client.get("/api/experiments/IMPACT_BG_TARGET/delete-impact").json()
     assert body["background_for"] == ["IMPACT_BG_USER"]
+
+
+# ---------------------------------------------------------------------------
+# PATCH /status occupancy rejection (issue #97, Defect 4)
+# ---------------------------------------------------------------------------
+
+def _seed_slot_experiment(db, eid, num, status, experiment_type, reactor_number, date=None):
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus as _S
+
+    exp = Experiment(
+        experiment_id=eid, experiment_number=num, status=status, date=date
+    )
+    db.add(exp)
+    db.flush()
+    db.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=eid,
+        experiment_type=experiment_type,
+        reactor_number=reactor_number,
+    ))
+    db.commit()
+    db.refresh(exp)
+    return exp
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_status_slot_rows(db_session):
+    """This endpoint commits, so rows land for real in experiments_test."""
+    yield
+    from database.models.conditions import ExperimentalConditions as _EC
+
+    db_session.query(_EC).filter(_EC.experiment_id.like("SLOT409_%")).delete(
+        synchronize_session=False
+    )
+    db_session.query(Experiment).filter(
+        Experiment.experiment_id.like("SLOT409_%")
+    ).delete(synchronize_session=False)
+    db_session.commit()
+
+
+def test_patch_status_to_ongoing_on_occupied_slot_returns_409(client, db_session):
+    import datetime as _dt
+
+    occupant = _seed_slot_experiment(
+        db_session, "SLOT409_A", 97401, ExperimentStatus.ONGOING, "HPHT", 8,
+        date=_dt.datetime(2026, 7, 24),
+    )
+    challenger = _seed_slot_experiment(
+        db_session, "SLOT409_B", 97402, ExperimentStatus.QUEUED, "HPHT", 8,
+    )
+
+    resp = client.patch("/api/experiments/SLOT409_B/status", json={"status": "ONGOING"})
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "R08" in detail
+    assert "SLOT409_A" in detail
+    assert "2026-07-24" in detail
+
+    db_session.refresh(occupant)
+    db_session.refresh(challenger)
+    assert occupant.status == ExperimentStatus.ONGOING
+    assert challenger.status == ExperimentStatus.QUEUED
+
+
+def test_patch_status_to_ongoing_on_empty_slot_returns_200(client, db_session):
+    exp = _seed_slot_experiment(
+        db_session, "SLOT409_C", 97403, ExperimentStatus.QUEUED, "HPHT", 10,
+    )
+    resp = client.patch("/api/experiments/SLOT409_C/status", json={"status": "ONGOING"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ONGOING"
+
+
+def test_patch_status_ignores_occupancy_across_series(client, db_session):
+    """An HPHT in R09 must not block a Core Flood claiming CF09."""
+    import datetime as _dt
+
+    _seed_slot_experiment(
+        db_session, "SLOT409_D", 97404, ExperimentStatus.ONGOING, "HPHT", 9,
+        date=_dt.datetime(2026, 7, 1),
+    )
+    cf = _seed_slot_experiment(
+        db_session, "SLOT409_E", 97405, ExperimentStatus.QUEUED, "Core Flood", 9,
+    )
+    resp = client.patch("/api/experiments/SLOT409_E/status", json={"status": "ONGOING"})
+    assert resp.status_code == 200
+
+
+def test_patch_status_to_completed_is_never_blocked(client, db_session):
+    """Only the transition TO ONGOING is gated. Closing out a run must always work,
+    including on a slot that is currently double-booked."""
+    import datetime as _dt
+
+    a = _seed_slot_experiment(
+        db_session, "SLOT409_F", 97406, ExperimentStatus.ONGOING, "HPHT", 11,
+        date=_dt.datetime(2026, 7, 1),
+    )
+    resp = client.patch("/api/experiments/SLOT409_F/status", json={"status": "COMPLETED"})
+    assert resp.status_code == 200
+
+
+def test_patch_status_to_ongoing_is_allowed_for_a_serum_vial(client, db_session):
+    """A Serum vial holds no slot, so it can never be blocked — even if it
+    carries a stray reactor_number matching an ONGOING HPHT."""
+    import datetime as _dt
+
+    _seed_slot_experiment(
+        db_session, "SLOT409_G", 97407, ExperimentStatus.ONGOING, "HPHT", 12,
+        date=_dt.datetime(2026, 7, 1),
+    )
+    _seed_slot_experiment(
+        db_session, "SLOT409_H", 97408, ExperimentStatus.QUEUED, "Serum", 12,
+    )
+    resp = client.patch("/api/experiments/SLOT409_H/status", json={"status": "ONGOING"})
+    assert resp.status_code == 200
+
+
+def test_patch_status_reongoing_on_own_slot_is_allowed(client, db_session):
+    """Re-asserting ONGOING on an experiment that already holds the slot is a
+    no-op, not a self-collision."""
+    import datetime as _dt
+
+    exp = _seed_slot_experiment(
+        db_session, "SLOT409_I", 97409, ExperimentStatus.ONGOING, "HPHT", 15,
+        date=_dt.datetime(2026, 7, 1),
+    )
+    resp = client.patch("/api/experiments/SLOT409_I/status", json={"status": "ONGOING"})
+    assert resp.status_code == 200
