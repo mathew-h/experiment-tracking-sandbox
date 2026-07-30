@@ -97,9 +97,10 @@ _WIDE_DI_COLUMNS = {
 class MasterUploadResult:
     """Master Results upload outcome.
 
-    Exists because the legacy 5-tuple has no slot for warnings and ~20 tests
-    plus the router unpack it positionally. `from_bytes` keeps returning the
-    tuple; `from_bytes_ex` returns this.
+    The one return shape. Issue #111 introduced it beside a legacy 5-tuple that
+    had no slot for `warnings`; issue #114 deleted the tuple and the two entry
+    points that produced it, since anything wired to them would compute warnings
+    and drop them on the floor.
     """
 
     created: int = 0
@@ -108,11 +109,6 @@ class MasterUploadResult:
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     feedbacks: List[Dict[str, Any]] = field(default_factory=list)
-
-    def as_tuple(self) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
-        """Legacy 5-tuple shape. Warnings are dropped — callers that need them
-        should use from_bytes_ex()."""
-        return self.created, self.updated, self.skipped, self.errors, self.feedbacks
 
 
 def _normalize_headers(columns: Any) -> List[str]:
@@ -611,48 +607,12 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
 
 class MasterBulkUploadService:
     @staticmethod
-    def sync_from_path(db: Session) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
-        """
-        Read the Master Results file from the configured path.
-        Priority: AppConfig table > MASTER_RESULTS_PATH env/settings.
-        Returns (created, updated, skipped, errors, feedbacks).
-        """
-        from backend.config.settings import get_settings  # noqa: PLC0415
-        from database.models.app_config import AppConfig  # noqa: PLC0415
-
-        cfg = db.query(AppConfig).filter_by(key="master_results_path").first()
-        path = cfg.value if cfg else get_settings().master_results_path
-
-        try:
-            with open(path, "rb") as fh:
-                file_bytes = fh.read()
-        except FileNotFoundError:
-            return 0, 0, 0, [
-                f"Master Results file not found at: {path}. "
-                "Configure the path via Bulk Uploads → Master Results Sync → Settings."
-            ], []
-        except PermissionError:
-            return 0, 0, 0, [
-                f"Permission denied reading: {path}. "
-                "Ensure the file is not open in Excel."
-            ], []
-        except Exception as exc:
-            return 0, 0, 0, [f"Failed to read Master Results file: {exc}"], []
-
-        return _process_bytes(db, file_bytes).as_tuple()
-
-    @staticmethod
-    def from_bytes(
-        db: Session, file_bytes: bytes
-    ) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
-        """Parse a manually uploaded Master Results file.
-
-        Legacy 5-tuple shape, kept for existing callers. Use from_bytes_ex()
-        to also receive warnings.
-        """
-        return _process_bytes(db, file_bytes).as_tuple()
-
-    @staticmethod
     def from_bytes_ex(db: Session, file_bytes: bytes) -> MasterUploadResult:
-        """Parse a manually uploaded Master Results file, warnings included."""
+        """Parse an uploaded Master Results file.
+
+        The only entry point. `POST /api/bulk-uploads/master-results` requires a
+        multipart file (issue #74 removed path-based sync along with the
+        /master-results/config endpoints and the sync button), so there is no
+        second way in.
+        """
         return _process_bytes(db, file_bytes)
