@@ -814,12 +814,20 @@ whose name mentions H2 appears under **Warnings** in the result panel rather
 than being ignored.
 
 **Errors are listed in sheet order.** Row errors appear in the same order as the
-rows in the spreadsheet, so you can work down the list against the file. Problems
-with the file as a whole — a missing required column, or the deprecated wide
-`DI a/b/c H2 (ppm)` columns — come first, since they have no row number.
+rows in the spreadsheet, so you can work down the list against the file. A
+problem with the file as a whole — a missing required column — comes first,
+since it has no row number. (The deprecated wide `DI a/b/c H2 (ppm)` columns
+are reported under **Warnings**, not Errors — the rest of the file still
+uploads.)
 ```
 
 Two of those paragraphs are unchanged (the first and the rename one) — they are repeated here so the replacement is a single contiguous block rather than three interleaved edits.
+
+**Correction (post-review, 2026-07-30):** the last sentence originally listed the
+deprecated wide `DI a/b/c H2 (ppm)` columns alongside missing required columns as
+a file-level *error*. That message is `warnings.append(...)`, not an error — the
+sentence has been corrected above to match what actually shipped in
+`docs/user_guide/BULK_UPLOADS.md`.
 
 - [ ] **Step 3: Update CALCULATIONS.md**
 
@@ -884,7 +892,7 @@ EOF
 
 ## Verification before calling this done
 
-- [ ] `.venv/Scripts/python -m pytest tests/services/bulk_uploads/ tests/integration/test_master_results_sync_endpoint.py tests/api/test_bulk_uploads.py -q` — paste the actual summary line. The pre-#114 count for `tests/services/bulk_uploads/` was 244 passed; expect 244 + 4 new − 2 deleted = 246 in that directory, and reconcile the number if it differs rather than accepting it.
+- [ ] `.venv/Scripts/python -m pytest tests/services/bulk_uploads/ tests/integration/test_master_results_sync_endpoint.py tests/api/test_bulk_uploads.py -q` — paste the actual summary line. The pre-#114 count for `tests/services/bulk_uploads/` was 244 passed; expect 244 + 4 new − 2 deleted = 246 in that directory, and reconcile the number if it differs rather than accepting it. **Correction (post-review, 2026-07-30):** the measured baseline is 264 on `develop` and 266 on this branch, not 244/246 as originally estimated here.
 - [ ] `git diff develop --stat -- database/models/ alembic/ database/event_listeners.py` returns empty — this branch changes no schema.
 - [ ] `Select-String -Path frontend -Include *.ts,*.tsx -Pattern "feedbacks" -Recurse` shows no new consumer — item 1 was built with zero frontend change, and a stray edit there means the wrong option was implemented.
 - [ ] No new warning fires on an ordinary sheet: `test_no_supersede_warning_when_precedence_is_uncontested` and `test_h2s_column_is_not_reported_as_a_dropped_h2_reading` both pass.

@@ -87,7 +87,7 @@ this variable, so removing the field required no edit to either.
 
 ## Acceptance criteria
 
-- [x] Row-level upload errors are returned sorted by sheet row number; file-level errors (missing columns, deprecated wide DI columns) stay first with no row number
+- [x] Row-level upload errors are returned sorted by sheet row number; file-level errors (missing required columns) stay first with no row number
 - [x] A Master Results row with both GC blocks populated produces one warning naming the affected rows, rendered in the existing bulk-upload panel warnings list, with zero frontend code changed
 - [x] The same-block geometry-pairing guard is tested against real measured magnitudes (4235 mL Full Loop carryover vs. 30 mL DI), not arbitrary values
 - [x] A row with no `H2 (ppm)` in either GC block stores neither `gas_sampling_volume_ml` nor `gas_sampling_pressure_MPa`

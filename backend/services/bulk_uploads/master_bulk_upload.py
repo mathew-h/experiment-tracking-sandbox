@@ -1,5 +1,5 @@
 """
-Master Results bulk upload — reads from fixed SharePoint path or uploaded bytes.
+Master Results bulk upload — parses an uploaded Dashboard workbook.
 
 Dashboard sheet column spec (v3, issue #111, 2026-07-30):
   Experiment ID | Description | Sample Date | Duration (Days) | NH4 (mM) |
@@ -375,7 +375,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     from backend.services.scalar_results_service import ScalarResultsService  # noqa: PLC0415
 
     out = MasterUploadResult()
-    errors = out.errors
+    sheet_errors = out.errors
     warnings = out.warnings
     feedbacks = out.feedbacks
     created = updated = skipped = 0
@@ -388,24 +388,28 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # list against the sheet top-down. Sheet-level messages have no row number
     # and belong at the top; every one of them returns immediately, so
     # out.errors is empty by the time the sort runs, and extending rather than
-    # assigning keeps them first if a non-returning one is ever added.
+    # assigning keeps them first if a non-returning one is ever added. Row-level
+    # warnings have no equivalent ordering guarantee — that is only safe today
+    # because every row warning is emitted in Phase 1 while the sole Phase-2
+    # warning is file-level and appended last, so a future Phase-2 row warning
+    # would need this same treatment.
     row_errors: List[Tuple[int, str]] = []
 
     try:
         xls = pd.ExcelFile(io.BytesIO(file_bytes))
     except Exception as exc:
-        errors.append(f"Failed to read file: {exc}")
+        sheet_errors.append(f"Failed to read file: {exc}")
         return out
 
     sheet_name = _find_sheet(xls)
     if sheet_name is None:
-        errors.append("File has no sheets.")
+        sheet_errors.append("File has no sheets.")
         return out
 
     try:
         df = xls.parse(sheet_name)
     except Exception as exc:
-        errors.append(f"Failed to parse sheet '{sheet_name}': {exc}")
+        sheet_errors.append(f"Failed to parse sheet '{sheet_name}': {exc}")
         return out
 
     df.columns = _normalize_headers(df.columns)
@@ -414,7 +418,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     required = {"Experiment ID", "Duration (Days)"}
     missing = required - set(df.columns)
     if missing:
-        errors.append(
+        sheet_errors.append(
             f"Sheet '{sheet_name}' is missing required columns: {', '.join(sorted(missing))}. "
             f"Available: {', '.join(df.columns[:10])}"
         )

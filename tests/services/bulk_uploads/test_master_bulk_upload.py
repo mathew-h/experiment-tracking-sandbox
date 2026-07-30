@@ -56,7 +56,7 @@ def _master_excel(rows: list[list]) -> bytes:
 # ---------------------------------------------------------------------------
 
 def test_from_bytes_creates_result_row(db_session: Session):
-    """from_bytes() with a valid Dashboard sheet creates a scalar result."""
+    """Uploading a valid Dashboard sheet creates a scalar result."""
     _seed_experiment(db_session, "HPHT_MAST001", 7701)
 
     xlsx = _master_excel([
@@ -1036,7 +1036,9 @@ def test_di_wins_ignores_stray_full_loop_gas_geometry(db_session: Session):
     assert scalar.gas_sampling_volume_ml == pytest.approx(30.0), (
         "must be DI's 30 mL injection volume, never FL's 4235 mL carryover"
     )
-    assert scalar.gas_sampling_pressure_MPa == pytest.approx(14.7 * _PSI_TO_MPA, rel=1e-3)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(14.7 * _PSI_TO_MPA, rel=1e-3), (
+        "must be DI's 14.7 psi, never FL's 90 psi"
+    )
 
 
 def test_zero_h2_is_a_real_measurement(db_session: Session):
