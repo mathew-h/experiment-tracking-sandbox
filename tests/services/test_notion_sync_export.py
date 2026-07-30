@@ -65,13 +65,19 @@ def _seed_experiment(
 
 
 def test_export_skips_idle_slots(db_session: Session) -> None:
-    """write_experiment_info is only called for occupied (ONGOING) reactor slots."""
+    """write_experiment_info is only called for occupied (ONGOING) reactor slots.
+
+    experiment_type="HPHT" is passed explicitly (issue #97): these tests exercise
+    export mechanics (page lookup, write, idle-clearing), not reactor-type
+    behavior, and a Serum vial legitimately holds no vessel to export — the
+    default type here must be an occupancy type so the row keeps a reactor_slot.
+    """
     client = MagicMock()
     pages = [
         _notion_page("aaa", "R01"),
         _notion_page("bbb", "R02"),  # no experiment in R02
     ]
-    _seed_experiment(db_session, "SERUM_001", 1001, reactor_number=1)
+    _seed_experiment(db_session, "SERUM_001", 1001, reactor_number=1, experiment_type="HPHT")
 
     result = run_export(client, db_session, pages, cleared_page_ids=set())
 
@@ -107,7 +113,7 @@ def test_export_sets_no_change_after_clear(db_session: Session) -> None:
     """set_status_no_change is called for a page that was cleared in this cycle."""
     client = MagicMock()
     pages = [_notion_page("ddd", "R05")]
-    _seed_experiment(db_session, "SERUM_002", 1003, reactor_number=5)
+    _seed_experiment(db_session, "SERUM_002", 1003, reactor_number=5, experiment_type="HPHT")
 
     run_export(client, db_session, pages, cleared_page_ids={"ddd"})
 
@@ -118,7 +124,7 @@ def test_export_preserves_ongoing_status(db_session: Session) -> None:
     """set_status_no_change is NOT called for a page that was not cleared (Ongoing)."""
     client = MagicMock()
     pages = [_notion_page("eee", "R06", status="Ongoing")]
-    _seed_experiment(db_session, "SERUM_003", 1004, reactor_number=6)
+    _seed_experiment(db_session, "SERUM_003", 1004, reactor_number=6, experiment_type="HPHT")
 
     run_export(client, db_session, pages, cleared_page_ids=set())
 
@@ -129,7 +135,7 @@ def test_export_preserves_non_cleared_status(db_session: Session) -> None:
     """set_status_no_change is NOT called for a page that was not cleared (any non-No Change status)."""
     client = MagicMock()
     pages = [_notion_page("fff", "R07", status="Completed")]
-    _seed_experiment(db_session, "SERUM_004", 1005, reactor_number=7)
+    _seed_experiment(db_session, "SERUM_004", 1005, reactor_number=7, experiment_type="HPHT")
 
     run_export(client, db_session, pages, cleared_page_ids=set())
 
@@ -172,7 +178,7 @@ def test_export_no_description_writes_empty_string(db_session: Session) -> None:
     """Experiment with no notes exports description as empty string (not None)."""
     client = MagicMock()
     pages = [_notion_page("iii", "R09")]
-    _seed_experiment(db_session, "SERUM_006", 1008, reactor_number=9, description="")
+    _seed_experiment(db_session, "SERUM_006", 1008, reactor_number=9, experiment_type="HPHT", description="")
 
     run_export(client, db_session, pages, cleared_page_ids=set())
 
@@ -185,7 +191,7 @@ def test_export_captures_write_error(db_session: Session) -> None:
     client = MagicMock()
     client.write_experiment_info.side_effect = Exception("Notion API down")
     pages = [_notion_page("jjj", "R10")]
-    _seed_experiment(db_session, "SERUM_007", 1009, reactor_number=10)
+    _seed_experiment(db_session, "SERUM_007", 1009, reactor_number=10, experiment_type="HPHT")
 
     result = run_export(client, db_session, pages, cleared_page_ids=set())
 

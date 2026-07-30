@@ -17,6 +17,7 @@ from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 from database.models.experiments import Experiment
 from database.models.notion_sync import ReactorChangeRequest
+from database.reactor_slot import canonical_slot_label
 from .client import (
     NotionSyncClient,
     extract_change_request,
@@ -41,18 +42,15 @@ class ImportResult:
 
 
 def _resolve_experiment_id(db: Session, reactor_label: str) -> str | None:
-    """Find the ONGOING experiment occupying a reactor slot, if any."""
-    label_upper = reactor_label.upper()
-    try:
-        if label_upper.startswith("CF"):
-            reactor_number = int(label_upper[2:])
-            type_filter = ExperimentalConditions.experiment_type == "Core Flood"
-        elif label_upper.startswith("R"):
-            reactor_number = int(label_upper[1:])
-            type_filter = ExperimentalConditions.experiment_type != "Core Flood"
-        else:
-            return None
-    except ValueError:
+    """Find the ONGOING experiment occupying a reactor slot, if any.
+
+    Matches the stored reactor_slot directly. The previous implementation parsed
+    the CF/R prefix and built a type filter whose `experiment_type != 'Core Flood'`
+    branch was NULL-unsafe in SQL — a row with a NULL type matched neither branch
+    and could never be resolved as an R* occupant (issue #97).
+    """
+    slot = canonical_slot_label(reactor_label)
+    if slot is None:
         return None
 
     row = db.execute(
@@ -60,8 +58,7 @@ def _resolve_experiment_id(db: Session, reactor_label: str) -> str | None:
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
         .where(
             Experiment.status == ExperimentStatus.ONGOING,
-            ExperimentalConditions.reactor_number == reactor_number,
-            type_filter,
+            ExperimentalConditions.reactor_slot == slot,
         )
         .limit(1)
     ).scalar_one_or_none()

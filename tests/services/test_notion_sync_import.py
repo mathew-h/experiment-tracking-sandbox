@@ -420,3 +420,82 @@ def test_old_in_progress_is_now_unknown_status(db_session: Session) -> None:
     assert result.skipped == 1
     assert result.imported == 0
     assert db_session.query(ReactorChangeRequest).count() == 0
+
+
+def test_resolve_experiment_id_matches_unpadded_notion_label(db_session: Session) -> None:
+    """Notion page titles are not guaranteed zero-padded — 'R5' must resolve to R05.
+
+    Regression guard: the old implementation parsed the digits with int() so it
+    handled this; canonical_slot_label must preserve that.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from backend.services.notion_sync.import_ import _resolve_experiment_id
+
+    exp = Experiment(experiment_id="HPHT_TEST_970", experiment_number=97601, status="ONGOING")
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="HPHT_TEST_970",
+        reactor_number=5,
+        experiment_type="HPHT",
+    ))
+    db_session.flush()
+
+    assert _resolve_experiment_id(db_session, "R5") == "HPHT_TEST_970"
+    assert _resolve_experiment_id(db_session, "r05") == "HPHT_TEST_970"
+
+
+def test_resolve_experiment_id_does_not_cross_series(db_session: Session) -> None:
+    """A Core Flood on rig 1 must not answer for R01."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from backend.services.notion_sync.import_ import _resolve_experiment_id
+
+    exp = Experiment(experiment_id="CF_TEST_970", experiment_number=97602, status="ONGOING")
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="CF_TEST_970",
+        reactor_number=1,
+        experiment_type="Core Flood",
+    ))
+    db_session.flush()
+
+    assert _resolve_experiment_id(db_session, "CF01") == "CF_TEST_970"
+    assert _resolve_experiment_id(db_session, "R01") is None
+
+
+def test_resolve_experiment_id_ignores_null_experiment_type_rows(db_session: Session) -> None:
+    """The old `experiment_type != 'Core Flood'` branch was NULL-unsafe in SQL: a
+    row with a NULL type matched neither branch and could never be resolved as an
+    R* occupant. It now has no reactor_slot at all — same outcome, stated reason.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from backend.services.notion_sync.import_ import _resolve_experiment_id
+
+    exp = Experiment(experiment_id="HPHT_TEST_971", experiment_number=97603, status="ONGOING")
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="HPHT_TEST_971",
+        reactor_number=4,
+        experiment_type=None,
+    )
+    db_session.add(cond)
+    db_session.flush()
+    assert cond.reactor_slot is None
+
+    assert _resolve_experiment_id(db_session, "R04") is None
+
+
+def test_resolve_experiment_id_rejects_a_malformed_label(db_session: Session) -> None:
+    from backend.services.notion_sync.import_ import _resolve_experiment_id
+
+    assert _resolve_experiment_id(db_session, "X01") is None
+    assert _resolve_experiment_id(db_session, "R00") is None
+    assert _resolve_experiment_id(db_session, "") is None

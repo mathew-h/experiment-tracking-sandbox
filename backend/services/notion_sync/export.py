@@ -1,6 +1,6 @@
 """Export step — write occupied reactor slot data to Notion.
 
-Only writes for ONGOING experiments with a reactor_number assigned.
+Only writes for ONGOING experiments occupying a physical reactor slot.
 Idle slots are skipped entirely (no Notion calls).
 """
 from __future__ import annotations
@@ -25,19 +25,6 @@ log = structlog.get_logger(__name__)
 class ExportResult:
     exported: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _reactor_label_for(reactor_number: int, experiment_type: str | None) -> str:
-    """Map DB reactor_number + experiment_type to Notion label e.g. 'R05' or 'CF01'.
-
-    Handles both string values and enum instances for experiment_type,
-    matching the same defensive pattern used in the dashboard router.
-    """
-    if experiment_type is None:
-        return f"R{reactor_number:02d}"
-    # Defensive: handle both plain string and enum instance
-    etype = experiment_type.value if hasattr(experiment_type, "value") else str(experiment_type)
-    return f"CF{reactor_number:02d}" if etype == "Core Flood" else f"R{reactor_number:02d}"
 
 
 def run_export(
@@ -71,7 +58,10 @@ def run_export(
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
         .filter(
             Experiment.status == ExperimentStatus.ONGOING,
-            ExperimentalConditions.reactor_number.isnot(None),
+            # reactor_slot, not reactor_number: the old filter exported a Serum
+            # vial carrying a stray reactor number to Notion as if it occupied
+            # R0N (issue #97).
+            ExperimentalConditions.reactor_slot.isnot(None),
         )
         .all()
     )
@@ -79,7 +69,7 @@ def run_export(
     occupied_page_ids: set[str] = set()
 
     for exp, cond in rows:
-        label = _reactor_label_for(cond.reactor_number, cond.experiment_type)
+        label = cond.reactor_slot
         page_id = notion_rows.get(label)
         if page_id is None:
             log.warning("notion_export_no_page_for_reactor", reactor=label)
