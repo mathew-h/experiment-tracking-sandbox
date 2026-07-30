@@ -16,7 +16,8 @@ v_results_scalar_rollup, not carried on the sheet.
 
 Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
 blank, and gas volume/pressure come from the same block. A value of 0 is a real
-reading, not a blank.
+reading, not a blank. A row with no reading in either block stores no gas
+geometry either — those columns carry stale values from previous runs.
 
 Older spellings are still accepted — the pre-rename 'H2 (ppm)', 'Gas Volume
 (mL)', 'Gas Pressure (psi)', 'Overwrite', and v2's 'DI avg H2 (ppm)'. v2's wide
@@ -221,10 +222,12 @@ def _resolve_h2(
 
     Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source, di_ppm), where
     source is 'full_loop', 'di', or None when neither block has a
-    concentration. di_ppm is this row's own DI parse, returned whether or not
-    DI won — callers that need to know whether a DI reading was superseded
-    read it from here rather than re-parsing the cell themselves, so that
-    decision can never drift from the precedence choice made above.
+    concentration — in which case the geometry is None too, since the gas
+    columns carry the previous run's values. di_ppm is this row's own DI parse,
+    returned whether or not DI won — callers that need to know whether a DI
+    reading was superseded read it from here rather than re-parsing the cell
+    themselves, so that decision can never drift from the precedence choice
+    made above.
     """
     di_ppm = _parse_float(row.get("DI H2 (ppm)"))
 
@@ -247,15 +250,16 @@ def _resolve_h2(
             di_ppm,
         )
 
-    # No concentration in either block. Keep reading the Full Loop gas columns
-    # so a row recording only the sampling geometry behaves as it did pre-#111.
-    return (
-        None,
-        _parse_float(row.get("FL Gas Volume (mL)")),
-        _parse_float(row.get("FL Gas Pressure (psi)")),
-        None,
-        di_ppm,
-    )
+    # No concentration in either block, so no geometry either (issue #114). The
+    # pre-#111 allowance here kept the Full Loop gas columns so a row recording
+    # only sampling geometry behaved as it always had. That assumed a blank gas
+    # cell meant no data; carryover is now a permanent condition of the GC sheets
+    # and 'H2 (ppm)' is the field of record (Mat, 2026-07-30), so those columns
+    # hold a previous run's values on 207 of 499 rows. Nothing was computed from
+    # them — _calculate_hydrogen needs a concentration — but persisting them put
+    # a 4235 mL volume in ScalarResults that no later reader could tell from a
+    # real measurement.
+    return (None, None, None, None, di_ppm)
 
 
 def _is_blank_duration(val: Any) -> bool:

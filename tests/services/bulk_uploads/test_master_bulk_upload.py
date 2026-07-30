@@ -1126,6 +1126,75 @@ def test_no_gc_reading_leaves_h2_unset(db_session: Session):
     assert scalar.h2_concentration_unit is None
 
 
+def test_geometry_without_a_concentration_is_not_stored(db_session: Session):
+    """Carryover gas columns with no reading attached are dropped.
+
+    The GC sheets always carry stale values in some columns (Mat, 2026-07-30) and
+    the field of record is 'H2 (ppm)'. Measured on the v3 Dashboard, 207 rows
+    carry FL geometry with no FL concentration; storing it would put 4235 mL into
+    ScalarResults where no later reader could tell it from a real measurement.
+    Nothing is computed from it either way — _calculate_hydrogen requires a
+    concentration.
+    """
+    _seed_experiment(db_session, "HPHT_GEO01", 8895)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_GEO01", 7.0, nh4=5.0,
+                fl_h2=None, fl_vol=4235.0, fl_psi=90.0,
+                di_h2=None, di_vol=30.0, di_psi=14.7),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 1, "the row must still upload — NH4 is real data"
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_GEO01")
+        .one()
+    ).scalar_data
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(5.0)
+    assert scalar.h2_concentration is None
+    assert scalar.gas_sampling_volume_ml is None, "carryover volume must not be stored"
+    assert scalar.gas_sampling_pressure_MPa is None, "carryover pressure must not be stored"
+
+
+def test_overwrite_clears_stale_geometry_when_the_reading_goes_away(db_session: Session):
+    """OVERWRITE on a concentration-less row clears geometry instead of rewriting carryover.
+
+    gas_sampling_volume_ml and gas_sampling_pressure_MPa are both in
+    SCALAR_UPDATABLE_FIELDS (backend/services/scalar_results_service.py:17), so
+    with overwrite=True every field absent from the row is set to None. Dropping
+    the carryover geometry therefore also stops a re-upload from re-asserting a
+    volume the second sheet no longer claims a reading for.
+    """
+    _seed_experiment(db_session, "HPHT_GEO02", 8896)
+
+    first = _master_excel_v3([
+        _v3_row("HPHT_GEO02", 7.0, fl_h2=115.0, fl_vol=4235.0, fl_psi=90.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("HPHT_GEO02", 7.0, fl_h2=None, fl_vol=4235.0, fl_psi=90.0, overwrite=1.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.updated == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_GEO02")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration is None
+    assert scalar.gas_sampling_volume_ml is None
+    assert scalar.gas_sampling_pressure_MPa is None
+
+
 # ---------------------------------------------------------------------------
 # Warnings and per-row H2 source feedback (issue #111 — Task 3)
 # ---------------------------------------------------------------------------
