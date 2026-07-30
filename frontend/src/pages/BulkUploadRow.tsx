@@ -48,6 +48,10 @@ export interface UploadRowProps {
   prominent?: boolean
   /** Override upload error handling; defaults to toastError('Upload failed', err.message) */
   onUploadError?: (err: Error) => void
+  /** Override success handling; defaults to setting the row's own result summary and
+   *  toasting. Two-phase rows (New Experiments) supply this so a dry run's real-looking
+   *  counts are never rendered as a completed upload. Mirrors `onUploadError`. */
+  onUploadSuccess?: (data: BulkUploadResult | ConflictCheckResult) => void
   isOpen: boolean
   onToggle: () => void
 }
@@ -72,6 +76,7 @@ export function UploadRow({
   topContent,
   prominent = false,
   onUploadError,
+  onUploadSuccess,
   isOpen,
   onToggle,
 }: UploadRowProps) {
@@ -83,6 +88,10 @@ export function UploadRow({
   const uploadMutation = useMutation({
     mutationFn: uploadFn,
     onSuccess: (data) => {
+      if (onUploadSuccess) {
+        onUploadSuccess(data)
+        return
+      }
       setResult(data)
       if (isBulkUploadResult(data)) {
         success(`Upload complete — ${data.created} created, ${data.updated} updated`)

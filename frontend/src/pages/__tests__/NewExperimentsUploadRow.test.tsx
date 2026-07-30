@@ -1,0 +1,251 @@
+import React from 'react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ToastProvider } from '@/components/ui'
+
+vi.mock('@/api/bulkUploads', () => ({
+  bulkUploadsApi: { uploadNewExperiments: vi.fn(), downloadTemplate: vi.fn() },
+  isConflictCheckResult: () => false,
+}))
+
+import { NewExperimentsUploadRow } from '../NewExperimentsUploadRow'
+import { bulkUploadsApi } from '@/api/bulkUploads'
+import type { BulkUploadResult, UploadPlan } from '@/api/bulkUploads'
+
+const PLAN: UploadPlan = {
+  creates: [
+    { row: 2, experiment_id: 'HPHT_001', parent_id: null, copied_from: null },
+    { row: 3, experiment_id: 'HPHT_002', parent_id: null, copied_from: null },
+  ],
+  renames: [], overwrites: [], skips: [], conflicts: [], counts: {},
+}
+
+function res(over: Partial<BulkUploadResult> = {}, plan: UploadPlan | null = PLAN): BulkUploadResult {
+  return {
+    created: 0, updated: 0, skipped: 0, errors: [], warnings: [], feedbacks: [],
+    message: '', dry_run: true, plan, plan_hash: 'hash-1', ...over,
+  }
+}
+
+let client: QueryClient
+
+function renderRow() {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <NewExperimentsUploadRow isOpen onToggle={vi.fn()} />
+      </ToastProvider>
+    </QueryClientProvider>,
+  )
+}
+
+async function dropFile() {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement
+  await userEvent.upload(input, new File(['x'], 'exp.xlsx'))
+}
+
+const mockUpload = () => vi.mocked(bulkUploadsApi.uploadNewExperiments)
+
+beforeEach(() => { vi.clearAllMocks() })
+
+describe('NewExperimentsUploadRow — preview phase', () => {
+  it('previews with dry_run and never commits on a file drop', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => expect(mockUpload()).toHaveBeenCalledTimes(1))
+    expect(mockUpload()).toHaveBeenCalledWith(expect.any(File), { dryRun: true })
+  })
+
+  it('opens the review modal showing the plan', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => expect(screen.getByText(/Review upload plan/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /Commit 2 changes/ })).toBeEnabled()
+  })
+
+  it('does not open the modal when the parser crashed and returned no plan', async () => {
+    // Genuine crash shape: `plan` itself is null/absent (backend/api/routers/
+    // bulk_uploads.py:189) — e.g. the upload isn't a readable spreadsheet at
+    // all. There is nothing to review, so this toasts and never opens the modal.
+    mockUpload().mockResolvedValue(res({ errors: ['Could not read file as an Excel workbook'], message: 'Upload failed' }, null))
+    renderRow()
+    await dropFile()
+    await waitFor(() => expect(screen.getByText(/Could not read file as an Excel workbook/)).toBeInTheDocument())
+    expect(screen.queryByText(/Review upload plan/i)).not.toBeInTheDocument()
+  })
+
+  it('opens the review modal (not the crash toast) when the plan is non-null but empty', async () => {
+    // The real shape for a missing required sheet (new_experiments.py:688): the
+    // parser reports it via `errors`, but `plan` is a non-null, entirely empty
+    // plan — NOT the null-plan crash shape above. `handlePreview`'s `!data.plan`
+    // guard must not swallow this into a toast; the researcher needs to see the
+    // error inside the modal, and Commit must be disabled at zero changes.
+    mockUpload().mockResolvedValue(res(
+      { errors: ["Missing required 'experiments' sheet"], message: 'Upload failed' },
+      { creates: [], renames: [], overwrites: [], skips: [], conflicts: [], counts: {} },
+    ))
+    renderRow()
+    await dropFile()
+    await waitFor(() => expect(screen.getByText(/Review upload plan/i)).toBeInTheDocument())
+    expect(screen.getByText(/Missing required 'experiments' sheet/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Commit 0 changes/ })).toBeDisabled()
+  })
+})
+
+describe('NewExperimentsUploadRow — commit phase', () => {
+  it('replays the previewed plan hash and omits dry_run', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockResolvedValue(res({ created: 2, dry_run: false, plan_hash: 'hash-1' }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(mockUpload()).toHaveBeenCalledTimes(2))
+    expect(mockUpload()).toHaveBeenLastCalledWith(expect.any(File), { planHash: 'hash-1' })
+  })
+
+  it('shows the committed counts and invalidates the next-ID chips', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    mockUpload().mockResolvedValue(res({ created: 2, updated: 0, dry_run: false, plan_hash: 'hash-1' }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.getByText(/Upload complete/i)).toBeInTheDocument())
+    expect(screen.getByText('Created: 2')).toBeInTheDocument()
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['nextIds'] })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['experiments'] })
+  })
+
+  it('treats a committed upload with parser row errors as done, not stale', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    // 8 rows committed, 2 rows errored — plan_hash unchanged, no conflicts.
+    mockUpload().mockResolvedValue(res({
+      created: 8, updated: 0, skipped: 0, dry_run: false, plan_hash: 'hash-1',
+      errors: ['Row 12: invalid status "RUNNING"'],
+    }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.getByText(/Upload complete/i)).toBeInTheDocument())
+    expect(screen.getByText('Created: 8')).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing was applied/i)).not.toBeInTheDocument()
+  })
+
+  it('does not open a stale/done view when commit itself crashed with no plan', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockResolvedValue(
+      res({ errors: ['Missing experiments sheet'], message: 'Upload failed', plan_hash: null }, null),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.queryByText(/Review upload plan/i)).not.toBeInTheDocument())
+    expect(screen.queryByText(/Upload complete/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Nothing was applied/i)).not.toBeInTheDocument()
+  })
+
+  it('toasts and keeps the review modal open when the commit request itself rejects', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockRejectedValue(new Error('Network error'))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.getByText('Network error')).toBeInTheDocument())
+    // The modal is still showing the original preview — nothing was discarded.
+    expect(screen.getByText(/Review upload plan/i)).toBeInTheDocument()
+  })
+})
+
+describe('NewExperimentsUploadRow — stale plan', () => {
+  it('shows the stale view when the returned hash differs from the previewed one', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockResolvedValue(res({
+      dry_run: false, plan_hash: 'hash-2',
+      errors: ["Plan changed since preview: previewed plan hash 'hash-1' does not match this file's plan 'hash-2'"],
+    }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.getByText(/Nothing was applied/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /Commit/ })).toBeDisabled()
+  })
+
+  it('shows the stale view when the fresh plan has conflicts', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockResolvedValue(res({
+      dry_run: false, plan_hash: 'hash-1',
+      errors: ['Row 4: [chain_rename_conflict] target already exists'],
+    }, { ...PLAN, conflicts: [{ row: 4, kind: 'chain_rename_conflict', detail: 'target already exists' }] }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.getByText(/Nothing was applied/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /Commit/ })).toBeDisabled()
+  })
+
+  it('re-arms commit only after the researcher confirms the new plan', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockResolvedValue(res({ dry_run: false, plan_hash: 'hash-2', errors: ['Plan changed since preview'] }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+    await waitFor(() => screen.getByText(/Nothing was applied/i))
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /reviewed the updated plan/i }))
+    expect(screen.getByRole('button', { name: /Commit 2 changes/ })).toBeEnabled()
+  })
+
+  it('resets the re-arm checkbox across two consecutive stale rounds (new hash remounts)', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    // Round 1: stale on hash-2. Tick the checkbox and re-arm Commit.
+    mockUpload().mockResolvedValue(res({ dry_run: false, plan_hash: 'hash-2', errors: ['Plan changed since preview'] }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+    await waitFor(() => screen.getByText(/Nothing was applied/i))
+    await userEvent.click(screen.getByRole('checkbox', { name: /reviewed the updated plan/i }))
+    expect(screen.getByRole('button', { name: /Commit 2 changes/ })).toBeEnabled()
+
+    // Round 2: commit again (replaying hash-2), server is stale again on a
+    // different hash-3. The modal must remount (new key) and the checkbox must
+    // NOT carry its ticked state over — otherwise a second stale response would
+    // silently arrive pre-confirmed.
+    mockUpload().mockResolvedValue(res({ dry_run: false, plan_hash: 'hash-3', errors: ['Plan changed since preview'] }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+    await waitFor(() => expect(mockUpload()).toHaveBeenLastCalledWith(expect.any(File), { planHash: 'hash-2' }))
+
+    await waitFor(() => screen.getByText(/Nothing was applied/i))
+    expect(screen.getByRole('checkbox', { name: /reviewed the updated plan/i })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: /Commit/ })).toBeDisabled()
+  })
+})
