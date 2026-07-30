@@ -66,7 +66,7 @@ Tests land beside their subject: `tests/test_reactor_slot.py`, `tests/models/tes
   - `normalize_experiment_type(experiment_type: object | None) -> str` — lowercased, whitespace-collapsed; tolerates enum instances via `.value`.
   - `series_prefix(experiment_type: object | None) -> str | None` — `"R"`, `"CF"`, or `None`.
   - `is_occupancy_type(experiment_type: object | None) -> bool`
-  - `derive_reactor_slot(reactor_number: int | None, experiment_type: object | None) -> str | None`
+  - `derive_reactor_slot(reactor_number: object | None, experiment_type: object | None) -> str | None` — `object` not `int`, because pandas hands the parsers numpy floats and the conditions sheet can hand over strings
   - `canonical_slot_label(label: str | None) -> str | None`
 
 - [ ] **Step 1: Write the failing test**
@@ -269,6 +269,17 @@ def is_occupancy_type(experiment_type: object | None) -> bool:
     return series_prefix(experiment_type) is not None
 
 
+def _format_slot(prefix: str, number: int) -> str | None:
+    """Render a canonical slot label, or None if the number is not a slot.
+
+    Zero and negatives are rejected here rather than at each call site so the
+    guard and the padding width live in one place.
+    """
+    if number <= 0:
+        return None
+    return f"{prefix}{number:02d}"
+
+
 def derive_reactor_slot(
     reactor_number: object | None,
     experiment_type: object | None,
@@ -289,9 +300,7 @@ def derive_reactor_slot(
         number = int(reactor_number)
     except (TypeError, ValueError):
         return None
-    if number <= 0:
-        return None
-    return f"{prefix}{number:02d}"
+    return _format_slot(prefix, number)
 
 
 def canonical_slot_label(label: str | None) -> str | None:
@@ -305,16 +314,13 @@ def canonical_slot_label(label: str | None) -> str | None:
     match = _SLOT_LABEL_RE.fullmatch(label.strip())
     if match is None:
         return None
-    number = int(match.group(2))
-    if number <= 0:
-        return None
-    return f"{match.group(1).upper()}{number:02d}"
+    return _format_slot(match.group(1).upper(), int(match.group(2)))
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `.venv/Scripts/pytest tests/test_reactor_slot.py -q`
-Expected: all pass (33 cases).
+Expected: all pass. The parametrized cases expand to 41 test items.
 
 - [ ] **Step 5: Commit**
 
