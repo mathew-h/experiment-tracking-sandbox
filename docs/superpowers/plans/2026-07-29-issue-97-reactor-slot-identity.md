@@ -1141,32 +1141,27 @@ with:
 ```python
 _VALID_STATUSES = {s.value for s in ExperimentStatus}
 _UNSET = object()
-
-
-def _normalize_type(experiment_type: str | None) -> str:
-    """Lowercase + collapse whitespace so 'HPHT ', 'Core  Flood', etc. compare cleanly."""
-    return normalize_experiment_type(experiment_type)
-
-
-def _is_eligible_for_occupancy(experiment_type: str | None) -> bool:
-    """True for HPHT / Core Flood — the types with physical reactor occupancy.
-
-    Delegates to database.reactor_slot so this and the reactor_slot column can
-    never disagree about what occupies a vessel (issue #97). The local
-    _OCCUPANCY_TYPES set it replaced also missed the 'CF' and 'CoreFlood'
-    spellings that exist in production data.
-    """
-    return is_occupancy_type(experiment_type)
 ```
 
-and add to the imports at the top (after line 13):
+**Both local type helpers are deleted, not kept as delegating wrappers.** Every
+call site of `_is_eligible_for_occupancy` is replaced below by
+`derive_reactor_slot(...) is not None`, which subsumes it — so keeping the
+function would leave something that still *reads* like the eligibility gate in a
+locked parser while having no effect, and a maintainer would edit it and see
+nothing change. `_normalize_type` goes with it for the same reason. (Ruling by the
+product owner, 2026-07-29, after the Task 4 review flagged both as dead.)
+
+Note this deletion also **widens** what counts as occupancy-bearing: the deleted
+`_OCCUPANCY_TYPES = {"hpht", "core flood"}` did not match the `"cf"` or
+`"coreflood"` spellings that `database/reactor_slot.py` accepts, and production
+has one row typed literally `CF`. That row becomes occupancy-bearing for the first
+time. Intended, and pinned by `test_cf_spelled_type_is_occupancy_bearing` below.
+
+Add to the imports at the top (after line 13) — `derive_reactor_slot` only, since
+nothing else from the module is used here:
 
 ```python
-from database.reactor_slot import (
-    derive_reactor_slot,
-    is_occupancy_type,
-    normalize_experiment_type,
-)
+from database.reactor_slot import derive_reactor_slot
 ```
 
 **3b.** Replace the two message helpers at lines 38-50 so they name the slot:
@@ -1313,7 +1308,9 @@ Note `reactor_slot` is derived here rather than read off `exp.conditions.reactor
         calendar date) than `newer_than`; occupants with a missing date, or a date
         that is newer-or-equal, are left ONGOING with a warning instead. Omitting
         `newer_than` entirely preserves the original unconditional behavior relied
-        on by the legacy Streamlit create path.
+        on by `new_experiments.py` (both occupancy call sites) and the legacy
+        Streamlit create path. That dependency is live, not historical — do not
+        change the `_UNSET` default without updating those callers.
 
         Args:
             db: Database session
