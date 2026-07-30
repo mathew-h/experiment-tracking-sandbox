@@ -2515,11 +2515,26 @@ with:
     // Without this a 409 from the occupancy check (issue #97) is swallowed: the
     // dropdown snaps back and the user is told nothing. The server's detail
     // names the occupying experiment and its start date, so show it verbatim.
-    onError: (err: unknown) => {
-      toastError(err.message || 'Could not update status')
+    onError: (err: Error) => {
+      toastError('Update failed', err.message || 'Could not update status')
     },
   })
 ```
+
+**Use the two-argument toast form.** `useToast`'s signature is
+`error(title: string, message?: string)` (`frontend/src/components/ui/Toast.tsx:15`),
+and the two neighbouring handlers in `ReactorGrid.tsx` (~`:309`, `:329`) both pass a
+short title plus a descriptive body. A one-argument call renders the whole
+~130-character server sentence as a bold title in a `max-w-[360px]` card. Put the
+short label in the title and the server detail in the body.
+
+**Test the real network-failure path, not an unreachable branch.** Axios never
+produces an empty `.message` — a genuine failure carries `"Network Error"` or
+`"timeout of Xms exceeded"`, and the interceptor leaves those untouched because
+there is no `response.data.detail`. So `err.message || fallback` effectively never
+reaches its fallback in production. Model a real network error in the test and
+assert the user still gets an intelligible toast; keep the `||` as defensive code
+but do not assert it as the contract.
 
 **Do NOT write a detail-extraction helper.** `frontend/src/api/client.ts:11-23` already installs an
 Axios response interceptor that copies FastAPI's `detail` onto `error.message`
