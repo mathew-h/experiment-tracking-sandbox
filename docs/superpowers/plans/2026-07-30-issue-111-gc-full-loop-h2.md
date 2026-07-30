@@ -55,7 +55,11 @@ This is the pivot: **a/b/c were replicate vials, not triplicate injections of on
 
 Because `_calculate_hydrogen()` (`backend/services/calculations/scalar_calcs.py:135`) needs ppm *and* volume *and* pressure, `h2_micromoles`, `h2_mass_ug` and `h2_grams_per_ton_yield` have been uncomputable from a master upload since the rename. Fixing the H2 column alone would not restore them — this is why gas volume and pressure are in scope.
 
-**v3 fill state as of 10:15:** 210 rows carry an Experiment ID. `FL H2 (ppm)` and `DI H2 (ppm)` are both empty throughout; `FL Gas Volume (mL)` / `FL Gas Pressure (psi)` are populated on 209; `DI gas volume (mL)` / `DI gas pressure (psi)` on all 499 (including blank rows). The GC columns are mid-repopulation, so **Task 6's real-file run is expected to report zero H2 sources** — that is the current state of the sheet, not a bug in the parser. Do not "fix" the parser to make H2 appear.
+**v3 fill state — corrected 2026-07-30 by Task 6's real-file run.** An earlier note here said "210 rows carry an Experiment ID", counted from `notna()` without inspecting the values. That was wrong: **v3 as saved contains no usable data at all.** Its `Dashboard` cells are Excel Table formulas (`=SampleList[[#This Row],[Experiment ID]]`, `=GCResults[...]`) whose cached values are stale — `Experiment ID` is the float `0.0` on all 210 "non-null" rows, and `Duration (Days)` holds `0` and `' '`. pandas and openpyxl read only that cache, never live-recalculated values. Because `0.0` is falsy, every row resolves to a blank ID and is skipped: the real run reported **499 skipped, 0 created, 0 errors, 0 warnings**.
+
+The file carries `fullCalcOnLoad=True`, so opening and re-saving it in Excel would populate the cache — but the underlying source sheets (`GC Full Loop`, `GC DI`, `Sampling`) are themselves `"Not Requested"`/blank for every row, so the sheet needs populating, not just recalculating.
+
+**Verification therefore runs against `Master_Reactor_Sampling_Tracker_v2.xlsx`**, which has genuine cached values: ~245 rows with real IDs, ~179 populated `FL H2 (ppm)` readings, and the wide `DI a/b/c` block. That exercises the alias layer, real FL ingestion, the wide-DI warning, and duplicate detection — none of which v3 can currently reach. Neither result is a parser bug; do not "fix" the parser to make H2 appear.
 
 ### Mean/SD already exists — do not build it
 
