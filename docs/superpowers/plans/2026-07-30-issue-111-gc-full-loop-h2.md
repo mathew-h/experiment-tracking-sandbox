@@ -588,7 +588,7 @@ In `backend/services/bulk_uploads/master_bulk_upload.py`, after `_find_sheet()`:
 ```python
 def _resolve_h2(
     row: Any,
-) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str]]:
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str], Optional[float]]:
     """Pick the winning GC reading for one Dashboard row (issue #111).
 
     Full Loop takes precedence over direct injection (Mat, 2026-07-30); DI is
@@ -601,9 +601,14 @@ def _resolve_h2(
     A value of 0 is a real measurement and wins normally; only a blank cell
     falls through.
 
-    Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source), where source is
-    'full_loop', 'di', or None when neither block has a concentration.
+    Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source, di_ppm), where
+    source is 'full_loop', 'di', or None when neither block has a
+    concentration. `di_ppm` is the parsed DI value whether or not it won, so
+    callers can report a superseded DI reading without re-parsing the cell —
+    one parse, one source of truth (review finding, Task 3).
     """
+    di_ppm = _parse_float(row.get("DI H2 (ppm)"))
+
     fl_ppm = _parse_float(row.get("FL H2 (ppm)"))
     if fl_ppm is not None:
         return (
@@ -611,15 +616,16 @@ def _resolve_h2(
             _parse_float(row.get("FL Gas Volume (mL)")),
             _parse_float(row.get("FL Gas Pressure (psi)")),
             "full_loop",
+            di_ppm,
         )
 
-    di_ppm = _parse_float(row.get("DI H2 (ppm)"))
     if di_ppm is not None:
         return (
             di_ppm,
             _parse_float(row.get("DI gas volume (mL)")),
             _parse_float(row.get("DI gas pressure (psi)")),
             "di",
+            di_ppm,
         )
 
     # No concentration in either block. Keep reading the Full Loop gas columns
@@ -629,6 +635,7 @@ def _resolve_h2(
         _parse_float(row.get("FL Gas Volume (mL)")),
         _parse_float(row.get("FL Gas Pressure (psi)")),
         None,
+        di_ppm,
     )
 ```
 
@@ -637,7 +644,7 @@ def _resolve_h2(
 Replace the three separate reads added in Task 1 Step 5 with:
 
 ```python
-        h2_ppm, gas_vol_ml, gas_psi, h2_source = _resolve_h2(row)
+        h2_ppm, gas_vol_ml, gas_psi, h2_source, di_ppm = _resolve_h2(row)
 ```
 
 Leave `gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None` on the following line exactly as it is.
@@ -757,6 +764,54 @@ def test_wide_di_columns_warn_about_one_row_per_vial(db_session: Session):
     assert scalar.h2_concentration is None, "wide DI values must not be guessed at"
 
 
+def test_h2s_column_is_not_reported_as_a_dropped_h2_reading(db_session: Session):
+    """'H2S (ppm)' must not be flagged as an unrecognized hydrogen column.
+
+    The warning exists so a researcher trusts it when it fires. A substring
+    match on 'h2' would also hit H2S and H2O and cry wolf about a hydrogen
+    value that was never there.
+    """
+    _seed_experiment(db_session, "HPHT_WARN07", 8827)
+
+    headers = list(_V3_HEADERS) + ["H2S (ppm)", "H2O (%)"]
+    row = _v3_row("HPHT_WARN07", 7.0, fl_h2=115.0) + [12.0, 3.0]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [row])})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert result.warnings == [], f"H2S/H2O must not warn, got: {result.warnings}"
+
+    # A genuine rename still warns — the guard narrows, it does not disable.
+    renamed = list(_V3_HEADERS)
+    renamed[renamed.index("FL H2 (ppm)")] = "GC Loop H2 ppm"
+    xlsx2 = make_excel_multisheet({"Dashboard": (renamed, [
+        _v3_row("HPHT_WARN07", 8.0, fl_h2=115.0),
+    ])})
+    result2 = MasterBulkUploadService.from_bytes_ex(db_session, xlsx2)
+    assert any("GC Loop H2 ppm" in w for w in result2.warnings)
+
+
+def test_superseded_di_flag_comes_from_the_resolver(db_session: Session):
+    """h2_di_superseded is derived from _resolve_h2's own DI parse.
+
+    Guards against the flag and the precedence decision drifting apart if the
+    DI branch later gains unit conversion or a sanity bound.
+    """
+    from backend.services.bulk_uploads.master_bulk_upload import _resolve_h2
+
+    both = {"FL H2 (ppm)": 115.0, "DI H2 (ppm)": 42.0}
+    fl_only = {"FL H2 (ppm)": 115.0, "DI H2 (ppm)": None}
+    di_only = {"FL H2 (ppm)": None, "DI H2 (ppm)": 42.0}
+    neither = {"FL H2 (ppm)": None, "DI H2 (ppm)": None}
+
+    assert _resolve_h2(both)[3:] == ("full_loop", 42.0)
+    assert _resolve_h2(fl_only)[3:] == ("full_loop", None)
+    assert _resolve_h2(di_only)[3:] == ("di", 42.0)
+    assert _resolve_h2(neither)[3:] == (None, None)
+
+
 def test_feedback_records_which_gc_block_was_used(db_session: Session):
     """Each row reports its H2 source so a discarded DI reading is visible."""
     _seed_experiment(db_session, "HPHT_WARN04", 8824)
@@ -804,12 +859,17 @@ Expected: the four `from_bytes_ex` tests FAIL with `AttributeError: type object 
 At the top of `backend/services/bulk_uploads/master_bulk_upload.py`, extend the imports:
 
 ```python
+import re
 from dataclasses import dataclass, field
 ```
 
 After `_HEADER_ALIASES`:
 
 ```python
+# H2 as a standalone token, so 'H2S (ppm)' and 'H2O' never look like a dropped
+# hydrogen column while a real rename ('GC Loop H2 ppm') still does.
+_H2_TOKEN = re.compile(r"\bh2\b", re.IGNORECASE)
+
 # Columns whose header mentions H2 and that the parser deliberately handles.
 _RECOGNIZED_H2_COLUMNS = {
     "FL H2 (ppm)",
@@ -922,9 +982,14 @@ Immediately after the `if missing:` block, before the `for idx, row in df.iterro
               "reading in 'DI H2 (ppm)'."
         )
 
+    # Match H2 only as a standalone token. A substring test would also fire on
+    # an H2S or H2O column, telling a researcher a hydrogen reading was dropped
+    # when none was — a false alarm in exactly the place this warning is meant
+    # to be trustworthy. A genuine rename keeps H2 as its own token
+    # ('GC Loop H2 ppm'), so detection is unaffected.
     unmapped_h2 = [
         c for c in df.columns
-        if "h2" in c.lower()
+        if _H2_TOKEN.search(c)
         and c not in _RECOGNIZED_H2_COLUMNS
         and c not in _WIDE_DI_COLUMNS
     ]
@@ -953,10 +1018,10 @@ Replace the existing `feedbacks.append(...)` line inside the `try` block with:
                 "experiment_id": exp_id,
                 "action": action,
                 "h2_source": h2_source,
-                "h2_di_superseded": (
-                    h2_source == "full_loop"
-                    and _parse_float(row.get("DI H2 (ppm)")) is not None
-                ),
+                # di_ppm comes from _resolve_h2's own parse — re-reading the
+                # cell here would let this flag drift from the precedence
+                # decision if the DI branch ever gains filtering.
+                "h2_di_superseded": h2_source == "full_loop" and di_ppm is not None,
             })
 ```
 
