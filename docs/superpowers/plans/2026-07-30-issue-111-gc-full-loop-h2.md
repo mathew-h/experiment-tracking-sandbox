@@ -19,6 +19,8 @@
 - **Two existing API tests DO have to change, and they fail loudly if you forget.** `tests/api/test_bulk_uploads.py:324` and `:339` replace the whole parser module with a `MagicMock` and stub `mock_svc.from_bytes.return_value = (3, 1, 0, [], [])`. Once the router calls `from_bytes_ex`, the mock returns a bare `MagicMock`, so `outcome.created` is not an `int` and `UploadResponse` validation blows up. Task 3 Step 9 updates both. Do not "fix" this by leaving the router on `from_bytes`.
 - **Do not change the sync path.** `backend/config/settings.py` and `sync_from_path()` stay as they are. Uploads happen by drag-and-drop.
 - **Per-row SAVEPOINT isolation is load-bearing.** The existing `db.begin_nested()` per row must be preserved exactly — `create_scalar_result_ex` commits per row, so a session-wide rollback would discard already-written rows.
+- **The worktree has no `.venv` of its own.** Every `.venv/Scripts/python.exe` command below must be run with the interpreter from the main checkout, with the worktree as the working directory: `& "C:\Users\MathewHearl\OneDrive - Addis Energy\Documents\01_Software\database_sandbox\experiment_tracking_sandbox\.venv\Scripts\python.exe" -m pytest ...`
+- **Every test a task adds must be green when that task commits.** If a test cannot be satisfied by its own task's code, it belongs in the later task that makes it observable.
 - Python style: `flake8 --max-line-length=100` must be clean on the changed file. Do not run `black` on it — the repo is not Black-formatted in practice and it would reformat locked neighbours.
 - Commit format: `[#111] <imperative description under 50 chars>` followed by `- Tests added: yes/no` and `- Docs updated: yes/no`.
 
@@ -176,16 +178,22 @@ def test_v3_fl_h2_columns_are_ingested(db_session: Session):
 def test_v3_uppercase_overwrite_header_is_honoured(db_session: Session):
     """The sheet spells it 'OVERWRITE'; the parser used to look for 'Overwrite'.
 
-    With the casing unmatched, _overwrite was always False and a flagged row
-    silently failed to update.
+    The difference is only observable on a field the second upload leaves
+    BLANK. `create_scalar_result_ex` (backend/services/scalar_results_service.py
+    :129-135) writes every SCALAR_UPDATABLE_FIELDS entry when overwrite is True
+    — clearing ones absent from the row — but only the fields actually present
+    when it is False. A test that repeats the same populated field in both
+    uploads passes either way and proves nothing.
     """
     _seed_experiment(db_session, "HPHT_FL002", 8802)
 
-    first = _master_excel_v3([_v3_row("HPHT_FL002", 7.0, nh4=5.0, overwrite=None)])
+    first = _master_excel_v3([_v3_row("HPHT_FL002", 7.0, nh4=5.0, ph=7.0)])
     MasterBulkUploadService.from_bytes(db_session, first)
 
+    # Repeat NH4 but leave Sample pH blank, with OVERWRITE set.
     second = _master_excel_v3([
-        _v3_row("HPHT_FL002", 7.0, description="Day 7 revised", nh4=6.5, overwrite=1.0),
+        _v3_row("HPHT_FL002", 7.0, description="Day 7 revised",
+                nh4=6.5, ph=None, overwrite=1.0),
     ])
     created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
         db_session, second
@@ -202,35 +210,10 @@ def test_v3_uppercase_overwrite_header_is_honoured(db_session: Session):
         .one()
     ).scalar_data
     assert scalar.gross_ammonium_concentration_mM == pytest.approx(6.5)
-
-
-def test_v2_di_avg_header_maps_onto_di_h2(db_session: Session):
-    """A v2 workbook's 'DI avg H2 (ppm)' still lands on h2_concentration.
-
-    v2 is not the reference format any more, but an archived workbook must not
-    lose its DI reading just because the column was renamed in v3.
-    """
-    _seed_experiment(db_session, "HPHT_FL003", 8803)
-
-    headers = list(_V3_HEADERS)
-    headers[headers.index("DI H2 (ppm)")] = "DI avg H2 (ppm)"
-    xlsx = make_excel_multisheet({"Dashboard": (headers, [
-        _v3_row("HPHT_FL003", 7.0, di_h2=42.0, di_vol=10.0, di_psi=15.0),
-    ])})
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
-        db_session, xlsx
+    assert scalar.final_ph is None, (
+        "OVERWRITE=TRUE must clear a field the new row leaves blank; a "
+        "surviving 7.0 means the OVERWRITE header was not recognised"
     )
-
-    assert errors == [], f"Unexpected errors: {errors}"
-    assert created == 1
-
-    scalar = (
-        db_session.query(ExperimentalResults)
-        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
-        .filter(Experiment.experiment_id == "HPHT_FL003")
-        .one()
-    ).scalar_data
-    assert scalar.h2_concentration == pytest.approx(42.0)
 
 
 def test_legacy_h2_header_still_parses(db_session: Session):
@@ -261,10 +244,12 @@ def test_legacy_h2_header_still_parses(db_session: Session):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "v3_fl_h2 or uppercase_overwrite or di_avg_header or legacy_h2_header" -v
+.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "v3_fl_h2 or uppercase_overwrite or legacy_h2_header" -v
 ```
 
-Expected: `test_v3_fl_h2_columns_are_ingested` FAILS on `h2_concentration` being `None`; `test_v3_uppercase_overwrite_header_is_honoured` FAILS with `updated == 0`; `test_v2_di_avg_header_maps_onto_di_h2` FAILS on `h2_concentration` being `None`; `test_legacy_h2_header_still_parses` PASSES already — it is the regression guard, keep it.
+Expected: `test_v3_fl_h2_columns_are_ingested` FAILS on `h2_concentration` being `None`; `test_v3_uppercase_overwrite_header_is_honoured` FAILS on `final_ph` still being `7.0` (the un-aliased `OVERWRITE` left `_overwrite` False, so the blank pH was preserved instead of cleared); `test_legacy_h2_header_still_parses` PASSES already — it is the regression guard, keep it.
+
+**Every test in this task must be green at commit time.** The `DI avg H2 (ppm)` alias cannot be observed until Task 2 teaches the parser to read a DI column at all, so its test lives in Task 2, not here.
 
 - [ ] **Step 3: Add the alias table**
 
@@ -469,6 +454,37 @@ def test_zero_h2_is_a_real_measurement(db_session: Session):
     assert scalar.h2_micromoles == pytest.approx(0.0)
 
 
+def test_v2_di_avg_header_maps_onto_di_h2(db_session: Session):
+    """A v2 workbook's 'DI avg H2 (ppm)' still lands on h2_concentration.
+
+    v2 is not the reference format any more, but an archived workbook must not
+    lose its DI reading just because the column was renamed in v3. The alias
+    itself is Task 1's, but nothing reads a DI column until _resolve_h2 exists,
+    so the test belongs here.
+    """
+    _seed_experiment(db_session, "HPHT_PREC05", 8815)
+
+    headers = list(_V3_HEADERS)
+    headers[headers.index("DI H2 (ppm)")] = "DI avg H2 (ppm)"
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [
+        _v3_row("HPHT_PREC05", 7.0, di_h2=42.0, di_vol=10.0, di_psi=15.0),
+    ])})
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_PREC05")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(42.0)
+
+
 def test_no_gc_reading_leaves_h2_unset(db_session: Session):
     """Both GC blocks blank → h2_concentration stays None and the row still lands."""
     _seed_experiment(db_session, "HPHT_PREC04", 8814)
@@ -497,7 +513,7 @@ def test_no_gc_reading_leaves_h2_unset(db_session: Session):
 .venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "PREC or prec" -v
 ```
 
-Expected: `test_di_used_when_full_loop_absent` FAILS (`h2_concentration is None`). The other three PASS after Task 1 — they pin behavior that must not regress when the DI branch is added.
+Expected: `test_di_used_when_full_loop_absent` and `test_v2_di_avg_header_maps_onto_di_h2` both FAIL (`h2_concentration is None`) — nothing reads a DI column before `_resolve_h2` exists. `test_full_loop_wins_when_both_present`, `test_zero_h2_is_a_real_measurement` and `test_no_gc_reading_leaves_h2_unset` PASS after Task 1 — they pin behavior that must not regress when the DI branch is added.
 
 - [ ] **Step 3: Add the resolver**
 
