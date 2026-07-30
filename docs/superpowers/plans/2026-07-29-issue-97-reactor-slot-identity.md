@@ -24,7 +24,10 @@
 
 Recorded here so no implementer adds them opportunistically:
 
-- **The PL/pgSQL uniqueness trigger and `CHECK (reactor_number IS NULL OR reactor_number > 0)`** (issue §4). Blocked: the prerequisite cleanup has not run. Dev DB right now has 5 double-booked slots (`CF01`×6, `CF03`×5, `R00`×8, `R01`×6, `R06`×2) and 13 rows with `reactor_number = 0`; prod had 2 slots and 11 zeros as of 2026-07-28. `database/data_migrations/018*` does not exist. Task 9 files the follow-up issue.
+- **The PL/pgSQL uniqueness trigger and `CHECK (reactor_number IS NULL OR reactor_number > 0)`** (issue §4). Blocked: the prerequisite cleanup has not run. `database/data_migrations/018*` does not exist. Task 9 files the follow-up issue (now **GitHub #112**).
+  - **Corrected 2026-07-30, measured against the stored `reactor_slot` column:** the dev DB has **4** double-booked slots — `CF01`×6, `CF03`×5, `R01`×6, `R06`×2 — and **13** rows with `reactor_number = 0`. Prod had 2 slots and 11 zeros as of 2026-07-28.
+  - **`R00` is NOT a double-booked slot**, though the 2026-07-28 audit listed it as one. Those eight `SERUM_JW_153`–`160` rows carry `reactor_number = 0`, so `derive_reactor_slot` returns `None` and their `reactor_slot` is NULL — they form no slot at all. This branch already made that class inert for occupancy. The audit's figure came from the pre-#97 re-derived `CASE`, which rendered zero as `"R00"`.
+  - The two prerequisites are **separate**: the 4 genuine collisions block the trigger; the 13 zero-rows block only the `CHECK`.
 - **Passing `newer_than` on the new-experiments upload path** (the second bullet of issue §3). This one follows from the split and is the plan's one deliberate deviation from the issue text — see the rationale in Task 5. Short version: the issue's own justification for passing it is "let the trigger be the backstop", and there is no trigger in this pass, so failing open would *create* silent double-bookings rather than surface them.
 - **Deleting the `seen_labels` dedup at `dashboard.py:126-140`.** The issue says do it last, after the constraint is verified. There is no constraint in this pass, so the dedup stays and `_occupancy` keeps under-counting double-booked slots by one. Recorded in the follow-up issue.
 - **The frontend "R01 is occupied by HPHT_222 — complete it and start HPHT_230?" confirm dialog.** Deferred by the issue itself. Task 8 only makes the 409 *visible*; today both status mutations swallow errors entirely.
@@ -2729,5 +2732,5 @@ The server is already running on port 8000 — do not restart it. Previous sessi
 ### What this branch does not fix, to state plainly in the PR
 
 - Two ONGOING experiments can still share a slot — there is no constraint. The dashboard still hides the second one and `summary.reactors.empty` still reads one too high per double-booking. Tracked in the new follow-up issue.
-- The 5 double-booked slots and 13 `reactor_number = 0` rows in the dev DB (and 2 / 11 in prod) are untouched. Cleaning them is Part A + Part B of `audit-2026-07-28-results-and-cleanup.md`, deliberately a separate human-run session.
+- The **4** double-booked slots and 13 `reactor_number = 0` rows in the dev DB (and 2 / 11 in prod) are untouched. Cleaning them is Part A + Part B of `audit-2026-07-28-results-and-cleanup.md`, deliberately a separate human-run session. Note `R00` is not among the 4 — see the corrected figures above.
 - `experiment_type` is still un-normalized (`SERUM` vs `Serum`), so the #85 Serum KPI is still undercounting by ~72%. `database/reactor_slot.py` tolerates every spelling, but the KPI predicate at `dashboard.py:212` is untouched. Tracked in `issue-experiment-type-enum-binding.md`.
