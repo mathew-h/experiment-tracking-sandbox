@@ -1471,7 +1471,10 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   `summary.reactors.empty` still reads one too high per double-booked slot.
   `newer_than` on the new-experiments path is also deferred to #112 — the issue's own
   rationale for passing it was "let the trigger be the backstop," and there was no
-  trigger yet.
+  trigger yet. **Correction, 2026-07-30:** `summary.reactors.empty` does NOT read
+  one too high per double-booking — `_occupancy()` counts the same deduped
+  `reactor_cards` list as the grid, so the counts are correct; only the grid hides
+  the contention. See `docs/issues/issue-reactor-occupancy-uniqueness-trigger.md`.
 - **Four decisions Mat made at scope confirmation (`/start-task`, 2026-07-29):**
   1. Ship §1–§3 plus tests only this branch; §4 deferred to a follow-up issue, blocked on the audit cleanup.
   2. Autoclave is **not** occupancy-bearing — only HPHT and Core Flood claim numbered slots.

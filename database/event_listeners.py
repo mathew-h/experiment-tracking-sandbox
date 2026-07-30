@@ -701,6 +701,17 @@ def set_reactor_slot(mapper, connection, target):
     Query.update() for those columns, or recompute reactor_slot explicitly in
     the same script.
 
+    Same exception applies to a raw Core INSERT built from hand-assembled SQL
+    text, e.g. scripts/migrate-sqlite-to-postgres.py:152-153, which runs
+    `conn.execute(text(sql), values)` directly against the connection. That
+    also compiles straight to SQL with no ORM instance involved, so this
+    listener never fires and every row it inserts lands with reactor_slot
+    NULL. `alembic upgrade head` will not repair this afterward if the DB is
+    already stamped past the migration that backfills the column — see the
+    warning in database/CLAUDE.md. General rule: **any** write that does not
+    go through an ORM instance (bulk Query.update(), raw Core INSERT/UPDATE,
+    direct SQL) leaves reactor_slot stale and must recompute it explicitly.
+
     Same pattern as calculate_additive_derived_values above: mutating a column
     attribute in before_insert/before_update is included in the emitted
     INSERT/UPDATE. Note the corollary — the value is only correct *after* a

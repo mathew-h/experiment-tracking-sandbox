@@ -20,7 +20,7 @@ def _models_engine():
     eng = create_engine(TEST_DB_URL, pool_pre_ping=True)
     Base.metadata.create_all(eng)
     yield eng
-    Base.metadata.drop_all(eng)
+    # No teardown — API/services suite may share the DB
 
 
 @pytest.fixture

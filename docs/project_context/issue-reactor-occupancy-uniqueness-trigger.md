@@ -172,12 +172,24 @@ meant to cover.
   §2 already says explicitly: delete it only *after* the constraint is verified,
   not before — removing it earlier would just make an existing double-booking
   render twice with no explanation.
-- **Re-verify `summary.reactors.empty`** (`backend/api/routers/dashboard.py::_occupancy`).
-  It currently reads one too high per double-booked slot because it counts the
-  deduped `reactor_cards` list. Once the dedup above is gone and the constraint
-  guarantees at most one ONGOING row per slot, confirm the arithmetic
-  (`ongoing + queued + empty == total`) actually holds against a live double-booking
-  fixture, not just by construction.
+- **Correction (2026-07-30): `summary.reactors.empty` is not currently wrong.**
+  An earlier version of this ticket claimed it "reads one too high per
+  double-booked slot." Verified empirically against the dev database and it
+  does not: `_occupancy()` (`backend/api/routers/dashboard.py:48-64`) counts
+  the same **deduped** `reactor_cards` list that feeds the grid, so a
+  double-booked slot contributes exactly one card either way. `ongoing`
+  therefore equals the number of *distinct occupied slots*, and
+  `empty = total - ongoing - queued` is correct today (measured with
+  `CF01`×6 and `CF03`×5 ONGOING: CF cards = {CF01, CF03}, `ongoing = 2`,
+  `empty = 3 - 2 = 1`, and CF02 is indeed the one free rig). The dedup is
+  what keeps this arithmetic correct — it is not masking an undercount. What
+  the dedup *does* hide is that the grid shows one card per slot regardless
+  of how many ONGOING rows occupy it, so contention is invisible even though
+  the count is right. Once the constraint above lands and the dedup is
+  removed, re-confirm the arithmetic (`ongoing + queued + empty == total`)
+  still holds against a live double-booking fixture — it should, since the
+  constraint guarantees at most one ONGOING row per slot, making the dedup's
+  job trivial rather than load-bearing.
 
 ## The open question that must be re-settled before scoping the trigger
 

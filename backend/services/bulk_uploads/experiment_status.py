@@ -6,6 +6,7 @@ from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 
 import pandas as pd
+import structlog
 from sqlalchemy.orm import Session
 
 from database import Experiment
@@ -13,6 +14,7 @@ from database.models import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 from database.reactor_slot import derive_reactor_slot
 
+log = structlog.get_logger(__name__)
 
 _VALID_STATUSES = {s.value for s in ExperimentStatus}
 _UNSET = object()
@@ -438,7 +440,12 @@ class ExperimentStatusService:
                 db.commit()
 
         except Exception as e:
-            warnings.append(f"Error managing reactor occupancy: {e}")
+            log.error(
+                "reactor_occupancy_check_failed",
+                experiment_id=getattr(new_experiment, "experiment_id", None),
+                error=str(e),
+            )
+            warnings.append(f"ERROR — reactor occupancy check did not run: {e}")
             if commit:
                 db.rollback()
 

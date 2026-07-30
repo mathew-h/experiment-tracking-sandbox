@@ -1377,9 +1377,14 @@ def test_dashboard_query_count_not_increased(client, db_session):
 
 
 def test_serum_with_stray_reactor_number_never_reaches_the_grid(client, db_session):
-    """A Serum vial has reactor_slot NULL, so the reactor-cards query cannot
-    return it. This replaces the experiment_type.in_(...) filter with a
-    structural guarantee (issue #97).
+    """Pins a PRESERVED guarantee, not a new one: a Serum vial was already
+    excluded on develop via the old `experiment_type.in_(["HPHT", "Core
+    Flood"])` filter, and it still is post-#97 because a Serum row derives
+    `reactor_slot = NULL`. This test passes identically on develop and here —
+    it does not by itself prove the slot predicate is doing the excluding.
+    `test_reactor_number_zero_never_reaches_the_grid` below is the
+    discriminating test in this group: it fails on the old filter (which let
+    reactor_number=0 through) and passes only with the reactor_slot guarantee.
     """
     from database.models.experiments import Experiment
     from database.models.conditions import ExperimentalConditions
@@ -1442,7 +1447,14 @@ def test_reactor_number_zero_never_reaches_the_grid(client, db_session):
 
 
 def test_reactor_status_endpoint_also_excludes_slotless_rows(client, db_session):
-    """The legacy GET /reactor-status moved onto the same predicate."""
+    """The legacy GET /reactor-status moved onto the same predicate.
+
+    Like test_serum_with_stray_reactor_number_never_reaches_the_grid above,
+    this pins a PRESERVED guarantee: the old `experiment_type.in_(...)` filter
+    already excluded this Serum row on develop, and `reactor_slot IS NULL`
+    still excludes it post-#97. `test_reactor_number_zero_never_reaches_the_grid`
+    is the discriminating test in this group.
+    """
     from database.models.experiments import Experiment
     from database.models.conditions import ExperimentalConditions
     from database.models.enums import ExperimentStatus

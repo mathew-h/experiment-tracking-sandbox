@@ -202,6 +202,8 @@ There is no database constraint preventing two ONGOING experiments from both car
 
   What survives is the *other* half: `_occupancy` counts `reactor_cards`, and `reactor_cards` is the **deduped** list. So a double-booked slot still contributes exactly one `ongoing`, and `empty = total - ongoing - queued` still reads one too high. The invariant the docstring promises (`ongoing + queued + empty == total`) holds while being wrong about the lab. The undercount moved from the SQL into the dedup; it did not go away.
 
+  > **Correction, 2026-07-30** (`docs/issues/issue-reactor-occupancy-uniqueness-trigger.md`): verified empirically against the dev database — this paragraph's conclusion is backwards. `_occupancy` counting the deduped `reactor_cards` list is what keeps `ongoing`/`empty` correct (one card per distinct occupied slot), not what breaks it; the dedup hides *contention on the grid*, not a count. Left as-is here per this branch's convention of preserving historical reasoning rather than rewriting it; see the linked file for the corrected rationale.
+
   This is the strongest argument for the constraint in §4 rather than more read-path patching. #85 correctly fixed the symptom it could see from inside `get_dashboard`; the remaining error is unreachable from there, because by the time `_occupancy` runs the duplicate has already been discarded. Once one-ONGOING-per-slot is enforced in the database, the dedup at 126-140 becomes dead code and can be deleted, and `_occupancy` becomes correct by construction.
 
 ---
