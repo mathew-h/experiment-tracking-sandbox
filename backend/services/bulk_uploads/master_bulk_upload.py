@@ -380,6 +380,17 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     feedbacks = out.feedbacks
     created = updated = skipped = 0
 
+    # Row-level errors carry their sheet row number and are sorted in at the end
+    # (issue #114 item 3). This function is two-phase by necessity — identity and
+    # duplicate tallying for every row, then the upserts — so appending straight
+    # to out.errors listed every Phase-1 error above every Phase-2 one: a row 5
+    # Duration error above a row 2 upsert failure, while researchers read this
+    # list against the sheet top-down. Sheet-level messages have no row number
+    # and belong at the top; every one of them returns immediately, so
+    # out.errors is empty by the time the sort runs, and extending rather than
+    # assigning keeps them first if a non-returning one is ever added.
+    row_errors: List[Tuple[int, str]] = []
+
     try:
         xls = pd.ExcelFile(io.BytesIO(file_bytes))
     except Exception as exc:
@@ -465,7 +476,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             skipped += 1
             continue
         if error is not None:
-            errors.append(error)
+            row_errors.append((row_num, error))
             continue
         resolved.append((row_num, exp_id, time_post_reaction, row))
 
@@ -483,12 +494,12 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # Phase 2 — upsert what is left.
     for row_num, exp_id, time_post_reaction, row in resolved:
         if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
-            errors.append(
+            row_errors.append((row_num, (
                 f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
                 f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "
                 f"— give each vial its own ID (e.g. SERUM_001a-t7, SERUM_001b-t7). "
                 f"No row for this vial-day was written."
-            )
+            )))
             continue
 
         description = str(row.get("Description") or "").strip() or None
@@ -556,10 +567,13 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
 
         except ValueError as exc:
             savepoint.rollback()
-            errors.append(f"Row {row_num} ({exp_id}): {exc}")
+            row_errors.append((row_num, f"Row {row_num} ({exp_id}): {exc}"))
         except Exception as exc:
             savepoint.rollback()
-            errors.append(f"Row {row_num} ({exp_id}): unexpected error — {exc}")
+            row_errors.append((row_num, f"Row {row_num} ({exp_id}): unexpected error — {exc}"))
+
+    # Stable sort — two errors on one row keep the order they were found in.
+    out.errors.extend(message for _, message in sorted(row_errors, key=lambda item: item[0]))
 
     out.created, out.updated, out.skipped = created, updated, skipped
     return out

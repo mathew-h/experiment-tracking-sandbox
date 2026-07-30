@@ -1305,6 +1305,40 @@ def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
     ) == 0
 
 
+# ---------------------------------------------------------------------------
+# Error ordering (issue #114 item 3)
+# ---------------------------------------------------------------------------
+
+def test_errors_are_listed_in_sheet_row_order(db_session: Session):
+    """The error list reads top-down against the spreadsheet.
+
+    _process_bytes resolves every row's identity (Phase 1) before upserting any
+    row (Phase 2), so appending in execution order put EVERY Phase-1 error above
+    EVERY Phase-2 one. Here row 2 fails in Phase 2 (no such experiment) and row 3
+    fails in Phase 1 (unparseable Duration); before issue #114 the row 3 message
+    came first, which is the opposite of how the sheet reads.
+
+    Nothing is seeded on purpose. create_scalar_result_ex falls back to
+    auto_create_treatment_experiment (backend/services/scalar_results_service.py
+    :86-95), which needs an existing parent experiment — with an empty table
+    there is none, so the not-found ValueError is guaranteed.
+    """
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_ORD_MISSING", 7.0),   # sheet row 2 — Phase 2: experiment not found
+        _v3_row("HPHT_ORD02", "not a day"),  # sheet row 3 — Phase 1: invalid Duration
+    ])
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.errors) == 2, f"expected one error per row, got: {result.errors}"
+    assert result.errors[0].startswith("Row 2 ("), (
+        f"the row 2 Phase-2 failure must come first, got: {result.errors}"
+    )
+    assert result.errors[1].startswith("Row 3:"), (
+        f"the row 3 Phase-1 failure must come second, got: {result.errors}"
+    )
+
+
 def test_same_vial_different_timepoints_is_fine(db_session: Session):
     """The same vial at two different days is two legitimate rows."""
     _seed_experiment(db_session, "SERUM_DUP02a", 8832)
