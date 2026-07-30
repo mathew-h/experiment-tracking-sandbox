@@ -843,3 +843,144 @@ def test_legacy_h2_header_still_parses(db_session: Session):
     ).scalar_data
     assert scalar.h2_concentration == pytest.approx(88.0)
     assert scalar.gas_sampling_volume_ml == pytest.approx(500.0)
+
+
+def test_full_loop_wins_when_both_present(db_session: Session):
+    """Full Loop takes precedence over DI (Mat, 2026-07-30).
+
+    Gas volume and pressure come from the SAME block as the winning
+    concentration — _calculate_hydrogen() combines all three, so mixing blocks
+    would compute micromoles from a volume that injection never used.
+    """
+    _seed_experiment(db_session, "HPHT_PREC01", 8811)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_PREC01", 7.0,
+                fl_h2=115.0, fl_vol=3935.0, fl_psi=90.0,
+                di_h2=42.0, di_vol=10.0, di_psi=15.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_PREC01")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(115.0)
+    assert scalar.gas_sampling_volume_ml == pytest.approx(3935.0)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(90.0 * _PSI_TO_MPA, rel=1e-3)
+
+
+def test_di_used_when_full_loop_absent(db_session: Session):
+    """A blank Full Loop cell falls back to 'DI H2 (ppm)' and DI's own gas
+    volume and pressure."""
+    _seed_experiment(db_session, "HPHT_PREC02", 8812)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_PREC02", 7.0, fl_h2=None, di_h2=42.0, di_vol=10.0, di_psi=15.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_PREC02")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(42.0)
+    assert scalar.h2_concentration_unit == "ppm"
+    assert scalar.gas_sampling_volume_ml == pytest.approx(10.0)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(15.0 * _PSI_TO_MPA, rel=1e-3)
+
+
+def test_zero_h2_is_a_real_measurement(db_session: Session):
+    """A Full Loop reading of exactly 0 ppm is stored, not treated as blank.
+
+    Mat is rewriting the Excel formulas so an absent peak area leaves the cell
+    empty; a 0 that survives that rewrite means a genuine zero. Do NOT route H2
+    through _parse_measurement_float (the pH/conductivity zero-suppressor).
+    """
+    _seed_experiment(db_session, "HPHT_PREC03", 8813)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_PREC03", 7.0, fl_h2=0.0, fl_vol=3785.0, fl_psi=30.0, di_h2=99.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_PREC03")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == 0.0, "0 ppm must not fall through to DI"
+    assert scalar.h2_micromoles == pytest.approx(0.0)
+
+
+def test_v2_di_avg_header_maps_onto_di_h2(db_session: Session):
+    """A v2 workbook's 'DI avg H2 (ppm)' still lands on h2_concentration.
+
+    v2 is not the reference format any more, but an archived workbook must not
+    lose its DI reading just because the column was renamed in v3. The alias
+    itself is Task 1's, but nothing reads a DI column until _resolve_h2 exists,
+    so the test belongs here.
+    """
+    _seed_experiment(db_session, "HPHT_PREC05", 8815)
+
+    headers = list(_V3_HEADERS)
+    headers[headers.index("DI H2 (ppm)")] = "DI avg H2 (ppm)"
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [
+        _v3_row("HPHT_PREC05", 7.0, di_h2=42.0, di_vol=10.0, di_psi=15.0),
+    ])})
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_PREC05")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(42.0)
+
+
+def test_no_gc_reading_leaves_h2_unset(db_session: Session):
+    """Both GC blocks blank → h2_concentration stays None and the row still lands."""
+    _seed_experiment(db_session, "HPHT_PREC04", 8814)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_PREC04", 7.0, nh4=5.0)])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_PREC04")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration is None
+    assert scalar.h2_concentration_unit is None

@@ -141,6 +141,52 @@ def _find_sheet(xls: pd.ExcelFile) -> Optional[str]:
     return xls.sheet_names[0] if xls.sheet_names else None
 
 
+def _resolve_h2(
+    row: Any,
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str]]:
+    """Pick the winning GC reading for one Dashboard row (issue #111).
+
+    Full Loop takes precedence over direct injection (Mat, 2026-07-30); DI is
+    used only when the Full Loop cell is blank. Gas volume and pressure are
+    taken from the same block as the winning concentration, because
+    _calculate_hydrogen() combines all three into h2_micromoles — pairing a
+    Full Loop ppm with a DI sampling volume would compute a number that
+    describes no real injection.
+
+    A value of 0 is a real measurement and wins normally; only a blank cell
+    falls through.
+
+    Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source), where source is
+    'full_loop', 'di', or None when neither block has a concentration.
+    """
+    fl_ppm = _parse_float(row.get("FL H2 (ppm)"))
+    if fl_ppm is not None:
+        return (
+            fl_ppm,
+            _parse_float(row.get("FL Gas Volume (mL)")),
+            _parse_float(row.get("FL Gas Pressure (psi)")),
+            "full_loop",
+        )
+
+    di_ppm = _parse_float(row.get("DI H2 (ppm)"))
+    if di_ppm is not None:
+        return (
+            di_ppm,
+            _parse_float(row.get("DI gas volume (mL)")),
+            _parse_float(row.get("DI gas pressure (psi)")),
+            "di",
+        )
+
+    # No concentration in either block. Keep reading the Full Loop gas columns
+    # so a row recording only the sampling geometry behaves as it did pre-#111.
+    return (
+        None,
+        _parse_float(row.get("FL Gas Volume (mL)")),
+        _parse_float(row.get("FL Gas Pressure (psi)")),
+        None,
+    )
+
+
 def _process_bytes(
     db: Session, file_bytes: bytes
 ) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
@@ -248,9 +294,7 @@ def _process_bytes(
         xrd_run_date = _parse_date(row.get("XRD Run Date"))
 
         nh4_mm = _parse_float(row.get("NH4 (mM)"))
-        h2_ppm = _parse_float(row.get("FL H2 (ppm)"))
-        gas_vol_ml = _parse_float(row.get("FL Gas Volume (mL)"))
-        gas_psi = _parse_float(row.get("FL Gas Pressure (psi)"))
+        h2_ppm, gas_vol_ml, gas_psi, h2_source = _resolve_h2(row)
         gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
