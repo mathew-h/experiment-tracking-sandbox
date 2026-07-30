@@ -270,7 +270,12 @@ def _resolve_row_identity(
       * both None/False — a good row
     """
     raw_id = row.get("Experiment ID")
-    if raw_id is None or (isinstance(raw_id, float) and pd.isna(raw_id)):
+    # A numeric 0 in this column is a stale/blank Excel formula cache, never a
+    # real experiment ID (e.g. Master_Results_Tracker_v3.xlsx reads 0.0 here on
+    # all 499 rows) — skip it the same as None/NaN/empty string.
+    if (raw_id is None
+            or (isinstance(raw_id, float) and pd.isna(raw_id))
+            or (isinstance(raw_id, (int, float)) and raw_id == 0)):
         return None, None, None, True
     exp_id = str(raw_id).strip()
     if not exp_id:

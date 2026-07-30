@@ -1307,3 +1307,27 @@ def test_blank_nan_experiment_id_is_skipped_not_duplicated(db_session: Session):
     assert skipped == 2
     assert created == 1
     assert [f["experiment_id"] for f in feedbacks] == ["HPHT_NAN01"]
+
+
+def test_zero_experiment_id_is_skipped_not_treated_as_an_experiment(db_session: Session):
+    """A numeric 0 in the Experiment ID column is a blank, not experiment "0".
+
+    Excel table formulas whose cache is stale read back as 0.0 — v3 does this on
+    all 499 rows. The pre-#111 guard `str(cell or "")` skipped them because 0 is
+    falsy; the NaN fix must not lose that.
+    """
+    _seed_experiment(db_session, "HPHT_ZERO01", 8891)
+
+    xlsx = _master_excel_v3([
+        _v3_row(0.0, 7.0, description="stale formula cache", nh4=1.0),
+        _v3_row(0.0, 7.0, description="another stale row", nh4=2.0),
+        _v3_row("HPHT_ZERO01", 7.0, description="real row", nh4=3.0),
+    ])
+    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"zero-ID rows must not error: {errors}"
+    assert skipped == 2
+    assert created == 1
+    assert [f["experiment_id"] for f in feedbacks] == ["HPHT_ZERO01"]
