@@ -242,3 +242,92 @@ the two negative ones (`reset --hard origin/` and `clean -*x*` must not appear i
 lines). Note these are static assertions plus a PowerShell parse — the script cannot be
 executed under pytest, so **the first run after any change must be attended, on the lab PC**,
 confirming `frontend:yes` in `updates.log` and that the service returns.
+
+## 2026-07-30 — Reactor slot identity is a stored, derived column; occupancy keys on it, never on `reactor_number`
+
+**Decision:** `experimental_conditions.reactor_slot` (`String(8)`, nullable, indexed) stores the
+canonical physical slot label (`R01`, `CF02`). Every occupancy comparison and every label render
+keys on that column. `reactor_number` stays, unchanged, for Power BI views, the
+`?reactor_number=` list filter and the data-migration scripts — it is no longer an identity.
+
+**Why:** a slot is a *pair* — series (HPHT vessel vs Core Flood rig) and number. `R01` and `CF01`
+are different hardware sharing the number 1. The label was re-derived from
+`(reactor_number, experiment_type)` at read time in three places, so every query asking "who is in
+reactor N?" had to remember to also scope by series, and several didn't. A bulk status upload
+setting a Core Flood to ONGOING on rig 1 would find the HPHT in `R01`, pass the date guard, and
+mark that running experiment COMPLETED. Storing the pair collapses three predicate pairs to one
+predicate and makes the mistake unavailable.
+
+**Rejected:** a `reactor_series` enum (still a two-column key — the same forgettable mistake); and
+offsetting CF numbering (`CF01` → 101), which makes `reactor_number` not mean what it says and
+leaves the derivation logic in place.
+
+**`NULL` means "holds no physical slot"** — a non-occupancy `experiment_type` (Serum / Autoclave /
+Other), a missing `reactor_number`, or `reactor_number <= 0`. This is load-bearing, not a
+convenience: an occupancy query filtered on `reactor_slot` cannot see a Serum vial *even if the
+calling code forgot to check the type*. It makes the eligibility gate structural rather than
+remembered. It also neutralises the eight phantom `R00` rows in production, which existed because
+`0` is falsy in Python and slipped past `if conditions.reactor_number`.
+
+**Maintained by a mapper-level listener, not by each write site.** `set_reactor_slot`
+(`database/event_listeners.py`, `before_insert`/`before_update`) derives the value on every ORM
+instance write, so both bulk-upload parsers, the conditions router, the conditions service and the
+legacy Streamlit app stay correct without knowing the column exists. "Every path that writes
+`reactor_number` must remember to also update the slot" is precisely the disease being treated.
+
+**Its two documented blind spots.** The listener does not fire for (a) a bulk `Query.update()` /
+Core `UPDATE` — precedent at `database/data_migrations/swap_reactor_4_7_015.py:96-109` — or (b) a
+raw Core `INSERT`, which is how `scripts/migrate-sqlite-to-postgres.py` loads rows. (b) is the
+sharper one: the documented "load a new `experiments.db`, then `alembic upgrade head`" workflow
+leaves the column entirely NULL and the upgrade cannot repair it, because the DB is stamped at the
+migration that would have backfilled it. Warned about in `database/CLAUDE.md`. A Postgres
+**generated column** would close this class permanently and is the recommended eventual design;
+it survives Core INSERTs, `Query.update()`, `psql` and future migrations alike.
+
+**Autoclave is not occupancy-bearing** (2026-07-29). Only HPHT and Core Flood hold vessels, despite
+`AUTO_JW_022`–`024` carrying historical HPHT vessel numbers — all COMPLETED, therefore inert. Revisit
+only if the team confirms autoclave runs occupy the numbered vessels.
+
+## 2026-07-30 — `PATCH /api/experiments/{id}/status` rejects a double-booking with 409; it never demotes
+
+**Decision:** a transition to ONGOING is refused with 409 when another ONGOING experiment already
+holds the target slot. The error names the slot, the occupant and its start date. The occupant is
+left alone. Only the transition *to* ONGOING is gated; an experiment holding no slot is never
+blocked; re-asserting ONGOING on a slot you already hold is not a self-collision.
+
+**Why not demote:** this endpoint cannot distinguish "I am advancing a sequential re-run" from "I
+picked the wrong reactor from a dropdown," and only one of those should close a colleague's running
+experiment. The bulk-upload paths demote because a status *file* carries that intent explicitly;
+a dropdown does not. `CF_018`, `-2` and `-3` were all simultaneously ONGOING in `CF01` in
+production precisely because this handler previously had no check at all.
+
+**Consequence accepted:** until a confirm-and-supersede dialog exists (deliberately deferred), the
+researcher must complete the occupant manually first. The 409 is surfaced as a toast on both status
+controls; before this branch, both mutations had no `onError` at all and swallowed it silently.
+
+## 2026-07-30 — The one-ONGOING-per-slot trigger is deferred, and three things follow from that
+
+**Decision:** issue #97 §4 — a PL/pgSQL trigger enforcing one ONGOING experiment per
+`reactor_slot`, plus `CHECK (reactor_number IS NULL OR reactor_number > 0)` — is **not** in this
+work. Tracked as GitHub **#112**, blocked on the data cleanup in
+`audit-2026-07-28-results-and-cleanup.md`.
+
+**Why:** both would fail against current data, and the lab PC runs `alembic upgrade head` nightly.
+A migration that can fail there breaks the entire deploy pipeline until someone fixes it by hand on
+that machine. Auto-completing experiments as a side effect of a schema change is also the exact bug
+this work exists to prevent.
+
+**Three consequences, each deliberate:**
+
+1. **`newer_than` is still not passed** on `new_experiments.py`'s occupancy call sites. The issue
+   asks for it, but its own rationale is "let the trigger be the backstop." With no trigger,
+   failing open would leave real double-bookings behind nothing but a warning — strictly worse than
+   demoting unconditionally. Pass it in the same change that adds the trigger, not before.
+2. **The `seen_labels` dedup in `dashboard.py` stays.** The issue says delete it, but explicitly
+   *after* the constraint is verified. It is also load-bearing for a reason the issue got backwards:
+   `_occupancy` counts the *deduped* card list, so `ongoing` equals the number of distinct occupied
+   slots and `empty` is **correct**. Removing the dedup would count experiments against a slot total
+   and drive `empty` negative. What the dedup costs is that the *grid* shows one card per slot, so
+   contention is invisible — not a wrong count.
+3. **Nothing at the database level prevents a double-booking.** Every entry point is narrower, but
+   none is closed. Prod had 4 genuinely contended slots on 2026-07-30.
