@@ -74,7 +74,9 @@ someone finds the dead invalidation, "fixes" the key, and ships a no-op.
       (unused eslint-disable directive); `ConditionsTab.buttons.test.tsx:61,83` and
       `NotesTab.buttons.test.tsx:50` (`@typescript-eslint/no-explicit-any`, ×3). After the
       deletion the set is unchanged — same 6 errors, same files, same rules. None fixed here;
-      that is deliberate, out-of-scope cleanup (see the plan's "Out of scope" section).
+      that is deliberate, out-of-scope cleanup (see
+      `docs/superpowers/plans/2026-07-30-issue-104-dead-add-result-modal.md`, "Out of scope"
+      section).
 - [x] `grep -rn "'results'," frontend/src` returns no query-key usages (the only remaining hit should be the `IMPACT_ROWS` label string in `DeleteExperimentModal.tsx:20`, which is display text, not a key)
 
 ## Notes
