@@ -1846,15 +1846,30 @@ def test_patch_status_ignores_occupancy_across_series(client, db_session):
 
 def test_patch_status_to_completed_is_never_blocked(client, db_session):
     """Only the transition TO ONGOING is gated. Closing out a run must always work,
-    including on a slot that is currently double-booked."""
+    including on a slot that is currently double-booked.
+
+    The second occupant is not decoration: double-booked slots exist in production
+    right now (the 2026-07-28 audit found CF01 triple-booked), so "can a researcher
+    still close out an experiment sitting in a contended vessel?" is a real
+    question. Seeding only one experiment would make this test pass trivially —
+    the gate short-circuits on `payload.status == ONGOING` before any slot logic
+    runs, so it would pass whether or not non-ONGOING transitions were handled
+    correctly.
+    """
     import datetime as _dt
 
-    a = _seed_slot_experiment(
+    _seed_slot_experiment(
         db_session, "SLOT409_F", 97406, ExperimentStatus.ONGOING, "HPHT", 11,
         date=_dt.datetime(2026, 7, 1),
     )
+    other = _seed_slot_experiment(
+        db_session, "SLOT409_F2", 97416, ExperimentStatus.ONGOING, "HPHT", 11,
+        date=_dt.datetime(2026, 7, 2),
+    )
     resp = client.patch("/api/experiments/SLOT409_F/status", json={"status": "COMPLETED"})
     assert resp.status_code == 200
+    db_session.refresh(other)
+    assert other.status == ExperimentStatus.ONGOING
 
 
 def test_patch_status_to_ongoing_is_allowed_for_a_serum_vial(client, db_session):
