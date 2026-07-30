@@ -187,6 +187,9 @@ export function BulkUploadsPage() {
         <p className="text-xs text-ink-muted mt-0.5">
           Upload analytical data from instrument exports and spreadsheets
         </p>
+        <p className="text-xs text-ink-muted mt-0.5">
+          Only New Experiments previews a plan before writing — the other uploads below apply immediately.
+        </p>
       </div>
 
       <div className="space-y-2">

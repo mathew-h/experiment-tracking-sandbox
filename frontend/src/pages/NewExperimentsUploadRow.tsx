@@ -96,8 +96,12 @@ export function NewExperimentsUploadRow({
       // complete" (the modal's own done-view title) so the two don't collide on the
       // same text — this exact collision broke this handler once already.
       success('Experiments created', `${data.created} created, ${data.updated} updated`)
-      // Creating experiments moves the next-ID chips (staleTime 60s).
+      // Creating experiments moves the next-ID chips (staleTime 60s) and the
+      // experiment list / dashboard (global staleTime 30s, frontend/src/main.tsx)
+      // — without this, both can serve a stale list missing the new rows for up
+      // to 30s after a successful commit.
       queryClient.invalidateQueries({ queryKey: ['nextIds'] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
     },
     onError: (err: Error) => {
       // Keep the modal on its current view so the reviewed plan is not lost.

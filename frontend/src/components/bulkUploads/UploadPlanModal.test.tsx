@@ -68,6 +68,35 @@ describe('UploadPlanModal — review', () => {
     renderModal('review', result({}, THREE_CREATES), true)
     expect(screen.getByRole('button', { name: /Committing/ })).toBeDisabled()
   })
+
+  it('shows parser errors alongside a normal plan, not just in done', () => {
+    renderModal('review', result({ errors: ["Row 6: invalid reactor number 'X'"] }, THREE_CREATES))
+    expect(screen.getByText(/invalid reactor number/)).toBeInTheDocument()
+    // Errors alone (independent of the plan contents) must not disable Commit.
+    expect(screen.getByRole('button', { name: /Commit 3 changes/ })).toBeEnabled()
+  })
+
+  it('shows parser warnings alongside a normal plan, not just in done', () => {
+    renderModal('review', result({ warnings: ['Row 5: invalid additive amount, dropped'] }, THREE_CREATES))
+    expect(screen.getByText(/invalid additive amount, dropped/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Commit 3 changes/ })).toBeEnabled()
+  })
+
+  it('disables commit and shows why for a zero-change plan', () => {
+    renderModal('review', result({}, {}))
+    expect(screen.getByRole('button', { name: /Commit 0 changes/ })).toBeDisabled()
+    expect(screen.getByText(/nothing to commit/i)).toBeInTheDocument()
+  })
+
+  it('renders the parser error for a non-null but empty plan (e.g. missing required sheet)', () => {
+    // This is the shape the parser actually returns for a missing 'experiments'
+    // sheet — a non-null, entirely empty plan plus an error string. It must not
+    // be confused with the true crash path (plan: null), which never reaches
+    // this modal at all (see NewExperimentsUploadRow.handlePreview).
+    renderModal('review', result({ errors: ["Missing required 'experiments' sheet"] }, {}))
+    expect(screen.getByText(/Missing required 'experiments' sheet/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Commit/ })).toBeDisabled()
+  })
 })
 
 describe('UploadPlanModal — stale', () => {
@@ -97,6 +126,18 @@ describe('UploadPlanModal — stale', () => {
     ))
     await userEvent.click(screen.getByRole('checkbox', { name: /reviewed the updated plan/i }))
     expect(screen.getByRole('button', { name: /Commit/ })).toBeDisabled()
+  })
+
+  it('shows warnings alongside the rejection reason without duplicating the error text', () => {
+    renderModal('stale', result({
+      dry_run: false, plan_hash: 'h2',
+      errors: ['Plan changed since preview: previewed plan hash \'h1\' does not match'],
+      warnings: ['Row 2: reactor 4 already occupied'],
+    }, THREE_CREATES))
+    // getByText throws on more than one match, so this also proves the banner's
+    // own copy of `errors` is not duplicated by the hoisted errors block.
+    expect(screen.getByText(/does not match/)).toBeInTheDocument()
+    expect(screen.getByText(/reactor 4 already occupied/)).toBeInTheDocument()
   })
 })
 

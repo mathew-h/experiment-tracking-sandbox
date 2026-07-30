@@ -1,3 +1,15 @@
+// Two preconditions this spec does not set up for you:
+//
+// 1. Requires docs/sample_data/new_experiments_template.xlsx, which is gitignored
+//    (.gitignore:13 -> docs/sample_data/*) and therefore absent on a clean
+//    checkout. The spec fails at setInputFiles until someone supplies the file
+//    locally. Pre-existing — unrelated to and unchanged by the preview-first work.
+// 2. Requires a FRESH database. It asserts Commit is enabled, but after one
+//    successful run the experiment IDs in the sample file already exist, and
+//    new_experiments.py:475 records a pre-existing ID as a conflict, which
+//    disables Commit permanently on any re-run. There is no delete UI to reset
+//    this — reseed/reset the database (or use a file with fresh IDs) before
+//    re-running.
 import { test, expect } from '../fixtures/auth'
 import * as path from 'path'
 import * as url from 'url'

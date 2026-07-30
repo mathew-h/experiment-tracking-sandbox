@@ -8,7 +8,11 @@ export type PlanModalView = 'review' | 'stale' | 'done'
 export interface UploadPlanModalProps {
   open: boolean
   view: PlanModalView
-  /** The previewed, rejected, or committed response. Carries a non-null plan. */
+  /** The previewed, rejected, or committed response. `plan` (`UploadPlan | null |
+   *  undefined`) is NOT guaranteed non-null or non-empty: a parser-level failure
+   *  (e.g. a missing required sheet) can return a non-null but entirely empty plan
+   *  alongside `errors` — the modal must render those errors and disable Commit
+   *  rather than assume a populated plan. */
   result: BulkUploadResult
   committing: boolean
   onCommit: () => void
@@ -37,7 +41,9 @@ export function UploadPlanModal({ open, view, result, committing, onCommit, onCl
     : 0
 
   // The conflict gate always wins — re-arming a stale plan cannot override it.
-  const commitDisabled = conflicts > 0 || (view === 'stale' && !reviewed) || committing
+  // A zero-change plan (e.g. the parser found nothing to do, or everything in it
+  // was a skip) has nothing to commit — Commit must not offer a real, no-op POST.
+  const commitDisabled = conflicts > 0 || changeCount === 0 || (view === 'stale' && !reviewed) || committing
 
   const footer = view === 'done' ? (
     <Button variant="secondary" onClick={onClose}>Close</Button>
@@ -47,6 +53,11 @@ export function UploadPlanModal({ open, view, result, committing, onCommit, onCl
         <span className="text-2xs text-status-error mr-auto max-w-md leading-relaxed">
           {conflicts} conflict{conflicts !== 1 ? 's' : ''} must be fixed in the workbook
           before this file can be committed — nothing will be applied until then.
+        </span>
+      )}
+      {conflicts === 0 && changeCount === 0 && (
+        <span className="text-2xs text-ink-muted mr-auto max-w-md leading-relaxed">
+          This file would make no changes — there is nothing to commit.
         </span>
       )}
       <Button variant="ghost" onClick={onClose} disabled={committing}>Cancel</Button>
@@ -89,27 +100,34 @@ export function UploadPlanModal({ open, view, result, committing, onCommit, onCl
         </div>
       )}
 
+      {/* Errors render in every view — the `stale` banner above already surfaces
+       *  `result.errors` as the rejection reason, so it is skipped here to avoid
+       *  showing the same strings twice; `review` and `done` have no other errors
+       *  surface, so they render unconditionally. This is the fix for the parser
+       *  reporting far more via `errors`/`warnings` than the plan itself can carry
+       *  (e.g. a missing required sheet returns a non-null but empty plan) — those
+       *  strings must never be visible only in `done`, after the write already
+       *  happened. */}
+      {view !== 'stale' && result.errors.length > 0 && (
+        <div className="mb-3 p-3 rounded bg-status-error/5 border border-status-error/20 space-y-1">
+          {result.errors.map((e, i) => (
+            <p key={i} className="text-2xs text-status-error font-mono-data">{e}</p>
+          ))}
+        </div>
+      )}
+      {result.warnings.length > 0 && (
+        <div className="mb-3 p-3 rounded bg-status-warning/5 border border-status-warning/20 space-y-1">
+          {result.warnings.map((w, i) => (
+            <p key={i} className="text-2xs text-status-warning">{w}</p>
+          ))}
+        </div>
+      )}
+
       {view === 'done' ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="success">Created: {result.created}</Badge>
-            <Badge variant="default">Updated: {result.updated}</Badge>
-            <Badge variant="warning">Skipped: {result.skipped}</Badge>
-          </div>
-          {result.errors.length > 0 && (
-            <div className="p-3 rounded bg-status-error/5 border border-status-error/20 space-y-1">
-              {result.errors.map((e, i) => (
-                <p key={i} className="text-2xs text-status-error font-mono-data">{e}</p>
-              ))}
-            </div>
-          )}
-          {result.warnings.length > 0 && (
-            <div className="p-3 rounded bg-status-warning/5 border border-status-warning/20 space-y-1">
-              {result.warnings.map((w, i) => (
-                <p key={i} className="text-2xs text-status-warning">{w}</p>
-              ))}
-            </div>
-          )}
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="success">Created: {result.created}</Badge>
+          <Badge variant="default">Updated: {result.updated}</Badge>
+          <Badge variant="warning">Skipped: {result.skipped}</Badge>
         </div>
       ) : (
         plan && <UploadPlanPanel plan={plan} />

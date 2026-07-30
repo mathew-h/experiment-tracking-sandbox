@@ -69,11 +69,31 @@ describe('NewExperimentsUploadRow — preview phase', () => {
   })
 
   it('does not open the modal when the parser crashed and returned no plan', async () => {
-    mockUpload().mockResolvedValue(res({ errors: ['Missing experiments sheet'], message: 'Upload failed' }, null))
+    // Genuine crash shape: `plan` itself is null/absent (backend/api/routers/
+    // bulk_uploads.py:189) — e.g. the upload isn't a readable spreadsheet at
+    // all. There is nothing to review, so this toasts and never opens the modal.
+    mockUpload().mockResolvedValue(res({ errors: ['Could not read file as an Excel workbook'], message: 'Upload failed' }, null))
     renderRow()
     await dropFile()
-    await waitFor(() => expect(screen.getByText(/Missing experiments sheet/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Could not read file as an Excel workbook/)).toBeInTheDocument())
     expect(screen.queryByText(/Review upload plan/i)).not.toBeInTheDocument()
+  })
+
+  it('opens the review modal (not the crash toast) when the plan is non-null but empty', async () => {
+    // The real shape for a missing required sheet (new_experiments.py:688): the
+    // parser reports it via `errors`, but `plan` is a non-null, entirely empty
+    // plan — NOT the null-plan crash shape above. `handlePreview`'s `!data.plan`
+    // guard must not swallow this into a toast; the researcher needs to see the
+    // error inside the modal, and Commit must be disabled at zero changes.
+    mockUpload().mockResolvedValue(res(
+      { errors: ["Missing required 'experiments' sheet"], message: 'Upload failed' },
+      { creates: [], renames: [], overwrites: [], skips: [], conflicts: [], counts: {} },
+    ))
+    renderRow()
+    await dropFile()
+    await waitFor(() => expect(screen.getByText(/Review upload plan/i)).toBeInTheDocument())
+    expect(screen.getByText(/Missing required 'experiments' sheet/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Commit 0 changes/ })).toBeDisabled()
   })
 })
 
@@ -104,6 +124,7 @@ describe('NewExperimentsUploadRow — commit phase', () => {
     await waitFor(() => expect(screen.getByText(/Upload complete/i)).toBeInTheDocument())
     expect(screen.getByText('Created: 2')).toBeInTheDocument()
     expect(spy).toHaveBeenCalledWith({ queryKey: ['nextIds'] })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['experiments'] })
   })
 
   it('treats a committed upload with parser row errors as done, not stale', async () => {
