@@ -29,17 +29,59 @@ has been done.** As of 2026-07-30:
 - `database/data_migrations/018*` does not exist — Part B (the data migration
   normalizing `experiment_type` and stripping `reactor_number = 0`) has not been written.
 - Part A (the ten status-change clicks through the app UI) has not been confirmed done either.
-- The dev DB currently has **5 double-booked slots**: `CF01` × 6, `CF03` × 5, `R00` × 8,
-  `R01` × 6, `R06` × 2. (These counts are higher than the audit's original 2-slot
-  finding because the lab has kept entering data in the interim — re-run the query
-  before scoping work, don't assume these numbers are still current either.)
-- The dev DB has **13 rows with `reactor_number = 0`**.
-- Prod had 2 double-booked slots and 11 zero-rows as of 2026-07-28, per the audit.
+
+**Fresh snapshot, 2026-07-30, queried against the stored `reactor_slot` column** (not
+the audit's re-derived `CASE` expression — see the discrepancy note below):
+
+- **4 double-booked slots**, all genuine ONGOING collisions the trigger must reject:
+
+  ```
+  CF01  6  CF-015-3, CF_016, CF_018, CF_020, CF_022, CF_024
+  CF03  5  CF_017, CF_019, CF_021, CF_023, CF_025
+  R01   6  HPHT_109-2, HPHT_903, HPHT_904, HPHT_905, HPHT_906, HPHT_907
+  R06   2  HPHT_129, HPHT_132
+  ```
+
+  This is the trigger's prerequisite: these four slots must each be down to one
+  ONGOING occupant before the uniqueness trigger can be added.
+
+- **13 rows with `reactor_number = 0`.** This is a separate prerequisite, for the
+  `CHECK` constraint only — see below for why it no longer overlaps with the slot
+  collisions.
+
+- **7 rows with `reactor_number > 0` and a NULL `reactor_slot`** — the
+  `AUTO_JW_022`–`024` and `HPHT_101` history the audit said to leave alone (non-
+  occupancy types carrying a real historical vessel number). Not a blocker for
+  either the trigger or the CHECK; listed here only so the count is accounted for.
+
+**`R00` is not a double-booking, and that is a genuine partial win from this branch,
+not an oversight.** The audit's original "R00 × 8" figure came from the pre-#97
+`CASE WHEN experiment_type = 'Core Flood' THEN 'CF' ELSE 'R' END || lpad(...)`
+expression, which happily rendered `reactor_number = 0` as `"R00"` regardless of
+type. `derive_reactor_slot` (issue #97) returns `None` for any `reactor_number <= 0`,
+so the eight `SERUM_JW_153`–`160` rows now have `reactor_slot IS NULL` — they no
+longer constitute a slot at all, let alone a shared one. **#97 already made the
+`R00` class inert for occupancy purposes.** Do not chase it as a double-booking;
+the real, narrower prerequisite for the trigger is the 4 slots listed above, and
+the 13 zero-rows are purely a `CHECK`-constraint cleanup with no occupancy
+implication left.
+
+**Why this snapshot's numbers differ from the audit's:** the 2026-07-28 audit
+queried before `reactor_slot` existed, so its "2 double-booked slots" figure
+(`CF01`, `R00`) used the same re-derived `CASE` expression described above, which
+conflates zero with a real `R00` vessel. This snapshot queries the stored column
+directly, which is authoritative post-#97 and is why `R00` correctly drops out
+while the genuine collision count grew from the lab's continued data entry between
+2026-07-28 and 2026-07-30 (`CF01`, `CF03`, `R01`, `R06` — up from `CF01` alone).
+Treat this as informative, not a discrepancy to reconcile — the two queries were
+answering different questions at different times against different definitions of
+"slot."
 
 **Both verification queries at the bottom of `audit-2026-07-28-results-and-cleanup.md`
-must return zero rows before the trigger migration is written.** Re-run them fresh —
-do not reuse the counts in this ticket or in the audit file, both are already stale
-relative to each other.
+must return zero rows before the trigger migration is written.** Re-run them fresh
+against `reactor_slot` (not the audit's original `CASE` expression) before scoping
+work — the lab enters data continuously, so even this 2026-07-30 snapshot should be
+treated as already aging, not as a number to hardcode into the migration.
 
 ### Why the ordering is not optional
 
