@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -49,6 +50,44 @@ _HEADER_ALIASES: Dict[str, str] = {
     "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
     "replicate": "Replicate",
 }
+
+# Columns whose header mentions H2 and that the parser deliberately handles.
+_RECOGNIZED_H2_COLUMNS = {
+    "FL H2 (ppm)",
+    "DI H2 (ppm)",
+}
+
+# v2's wide DI block. Those letters are replicate VIALS, and v3 gives each vial
+# its own row, so there is no correct way to fold three values into one result.
+# Recognized so they are named in a specific warning rather than a generic one.
+_WIDE_DI_COLUMNS = {
+    "DI a H2 (ppm)",
+    "DI b H2 (ppm)",
+    "DI c H2 (ppm)",
+    "DI SD (ppm)",
+}
+
+
+@dataclass
+class MasterUploadResult:
+    """Master Results upload outcome.
+
+    Exists because the legacy 5-tuple has no slot for warnings and ~20 tests
+    plus the router unpack it positionally. `from_bytes` keeps returning the
+    tuple; `from_bytes_ex` returns this.
+    """
+
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    feedbacks: List[Dict[str, Any]] = field(default_factory=list)
+
+    def as_tuple(self) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
+        """Legacy 5-tuple shape. Warnings are dropped — callers that need them
+        should use from_bytes_ex()."""
+        return self.created, self.updated, self.skipped, self.errors, self.feedbacks
 
 
 def _normalize_headers(columns: Any) -> List[str]:
@@ -187,32 +226,34 @@ def _resolve_h2(
     )
 
 
-def _process_bytes(
-    db: Session, file_bytes: bytes
-) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
+def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     """
     Parse the Master Results Excel and upsert scalar results.
-    Returns (created, updated, skipped, errors, feedbacks).
     """
     from backend.services.scalar_results_service import ScalarResultsService  # noqa: PLC0415
 
-    errors: List[str] = []
-    feedbacks: List[Dict[str, Any]] = []
+    out = MasterUploadResult()
+    errors = out.errors
+    warnings = out.warnings
+    feedbacks = out.feedbacks
     created = updated = skipped = 0
 
     try:
         xls = pd.ExcelFile(io.BytesIO(file_bytes))
     except Exception as exc:
-        return 0, 0, 0, [f"Failed to read file: {exc}"], []
+        errors.append(f"Failed to read file: {exc}")
+        return out
 
     sheet_name = _find_sheet(xls)
     if sheet_name is None:
-        return 0, 0, 0, ["File has no sheets."], []
+        errors.append("File has no sheets.")
+        return out
 
     try:
         df = xls.parse(sheet_name)
     except Exception as exc:
-        return 0, 0, 0, [f"Failed to parse sheet '{sheet_name}': {exc}"], []
+        errors.append(f"Failed to parse sheet '{sheet_name}': {exc}")
+        return out
 
     df.columns = _normalize_headers(df.columns)
 
@@ -220,10 +261,44 @@ def _process_bytes(
     required = {"Experiment ID", "Duration (Days)"}
     missing = required - set(df.columns)
     if missing:
-        return 0, 0, 0, [
+        errors.append(
             f"Sheet '{sheet_name}' is missing required columns: {', '.join(sorted(missing))}. "
             f"Available: {', '.join(df.columns[:10])}"
-        ], []
+        )
+        return out
+
+    # Issue #111: an H2 column the parser cannot map used to vanish silently —
+    # every other field upserted fine, so a sync looked healthy while the
+    # hydrogen value was lost. Say so instead.
+    stale_wide_di = [c for c in df.columns if c in _WIDE_DI_COLUMNS]
+    if stale_wide_di:
+        warnings.append(
+            "Ignoring wide direct-injection column(s): "
+            + ", ".join(f"'{c}'" for c in sorted(stale_wide_di))
+            + ". Those letters are replicate vials — give each one row per "
+              "experiment ID (e.g. SERUM_001a-t1, SERUM_001b-t1) and put its "
+              "reading in 'DI H2 (ppm)'."
+        )
+
+    unmapped_h2 = [
+        c for c in df.columns
+        if "h2" in c.lower()
+        and c not in _RECOGNIZED_H2_COLUMNS
+        and c not in _WIDE_DI_COLUMNS
+    ]
+    if unmapped_h2:
+        warnings.append(
+            "Unrecognized H2 column(s) ignored: "
+            + ", ".join(f"'{c}'" for c in unmapped_h2)
+            + ". No hydrogen value was read from them — check the Dashboard "
+              "headers against the parser's expected names."
+        )
+
+    if not _RECOGNIZED_H2_COLUMNS & set(df.columns):
+        warnings.append(
+            f"Sheet '{sheet_name}' has no recognized H2 column "
+            "('FL H2 (ppm)' or 'DI H2 (ppm)') — no hydrogen data was ingested."
+        )
 
     for idx, row in df.iterrows():
         row_num = idx + 2
@@ -338,7 +413,16 @@ def _process_bytes(
             else:
                 updated += 1
             savepoint.commit()
-            feedbacks.append({"row": row_num, "experiment_id": exp_id, "action": action})
+            feedbacks.append({
+                "row": row_num,
+                "experiment_id": exp_id,
+                "action": action,
+                "h2_source": h2_source,
+                "h2_di_superseded": (
+                    h2_source == "full_loop"
+                    and _parse_float(row.get("DI H2 (ppm)")) is not None
+                ),
+            })
 
         except ValueError as exc:
             savepoint.rollback()
@@ -347,7 +431,8 @@ def _process_bytes(
             savepoint.rollback()
             errors.append(f"Row {row_num} ({exp_id}): unexpected error — {exc}")
 
-    return created, updated, skipped, errors, feedbacks
+    out.created, out.updated, out.skipped = created, updated, skipped
+    return out
 
 
 class MasterBulkUploadService:
@@ -380,14 +465,20 @@ class MasterBulkUploadService:
         except Exception as exc:
             return 0, 0, 0, [f"Failed to read Master Results file: {exc}"], []
 
-        return _process_bytes(db, file_bytes)
+        return _process_bytes(db, file_bytes).as_tuple()
 
     @staticmethod
     def from_bytes(
         db: Session, file_bytes: bytes
     ) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
+        """Parse a manually uploaded Master Results file.
+
+        Legacy 5-tuple shape, kept for existing callers. Use from_bytes_ex()
+        to also receive warnings.
         """
-        Parse a manually uploaded Master Results file.
-        Returns (created, updated, skipped, errors, feedbacks).
-        """
+        return _process_bytes(db, file_bytes).as_tuple()
+
+    @staticmethod
+    def from_bytes_ex(db: Session, file_bytes: bytes) -> MasterUploadResult:
+        """Parse a manually uploaded Master Results file, warnings included."""
         return _process_bytes(db, file_bytes)

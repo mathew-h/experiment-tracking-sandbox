@@ -391,7 +391,8 @@ async def upload_master_results(
     from backend.services.bulk_uploads.master_bulk_upload import MasterBulkUploadService  # noqa: PLC0415
     try:
         file_bytes = await file.read()
-        created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(db, file_bytes)
+        outcome = MasterBulkUploadService.from_bytes_ex(db, file_bytes)
+        created, updated, skipped = outcome.created, outcome.updated, outcome.skipped
         _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
@@ -400,8 +401,10 @@ async def upload_master_results(
                               message="Upload failed")
     log.info("master_results", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
-        created=created, updated=updated, skipped=skipped, errors=errors,
-        feedbacks=feedbacks,
+        created=created, updated=updated, skipped=skipped,
+        errors=outcome.errors,
+        warnings=outcome.warnings,
+        feedbacks=outcome.feedbacks,
         message=_finalize_message(f"Master Results: {created} created, {updated} updated, {skipped} skipped", dry_run),
         dry_run=dry_run,
     )

@@ -984,3 +984,106 @@ def test_no_gc_reading_leaves_h2_unset(db_session: Session):
     ).scalar_data
     assert scalar.h2_concentration is None
     assert scalar.h2_concentration_unit is None
+
+
+# ---------------------------------------------------------------------------
+# Warnings and per-row H2 source feedback (issue #111 — Task 3)
+# ---------------------------------------------------------------------------
+
+def test_unrecognized_h2_column_warns(db_session: Session):
+    """A column mentioning H2 that the parser cannot map is reported.
+
+    This is the guard for the class of bug #111 itself was: a renamed column
+    that upserts every other field successfully while the H2 value vanishes.
+    """
+    _seed_experiment(db_session, "HPHT_WARN01", 8821)
+
+    headers = list(_V3_HEADERS)
+    headers[headers.index("FL H2 (ppm)")] = "GC Loop H2 ppm"  # a future rename
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [
+        _v3_row("HPHT_WARN01", 7.0, fl_h2=115.0),
+    ])})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 1, "The row must still upload — this is a warning, not a failure"
+    assert any("GC Loop H2 ppm" in w for w in result.warnings)
+
+
+def test_no_h2_column_at_all_warns(db_session: Session):
+    """A Dashboard with neither GC block warns once, at file level."""
+    _seed_experiment(db_session, "HPHT_WARN02", 8822)
+
+    keep = [h for h in _V3_HEADERS if "H2" not in h]
+    row = [v for h, v in zip(_V3_HEADERS, _v3_row("HPHT_WARN02", 7.0, nh4=5.0))
+           if "H2" not in h]
+    xlsx = make_excel_multisheet({"Dashboard": (keep, [row])})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert any("no recognized H2 column" in w for w in result.warnings)
+
+
+def test_wide_di_columns_warn_about_one_row_per_vial(db_session: Session):
+    """A v2 sheet still carrying 'DI a/b/c H2 (ppm)' is told to split the rows.
+
+    v3 collapsed those to one 'DI H2 (ppm)' because a/b/c are replicate vials
+    that each get their own experiment ID now. The columns are ignored, not
+    guessed at.
+    """
+    _seed_experiment(db_session, "HPHT_WARN03", 8823)
+
+    headers = list(_V3_HEADERS) + ["DI a H2 (ppm)", "DI b H2 (ppm)", "DI c H2 (ppm)"]
+    row = _v3_row("HPHT_WARN03", 7.0, nh4=5.0) + [10.0, 11.0, 12.0]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [row])})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert any("one row per experiment ID" in w for w in result.warnings)
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_WARN03")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration is None, "wide DI values must not be guessed at"
+
+
+def test_feedback_records_which_gc_block_was_used(db_session: Session):
+    """Each row reports its H2 source so a discarded DI reading is visible."""
+    _seed_experiment(db_session, "HPHT_WARN04", 8824)
+    _seed_experiment(db_session, "HPHT_WARN05", 8825)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_WARN04", 7.0, fl_h2=115.0, di_h2=42.0),   # DI superseded
+        _v3_row("HPHT_WARN05", 7.0, fl_h2=None, di_h2=42.0),    # DI used
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 2
+
+    by_id = {f["experiment_id"]: f for f in result.feedbacks}
+    assert by_id["HPHT_WARN04"]["h2_source"] == "full_loop"
+    assert by_id["HPHT_WARN04"]["h2_di_superseded"] is True
+    assert by_id["HPHT_WARN05"]["h2_source"] == "di"
+    assert by_id["HPHT_WARN05"]["h2_di_superseded"] is False
+
+
+def test_from_bytes_tuple_shape_unchanged(db_session: Session):
+    """from_bytes() still returns the legacy 5-tuple — no caller breaks."""
+    _seed_experiment(db_session, "HPHT_WARN06", 8826)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_WARN06", 7.0, nh4=5.0)])
+    out = MasterBulkUploadService.from_bytes(db_session, xlsx)
+
+    assert len(out) == 5
+    created, updated, skipped, errors, feedbacks = out
+    assert created == 1
+    assert isinstance(errors, list) and isinstance(feedbacks, list)
