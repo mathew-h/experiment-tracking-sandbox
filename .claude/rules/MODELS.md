@@ -19,6 +19,18 @@ The central hub for all experimental data.
   - `sample_id`: FK to `SampleInfo`.
   - `researcher`, `date` (optional).
   - `is_outlier` (Boolean, non-null, default `false`): flags a bad vial (leak, cracked septum). Flagged experiments are excluded from `v_results_scalar_rollup` aggregates **including `n_replicates`**, but remain fully visible in all per-row views (`v_results_scalar`, `v_results_h2`, `v_results_icp`, `v_primary_experiment_results`) and on their own pages.
+  - **Bulk deletion path (issue #109):** `POST /api/bulk-uploads/experiment-deletion`
+    is the second entry point into the same purge. It parses an `experiment_id`
+    column and calls `delete_experiment_cascade` once per row, so every rule below
+    applies unchanged. Two things are specific to it:
+    `backend/api/routers/bulk_uploads.py::BULK_DELETE_ALLOWED_EMAIL` gates it to a
+    single hardcoded address (403 for anyone else — the only access control in
+    Phase 1, there is no preview and no `dry_run`), and each row runs inside its
+    own SAVEPOINT in
+    `backend/services/bulk_uploads/experiment_deletion_bulk.py`. The SAVEPOINT is
+    load-bearing, not defensive: `delete_experiment_cascade` commits per row, so a
+    session-wide `db.rollback()` on one bad row would discard the experiments the
+    batch had already deleted.
   - **Deletion path (issue #99):** `DELETE /api/experiments/{experiment_id}` is a
     **hard** delete available to any approved researcher (no role gate) and returns
     **200 with a body** reporting what was decoupled — not 204. Deletion **purges

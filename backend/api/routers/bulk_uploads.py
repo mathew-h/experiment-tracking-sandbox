@@ -745,6 +745,84 @@ async def upload_experiment_status(
 
 
 # ---------------------------------------------------------------------------
+# Bulk experiment deletion (issue #109, Phase 1)
+# ---------------------------------------------------------------------------
+
+# Hardcoded on purpose for Phase 1 (issue #109): this endpoint hard-deletes an
+# arbitrary list of experiments with no preview and no undo, and the single
+# trusted user is the whole access model. Generalizing to a role/claim check is
+# Phase 2 item 7 -- do not swap this for a settings value without one, or the
+# gate becomes editable from the environment.
+BULK_DELETE_ALLOWED_EMAIL = "mhearl@addisenergy.com"
+
+
+@router.post("/experiment-deletion", response_model=UploadResponse)
+async def upload_experiment_deletion(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> UploadResponse:
+    """Hard-delete every experiment listed in an uploaded `experiment_id` column.
+
+    Restricted to `BULK_DELETE_ALLOWED_EMAIL`. Irreversible: each row is purged by
+    `experiment_deletion.delete_experiment_cascade`, which commits per row, so a
+    partial batch stays deleted. There is no dry_run and no plan gate in Phase 1
+    (issue #109) -- the guardrails are the single-user check below, the browser
+    confirmation, and the ModificationsLog audit row the cascade writes.
+
+    `updated` counts deletions, `skipped` counts IDs with no matching experiment,
+    and `errors` carries the per-row failures. The itemized lists are in
+    `feedbacks[0]` and, for display, in `warnings`.
+    """
+    if (current_user.email or "").strip().lower() != BULK_DELETE_ALLOWED_EMAIL:
+        raise HTTPException(
+            status_code=403,
+            detail="Bulk experiment deletion is restricted to the data owner.",
+        )
+
+    from backend.services.bulk_uploads.experiment_deletion_bulk import (  # noqa: PLC0415
+        delete_experiments_from_file,
+    )
+
+    file_bytes = await file.read()
+    try:
+        result = delete_experiments_from_file(
+            db, file_bytes, filename=file.filename, modified_by=current_user.email,
+        )
+    except Exception as exc:
+        db.rollback()
+        log.error("bulk_experiment_deletion_failed",
+                  user=current_user.email, error=str(exc))
+        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
+                              message="Bulk deletion failed")
+
+    errors = list(result.errors) + [
+        f"{f['experiment_id']}: {f['error']}" for f in result.failed
+    ]
+    warnings = (
+        [f"Deleted: {eid}" for eid in result.deleted]
+        + [f"Not found, nothing deleted: {eid}" for eid in result.missing]
+    )
+
+    return UploadResponse(
+        created=0,
+        updated=len(result.deleted),
+        skipped=len(result.missing),
+        errors=errors,
+        warnings=warnings,
+        feedbacks=[{
+            "deleted": result.deleted,
+            "missing": result.missing,
+            "failed": result.failed,
+        }],
+        message=(
+            f"Deleted {len(result.deleted)} experiment(s), "
+            f"{len(result.missing)} not found, {len(result.failed)} failed"
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Template downloads
 # ---------------------------------------------------------------------------
 
@@ -1044,6 +1122,17 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             headers=["sample_id", "SiO2", "Al2O3", "Fe2O3", "MgO", "CaO", "Na2O"],
             required={"sample_id"},
             example_row=["S001", 47.2, 13.5, 11.0, 8.4, 10.2, 2.6],
+        )
+
+    if upload_type == "experiment-deletion":
+        # Single required column by design (issue #109): anything else on the
+        # sheet would imply this upload edits experiments rather than destroying
+        # the ones named here.
+        return _simple_template(
+            headers=["experiment_id"],
+            required={"experiment_id"},
+            sheet_title="Delete",
+            example_row=["HPHT_072"],
         )
 
     if upload_type == "experiment-status":

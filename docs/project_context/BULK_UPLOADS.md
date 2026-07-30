@@ -15,8 +15,8 @@ the bottom — click it to expand them.
 | Behaviour | Details |
 |-----------|---------|
 | **Auth required** | You must be logged in. Uploads fail silently if your session has expired — refresh the page and re-login. |
-| **Result summary** | After processing you see Created / Updated / Skipped counts and an expandable error list. |
-| **Atomic transactions** | If the file fails validation mid-way, **zero rows are written**. Fix the file and resubmit. |
+| **Result summary** | After processing you see Created / Updated / Skipped counts and an expandable error list. Delete Experiments relabels these to Deleted / Not found. |
+| **Atomic transactions** | If the file fails validation mid-way, **zero rows are written**. Fix the file and resubmit. **Exception: Delete Experiments** commits each row on its own, so a partly-failed batch stays partly deleted. |
 | **Template download** | Rows that have a template show a download button. Use the template to avoid column name errors. |
 | **Calc engine** | Where relevant (scalar results), derived fields (H₂ yield, g/t yield, etc.) are recalculated automatically. |
 
@@ -335,6 +335,50 @@ Imports raw pXRF scan data into `PXRFReading` records.
 
 Use the raw Excel export from the Olympus Vanta or equivalent portable XRF device.
 No template available — upload the raw instrument file directly.
+
+---
+
+## 13 — Delete Experiments
+
+**Endpoint:** `POST /api/bulk-uploads/experiment-deletion`
+
+**Restricted to the data owner (`mhearl@addisenergy.com`).** The row is visible to
+everyone, but the server refuses the upload with a 403 for any other account. There is
+no need to ask for access — this exists to clean up batches of bad entries.
+
+**This is a permanent, irreversible deletion, not an update.** Each listed experiment
+and everything it owns is destroyed: conditions, all results (scalar, ICP, H₂), result
+files, notes, additives, external analyses, XRD phases and reactor change requests. Two
+things belonging to *other* experiments are only unlinked, never deleted: a scalar result
+that used a deleted experiment as its ammonium background keeps its background value and
+loses only the provenance pointer, and replicate siblings keep their group membership and
+lose only the parent pointer. Deleted experiments cannot be restored from the audit log —
+it records what was destroyed, not enough to rebuild it.
+
+### Sheet format
+
+| Column | Required | Notes |
+|--------|----------|-------|
+| experiment_id | ✅ | One experiment ID per row. Nothing else is read. |
+
+Blank rows and repeated IDs are ignored. Download the template for a ready-made sheet.
+
+### What happens on submit
+
+1. Your browser asks you to confirm. For a `.csv` the prompt states how many rows it
+   found; for Excel it names the file instead (the count can only be read from a CSV in
+   the browser). **Read the prompt — this is the last chance to stop.**
+2. Every listed experiment is deleted one at a time, each committed on its own.
+3. The result panel reports three lists:
+   - **Deleted** — gone.
+   - **Not found** — no experiment with that ID; nothing happened. Usually a typo or an
+     ID that was already deleted.
+   - **Errors** — the row could not be deleted, with the reason. The rest of the batch
+     still went through; a single bad row never blocks the others.
+
+Because each row commits separately, a partly-successful batch **stays** partly
+successful — re-uploading the same file is safe (already-deleted IDs simply come back
+under "Not found").
 
 ---
 

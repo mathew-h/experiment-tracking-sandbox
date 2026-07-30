@@ -104,6 +104,7 @@ export type TemplateType =
   | 'chemical-inventory'
   | 'elemental-composition'
   | 'experiment-status'
+  | 'experiment-deletion'
 
 function fileForm(file: File): FormData {
   const fd = new FormData()
@@ -183,7 +184,13 @@ export const bulkUploadsApi = {
   uploadExperimentStatus: (file: File) =>
     post<BulkUploadResult>('/bulk-uploads/experiment-status', fileForm(file)),
 
-  // Card 12 — pXRF Readings
+  // Card 12 — Bulk experiment deletion (issue #109 Phase 1). Hard, irreversible
+  // cascade delete of every experiment_id in the file; the backend refuses this
+  // for anyone but the data owner. No dry_run — Phase 1 has no preview step.
+  uploadExperimentDeletion: (file: File) =>
+    post<BulkUploadResult>('/bulk-uploads/experiment-deletion', fileForm(file)),
+
+  // Card 13 — pXRF Readings
   uploadPXRF: (file: File) =>
     post<BulkUploadResult>('/bulk-uploads/pxrf', fileForm(file)),
 
