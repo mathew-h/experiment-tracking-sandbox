@@ -1476,17 +1476,26 @@ Append to `tests/views/test_v_results_scalar_rollup.py`, reusing that file's exi
 class TestRollupVialLevelIds:
     """Issue #111: the Dashboard moved to one row per unique experiment ID, so
     replicate spread must come from the rollup rather than from avg/SD columns
-    on the sheet."""
+    on the sheet.
+
+    ID form matters here. A replicate letter only binds to a NUMERIC index —
+    `_REPLICATE_LETTER_RE = r'^(\\d+)([a-z])$'` in
+    database/experiment_id_parser.py matches the final underscore-separated
+    segment. 'ROLL_910a' parses to base 'ROLL_910' + label 'a', but an
+    alphanumeric index like 'ROLL_R10a' does not parse as a replicate at all
+    and each vial would become its own base — silently producing n=1 groups and
+    a vacuous test.
+    """
 
     def test_three_vials_at_one_timepoint_give_mean_and_sd(self, view_db):
-        """SERUM_R01a/b/c-t1 aggregate to n=3 with an n-1 SD.
+        """ROLL_910a/b/c-t1 aggregate to n=3 with an n-1 SD.
 
         The -t token is stripped before lineage grouping, so all three land on
-        base 'SERUM_R01' at bucket 1.0.
+        base 'ROLL_910' at bucket 1.0.
         """
-        exp_a = _make_experiment(view_db, "SERUM_R01a-t1", 9101)
-        exp_b = _make_experiment(view_db, "SERUM_R01b-t1", 9102)
-        exp_c = _make_experiment(view_db, "SERUM_R01c-t1", 9103)
+        exp_a = _make_experiment(view_db, "ROLL_910a-t1", 9101)
+        exp_b = _make_experiment(view_db, "ROLL_910b-t1", 9102)
+        exp_c = _make_experiment(view_db, "ROLL_910c-t1", 9103)
 
         for exp, h2 in ((exp_a, 10.0), (exp_b, 20.0), (exp_c, 30.0)):
             er = _make_result(view_db, exp, bucket_days=1.0)
@@ -1497,7 +1506,7 @@ class TestRollupVialLevelIds:
             text("""
                 SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
                 FROM v_results_scalar_rollup
-                WHERE base_experiment_id = 'SERUM_R01'
+                WHERE base_experiment_id = 'ROLL_910'
                   AND time_post_reaction_bucket_days = 1.0
             """)
         ).fetchone()
@@ -1515,10 +1524,10 @@ class TestRollupVialLevelIds:
             ("b", 9112, 20.0, 200.0),
             ("c", 9113, 30.0, 300.0),
         ):
-            exp_t1 = _make_experiment(view_db, f"SERUM_R02{letter}-t1", num)
+            exp_t1 = _make_experiment(view_db, f"ROLL_920{letter}-t1", num)
             _make_scalar(view_db, _make_result(view_db, exp_t1, bucket_days=1.0),
                          gross_nh4=1.0, h2_ppm=h2_t1)
-            exp_t3 = _make_experiment(view_db, f"SERUM_R02{letter}-t3", num + 100)
+            exp_t3 = _make_experiment(view_db, f"ROLL_920{letter}-t3", num + 100)
             _make_scalar(view_db, _make_result(view_db, exp_t3, bucket_days=3.0),
                          gross_nh4=1.0, h2_ppm=h2_t3)
         view_db.commit()
@@ -1527,7 +1536,7 @@ class TestRollupVialLevelIds:
             text("""
                 SELECT time_post_reaction_bucket_days, n_replicates, mean_h2_ppm
                 FROM v_results_scalar_rollup
-                WHERE base_experiment_id = 'SERUM_R02'
+                WHERE base_experiment_id = 'ROLL_920'
                 ORDER BY time_post_reaction_bucket_days
             """)
         ).fetchall()
@@ -1539,13 +1548,17 @@ class TestRollupVialLevelIds:
         assert rows[1]._mapping["mean_h2_ppm"] == pytest.approx(200.0)
 ```
 
+**Replicate letters bind to a numeric index only.** `ROLL_910a` → base `ROLL_910`, label `a`. An alphanumeric index (`ROLL_R10a`) parses to base `ROLL_R10a` with **no** replicate label, so each vial forms its own group, `n_replicates` is 1 per vial, and the rollup query returns no matching row at all. Verified against the live parser before writing this. Every experiment ID in this repo uses a numeric index (`SERUM_001`, `HPHT_139`, `ROLL_001a`), so this is the parser behaving correctly, not a limitation to work around.
+
 - [ ] **Step 2: Run it**
 
 ```bash
 .venv/Scripts/python.exe -m pytest tests/views/test_v_results_scalar_rollup.py -v
 ```
 
-Expected: PASS on the first run — this documents existing behavior rather than driving new code. If `test_three_vials_at_one_timepoint_give_mean_and_sd` returns `None` for the row, the `-t` token is not being stripped during lineage grouping; stop and report that, because it would mean the pivot does not aggregate and the whole approach needs revisiting. Do not paper over it by rewriting the test to use letterless IDs.
+Expected: PASS on the first run — this documents existing behavior rather than driving new code.
+
+If `test_three_vials_at_one_timepoint_give_mean_and_sd` returns `None` for the row, **first check the ID form**: a replicate letter binds only to a numeric index, so an alphanumeric index would produce one base per vial and no matching group (this exact defect was caught during execution — the plan originally used `SERUM_R01a`, which does not parse as a replicate). If the IDs are numeric-indexed and the row is still `None`, the `-t` token is not being stripped during lineage grouping: stop and report it, because that would mean the pivot does not aggregate and the whole approach needs revisiting. Either way, do **not** paper over it by rewriting the test to use letterless IDs — that hides the thing the test exists to detect.
 
 - [ ] **Step 3: Commit**
 
