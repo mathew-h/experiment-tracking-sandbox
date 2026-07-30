@@ -634,8 +634,15 @@ One scripted replacement — do not hand-edit 46 sites:
 
 ```powershell
 $p = "tests/services/bulk_uploads/test_master_bulk_upload.py"
-(Get-Content $p -Raw).Replace("MasterBulkUploadService.from_bytes(", "_upload(") | Set-Content $p -Encoding utf8
+$content = [System.IO.File]::ReadAllText($p, [System.Text.Encoding]::UTF8)
+$content = $content.Replace("MasterBulkUploadService.from_bytes(", "_upload(")
+[System.IO.File]::WriteAllText($p, $content, (New-Object System.Text.UTF8Encoding $false))
 ```
+
+`Get-Content -Raw | Set-Content -Encoding utf8` mojibake-corrupts em dashes and
+other non-ASCII characters under PowerShell 5.1 — it did on this file when
+Task 5's implementer ran it, and it had to be reverted and redone with an
+explicit UTF-8 read/write as above.
 
 `from_bytes_ex(` does not match — the trailing `(` in the search string prevents it. Verify: `Select-String -Path $p -Pattern "MasterBulkUploadService\.from_bytes\("` must return nothing, and `Select-String -Path $p -Pattern "from_bytes_ex"` must still return its 8 hits.
 
