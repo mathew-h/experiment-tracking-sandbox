@@ -166,3 +166,43 @@ dead experiment's data (see the issue #99 entry above).
 **Guard:** `DeleteExperiment.test.tsx` asserts the detail page is already unmounted at the moment
 the first eviction runs. Note the 404 burst itself does NOT reproduce under jsdom, so the test
 pins the ordering rather than the symptom — a symptom-based test here passes even without the fix.
+
+## 2026-07-30 — A batch loop over a helper that commits per row must isolate each row with a SAVEPOINT, never `db.rollback()`
+
+**Decision:** any service that iterates over a helper which commits internally must wrap each
+iteration in `db.begin_nested()` and unwind failures with `savepoint.rollback()`. Never
+`db.rollback()` in the per-row `except`. See the loop in
+`backend/services/bulk_uploads/experiment_deletion_bulk.py::delete_experiments_from_file`,
+which calls `experiment_deletion.delete_experiment_cascade` (that function commits) once per row.
+
+**Why:** two independent reasons, and the naive version fails both.
+
+1. *Correctness.* After a failed statement Postgres refuses every subsequent statement until the
+   transaction is unwound, so something must unwind it — one bad row would otherwise poison the
+   whole remaining batch. But `db.rollback()` unwinds to the start of the session's transaction,
+   discarding every row the batch had already committed. A single unusable row would silently turn
+   a 50-row cleanup into a no-op while still reporting the other 49 as deleted. The issue's own
+   wording ("call `delete_experiment_cascade` inside a `try/except`") reads as sufficient and is
+   not.
+2. *Testability.* Under the test fixtures (`tests/api/conftest.py`,
+   `tests/services/conftest.py`, `tests/services/bulk_uploads/conftest.py`) the Session joins an
+   external transaction in `rollback_only` mode, so a session-wide `db.rollback()` erases seed data
+   committed earlier in the same test — see the 2026-07-29 issue #99/#100 notes and
+   `issue-log.md`. The "one row failed, the others still deleted" assertion is therefore
+   *unwritable* against a `db.rollback()` implementation: the surviving rows come back as
+   `missing` instead of `deleted`.
+
+Probed before implementing, not assumed: `begin_nested()` → helper's own `commit()` releases the
+savepoint and persists the row, leaves the outer transaction usable, and a later
+`savepoint.rollback()` undoes only its own row. So one implementation is correct both in
+production (no external transaction) and under the fixtures.
+
+**Scope:** applies to the checkbox-driven bulk delete in `issue-bulk-delete-selected.md` and to any
+future bulk wrapper around a committing single-item service. Guard `savepoint.rollback()` with
+`if savepoint.is_active` — if the helper already committed, the savepoint is released and rolling
+back would raise. Because the naive `db.rollback()` *reads* as the more careful choice, the reason
+is stated in a comment at the call site and in the module docstring so it is not "fixed" back.
+
+**Guard:** `tests/services/bulk_uploads/test_experiment_deletion_bulk.py::test_delete_isolates_a_failing_row_from_the_rest_of_the_batch`
+patches the inner helper to raise for one specific ID and asserts the remaining rows still deleted.
+That test fails against a `db.rollback()` implementation.
