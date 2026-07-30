@@ -54,17 +54,28 @@ _HEADER_ALIASES: Dict[str, str] = {
 def _normalize_headers(columns: Any) -> List[str]:
     """Map sheet headers onto canonical names.
 
-    If a sheet carries two spellings of the same field (e.g. a hand-merged
-    workbook with 'DI avg H2 (ppm)' *and* 'DI H2 (ppm)'), the first one wins and
-    the later duplicate keeps its raw header — pandas would otherwise hand back
-    a DataFrame slice instead of a scalar on `row.get()`.
+    A sheet can carry two spellings of one field — a hand-merged workbook with
+    both 'DI avg H2 (ppm)' and 'DI H2 (ppm)', or 'H2 (ppm)' beside its v3
+    replacement 'FL H2 (ppm)'. Renaming both to the canonical name would give
+    pandas duplicate columns, and `row.get()` would then return a Series rather
+    than a scalar; `_parse_float` raises on that and its `except Exception`
+    swallows the value — the exact silent loss issue #111 exists to fix.
+
+    Two rules prevent it:
+      1. A column never takes a canonical name that another column in the same
+         sheet already carries literally. The literal (v3) column wins and the
+         aliased one keeps its raw header.
+      2. Any remaining collision falls back to the raw header.
     """
+    raw = [str(c).strip() for c in columns]
+    raw_names = set(raw)
     out: List[str] = []
     seen: set[str] = set()
-    for col in columns:
-        name = str(col).strip()
+    for name in raw:
         canonical = _HEADER_ALIASES.get(name.lower(), name)
-        if canonical in seen and canonical != name:
+        if canonical != name and canonical in raw_names:
+            canonical = name
+        if canonical in seen:
             canonical = name
         out.append(canonical)
         seen.add(canonical)

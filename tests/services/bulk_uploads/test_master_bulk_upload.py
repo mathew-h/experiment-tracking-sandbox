@@ -765,6 +765,61 @@ def test_v3_uppercase_overwrite_header_is_honoured(db_session: Session):
     )
 
 
+def test_both_spellings_of_one_field_do_not_collide(db_session: Session):
+    """A sheet carrying both 'H2 (ppm)' and 'FL H2 (ppm)' must not produce two
+    columns with the same name.
+
+    Duplicate column names make pandas hand `row.get()` a Series instead of a
+    scalar; `_parse_float` raises on it and its `except Exception` returns None,
+    silently dropping the value — the exact failure issue #111 exists to fix.
+    The literal v3 column wins; the aliased one keeps its raw header.
+    """
+    from backend.services.bulk_uploads.master_bulk_upload import _normalize_headers
+
+    for columns, expected in (
+        (["H2 (ppm)", "FL H2 (ppm)"], ["H2 (ppm)", "FL H2 (ppm)"]),
+        (["FL H2 (ppm)", "H2 (ppm)"], ["FL H2 (ppm)", "H2 (ppm)"]),
+        (["DI avg H2 (ppm)", "DI H2 (ppm)"], ["DI avg H2 (ppm)", "DI H2 (ppm)"]),
+        # Two aliases of one canonical, neither spelled canonically.
+        (["gas volume (ml)", "Gas Volume (mL)"],
+         ["FL Gas Volume (mL)", "Gas Volume (mL)"]),
+    ):
+        result = _normalize_headers(columns)
+        assert result == expected, f"{columns} -> {result}"
+        assert len(set(result)) == len(result), f"duplicate columns from {columns}"
+
+    # Ordinary single-spelling mapping is unaffected.
+    assert _normalize_headers(["H2 (ppm)"]) == ["FL H2 (ppm)"]
+    assert _normalize_headers(["OVERWRITE"]) == ["Overwrite"]
+
+
+def test_both_spellings_end_to_end_keeps_the_v3_value(db_session: Session):
+    """The collision case survives a real upload: the v3 column's value lands."""
+    _seed_experiment(db_session, "HPHT_FL005", 8805)
+
+    headers = ["H2 (ppm)"] + list(_V3_HEADERS)
+    row = [999.0] + _v3_row("HPHT_FL005", 7.0, fl_h2=115.0, fl_vol=3935.0, fl_psi=90.0)
+    xlsx = make_excel_multisheet({"Dashboard": (headers, [row])})
+
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_FL005")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(115.0), (
+        "the literal 'FL H2 (ppm)' column must win, and its value must not be "
+        "lost to a duplicate-column Series"
+    )
+
+
 def test_legacy_h2_header_still_parses(db_session: Session):
     """Archived workbooks using the pre-rename 'H2 (ppm)' block keep working."""
     _seed_experiment(db_session, "HPHT_FL004", 8804)
