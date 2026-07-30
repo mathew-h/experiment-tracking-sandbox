@@ -831,10 +831,16 @@ class NewExperimentsUploadService:
                         # Manage reactor occupancy: only one ONGOING experiment per
                         # physical slot. Keyed on the derived reactor_slot, which is
                         # None for a non-occupancy type (Serum / Autoclave / Other)
-                        # and for reactor_number <= 0 — so this path can no longer
-                        # complete an HPHT because a Serum row carried a stray
-                        # reactor number, and `is not None` no longer skips rows
-                        # whose reactor number is 0 (issue #97, Defect 3).
+                        # or a non-positive reactor_number. Task 4's fallback inside
+                        # manage_reactor_occupancy already excluded both cases
+                        # transitively when reactor_slot was omitted; passing
+                        # reactor_slot explicitly here makes that exclusion visible
+                        # at the call site instead of implicit in a lazy `.conditions`
+                        # load, which is fragile for a freshly constructed, unflushed
+                        # conditions row. `is not None` replaces a falsy check that
+                        # happened to behave the same for 0 — same behavior, the
+                        # footgun (a future refactor treating 0 as truthy) is gone,
+                        # not the outcome (issue #97, Defect 3).
                         #
                         # `newer_than` is still deliberately NOT passed, so the
                         # start-date guard stays inactive and demotion here remains
