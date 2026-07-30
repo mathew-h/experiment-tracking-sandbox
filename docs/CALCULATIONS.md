@@ -127,6 +127,21 @@ h2_mass_ug    = h2_mol × 2.01588 × 1,000,000     [µg; MW H₂ = 2.01588 g/mol
 - `h2_concentration` always stored in ppm (vol/vol)
 - All three inputs required and > 0; otherwise both outputs are `None`
 
+**Where the inputs come from on a Master Results upload (issue #111):** all
+three inputs are read from a single GC block. Full Loop (`FL H2 (ppm)`,
+`FL Gas Volume (mL)`, `FL Gas Pressure (psi)`) takes precedence; direct
+injection (`DI H2 (ppm)`, `DI gas volume (mL)`, `DI gas pressure (psi)`) is
+used only when the Full Loop concentration cell is blank. The blocks are never
+mixed — pairing a Full Loop concentration with a DI sampling volume would
+compute micromoles for an injection that never happened. A concentration of `0`
+is a real measurement and is stored as such.
+
+**Replicate spread is not calculated here.** Mean and standard deviation across
+replicate vials come from `v_results_scalar_rollup` (`mean_h2_ppm`,
+`sd_h2_ppm`, `stddev_samp`, n-1, outlier vials excluded), served by
+`GET /api/experiments/groups/{base_id}/rollup`. The Dashboard sheet no longer
+carries avg/SD columns — each vial supplies one reading and the view aggregates.
+
 ### Hydrogen Yield (`h2_grams_per_ton_yield`)
 
 ```

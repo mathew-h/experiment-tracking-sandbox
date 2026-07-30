@@ -1,11 +1,27 @@
 """
 Master Results bulk upload — reads from fixed SharePoint path or uploaded bytes.
 
-Dashboard sheet column spec:
-  Experiment ID | Duration (Days) | Description | Sample Date | NMR Run Date |
-  ICP Run Date  | GC Run Date     | XRD Run Date | NH4 (mM)   | H2 (ppm)    | Gas Volume (mL) |
-  Gas Pressure (psi) | Sample pH | Sample Conductivity (mS/cm) |
-  Sampled Solution Volume (mL) | Modification | Overwrite
+Dashboard sheet column spec (v3, issue #111, 2026-07-30):
+  Experiment ID | Description | Sample Date | Duration (Days) | NH4 (mM) |
+  FL H2 (ppm)   | FL Gas Volume (mL) | FL Gas Pressure (psi) | Sample pH |
+  Sample Conductivity (mS/cm) | Modification | NMR Run Date |
+  Sampled Solution Volume (mL) | ICP Run Date | GC Run Date | XRD Run Date |
+  OVERWRITE | DI H2 (ppm) | DI gas volume (mL) | DI gas pressure (psi)
+
+One row per unique experiment ID. Replicate letters are separate vials, so
+SERUM_001a/b/c at days 1 and 3 is six rows (SERUM_001a-t1, SERUM_001b-t1, ...),
+not two rows with per-letter columns. Two rows sharing an ID and timepoint are
+both rejected. Cross-replicate mean and SD are computed by
+v_results_scalar_rollup, not carried on the sheet.
+
+Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
+blank, and gas volume/pressure come from the same block. A value of 0 is a real
+reading, not a blank.
+
+Older spellings are still accepted — the pre-rename 'H2 (ppm)', 'Gas Volume
+(mL)', 'Gas Pressure (psi)', 'Overwrite', and v2's 'DI avg H2 (ppm)'. v2's wide
+'DI a/b/c H2 (ppm)' and 'DI SD (ppm)' are ignored with a warning. See
+_HEADER_ALIASES.
 """
 from __future__ import annotations
 
@@ -387,8 +403,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # row per unique experiment ID (issue #111): two rows claiming the same
     # vial at the same day are two readings fighting over one timepoint, and
     # letting the later one win would destroy the earlier silently. Both are
-    # rejected, so this has to happen before any row is committed —
-    # create_scalar_result_ex commits per row.
+    # rejected. A collision is only discoverable once the LATER row has been
+    # read, by which point the earlier row has already been flushed, counted
+    # and given a feedback record — hence a pre-pass rather than an in-loop
+    # check. (The upload commits once, at the endpoint, via _finalize_write.)
     resolved: List[Tuple[int, str, float, Any]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2

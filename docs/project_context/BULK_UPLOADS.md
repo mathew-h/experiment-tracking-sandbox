@@ -35,6 +35,27 @@ the upload zone. The former "Sync from SharePoint" button was removed (issue #74
 — the file is now always uploaded manually, and the `file` field is required on
 the endpoint.
 
+**One row per vial.** Each unique experiment ID gets its own row. Replicates are
+separate vials, so `SERUM_001` with replicates a, b, c sampled at days 1 and 3
+is six rows — `SERUM_001a-t1`, `SERUM_001b-t1`, `SERUM_001c-t1`, `SERUM_001a-t3`,
+`SERUM_001b-t3`, `SERUM_001c-t3` — not two rows with an a/b/c column each. If two
+rows share an experiment ID and Duration, **both are rejected** and listed under
+Errors, because there is no safe way to tell which reading you meant to keep.
+
+You no longer put averages or standard deviations on the sheet. Enter each
+vial's own reading; the app computes the replicate mean and SD and shows them on
+the experiment group page.
+
+**Hydrogen columns.** `FL H2 (ppm)` (Full Loop) is used whenever it has a value;
+`DI H2 (ppm)` is used only when the Full Loop cell is blank. Gas volume and
+pressure are taken from whichever block supplied the concentration, so do not
+mix them by hand. A `0` is treated as a real reading of zero — leave the cell
+**empty** if there was no measurement.
+
+If you rename a Dashboard column, the upload now tells you: any unmatched column
+whose name mentions H2 appears under **Warnings** in the result panel rather
+than being ignored.
+
 ### Expected sheet: `Dashboard`
 
 | Column | Required | Notes |

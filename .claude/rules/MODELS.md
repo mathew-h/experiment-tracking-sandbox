@@ -219,6 +219,18 @@ Stores solution chemistry measurements.
   - `co2_partial_pressure_MPa`.
 - **Hydrogen (H2)** — always stored in **ppm (vol/vol)**:
   - Inputs: `h2_concentration` (ppm), `h2_concentration_unit` (always `'ppm'`), `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`.
+  - **GC source precedence (issue #111):** `h2_concentration` holds a single ppm
+    value and there is no stored notion of which GC method produced it. On a
+    Master Results upload the parser picks Full Loop over direct injection and
+    writes only the winner; the discarded DI reading is reported in the upload's
+    per-row feedback (`h2_source`, `h2_di_superseded`) and is not persisted.
+    Making that a stored provenance field would be an additive `ScalarResults`
+    column and a schema-checklist run.
+  - **One row per vial (issue #111):** the v3 Dashboard carries one row per
+    unique `experiment_id`; replicate letters are separate vials with their own
+    IDs, not columns. The upload rejects two rows sharing an ID and timepoint.
+    Cross-replicate mean/SD therefore come from `v_results_scalar_rollup`
+    (`mean_h2_ppm` / `sd_h2_ppm`), not from the spreadsheet.
   - Derived (PV = nRT at 20 °C): `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`.
 - **Background**: `background_experiment_id`, `background_experiment_fk` (optional FK to `Experiment`).
 
