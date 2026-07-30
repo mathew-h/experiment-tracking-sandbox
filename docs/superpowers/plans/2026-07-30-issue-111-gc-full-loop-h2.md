@@ -18,7 +18,8 @@
 - **v3 is the reference format**, but older headers must keep parsing. ~20 existing tests in `tests/services/bulk_uploads/test_master_bulk_upload.py` use pre-rename headers and must pass **unmodified**.
 - **Two existing API tests DO have to change, and they fail loudly if you forget.** `tests/api/test_bulk_uploads.py:324` and `:339` replace the whole parser module with a `MagicMock` and stub `mock_svc.from_bytes.return_value = (3, 1, 0, [], [])`. Once the router calls `from_bytes_ex`, the mock returns a bare `MagicMock`, so `outcome.created` is not an `int` and `UploadResponse` validation blows up. Task 3 Step 9 updates both. Do not "fix" this by leaving the router on `from_bytes`.
 - **Do not change the sync path.** `backend/config/settings.py` and `sync_from_path()` stay as they are. Uploads happen by drag-and-drop.
-- **Per-row SAVEPOINT isolation is load-bearing.** The existing `db.begin_nested()` per row must be preserved exactly — `create_scalar_result_ex` commits per row, so a session-wide rollback would discard already-written rows.
+- **Per-row SAVEPOINT isolation is load-bearing.** The existing `db.begin_nested()` per row must be preserved exactly. It exists so **a failed row does not poison the session** — without it, one row raising leaves the transaction in a state where every subsequent row fails with `PendingRollbackError`, aborting the rest of the batch. Same rationale as the savepoint at `backend/services/scalar_results_service.py:286-287`.
+- **Correction, established during execution (2026-07-30).** `create_scalar_result_ex` **flushes; it does not commit** (`scalar_results_service.py:209`). The upload commits exactly once, at the endpoint, via `_finalize_write` (`backend/api/routers/bulk_uploads.py:28-37`) — which is also how `dry_run` works: run the full parse, then roll back. An earlier draft of this plan asserted the service commits per row. That is true of `delete_experiment_cascade` on the bulk-deletion path (issue #109), **not** of the scalar path. Wherever that claim appears — plan prose or code comment — it is wrong and must be corrected. The pre-pass in Task 4 is still required, for a different reason: a collision is only discoverable once the *later* row has been read, by which point the earlier row has already been flushed, counted, and given a feedback record.
 - **The worktree has no `.venv` of its own.** Every `.venv/Scripts/python.exe` command below must be run with the interpreter from the main checkout, with the worktree as the working directory: `& "C:\Users\MathewHearl\OneDrive - Addis Energy\Documents\01_Software\database_sandbox\experiment_tracking_sandbox\.venv\Scripts\python.exe" -m pytest ...`
 - **Every test a task adds must be green when that task commits.** If a test cannot be satisfied by its own task's code, it belongs in the later task that makes it observable.
 - **Never use bare `git stash` / `git stash pop` here.** The stash stack is shared with the main checkout and every other worktree, and other sessions may push or pop concurrently — a bare `pop` can restore someone else's work into this tree. To verify a RED state against pre-fix source, prefer `git stash push -u -m "<unique-tag>"` followed by `git stash apply <sha>` and an explicit drop, or simply `git show HEAD:<path>` / a scratch copy. Never `git commit --amend` either: an earlier round amended a commit that was not its own and the history had to be rebuilt.
@@ -1396,8 +1397,10 @@ The pre-pass goes **after** the three file-level warning blocks that Task 3 adde
     # row per unique experiment ID (issue #111): two rows claiming the same
     # vial at the same day are two readings fighting over one timepoint, and
     # letting the later one win would destroy the earlier silently. Both are
-    # rejected, so this has to happen before any row is committed —
-    # create_scalar_result_ex commits per row.
+    # rejected. A collision is only discoverable once the LATER row has been
+    # read, by which point the earlier row has already been flushed, counted
+    # and given a feedback record — hence a pre-pass rather than an in-loop
+    # check. (The upload commits once, at the endpoint, via _finalize_write.)
     resolved: List[Tuple[int, str, float, Any]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
@@ -1683,6 +1686,28 @@ Older spellings are still accepted — the pre-rename 'H2 (ppm)', 'Gas Volume
 _HEADER_ALIASES.
 """
 ```
+
+- [ ] **Step 1b: Correct a factually wrong code comment**
+
+`backend/services/bulk_uploads/master_bulk_upload.py`, in the Phase 1 comment above `resolved: List[...]`, currently ends with:
+
+```python
+    # rejected, so this has to happen before any row is committed —
+    # create_scalar_result_ex commits per row.
+```
+
+That claim is **false** and was inherited from an earlier draft of this plan. `create_scalar_result_ex` flushes (`backend/services/scalar_results_service.py:209`); it never commits. The upload commits once, at the endpoint, via `_finalize_write` (`backend/api/routers/bulk_uploads.py:28-37`). Per-row commits are a property of `delete_experiment_cascade` on the bulk-deletion path (issue #109), not this one. Replace those two lines with:
+
+```python
+    # rejected. A collision is only discoverable once the LATER row has been
+    # read, by which point the earlier row has already been flushed, counted
+    # and given a feedback record — hence a pre-pass rather than an in-loop
+    # check. (The upload commits once, at the endpoint, via _finalize_write.)
+```
+
+Leave the rest of that comment block and all surrounding code untouched. This is a comment-only edit: no test should change behavior, but re-run `tests/services/bulk_uploads/` afterwards to confirm nothing was disturbed.
+
+Do **not** repeat the per-row-commit claim in any documentation you write in the steps below.
 
 - [ ] **Step 2: Update `docs/CALCULATIONS.md`**
 
