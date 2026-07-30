@@ -645,3 +645,146 @@ def test_master_token_id_with_blank_replicate_uploads_fine(db_session: Session):
         .one()
     )
     assert result.time_post_reaction_days == 7.0
+
+
+# ---------------------------------------------------------------------------
+# v3 Dashboard headers (issue #111)
+# ---------------------------------------------------------------------------
+
+# The v3 Dashboard as of 2026-07-30. One row per unique experiment ID: the
+# wide 'DI a/b/c' block collapsed to a single 'DI H2 (ppm)' because a/b/c were
+# replicate vials, and each vial now gets its own row.
+_V3_HEADERS = [
+    "Experiment ID", "Description", "Sample Date", "Duration (Days)", "NH4 (mM)",
+    "FL H2 (ppm)", "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
+    "Sample pH", "Sample Conductivity (mS/cm)", "Modification", "NMR Run Date",
+    "Sampled Solution Volume (mL)", "ICP Run Date", "GC Run Date", "XRD Run Date",
+    "OVERWRITE",
+    "DI H2 (ppm)", "DI gas volume (mL)", "DI gas pressure (psi)",
+]
+
+
+def _v3_row(
+    experiment_id: str,
+    duration: float | None = 7.0,
+    *,
+    description: str = "Day 7",
+    nh4: float | None = None,
+    fl_h2: float | None = None,
+    fl_vol: float | None = None,
+    fl_psi: float | None = None,
+    ph: float | None = 7.0,
+    overwrite=None,
+    di_h2: float | None = None,
+    di_vol: float | None = None,
+    di_psi: float | None = None,
+) -> list:
+    """Build one Dashboard row in _V3_HEADERS order."""
+    return [
+        experiment_id, description, None, duration, nh4,
+        fl_h2, fl_vol, fl_psi,
+        ph, None, None, None,
+        None, None, None, None,
+        overwrite,
+        di_h2, di_vol, di_psi,
+    ]
+
+
+def _master_excel_v3(rows: list[list]) -> bytes:
+    return make_excel_multisheet({"Dashboard": (_V3_HEADERS, rows)})
+
+
+def test_v3_fl_h2_columns_are_ingested(db_session: Session):
+    """'FL H2 (ppm)' / 'FL Gas Volume (mL)' / 'FL Gas Pressure (psi)' are read.
+
+    Before #111 these were dropped silently: the parser looked for the pre-rename
+    'H2 (ppm)' spelling, found nothing, and the None-filter removed the field.
+    """
+    _seed_experiment(db_session, "HPHT_FL001", 8801)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_FL001", 7.0, fl_h2=115.04, fl_vol=3935.0, fl_psi=90.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_FL001")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(115.04)
+    assert scalar.h2_concentration_unit == "ppm"
+    assert scalar.gas_sampling_volume_ml == pytest.approx(3935.0)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(90.0 * _PSI_TO_MPA, rel=1e-3)
+
+
+def test_v3_uppercase_overwrite_header_is_honoured(db_session: Session):
+    """The sheet spells it 'OVERWRITE'; the parser used to look for 'Overwrite'.
+
+    The difference is only observable on a field the second upload leaves
+    BLANK. `create_scalar_result_ex` (backend/services/scalar_results_service.py
+    :129-135) writes every SCALAR_UPDATABLE_FIELDS entry when overwrite is True
+    — clearing ones absent from the row — but only the fields actually present
+    when it is False. A test that repeats the same populated field in both
+    uploads passes either way and proves nothing.
+    """
+    _seed_experiment(db_session, "HPHT_FL002", 8802)
+
+    first = _master_excel_v3([_v3_row("HPHT_FL002", 7.0, nh4=5.0, ph=7.0)])
+    MasterBulkUploadService.from_bytes(db_session, first)
+
+    # Repeat NH4 but leave Sample pH blank, with OVERWRITE set.
+    second = _master_excel_v3([
+        _v3_row("HPHT_FL002", 7.0, description="Day 7 revised",
+                nh4=6.5, ph=None, overwrite=1.0),
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, second
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert updated == 1
+    assert created == 0
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_FL002")
+        .one()
+    ).scalar_data
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(6.5)
+    assert scalar.final_ph is None, (
+        "OVERWRITE=TRUE must clear a field the new row leaves blank; a "
+        "surviving 7.0 means the OVERWRITE header was not recognised"
+    )
+
+
+def test_legacy_h2_header_still_parses(db_session: Session):
+    """Archived workbooks using the pre-rename 'H2 (ppm)' block keep working."""
+    _seed_experiment(db_session, "HPHT_FL004", 8804)
+
+    xlsx = _master_excel([
+        ["HPHT_FL004", 7.0, "Day 7", None, None, None, None,
+         5.0, 88.0, 500.0, 145.0, 7.0, None, None, "FALSE"],
+    ])
+    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+        db_session, xlsx
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_FL004")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration == pytest.approx(88.0)
+    assert scalar.gas_sampling_volume_ml == pytest.approx(500.0)

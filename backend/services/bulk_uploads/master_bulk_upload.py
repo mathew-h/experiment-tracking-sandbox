@@ -23,6 +23,53 @@ from database.experiment_id_parser import split_timepoint_token
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
 
+# Canonical Dashboard headers, keyed by the lowercased sheet header.
+#
+# Issue #111: the sheet was restructured twice. The single 'H2 (ppm)' block was
+# renamed to a Full Loop ('FL ...') block and 'Overwrite' became 'OVERWRITE';
+# then the wide DI block ('DI a/b/c H2 (ppm)' + avg + SD) collapsed to one
+# 'DI H2 (ppm)' when a/b/c moved to their own rows. Every spelling is accepted
+# so archived workbooks keep parsing; the values on the right are the only
+# names the row reads below use.
+_HEADER_ALIASES: Dict[str, str] = {
+    # Full Loop — pre-rename spelling first in each pair
+    "h2 (ppm)": "FL H2 (ppm)",
+    "fl h2 (ppm)": "FL H2 (ppm)",
+    "gas volume (ml)": "FL Gas Volume (mL)",
+    "fl gas volume (ml)": "FL Gas Volume (mL)",
+    "gas pressure (psi)": "FL Gas Pressure (psi)",
+    "fl gas pressure (psi)": "FL Gas Pressure (psi)",
+    # GC direct injection — 'DI avg' is the v2 spelling of v3's 'DI H2'
+    "di h2 (ppm)": "DI H2 (ppm)",
+    "di avg h2 (ppm)": "DI H2 (ppm)",
+    "di gas volume (ml)": "DI gas volume (mL)",
+    "di gas pressure (psi)": "DI gas pressure (psi)",
+    # Casing-only normalisations (previously done inline)
+    "overwrite": "Overwrite",
+    "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
+    "replicate": "Replicate",
+}
+
+
+def _normalize_headers(columns: Any) -> List[str]:
+    """Map sheet headers onto canonical names.
+
+    If a sheet carries two spellings of the same field (e.g. a hand-merged
+    workbook with 'DI avg H2 (ppm)' *and* 'DI H2 (ppm)'), the first one wins and
+    the later duplicate keeps its raw header — pandas would otherwise hand back
+    a DataFrame slice instead of a scalar on `row.get()`.
+    """
+    out: List[str] = []
+    seen: set[str] = set()
+    for col in columns:
+        name = str(col).strip()
+        canonical = _HEADER_ALIASES.get(name.lower(), name)
+        if canonical in seen and canonical != name:
+            canonical = name
+        out.append(canonical)
+        seen.add(canonical)
+    return out
+
 
 def _parse_float(val: Any) -> Optional[float]:
     if val is None:
@@ -110,17 +157,7 @@ def _process_bytes(
     except Exception as exc:
         return 0, 0, 0, [f"Failed to parse sheet '{sheet_name}': {exc}"], []
 
-    df.columns = [str(c).strip() for c in df.columns]
-    # Normalise the optional volume column header to canonical casing.
-    df.columns = [
-        "Sampled Solution Volume (mL)" if c.lower() == "sampled solution volume (ml)" else c
-        for c in df.columns
-    ]
-    # Normalise the optional replicate column header to canonical casing.
-    df.columns = [
-        "Replicate" if c.lower() == "replicate" else c
-        for c in df.columns
-    ]
+    df.columns = _normalize_headers(df.columns)
 
     # Validate required columns
     required = {"Experiment ID", "Duration (Days)"}
@@ -200,9 +237,9 @@ def _process_bytes(
         xrd_run_date = _parse_date(row.get("XRD Run Date"))
 
         nh4_mm = _parse_float(row.get("NH4 (mM)"))
-        h2_ppm = _parse_float(row.get("H2 (ppm)"))
-        gas_vol_ml = _parse_float(row.get("Gas Volume (mL)"))
-        gas_psi = _parse_float(row.get("Gas Pressure (psi)"))
+        h2_ppm = _parse_float(row.get("FL H2 (ppm)"))
+        gas_vol_ml = _parse_float(row.get("FL Gas Volume (mL)"))
+        gas_psi = _parse_float(row.get("FL Gas Pressure (psi)"))
         gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
