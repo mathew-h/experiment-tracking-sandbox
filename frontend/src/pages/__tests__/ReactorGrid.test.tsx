@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
@@ -16,6 +16,7 @@ vi.mock('@/api/experiments', () => ({
 }))
 
 import { ReactorGrid } from '../ReactorGrid'
+import { experimentsApi } from '@/api/experiments'
 
 function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
   return {
@@ -93,5 +94,51 @@ describe('ReactorGrid — slot counts derived from props (issue #85)', () => {
     )
     expect(labels.length).toBe(3)
     expect(labels).toEqual(['R01', 'R02', 'CF01'])
+  })
+})
+
+describe('StatusBadge — reactor occupancy 409 (issue #97)', () => {
+  it('shows the server message when a status change is rejected as a double-booking', async () => {
+    const detail =
+      "Reactor R05 is already occupied by ONGOING experiment 'HPHT_222' (started 2026-07-24). Complete or cancel it before starting 'HPHT_MH_072'."
+    // The axios response interceptor (frontend/src/api/client.ts) already copies
+    // response.data.detail onto error.message by the time onError sees it, so a
+    // faithful mock sets .message to the detail itself, not the generic Axios
+    // "Request failed with status code 409" text (which never reaches onError
+    // in real usage).
+    vi.mocked(experimentsApi.patchStatus).mockRejectedValueOnce(
+      Object.assign(new Error(detail), {
+        response: { status: 409, data: { detail } },
+      })
+    )
+
+    renderGrid([makeCard({ status: 'QUEUED' })])
+
+    fireEvent.click(screen.getByTitle('Change status'))
+    fireEvent.click(screen.getByRole('button', { name: 'ONGOING' }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/already occupied by ONGOING experiment 'HPHT_222'/)
+      ).toBeInTheDocument()
+    )
+  })
+
+  it('falls back to a generic message when the error carries no detail', async () => {
+    // No response.data.detail means the interceptor never touches .message, so
+    // an error with an empty message models the case the `|| 'Could not update
+    // status'` fallback exists for.
+    vi.mocked(experimentsApi.patchStatus).mockRejectedValueOnce(
+      Object.assign(new Error(''), { response: undefined })
+    )
+
+    renderGrid([makeCard({ status: 'QUEUED' })])
+
+    fireEvent.click(screen.getByTitle('Change status'))
+    fireEvent.click(screen.getByRole('button', { name: 'ONGOING' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('Could not update status')).toBeInTheDocument()
+    )
   })
 })

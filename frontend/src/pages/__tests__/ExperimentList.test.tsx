@@ -4,6 +4,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { ToastProvider } from '@/components/ui'
 
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
@@ -52,7 +53,9 @@ const queryClient = new QueryClient({
 function wrapper({ children }: { children: React.ReactNode }) {
   return (
     <MemoryRouter>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>{children}</ToastProvider>
+      </QueryClientProvider>
     </MemoryRouter>
   )
 }
@@ -446,5 +449,46 @@ describe('ExperimentListPage — issue #98: status editable iff label names the 
     render(<ExperimentListPage />, { wrapper })
     await waitFor(() => expect(screen.getByText('SERUM_004')).toBeInTheDocument())
     expect(screen.getByRole('combobox', { name: /row status/i })).toBeInTheDocument()
+  })
+})
+
+describe('ExperimentList — inline status 409 (issue #97)', () => {
+  beforeEach(() => {
+    vi.mocked(experimentsApi.list).mockImplementation(async (params) => {
+      const skip = params?.skip ?? 0
+      const limit = params?.limit ?? LIMIT
+      return { items: makeItems(skip, limit), total: TOTAL, skip, limit }
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows the server message when an inline status change is rejected', async () => {
+    const detail =
+      "Reactor CF01 is already occupied by ONGOING experiment 'CF_018-3' (started 2026-07-24). Complete or cancel it before starting 'EXP_001'."
+    // The axios response interceptor (frontend/src/api/client.ts) already copies
+    // response.data.detail onto error.message by the time onError sees it, so a
+    // faithful mock sets .message to the detail itself, not the generic Axios
+    // "Request failed with status code 409" text (which never reaches onError
+    // in real usage).
+    vi.mocked(experimentsApi.patchStatus).mockRejectedValueOnce(
+      Object.assign(new Error(detail), {
+        response: { status: 409, data: { detail } },
+      })
+    )
+
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('EXP_001')).toBeInTheDocument())
+
+    const selects = screen.getAllByLabelText('Row status')
+    fireEvent.change(selects[0], { target: { value: 'COMPLETED' } })
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/already occupied by ONGOING experiment 'CF_018-3'/)
+      ).toBeInTheDocument()
+    )
   })
 })

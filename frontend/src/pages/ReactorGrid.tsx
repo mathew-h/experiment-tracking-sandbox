@@ -60,12 +60,19 @@ function StatusBadge({
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
+  const { error: toastError } = useToast()
 
   const { mutate, isPending } = useMutation({
     mutationFn: (newStatus: ExperimentStatus) =>
       experimentsApi.patchStatus(card.experiment_id!, newStatus),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+    // Without this a 409 from the occupancy check (issue #97) is swallowed: the
+    // dropdown snaps back and the user is told nothing. The server's detail
+    // names the occupying experiment and its start date, so show it verbatim.
+    onError: (err: Error) => {
+      toastError(err.message || 'Could not update status')
     },
   })
 
