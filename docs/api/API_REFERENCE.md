@@ -649,6 +649,41 @@ POST /api/bulk-uploads/new-experiments   file=<same xlsx>  plan_hash=a1b2…
 
 Note: the legacy Streamlit uploader (`legacy/streamlit_frontend/bulk_uploads.py`) calls the service directly via `bulk_upsert_from_excel` and is not covered by either gate.
 
+### Bulk experiment deletion (issue #109, Phase 1)
+
+`POST /api/bulk-uploads/experiment-deletion` takes a `.xlsx`/`.xls`/`.csv` file with a
+single `experiment_id` column and **hard-deletes** each listed experiment via
+`experiment_deletion.delete_experiment_cascade` — the same irreversible purge as
+`DELETE /api/experiments/{experiment_id}` (see `MODELS.md`). There is **no preview,
+no `dry_run` and no `plan_hash` gate**: the deliberate Phase 1 trade-off is speed for
+one trusted user cleaning up a known list. Phase 2 adds the preview-first flow.
+
+- **Access:** the handler's first statement compares `current_user.email` (case-insensitively)
+  against `BULK_DELETE_ALLOWED_EMAIL` in `backend/api/routers/bulk_uploads.py` and raises
+  **403** otherwise. This is a hardcoded single address, not a role check — the frontend row
+  is visible to everyone and the 403 is the only gate.
+- **Partial success is intended.** `delete_experiment_cascade` commits per row, and each row
+  runs inside its own SAVEPOINT, so one unusable row is unwound and reported without
+  discarding the deletions that already succeeded.
+- **Unknown IDs do not fail the request** — they come back in `missing` so a typo cannot
+  block a cleanup batch.
+- **Audit:** every deleted experiment still gets its `ModificationsLog` row with
+  `experiment_fk = NULL`. That row is the only surviving trace; the snapshot in `old_values`
+  is a record of what was deleted, not a restore point.
+- **No batch size cap** in Phase 1.
+
+Response is the standard `UploadResponse`, reinterpreted: `updated` = deletions,
+`skipped` = IDs not found, `errors` = `"<id>: <reason>"` per failed row. The itemized
+lists are in `feedbacks[0]` as `{deleted: [...], missing: [...], failed: [{experiment_id, error}]}`
+and repeated in `warnings` for display.
+
+```
+POST /api/bulk-uploads/experiment-deletion   file=<xlsx with experiment_id column>
+  → 403 { "detail": "Bulk experiment deletion is restricted to the data owner." }
+  → 200 { "updated": 12, "skipped": 1, "errors": ["HPHT_099: <reason>"],
+          "feedbacks": [{"deleted": [...], "missing": ["HPHT_TYPO"], "failed": [...]}] }
+```
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/bulk-uploads/master-results` | Master Results upload. `file` required — the no-file SharePoint sync mode and the GET/PATCH /master-results/config endpoints were removed (issue #74). Runs calc engine on affected `ScalarResults`. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
@@ -663,7 +698,8 @@ Note: the legacy Streamlit uploader (`legacy/streamlit_frontend/bulk_uploads.py`
 | POST | `/api/bulk-uploads/actlabs-rock` | Import ActLabs geochemical analysis reports (Excel or CSV). Heuristic header detection. |
 | POST | `/api/bulk-uploads/experiment-status` | Per-row status/date/reactor update. HPHT/Core Flood rows set to ONGOING with a reactor_number auto-complete an older occupant in the same reactor (date-gated); no blanket "complete unlisted HPHT" behavior. |
 | POST | `/api/bulk-uploads/pxrf` | Import pXRF readings from instrument export. |
-| GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`. Returns 404 for types with no template. |
+| POST | `/api/bulk-uploads/experiment-deletion` | **Hard-deletes** every experiment in the file's `experiment_id` column. **403 for anyone but `mhearl@addisenergy.com`** (see below). |
+| GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`, `experiment-deletion`. Returns 404 for types with no template. |
 | GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
 
 ## Interactive Docs

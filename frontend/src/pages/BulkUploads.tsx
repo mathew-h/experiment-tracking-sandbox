@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Select } from '@/components/ui'
+import { Select, useToast } from '@/components/ui'
 import { bulkUploadsApi, NextIds } from '@/api/bulkUploads'
 import { UploadRow, IconChevron } from './BulkUploadRow'
 import { ActlabsUploadRow } from './ActlabsUploadRow'
@@ -160,6 +160,36 @@ function IcpOverwriteToggle({
   )
 }
 
+// ─── Bulk experiment deletion (issue #109 Phase 1) ───────────────────────────
+
+/** Thrown when the researcher dismisses the browser confirmation, so the
+ *  mutation's error path can stay silent instead of reporting a failed upload. */
+const CANCELLED = 'Deletion cancelled'
+
+/**
+ * Non-blank data rows in a CSV, or `null` when the count cannot be read in the
+ * browser. Excel would need a client-side workbook parser (a new frontend
+ * dependency), which Phase 1 deliberately does not add — those files fall back
+ * to confirming by filename.
+ */
+async function countCsvIdRows(file: File): Promise<number | null> {
+  if (!file.name.toLowerCase().endsWith('.csv')) return null
+  const lines = (await file.text())
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  return Math.max(lines.length - 1, 0) // minus the header row
+}
+
+async function confirmThenDelete(file: File) {
+  const count = await countCsvIdRows(file)
+  const subject = count === null ? `the experiments listed in ${file.name}` : `${count} experiment(s)`
+  if (!window.confirm(`Delete ${subject}? This cannot be undone.`)) {
+    throw new Error(CANCELLED)
+  }
+  return bulkUploadsApi.uploadExperimentDeletion(file)
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 /** Bulk data upload page: one row per upload type with template download and status feedback. */
 export function BulkUploadsPage() {
@@ -169,6 +199,7 @@ export function BulkUploadsPage() {
   const [xrdOverwrite, setXrdOverwrite] = useState(false)
   const [icpOverwrite, setIcpOverwrite] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
+  const { error: toastError } = useToast()
 
   const toggle = (id: string) => setOpenRow((prev) => (prev === id ? null : id))
   const isOpen = (id: string) => openRow === id
@@ -380,6 +411,25 @@ export function BulkUploadsPage() {
                 uploadFn={(file) => bulkUploadsApi.uploadPXRF(file)}
                 isOpen={isOpen('pxrf')}
                 onToggle={() => toggle('pxrf')}
+              />
+
+              {/* 13 — Delete Experiments (issue #109 Phase 1) — restricted to the
+                  data owner by the backend; other accounts get a 403 here. */}
+              <UploadRow
+                id="experiment-deletion"
+                title="Delete Experiments"
+                description="Permanently delete every experiment listed in a spreadsheet"
+                helpText="Restricted to the data owner — other accounts are refused by the server. Required column: experiment_id (one per row). Each listed experiment and everything it owns (conditions, results, ICP, files, notes, additives, external analyses, XRD phases, change requests) is permanently destroyed; the only surviving trace is the audit log entry. IDs not found in the database are reported and skipped, and a row that fails to delete does not stop the rest of the batch."
+                accept=".xlsx,.xls,.csv"
+                uploadFn={confirmThenDelete}
+                templateType="experiment-deletion"
+                resultLabels={{ created: null, updated: 'Deleted', skipped: 'Not found' }}
+                useServerMessage
+                onUploadError={(err) => {
+                  if (err.message !== CANCELLED) toastError('Deletion failed', err.message)
+                }}
+                isOpen={isOpen('experiment-deletion')}
+                onToggle={() => toggle('experiment-deletion')}
               />
 
             </div>

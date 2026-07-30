@@ -46,6 +46,12 @@ export interface UploadRowProps {
   topContent?: React.ReactNode
   /** Larger header treatment for the six active widgets at the top of the page */
   prominent?: boolean
+  /** Renames the created/updated/skipped badges; `null` hides one. Deletion
+   *  (issue #109) reuses this row, where "0 created, 2 updated" is meaningless. */
+  resultLabels?: { created?: string | null; updated?: string | null; skipped?: string | null }
+  /** Toast the server's own `message` on success instead of the created/updated
+   *  summary. For rows whose counts don't describe what happened. */
+  useServerMessage?: boolean
   /** Override upload error handling; defaults to toastError('Upload failed', err.message) */
   onUploadError?: (err: Error) => void
   /** Override success handling; defaults to setting the row's own result summary and
@@ -75,11 +81,19 @@ export function UploadRow({
   skippedMessage,
   topContent,
   prominent = false,
+  resultLabels,
+  useServerMessage = false,
   onUploadError,
   onUploadSuccess,
   isOpen,
   onToggle,
 }: UploadRowProps) {
+  const labels = {
+    created: 'Created',
+    updated: 'Updated',
+    skipped: 'Skipped',
+    ...resultLabels,
+  }
   const [result, setResult] = useState<BulkUploadResult | ConflictCheckResult | null>(null)
   const [showAllErrors, setShowAllErrors] = useState(false)
   const [showAllWarnings, setShowAllWarnings] = useState(false)
@@ -93,7 +107,7 @@ export function UploadRow({
         return
       }
       setResult(data)
-      if (isBulkUploadResult(data)) {
+      if (isBulkUploadResult(data) && !useServerMessage) {
         success(`Upload complete — ${data.created} created, ${data.updated} updated`)
       } else {
         success(data.message)
@@ -184,9 +198,9 @@ export function UploadRow({
           {result && !isPending && isBulkUploadResult(result) && (
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
-                <Badge variant="success">Created: {result.created}</Badge>
-                <Badge variant="default">Updated: {result.updated}</Badge>
-                <Badge variant="warning">Skipped: {result.skipped}</Badge>
+                {labels.created && <Badge variant="success">{labels.created}: {result.created}</Badge>}
+                {labels.updated && <Badge variant="default">{labels.updated}: {result.updated}</Badge>}
+                {labels.skipped && <Badge variant="warning">{labels.skipped}: {result.skipped}</Badge>}
                 {result.errors.length > 0 && (
                   <Badge variant="error">Errors: {result.errors.length}</Badge>
                 )}
