@@ -11,21 +11,31 @@ from sqlalchemy.orm import Session
 from database import Experiment
 from database.models import ExperimentalConditions
 from database.models.enums import ExperimentStatus
+from database.reactor_slot import (
+    derive_reactor_slot,
+    is_occupancy_type,
+    normalize_experiment_type,
+)
 
 
 _VALID_STATUSES = {s.value for s in ExperimentStatus}
-_OCCUPANCY_TYPES = {"hpht", "core flood"}
 _UNSET = object()
 
 
 def _normalize_type(experiment_type: str | None) -> str:
     """Lowercase + collapse whitespace so 'HPHT ', 'Core  Flood', etc. compare cleanly."""
-    return " ".join((experiment_type or "").strip().lower().split())
+    return normalize_experiment_type(experiment_type)
 
 
 def _is_eligible_for_occupancy(experiment_type: str | None) -> bool:
-    """True for HPHT / Core Flood — the types with physical reactor occupancy."""
-    return _normalize_type(experiment_type) in _OCCUPANCY_TYPES
+    """True for HPHT / Core Flood — the types with physical reactor occupancy.
+
+    Delegates to database.reactor_slot so this and the reactor_slot column can
+    never disagree about what occupies a vessel (issue #97). The local
+    _OCCUPANCY_TYPES set it replaced also missed the 'CF' and 'CoreFlood'
+    spellings that exist in production data.
+    """
+    return is_occupancy_type(experiment_type)
 
 
 def _occupant_is_older(occupant_date: date | None, incoming_date: date | None) -> bool:
@@ -35,16 +45,16 @@ def _occupant_is_older(occupant_date: date | None, incoming_date: date | None) -
     return occupant_date < incoming_date
 
 
-def _demoted_message(reactor_number: int, demoted_id: str, new_id: str) -> str:
+def _demoted_message(reactor_slot: str, demoted_id: str, new_id: str) -> str:
     return (
-        f"Reactor {reactor_number}: Marked experiment '{demoted_id}' "
+        f"Reactor {reactor_slot}: Marked experiment '{demoted_id}' "
         f"as COMPLETED (replaced by '{new_id}')"
     )
 
 
-def _not_demoted_message(reactor_number: int, occupant_id: str, new_id: str) -> str:
+def _not_demoted_message(reactor_slot: str, occupant_id: str, new_id: str) -> str:
     return (
-        f"Reactor {reactor_number}: '{occupant_id}' was NOT completed — its start date "
+        f"Reactor {reactor_slot}: '{occupant_id}' was NOT completed — its start date "
         f"is not older than '{new_id}''s (or a start date is missing on one of them). "
         f"Manual review needed."
     )
@@ -69,6 +79,7 @@ class PlannedDemotion:
     experiment_id: str
     experiment_pk: int
     reactor_number: int
+    reactor_slot: str
     triggering_experiment_id: str
 
 
@@ -193,7 +204,10 @@ class ExperimentStatusService:
         missing_ids = [eid for eid in listed_ids if eid not in found_ids]
 
         changes: List[PlannedChange] = []
-        reactor_targets: Dict[int, str] = {}
+        # Keyed on the canonical slot label, not the bare integer: an HPHT into
+        # R01 and a Core Flood into CF01 in one file are two different vessels
+        # and must not collide (issue #97, Defect 2).
+        reactor_targets: Dict[str, str] = {}
         conflict_errors: List[str] = []
 
         for r in parsed_rows:
@@ -213,19 +227,19 @@ class ExperimentStatusService:
                 new_date=r["date"],
             ))
 
+            incoming_slot = derive_reactor_slot(r["reactor_number"], exp_type)
             if (
                 r["status"] == ExperimentStatus.ONGOING.value
-                and r["reactor_number"] is not None
-                and _is_eligible_for_occupancy(exp_type)
+                and incoming_slot is not None
             ):
-                existing = reactor_targets.get(r["reactor_number"])
+                existing = reactor_targets.get(incoming_slot)
                 if existing is not None:
                     conflict_errors.append(
-                        f"Reactor {r['reactor_number']} is targeted by multiple rows in "
+                        f"Reactor {incoming_slot} is targeted by multiple rows in "
                         f"this file: '{existing}' and '{exp.experiment_id}'"
                     )
                 else:
-                    reactor_targets[r["reactor_number"]] = exp.experiment_id
+                    reactor_targets[incoming_slot] = exp.experiment_id
 
         if conflict_errors:
             return StatusChangePreview([], [], missing_ids, conflict_errors, [])
@@ -235,19 +249,23 @@ class ExperimentStatusService:
 
         for r in parsed_rows:
             exp = exp_by_id.get(r["experiment_id"])
-            if exp is None or r["status"] != ExperimentStatus.ONGOING.value or r["reactor_number"] is None:
+            if exp is None or r["status"] != ExperimentStatus.ONGOING.value:
                 continue
             exp_type = exp.conditions.experiment_type if exp.conditions else None
-            if not _is_eligible_for_occupancy(exp_type):
+            incoming_slot = derive_reactor_slot(r["reactor_number"], exp_type)
+            if incoming_slot is None:
                 continue
 
+            # Scoped on reactor_slot, so an occupant is only found in the SAME
+            # physical vessel. Filtering on reactor_number alone made a Core
+            # Flood going ONGOING find the HPHT in R01 (issue #97, Defect 1).
             occupants = db.query(Experiment).join(
                 ExperimentalConditions,
                 Experiment.id == ExperimentalConditions.experiment_fk,
             ).filter(
                 Experiment.id != exp.id,
                 Experiment.status == ExperimentStatus.ONGOING,
-                ExperimentalConditions.reactor_number == r["reactor_number"],
+                ExperimentalConditions.reactor_slot == incoming_slot,
             ).all()
 
             incoming_date = r["date"].date() if r["date"] is not None else None
@@ -259,11 +277,12 @@ class ExperimentStatusService:
                         experiment_id=occ.experiment_id,
                         experiment_pk=occ.id,
                         reactor_number=r["reactor_number"],
+                        reactor_slot=incoming_slot,
                         triggering_experiment_id=exp.experiment_id,
                     ))
-                    warnings.append(_demoted_message(r["reactor_number"], occ.experiment_id, exp.experiment_id))
+                    warnings.append(_demoted_message(incoming_slot, occ.experiment_id, exp.experiment_id))
                 else:
-                    warnings.append(_not_demoted_message(r["reactor_number"], occ.experiment_id, exp.experiment_id))
+                    warnings.append(_not_demoted_message(incoming_slot, occ.experiment_id, exp.experiment_id))
 
         return StatusChangePreview(changes, demotions, missing_ids, [], warnings)
     
@@ -315,14 +334,18 @@ class ExperimentStatusService:
                         exp.conditions.reactor_number = change.new_reactor_number
                         reactor_updates += 1
 
-                if (
-                    change.new_status == ExperimentStatus.ONGOING.value
-                    and change.new_reactor_number is not None
-                    and _is_eligible_for_occupancy(change.experiment_type)
-                ):
+                # Derived here rather than read off exp.conditions.reactor_slot:
+                # the assignment above has just changed reactor_number in-session
+                # and the before_flush listener has not run yet (issue #97
+                # pre-flush rule).
+                incoming_slot = derive_reactor_slot(
+                    change.new_reactor_number, change.experiment_type
+                )
+                if change.new_status == ExperimentStatus.ONGOING.value and incoming_slot is not None:
                     newer_than = change.new_date.to_pydatetime() if change.new_date is not None else None
                     marked, occ_warnings = ExperimentStatusService.manage_reactor_occupancy(
-                        db, exp, change.new_reactor_number, commit=False, newer_than=newer_than,
+                        db, exp, change.new_reactor_number, commit=False,
+                        newer_than=newer_than, reactor_slot=incoming_slot,
                     )
                     demotions_applied += marked
                     warnings.extend(occ_warnings)
@@ -348,19 +371,22 @@ class ExperimentStatusService:
         reactor_number: int,
         commit: bool = True,
         newer_than: datetime | None = _UNSET,
+        reactor_slot: str | None = None,
     ) -> Tuple[int, List[str]]:
         """
-        Ensure only one experiment is ONGOING per reactor at a time.
+        Ensure only one experiment is ONGOING per physical reactor slot at a time.
 
-        When a new experiment is set to ONGOING with a reactor number, this function
-        marks other ONGOING experiments in the same reactor as COMPLETED.
+        Occupancy is keyed on `reactor_slot` (e.g. 'R01', 'CF01'), not on the bare
+        `reactor_number` — R01 and CF01 are different vessels that share the number
+        1, and keying on the integer let a Core Flood auto-complete a running HPHT
+        (issue #97, Defect 1).
 
         If `newer_than` is explicitly passed (even as None), a start-date guard is
         active: an occupant is only demoted if its `date` is strictly older (by
         calendar date) than `newer_than`; occupants with a missing date, or a date
         that is newer-or-equal, are left ONGOING with a warning instead. Omitting
         `newer_than` entirely preserves the original unconditional behavior relied
-        on by `new_experiments.py` and the legacy create path.
+        on by the legacy Streamlit create path.
 
         Args:
             db: Database session
@@ -368,9 +394,17 @@ class ExperimentStatusService:
             reactor_number: The reactor number being assigned
             commit: Whether to commit changes (default True)
             newer_than: Optional start-date guard (see above)
+            reactor_slot: The canonical slot the incoming experiment is claiming.
+                Callers that have just assigned a new reactor_number in-session
+                must pass this, because the derived column is only written at
+                flush time. When omitted it is derived from `new_experiment`'s
+                own conditions — which is what keeps the legacy Streamlit caller
+                correct without changing it.
 
         Returns:
-            Tuple of (marked_completed_count, warnings)
+            Tuple of (marked_completed_count, warnings). Returns (0, []) when the
+            incoming experiment holds no slot at all: a non-occupancy type, a
+            missing reactor_number, or reactor_number <= 0.
         """
         warnings: List[str] = []
         marked_completed = 0
@@ -380,13 +414,25 @@ class ExperimentStatusService:
             if new_experiment.status != ExperimentStatus.ONGOING:
                 return 0, []
 
+            slot = reactor_slot
+            if slot is None:
+                conditions = getattr(new_experiment, "conditions", None)
+                slot = derive_reactor_slot(
+                    reactor_number,
+                    conditions.experiment_type if conditions is not None else None,
+                )
+            if slot is None:
+                # No physical slot to contest — nothing to demote, and nothing
+                # worth warning about.
+                return 0, []
+
             conflicting_experiments = db.query(Experiment).join(
                 ExperimentalConditions,
                 Experiment.id == ExperimentalConditions.experiment_fk
             ).filter(
                 Experiment.id != new_experiment.id,
                 Experiment.status == ExperimentStatus.ONGOING,
-                ExperimentalConditions.reactor_number == reactor_number
+                ExperimentalConditions.reactor_slot == slot
             ).all()
 
             for exp in conflicting_experiments:
@@ -395,14 +441,14 @@ class ExperimentStatusService:
                     incoming_date = newer_than.date() if newer_than else None
                     if incoming_date is None or occ_date is None or occ_date >= incoming_date:
                         warnings.append(
-                            _not_demoted_message(reactor_number, exp.experiment_id, new_experiment.experiment_id)
+                            _not_demoted_message(slot, exp.experiment_id, new_experiment.experiment_id)
                         )
                         continue
 
                 exp.status = ExperimentStatus.COMPLETED
                 marked_completed += 1
                 warnings.append(
-                    _demoted_message(reactor_number, exp.experiment_id, new_experiment.experiment_id)
+                    _demoted_message(slot, exp.experiment_id, new_experiment.experiment_id)
                 )
 
             if commit:
