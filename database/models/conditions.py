@@ -16,6 +16,22 @@ class ExperimentalConditions(Base):
     temperature_c = Column(Float)
     experiment_type = Column(String)
     reactor_number = Column(Integer, nullable=True)
+    # Canonical physical slot label — 'R01'..'R16' (HPHT vessels) or 'CF01'..'CF03'
+    # (Core Flood rigs). NULL whenever the experiment holds no physical slot:
+    # a non-occupancy type (Serum / Autoclave / Other), a missing reactor_number,
+    # or reactor_number <= 0.
+    #
+    # DO NOT SET THIS BY HAND. It is derived from (reactor_number,
+    # experiment_type) by database.reactor_slot.derive_reactor_slot and written
+    # on every ORM write by the before_insert/before_update listener
+    # `set_reactor_slot` in database/event_listeners.py. Assigning it directly
+    # will be silently overwritten on the next flush.
+    #
+    # This is the key for every occupancy comparison (issue #97). Reading
+    # reactor_number alone conflates R01 with CF01 — two different vessels that
+    # share the number 1 — which is how a Core Flood going ONGOING could
+    # auto-complete a running HPHT.
+    reactor_slot = Column(String(8), nullable=True, index=True)
     feedstock = Column(String, nullable=True)
     room_temp_pressure_psi = Column(Float, nullable=True)  # in psi instead of bar
     rxn_temp_pressure_psi = Column(Float, nullable=True)
