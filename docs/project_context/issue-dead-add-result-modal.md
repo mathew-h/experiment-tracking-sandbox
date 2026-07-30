@@ -67,7 +67,7 @@ someone finds the dead invalidation, "fixes" the key, and ships a no-op.
 
 - [x] Both files removed, or a written justification recorded here for keeping them
 - [x] Any behavior unique to the dead modal either ported to `AddResultsModal.tsx` or explicitly declined in the commit body
-- [x] `cd frontend && npm run test` and `npm run lint` pass — **`npm run test` passes; `npm run lint` cannot pass literally.** It runs with
+- [~] `cd frontend && npm run test` and `npm run lint` pass — **`npm run test` passes; `npm run lint` cannot pass literally.** It runs with
       `--max-warnings 0` and already failed on this branch before this change, with exactly
       6 pre-existing errors, none in the deleted files: `CompoundFormModal.tsx:41,57`
       (rule `react-hooks/set-state-in-effect` was not found, ×2); `pages/ExperimentDetail/AddResultsModal.tsx:96`
@@ -89,3 +89,15 @@ authors to mirror `AddResultModal.test.tsx` for its provider wrapper pattern. Th
 now deleted, and the advice was already wrong before deletion — the test used only
 `QueryClientProvider`, never the `ToastProvider` the pointer was about. Left as-is;
 historical plan documents are dated records, not live docs.
+
+**Out of scope, discovered but deliberately not fixed here** (full detail in
+`docs/superpowers/plans/2026-07-30-issue-104-dead-add-result-modal.md`, "Out of scope"
+section):
+1. `AddResultsModal.tsx:96` carries an unused `eslint-disable-next-line
+   react-hooks/exhaustive-deps` — one of the 6 baseline lint errors, and a one-line fix in
+   the sibling live file. Not touched: this branch is a deletion, and editing the live
+   modal would ride a behavior-adjacent change along with a chore.
+2. The other 5 baseline lint errors (`CompoundFormModal.tsx` ×2,
+   `@typescript-eslint/no-explicit-any` ×3).
+3. The live modal cannot create a non-primary result row at all. That is pre-existing
+   product behavior, not a regression introduced here.

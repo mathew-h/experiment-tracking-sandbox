@@ -138,8 +138,13 @@ The live modal is strictly the stronger implementation:
 
 The GitHub issue's acceptance criteria say "Both files removed, **or a written justification
 recorded here**". Both were removed, so record that resolution in the local spec, matching
-how `docs/issues/` files were annotated on issues #97 and #111 (a status blockquote at the
-top, original problem text left intact below it).
+how `docs/issues/` files were annotated on issues #97 and #111 for the status-blockquote
+shape (a status blockquote at the top, original problem text left intact below it) — but not
+for checkbox ticking: `docs/issues/issue-reactor-slot-identity-and-occupancy-uniqueness.md`
+(the #97 doc) has a blockquote and no checkboxes at all. The tick convention for a criterion
+that cannot be met as worded (`[~]` partial, `[ ]` unmeetable-as-worded, both with inline
+explanations) actually comes from `docs/issues/issue-bulk-upload-dry-run.md:255,260`, which
+is the exemplar Task 2's checkbox edits should follow.
 
 **Steps:**
 
@@ -182,7 +187,8 @@ top, original problem text left intact below it).
    `eslint-disable-next-line react-hooks/exhaustive-deps` — one of the 6 baseline lint
    errors, and a one-line fix in the sibling live file. Not touched: this branch is a
    deletion, and editing the live modal would mean a behavior-adjacent change riding along
-   with a chore.
+   with a chore. Tracked in `docs/issues/issue-eslint-baseline.md`.
 2. The other 5 baseline lint errors (`CompoundFormModal.tsx` ×2, `no-explicit-any` ×3).
+   Also tracked in `docs/issues/issue-eslint-baseline.md`.
 3. The live modal cannot create a non-primary result row at all. That is the pre-existing
    product behavior, not a regression introduced here.
