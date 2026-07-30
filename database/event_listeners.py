@@ -689,8 +689,17 @@ def set_reactor_slot(mapper, connection, target):
     Issue #97. A mapper-level listener rather than per-write-site assignment,
     because "every path that writes reactor_number must remember to also update
     the slot" is precisely the failure mode the column exists to eliminate. This
-    covers both bulk-upload parsers, the conditions router, the legacy Streamlit
-    app and the database/data_migrations/ scripts with one hook.
+    covers every path that loads an ExperimentalConditions instance and mutates
+    its attributes: both bulk-upload parsers, the conditions router,
+    experimental_conditions_service.py, and the legacy Streamlit app.
+
+    Exception: a bulk `Query.update()` (Core UPDATE) compiles straight to SQL
+    and does not invoke per-row mapper events, so it does NOT fire this
+    listener. database/data_migrations/swap_reactor_4_7_015.py:96-109 is an
+    existing precedent for that idiom. A future script changing
+    reactor_number or experiment_type this way must either avoid
+    Query.update() for those columns, or recompute reactor_slot explicitly in
+    the same script.
 
     Same pattern as calculate_additive_derived_values above: mutating a column
     attribute in before_insert/before_update is included in the emitted
