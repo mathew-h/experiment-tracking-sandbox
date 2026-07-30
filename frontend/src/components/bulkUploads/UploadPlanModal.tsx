@@ -21,7 +21,12 @@ export interface UploadPlanModalProps {
  *  because the plan changed — requires explicit re-arming), and `done` (committed).
  *
  *  The re-arm checkbox is local state and is reset by the PARENT remounting this
- *  component with `key={result.plan_hash}` on every new response — not by an effect. */
+ *  component on a new `plan_hash` (`key={result.plan_hash}`) — not by an effect, and
+ *  not on every response, only a changed hash. This is safe because a hash-mismatch
+ *  rejection always changes the key (the server returns the fresh file's own hash,
+ *  which differs from the one that was replayed), and a conflict rejection — where
+ *  the hash can stay the same — is disabled by the conflict gate below regardless of
+ *  `reviewed`, so a carried-over checkbox value can never re-arm Commit on its own. */
 export function UploadPlanModal({ open, view, result, committing, onCommit, onClose }: UploadPlanModalProps) {
   const [reviewed, setReviewed] = useState(false)
   const plan = result.plan

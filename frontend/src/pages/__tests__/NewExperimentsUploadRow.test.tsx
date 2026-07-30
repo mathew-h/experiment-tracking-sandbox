@@ -123,6 +123,36 @@ describe('NewExperimentsUploadRow — commit phase', () => {
     expect(screen.getByText('Created: 8')).toBeInTheDocument()
     expect(screen.queryByText(/Nothing was applied/i)).not.toBeInTheDocument()
   })
+
+  it('does not open a stale/done view when commit itself crashed with no plan', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockResolvedValue(
+      res({ errors: ['Missing experiments sheet'], message: 'Upload failed', plan_hash: null }, null),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.queryByText(/Review upload plan/i)).not.toBeInTheDocument())
+    expect(screen.queryByText(/Upload complete/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Nothing was applied/i)).not.toBeInTheDocument()
+  })
+
+  it('toasts and keeps the review modal open when the commit request itself rejects', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    mockUpload().mockRejectedValue(new Error('Network error'))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    await waitFor(() => expect(screen.getByText('Network error')).toBeInTheDocument())
+    // The modal is still showing the original preview — nothing was discarded.
+    expect(screen.getByText(/Review upload plan/i)).toBeInTheDocument()
+  })
 })
 
 describe('NewExperimentsUploadRow — stale plan', () => {
@@ -170,5 +200,31 @@ describe('NewExperimentsUploadRow — stale plan', () => {
 
     await userEvent.click(screen.getByRole('checkbox', { name: /reviewed the updated plan/i }))
     expect(screen.getByRole('button', { name: /Commit 2 changes/ })).toBeEnabled()
+  })
+
+  it('resets the re-arm checkbox across two consecutive stale rounds (new hash remounts)', async () => {
+    mockUpload().mockResolvedValue(res())
+    renderRow()
+    await dropFile()
+    await waitFor(() => screen.getByRole('button', { name: /Commit 2 changes/ }))
+
+    // Round 1: stale on hash-2. Tick the checkbox and re-arm Commit.
+    mockUpload().mockResolvedValue(res({ dry_run: false, plan_hash: 'hash-2', errors: ['Plan changed since preview'] }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+    await waitFor(() => screen.getByText(/Nothing was applied/i))
+    await userEvent.click(screen.getByRole('checkbox', { name: /reviewed the updated plan/i }))
+    expect(screen.getByRole('button', { name: /Commit 2 changes/ })).toBeEnabled()
+
+    // Round 2: commit again (replaying hash-2), server is stale again on a
+    // different hash-3. The modal must remount (new key) and the checkbox must
+    // NOT carry its ticked state over — otherwise a second stale response would
+    // silently arrive pre-confirmed.
+    mockUpload().mockResolvedValue(res({ dry_run: false, plan_hash: 'hash-3', errors: ['Plan changed since preview'] }))
+    await userEvent.click(screen.getByRole('button', { name: /Commit 2 changes/ }))
+    await waitFor(() => expect(mockUpload()).toHaveBeenLastCalledWith(expect.any(File), { planHash: 'hash-2' }))
+
+    await waitFor(() => screen.getByText(/Nothing was applied/i))
+    expect(screen.getByRole('checkbox', { name: /reviewed the updated plan/i })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: /Commit/ })).toBeDisabled()
   })
 })

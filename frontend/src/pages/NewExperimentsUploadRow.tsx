@@ -4,7 +4,7 @@ import { useToast } from '@/components/ui'
 import { UploadRow } from './BulkUploadRow'
 import { UploadPlanModal } from '@/components/bulkUploads/UploadPlanModal'
 import type { PlanModalView } from '@/components/bulkUploads/UploadPlanModal'
-import { bulkUploadsApi } from '@/api/bulkUploads'
+import { bulkUploadsApi, isConflictCheckResult } from '@/api/bulkUploads'
 import type { BulkUploadResult, ConflictCheckResult } from '@/api/bulkUploads'
 
 const HELP_TEXT =
@@ -38,7 +38,7 @@ export function NewExperimentsUploadRow({
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<BulkUploadResult | null>(null)
   const [view, setView] = useState<PlanModalView>('review')
-  const { error: toastError } = useToast()
+  const { success, error: toastError } = useToast()
   const queryClient = useQueryClient()
 
   const close = () => {
@@ -48,15 +48,22 @@ export function NewExperimentsUploadRow({
   }
 
   /** A 200 with errors and no plan is the parser-crash path
-   *  (backend/api/routers/bulk_uploads.py:189) — there is nothing to review. */
+   *  (backend/api/routers/bulk_uploads.py:189) — there is nothing to review.
+   *  `isConflictCheckResult` guards the cast: that shape (Actlabs-only today, no
+   *  `errors` field) can't reach `uploadNewExperiments` in practice, but a blind
+   *  `as BulkUploadResult` would throw on `res.errors[0]` if it ever did. */
   const handlePreview = (data: BulkUploadResult | ConflictCheckResult) => {
-    const res = data as BulkUploadResult
-    if (!res.plan) {
-      toastError('Preview failed', res.errors[0] ?? res.message)
+    if (isConflictCheckResult(data)) {
+      toastError('Preview failed', data.message)
       setFile(null)
       return
     }
-    setResult(res)
+    if (!data.plan) {
+      toastError('Preview failed', data.errors[0] ?? data.message)
+      setFile(null)
+      return
+    }
+    setResult(data)
     setView('review')
   }
 
@@ -81,11 +88,14 @@ export function NewExperimentsUploadRow({
         return
       }
 
-      // The modal itself switches to the 'done' view with the counts — a toast
-      // here would duplicate that message and, since useToast's `success(title)`
-      // renders the title verbatim, it collides on text ("Upload complete …")
-      // with the modal's own "Upload complete" title.
       setView('done')
+      // Because this row supplies `onUploadSuccess`, UploadRow never renders its own
+      // "Uploaded" badge or result panel (BulkUploadRow.tsx onSuccess early-returns) —
+      // so once the researcher closes this modal, this toast is the only thing on the
+      // page confirming the write happened. Wording deliberately avoids "Upload
+      // complete" (the modal's own done-view title) so the two don't collide on the
+      // same text — this exact collision broke this handler once already.
+      success('Experiments created', `${data.created} created, ${data.updated} updated`)
       // Creating experiments moves the next-ID chips (staleTime 60s).
       queryClient.invalidateQueries({ queryKey: ['nextIds'] })
     },
@@ -125,9 +135,16 @@ export function NewExperimentsUploadRow({
           onCommit={() => {
             if (file && result.plan_hash) {
               commitMutation.mutate({ f: file, planHash: result.plan_hash })
+            } else {
+              // Should be unreachable — Commit is only enabled once a preview has
+              // set both `file` and `result.plan_hash`. Surface it rather than let
+              // the click silently do nothing if a malformed response ever gets here.
+              toastError('Cannot commit', 'The previewed file or plan hash is missing — try dropping the file again.')
             }
           }}
-          onClose={close}
+          // Block backdrop-click/Escape dismissal mid-commit — Cancel is already
+          // disabled in the modal's footer for the same reason (no mid-flight exit).
+          onClose={commitMutation.isPending ? () => {} : close}
         />
       )}
     </>
