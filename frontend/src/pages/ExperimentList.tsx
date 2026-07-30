@@ -317,9 +317,11 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['experiments'] }),
     // Without this a 409 from the occupancy check (issue #97) is swallowed: the
     // select snaps back and the user is told nothing. The server's detail
-    // names the occupying experiment and its start date, so show it verbatim.
+    // names the occupying experiment and its start date, so show it verbatim
+    // in the body — matching the title/body convention used elsewhere in this
+    // codebase (e.g. ReactorGrid.tsx's dateMutation/crMutation handlers).
     onError: (err: Error) => {
-      toastError(err.message || 'Could not update status')
+      toastError('Update failed', err.message || 'Could not update status')
     },
   })
 

@@ -70,9 +70,11 @@ function StatusBadge({
     },
     // Without this a 409 from the occupancy check (issue #97) is swallowed: the
     // dropdown snaps back and the user is told nothing. The server's detail
-    // names the occupying experiment and its start date, so show it verbatim.
+    // names the occupying experiment and its start date, so show it verbatim
+    // in the body — matching the title/body convention used by the other
+    // handlers in this file (e.g. ReactorDetailModal's dateMutation/crMutation).
     onError: (err: Error) => {
-      toastError(err.message || 'Could not update status')
+      toastError('Update failed', err.message || 'Could not update status')
     },
   })
 

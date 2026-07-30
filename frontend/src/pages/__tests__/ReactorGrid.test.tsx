@@ -124,10 +124,28 @@ describe('StatusBadge — reactor occupancy 409 (issue #97)', () => {
     )
   })
 
-  it('falls back to a generic message when the error carries no detail', async () => {
-    // No response.data.detail means the interceptor never touches .message, so
-    // an error with an empty message models the case the `|| 'Could not update
-    // status'` fallback exists for.
+  it('shows an intelligible toast for a real network failure (no response)', async () => {
+    // Axios never actually produces an empty .message: a genuine network/timeout
+    // failure carries a non-empty default message (e.g. "Network Error"), which
+    // the interceptor leaves untouched because there is no response.data.detail
+    // to copy. This models that real failure mode, not a synthetic empty string.
+    vi.mocked(experimentsApi.patchStatus).mockRejectedValueOnce(
+      Object.assign(new Error('Network Error'), { response: undefined })
+    )
+
+    renderGrid([makeCard({ status: 'QUEUED' })])
+
+    fireEvent.click(screen.getByTitle('Change status'))
+    fireEvent.click(screen.getByRole('button', { name: 'ONGOING' }))
+
+    await waitFor(() => expect(screen.getByText('Update failed')).toBeInTheDocument())
+    expect(screen.getByText('Network Error')).toBeInTheDocument()
+  })
+
+  it('[defensive] falls back to a generic message if the error ever has no message at all', async () => {
+    // Not a real Axios shape — Axios always sets a non-empty default message.
+    // This only guards the `|| 'Could not update status'` fallback itself, in
+    // case some future rejection path ever supplies a genuinely empty message.
     vi.mocked(experimentsApi.patchStatus).mockRejectedValueOnce(
       Object.assign(new Error(''), { response: undefined })
     )
