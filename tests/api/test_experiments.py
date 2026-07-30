@@ -1689,7 +1689,6 @@ def test_delete_impact_lists_background_dependents(client, db_session):
 
 def _seed_slot_experiment(db, eid, num, status, experiment_type, reactor_number, date=None):
     from database.models.conditions import ExperimentalConditions
-    from database.models.enums import ExperimentStatus as _S
 
     exp = Experiment(
         experiment_id=eid, experiment_number=num, status=status, date=date
@@ -1748,7 +1747,7 @@ def test_patch_status_to_ongoing_on_occupied_slot_returns_409(client, db_session
 
 
 def test_patch_status_to_ongoing_on_empty_slot_returns_200(client, db_session):
-    exp = _seed_slot_experiment(
+    _seed_slot_experiment(
         db_session, "SLOT409_C", 97403, ExperimentStatus.QUEUED, "HPHT", 10,
     )
     resp = client.patch("/api/experiments/SLOT409_C/status", json={"status": "ONGOING"})
@@ -1764,7 +1763,7 @@ def test_patch_status_ignores_occupancy_across_series(client, db_session):
         db_session, "SLOT409_D", 97404, ExperimentStatus.ONGOING, "HPHT", 9,
         date=_dt.datetime(2026, 7, 1),
     )
-    cf = _seed_slot_experiment(
+    _seed_slot_experiment(
         db_session, "SLOT409_E", 97405, ExperimentStatus.QUEUED, "Core Flood", 9,
     )
     resp = client.patch("/api/experiments/SLOT409_E/status", json={"status": "ONGOING"})
@@ -1776,12 +1775,20 @@ def test_patch_status_to_completed_is_never_blocked(client, db_session):
     including on a slot that is currently double-booked."""
     import datetime as _dt
 
-    a = _seed_slot_experiment(
+    _seed_slot_experiment(
         db_session, "SLOT409_F", 97406, ExperimentStatus.ONGOING, "HPHT", 11,
         date=_dt.datetime(2026, 7, 1),
     )
+    other_occupant = _seed_slot_experiment(
+        db_session, "SLOT409_F2", 97410, ExperimentStatus.ONGOING, "HPHT", 11,
+        date=_dt.datetime(2026, 7, 2),
+    )
     resp = client.patch("/api/experiments/SLOT409_F/status", json={"status": "COMPLETED"})
     assert resp.status_code == 200
+    assert resp.json()["status"] == "COMPLETED"
+
+    db_session.refresh(other_occupant)
+    assert other_occupant.status == ExperimentStatus.ONGOING
 
 
 def test_patch_status_to_ongoing_is_allowed_for_a_serum_vial(client, db_session):
@@ -1805,7 +1812,7 @@ def test_patch_status_reongoing_on_own_slot_is_allowed(client, db_session):
     no-op, not a self-collision."""
     import datetime as _dt
 
-    exp = _seed_slot_experiment(
+    _seed_slot_experiment(
         db_session, "SLOT409_I", 97409, ExperimentStatus.ONGOING, "HPHT", 15,
         date=_dt.datetime(2026, 7, 1),
     )
