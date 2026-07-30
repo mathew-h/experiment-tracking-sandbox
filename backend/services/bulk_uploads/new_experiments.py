@@ -19,6 +19,7 @@ from database import (
     AmountUnit,
 )
 from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
+from database.reactor_slot import derive_reactor_slot
 from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryService
 from backend.services.bulk_uploads.experiment_status import ExperimentStatusService
 from backend.services.experiment_validation import parse_experiment_id as parse_exp_id_validation, validate_experiment_id, extract_lineage_info
@@ -827,16 +828,35 @@ class NewExperimentsUploadService:
                             if parsed.experiment_type:
                                 conditions.experiment_type = parsed.experiment_type.value
                         
-                        # Manage reactor occupancy: if experiment is ONGOING and has reactor_number, 
-                        # mark other ONGOING experiments in same reactor as COMPLETED
-                        if conditions.reactor_number and experiment.status == ExperimentStatus.ONGOING:
+                        # Manage reactor occupancy: only one ONGOING experiment per
+                        # physical slot. Keyed on the derived reactor_slot, which is
+                        # None for a non-occupancy type (Serum / Autoclave / Other)
+                        # and for reactor_number <= 0 — so this path can no longer
+                        # complete an HPHT because a Serum row carried a stray
+                        # reactor number, and `is not None` no longer skips rows
+                        # whose reactor number is 0 (issue #97, Defect 3).
+                        #
+                        # `newer_than` is still deliberately NOT passed, so the
+                        # start-date guard stays inactive and demotion here remains
+                        # unconditional. Issue #97 §3 asks for it, but its stated
+                        # rationale is "let the trigger be the backstop" — and the
+                        # one-ONGOING-per-slot trigger is not in this pass. Failing
+                        # open with no backstop would leave real double-bookings in
+                        # the DB behind nothing but a warning. Pass newer_than in the
+                        # same change that adds the trigger, not before. Tracked in
+                        # docs/issues/issue-reactor-occupancy-uniqueness-trigger.md.
+                        incoming_slot = derive_reactor_slot(
+                            conditions.reactor_number, conditions.experiment_type
+                        )
+                        if incoming_slot is not None and experiment.status == ExperimentStatus.ONGOING:
                             marked, reactor_warnings = ExperimentStatusService.manage_reactor_occupancy(
-                                db, experiment, conditions.reactor_number, commit=False
+                                db, experiment, conditions.reactor_number, commit=False,
+                                reactor_slot=incoming_slot,
                             )
                             warnings.extend(reactor_warnings)
                             if marked > 0:
                                 info_messages.append(
-                                    f"Reactor {conditions.reactor_number}: Auto-completed {marked} "
+                                    f"Reactor {incoming_slot}: Auto-completed {marked} "
                                     f"conflicting experiment(s) for '{exp_id}'"
                                 )
                     except Exception as e:
@@ -900,15 +920,22 @@ class NewExperimentsUploadService:
                 
                 info_messages.append(f"Experiment {exp_id}: Copied all conditions from parent {parent.experiment_id} (no conditions sheet row provided)")
 
-                # Manage reactor occupancy for auto-copied conditions
-                if conditions.reactor_number and experiment.status == ExperimentStatus.ONGOING:
+                # Manage reactor occupancy for auto-copied conditions.
+                # Same gates as the conditions-sheet path above (issue #97, Defect 3):
+                # slot-scoped, non-occupancy types excluded, zero excluded. `newer_than`
+                # is omitted here for the same reason — see the comment on that path.
+                incoming_slot = derive_reactor_slot(
+                    conditions.reactor_number, conditions.experiment_type
+                )
+                if incoming_slot is not None and experiment.status == ExperimentStatus.ONGOING:
                     marked, reactor_warnings = ExperimentStatusService.manage_reactor_occupancy(
-                        db, experiment, conditions.reactor_number, commit=False
+                        db, experiment, conditions.reactor_number, commit=False,
+                        reactor_slot=incoming_slot,
                     )
                     warnings.extend(reactor_warnings)
                     if marked > 0:
                         info_messages.append(
-                            f"Reactor {conditions.reactor_number}: Auto-completed {marked} "
+                            f"Reactor {incoming_slot}: Auto-completed {marked} "
                             f"conflicting experiment(s) for '{exp_id}'"
                         )
 
