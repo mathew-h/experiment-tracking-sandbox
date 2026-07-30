@@ -206,3 +206,39 @@ is stated in a comment at the call site and in the module docstring so it is not
 **Guard:** `tests/services/bulk_uploads/test_experiment_deletion_bulk.py::test_delete_isolates_a_failing_row_from_the_rest_of_the_batch`
 patches the inner helper to raise for one specific ID and asserts the remaining rows still deleted.
 That test fails against a `db.rollback()` implementation.
+
+## 2026-07-30 — The lab PC deploy stops the service before pulling, and resets to HEAD (never origin/main)
+
+**Decision:** `update.ps1` stops `ExperimentTracker` before any git operation and starts it
+again on every exit path; it discards a dirty working tree with `git reset --hard HEAD` plus
+`git clean -fd`; and it verifies `HEAD == origin/main` after the pull.
+
+**Why each, and why the obvious alternative is wrong:**
+
+- **Stop before pull.** On Windows a running Python process holding open handles can make a
+  pull apply only partially, leaving files updated but the index unmoved — the state the lab
+  PC was found in. The cost is that a failure now leaves the app OFFLINE rather than stale,
+  so `Abort` itself calls `Start-TrackerService` and a failed start logs `CRITICAL` with the
+  manual recovery command. Do not add an early `exit` that bypasses it.
+- **Reset to `HEAD`, never `origin/main`.** This is the subtle one. `reset --hard origin/main`
+  advances HEAD, so the script's own `git pull` becomes a no-op, `$headBefore -eq $headAfter`,
+  the "no new commits" branch fires, and Step 6 never rebuilds the frontend. The deploy logs
+  SUCCESS while serving a stale `frontend/dist` — which is indistinguishable, from the user's
+  side, from the feature never having been written.
+- **`clean -fd`, never `-fdx`.** `-x` deletes ignored files: `.venv` (holding the very
+  `pip.exe`/`alembic.exe` the script invokes), `.env`, `frontend/.env.local`, `node_modules`,
+  `frontend/dist`. None are in the repo.
+- **Verify HEAD after pulling.** Silent partial success is the failure mode that let ten days
+  of drift go unnoticed.
+
+**Scope:** the lab PC checkout is a deploy target and must never hold local work. Nothing
+should edit tracked files there, and no coding agent should be pointed at it with write
+access. `.claude/settings.local.json` is now gitignored for exactly this reason — while
+tracked it conflicted on pull in both the 2026-07-20 and 2026-07-30 incidents. Project-wide
+Claude settings belong in the tracked `.claude/settings.json`.
+
+**Guard:** `tests/deployment/test_update_script.py` asserts every property above, including
+the two negative ones (`reset --hard origin/` and `clean -*x*` must not appear in executable
+lines). Note these are static assertions plus a PowerShell parse — the script cannot be
+executed under pytest, so **the first run after any change must be attended, on the lab PC**,
+confirming `frontend:yes` in `updates.log` and that the service returns.

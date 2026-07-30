@@ -103,6 +103,64 @@ To check the update log:
 Get-Content "C:\Logs\experiment-tracker\updates.log" -Tail 20
 ```
 
+### The lab PC must never hold local changes
+
+**This checkout is a deploy target, not a workspace.** Do not edit files here, and do not
+run a coding agent against it that can write to tracked files. Any local modification
+blocks `git pull`, and because the nightly job only writes `FAILED` to the log, the machine
+then silently stops updating. On 2026-07-30 it was found 22 commits behind, having failed
+this way for ten days; the same thing had happened on 2026-07-20 and been worked around
+with a `git stash` rather than fixed.
+
+`update.ps1` now defends itself, but prevention is still better than recovery:
+
+| Guard | Why |
+|-------|-----|
+| The service is **stopped before** `git pull` and started after | A running Python process holding open file handles can make a pull apply only *partially*, which is the likeliest origin of the dirty tree. Because a failure would now leave the app offline rather than merely stale, every exit path — including `Abort` — calls `Start-TrackerService`. |
+| A dirty tree is **discarded** before pulling, and each discarded entry is logged | Turns a permanently-stuck deploy into a self-healing one, while leaving evidence in `updates.log` so a recurrence is visible instead of silent. |
+| HEAD is **verified against `origin/main`** after the pull | A partially applied update can no longer report `SUCCESS`. |
+
+Two details in that script are load-bearing and must not be "simplified":
+
+- The reset is `git reset --hard HEAD`, **never** `origin/main`. Resetting to `origin/main`
+  moves HEAD itself, so the script's own `git pull` finds nothing to do, `$headBefore`
+  equals `$headAfter`, the "no new commits" branch fires, and **the frontend is never
+  rebuilt** — a deploy that logs SUCCESS while serving a stale `frontend/dist`.
+- The clean is `git clean -fd`, **never** `-fdx`. `-x` deletes ignored files, which here
+  means `.venv` (containing the `pip.exe` and `alembic.exe` this script runs), `.env`,
+  `frontend/.env.local`, `node_modules` and `frontend/dist`. None are recoverable from the
+  repository.
+
+`tests/deployment/test_update_script.py` asserts all of the above.
+
+### If a deploy fails on `git pull`
+
+The script now recovers on its own, but to do it by hand — from `C:\Apps\experiment-tracking`:
+
+```powershell
+git stash list                 # anything already stashed? archive it before touching anything
+git fetch origin main
+git status --porcelain
+
+# Confirm nothing unique is at risk: every untracked file should be IDENTICAL to upstream.
+git ls-files --others --exclude-standard | ForEach-Object {
+  $local = git hash-object -- $_
+  $main  = git rev-parse "origin/main:$_" 2>$null
+  if ($LASTEXITCODE -ne 0) { "ONLY-LOCAL  $_" }
+  elseif ($local -eq $main) { "IDENTICAL   $_" }
+  else                      { "DIFFERS     $_" }
+}
+```
+
+`ONLY-LOCAL` or `DIFFERS` means real work exists only on this machine — recover it before
+continuing. Otherwise clear the tree (`git reset --hard HEAD`, `git clean -fd`) and re-run
+`update.ps1`. Note that **`git diff origin/main` is not a useful check here**: it compares
+against the index, so on a checkout that is behind it reports every missing commit's
+content as a deletion, which looks alarming and means nothing.
+
+Stashes are not touched by `reset --hard` or `clean -fd`, so old ones accumulate silently —
+`git stash list` is worth checking periodically.
+
 ---
 
 ## Database Backups
