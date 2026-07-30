@@ -106,13 +106,28 @@ measured magnitudes (4235 mL vs. 30 mL) rather than adding new coverage. Do
 not read this as "a test was added" in any summary of this branch; one was
 strengthened.
 
-**Power BI / reporting consumers, take note.** `v_primary_experiment_results`
-exposes `gas_sampling_volume_ml` and `gas_sampling_pressure_MPa` directly as
-columns, so consequence 2 means the ~207 of 499 rows on the current sheet that
-previously carried forwarded geometry will show those cells go from populated
-to `NULL` the next time that sheet is re-uploaded — intended behavior, not a
-data-loss bug, but worth knowing before a dashboard refresh looks like it lost
-data.
+**Power BI / reporting consumers — corrected note.** An earlier draft of this
+paragraph claimed `v_primary_experiment_results` exposes these two columns and
+that a re-upload would blank them for Power BI. Both parts were wrong.
+`v_primary_experiment_results` does not exist in the current schema —
+`database/event_listeners.py:661` unconditionally drops it on every startup
+and it is absent from the view-creation list; this staleness is tracked
+separately in `docs/working/issues/05-models-md-stale-v-primary-experiment-results.md`.
+The two columns are actually exposed by `v_results_h2`
+(`database/event_listeners.py:569-590`) — but that view's own
+`WHERE sr.h2_concentration IS NOT NULL` filter excludes exactly the rows
+consequence 2 affects (no H2 reading in either GC block), so it never
+surfaces a stale-vs-cleared distinction for them either way. And even for a
+report querying `scalar_results` directly, the claim only holds when the
+re-uploaded row has `Overwrite=TRUE`: `backend/services/scalar_results_service.py:120-135`
+nulls unpresent fields only on that path, while an ordinary re-upload
+(`Overwrite` blank, the default) leaves previously-stored stale geometry
+untouched — `master_bulk_upload.py:543` strips the now-`None`
+`gas_sampling_volume_ml`/`gas_sampling_pressure_MPa` keys out of `result_data`
+before the service call, so the non-overwrite path never even sees them to
+clear. Net effect: this fix stops *new* stale geometry from being written; it
+does not retroactively clear geometry already stored, unless that row is
+explicitly re-uploaded with Overwrite checked.
 
 **Test-count reconciliation.** The implementation plan estimated the
 pre-#114 `tests/services/bulk_uploads/` count at 244 passed, expecting

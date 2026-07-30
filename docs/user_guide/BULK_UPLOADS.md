@@ -70,19 +70,18 @@ recovered from the database afterwards.
 `H2 (ppm)` in either block imports no gas volume or pressure either, even when
 those cells are filled in. The GC sheets carry values forward from previous runs,
 so geometry with no concentration beside it is stale rather than measured, and
-nothing is computed from it in any case. If you re-upload a sheet that was
-previously imported with carried-over geometry, expect the gas volume and
-pressure columns for those rows to go blank in Power BI reports too — that is
-this fix taking effect, not lost data.
+nothing is computed from it in any case.
 
 If you rename a Dashboard column, the upload now tells you: any unmatched column
 whose name mentions H2 appears under **Warnings** in the result panel rather
 than being ignored.
 
 **Errors are listed in sheet order.** Row errors appear in the same order as the
-rows in the spreadsheet, so you can work down the list against the file. Problems
-with the file as a whole — a missing required column, or the deprecated wide
-`DI a/b/c H2 (ppm)` columns — come first, since they have no row number.
+rows in the spreadsheet, so you can work down the list against the file. A
+problem with the file as a whole — a missing required column — comes first,
+since it has no row number. (The deprecated wide `DI a/b/c H2 (ppm)` columns
+are reported under **Warnings**, not Errors — the rest of the file still
+uploads.)
 
 ### Expected sheet: `Dashboard`
 
