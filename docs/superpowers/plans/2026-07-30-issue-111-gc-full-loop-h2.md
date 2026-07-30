@@ -576,7 +576,7 @@ def test_no_gc_reading_leaves_h2_unset(db_session: Session):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "PREC or prec" -v
+.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "full_loop_wins or di_used or zero_h2 or no_gc_reading or di_avg_header" -v
 ```
 
 Expected: `test_di_used_when_full_loop_absent` and `test_v2_di_avg_header_maps_onto_di_h2` both FAIL (`h2_concentration is None`) — nothing reads a DI column before `_resolve_h2` exists. `test_full_loop_wins_when_both_present`, `test_zero_h2_is_a_real_measurement` and `test_no_gc_reading_leaves_h2_unset` PASS after Task 1 — they pin behavior that must not regress when the DI branch is added.
@@ -794,7 +794,7 @@ def test_from_bytes_tuple_shape_unchanged(db_session: Session):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "WARN or warn or tuple_shape" -v
+.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "warn or tuple_shape or which_gc_block" -v
 ```
 
 Expected: the four `from_bytes_ex` tests FAIL with `AttributeError: type object 'MasterBulkUploadService' has no attribute 'from_bytes_ex'`. `test_from_bytes_tuple_shape_unchanged` PASSES — it is the regression guard.
@@ -1238,7 +1238,7 @@ def test_duplicate_does_not_block_other_rows(db_session: Session):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "DUP or duplicate or distinct_vials" -v
+.venv/Scripts/python.exe -m pytest tests/services/bulk_uploads/test_master_bulk_upload.py -k "duplicate or distinct_vials or same_vial_different" -v
 ```
 
 Expected: `test_duplicate_vial_and_timepoint_is_an_error`, `test_duplicate_detected_after_timepoint_token_resolution` and `test_duplicate_does_not_block_other_rows` FAIL (the second row currently upserts, so `created` is 1 or 2 and `errors` is empty). `test_same_vial_different_timepoints_is_fine` and `test_replicate_letters_are_distinct_vials` PASS already — they pin behavior the new check must not break.
