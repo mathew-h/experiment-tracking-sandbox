@@ -95,5 +95,11 @@ test-results/
 # Git worktrees
 .worktrees/
 
+# Claude Code machine-local overrides. Never commit this: it accumulates
+# per-machine permission rules with absolute paths, and while it was tracked it
+# conflicted on every `git pull` on the lab PC (2026-07-20 and 2026-07-30),
+# blocking the deploy. Project-wide settings belong in .claude/settings.json.
+.claude/settings.local.json
+
 # User onboarding (contains internal IP addresses)
 docs/user_guide/ONBOARDING.md
