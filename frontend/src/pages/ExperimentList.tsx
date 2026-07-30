@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { experimentsApi, type ExperimentListItem, type ExperimentStatus } from '@/api/experiments'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
-  Button, Input, Select, PageSpinner, StatusBadge,
+  Button, Input, Select, PageSpinner, StatusBadge, useToast,
 } from '@/components/ui'
 
 const STATUS_OPTIONS = [
@@ -291,6 +291,7 @@ export function ExperimentListPage() {
 function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; child?: boolean; groupBadge?: ReactNode }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { error: toastError } = useToast()
 
   // Issue #98: a row that stands for more than one experiment must not offer an
   // inline status edit -- the PATCH would silently hit only the representative
@@ -314,6 +315,14 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
     mutationFn: ({ experimentId, status }: { experimentId: string; status: ExperimentStatus }) =>
       experimentsApi.patchStatus(experimentId, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['experiments'] }),
+    // Without this a 409 from the occupancy check (issue #97) is swallowed: the
+    // select snaps back and the user is told nothing. The server's detail
+    // names the occupying experiment and its start date, so show it verbatim
+    // in the body — matching the title/body convention used elsewhere in this
+    // codebase (e.g. ReactorGrid.tsx's dateMutation/crMutation handlers).
+    onError: (err: Error) => {
+      toastError('Update failed', err.message || 'Could not update status')
+    },
   })
 
   return (

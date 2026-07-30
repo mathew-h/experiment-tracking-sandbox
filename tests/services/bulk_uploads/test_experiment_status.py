@@ -154,7 +154,9 @@ def test_preview_same_reactor_multiple_rows_errors(db_session: Session):
     preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
 
     assert len(preview.errors) == 1
-    assert "Reactor 4" in preview.errors[0]
+    # issue #97: the conflict message now names the canonical slot (R04),
+    # not the bare reactor number, so it distinguishes R04 from CF04.
+    assert "Reactor R04" in preview.errors[0]
     assert "HPHT_ST005" in preview.errors[0]
     assert "HPHT_ST006" in preview.errors[0]
     assert preview.changes == []
@@ -564,3 +566,242 @@ def test_full_round_trip_file_to_db_state(db_session: Session):
     assert new_exp.status == ExperimentStatus.ONGOING
     assert new_exp.date.date().isoformat() == "2026-06-01"
     assert occupant.status == ExperimentStatus.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# Cross-series slot identity (issue #97)
+# ---------------------------------------------------------------------------
+
+def test_core_flood_going_ongoing_does_not_demote_hpht_in_same_number(db_session: Session):
+    """THE headline regression test. R01 and CF01 are different vessels.
+
+    Before #97 the occupant query keyed on the bare integer, so loading Core
+    Flood rig 1 found the HPHT in R01, passed the date guard, and silently set a
+    running experiment to COMPLETED.
+    """
+    from datetime import datetime
+
+    hpht = _seed_experiment(
+        db_session, "HPHT_SLOT_209", 97201, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=1, date=datetime(2026, 5, 1),
+    )
+    cf = _seed_experiment(
+        db_session, "CF_SLOT_301", 97202, ExperimentStatus.COMPLETED, "Core Flood",
+        reactor_number=1,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["CF_SLOT_301", "ONGOING", 1, "2026-07-20"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert preview.demotions == []
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.demotions_applied == 0
+    db_session.refresh(hpht)
+    db_session.refresh(cf)
+    assert hpht.status == ExperimentStatus.ONGOING
+    assert cf.status == ExperimentStatus.ONGOING
+
+
+def test_hpht_going_ongoing_does_not_demote_core_flood_in_same_number(db_session: Session):
+    """The same collision in the other direction."""
+    from datetime import datetime
+
+    cf = _seed_experiment(
+        db_session, "CF_SLOT_302", 97203, ExperimentStatus.ONGOING, "Core Flood",
+        reactor_number=2, date=datetime(2026, 5, 1),
+    )
+    hpht = _seed_experiment(
+        db_session, "HPHT_SLOT_210", 97204, ExperimentStatus.COMPLETED, "HPHT",
+        reactor_number=2,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_SLOT_210", "ONGOING", 2, "2026-07-20"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.demotions_applied == 0
+    db_session.refresh(cf)
+    assert cf.status == ExperimentStatus.ONGOING
+
+
+def test_same_number_different_series_in_one_file_is_not_a_conflict(db_session: Session):
+    """An HPHT into R01 and a Core Flood into CF01 in the same workbook is legal.
+
+    Before #97 `reactor_targets` was keyed on the integer, so this produced a
+    spurious "Reactor 1 is targeted by multiple rows" error — and conflict_errors
+    short-circuits the whole preview, so one false positive blocked the file.
+    """
+    hpht = _seed_experiment(
+        db_session, "HPHT_SLOT_211", 97205, ExperimentStatus.COMPLETED, "HPHT",
+        reactor_number=1,
+    )
+    cf = _seed_experiment(
+        db_session, "CF_SLOT_303", 97206, ExperimentStatus.COMPLETED, "Core Flood",
+        reactor_number=1,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [
+            ["HPHT_SLOT_211", "ONGOING", 1, "2026-07-20"],
+            ["CF_SLOT_303", "ONGOING", 1, "2026-07-20"],
+        ],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert preview.errors == []
+    assert len(preview.changes) == 2
+
+
+def test_same_slot_twice_in_one_file_is_still_a_conflict(db_session: Session):
+    """The real conflict must survive, and the message must name the slot."""
+    _seed_experiment(
+        db_session, "HPHT_SLOT_212", 97207, ExperimentStatus.COMPLETED, "HPHT",
+        reactor_number=7,
+    )
+    _seed_experiment(
+        db_session, "HPHT_SLOT_213", 97208, ExperimentStatus.COMPLETED, "HPHT",
+        reactor_number=7,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [
+            ["HPHT_SLOT_212", "ONGOING", 7, "2026-07-20"],
+            ["HPHT_SLOT_213", "ONGOING", 7, "2026-07-20"],
+        ],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert len(preview.errors) == 1
+    assert "R07" in preview.errors[0]
+    assert "HPHT_SLOT_212" in preview.errors[0]
+    assert "HPHT_SLOT_213" in preview.errors[0]
+
+
+def test_demotion_within_the_same_slot_still_works(db_session: Session):
+    """Guard against over-correcting: two HPHTs in R11 must still demote."""
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_SLOT_214", 97209, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=11, date=datetime(2026, 1, 1),
+    )
+    incoming = _seed_experiment(
+        db_session, "HPHT_SLOT_215", 97210, ExperimentStatus.COMPLETED, "HPHT",
+        reactor_number=11,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_SLOT_215", "ONGOING", 11, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert [d.reactor_slot for d in preview.demotions] == ["R11"]
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.demotions_applied == 1
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.COMPLETED
+    assert any("R11" in w for w in result.warnings)
+
+
+def test_zero_reactor_number_never_demotes_anyone(db_session: Session):
+    """reactor_number = 0 is not a slot. The 8 R00 SERUM_JW vials in the
+    2026-07-28 prod audit exist because zero slipped through."""
+    from datetime import datetime
+
+    occupant = _seed_experiment(
+        db_session, "HPHT_SLOT_216", 97211, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=0, date=datetime(2026, 1, 1),
+    )
+    incoming = _seed_experiment(
+        db_session, "HPHT_SLOT_217", 97212, ExperimentStatus.COMPLETED, "HPHT",
+        reactor_number=0,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_SLOT_217", "ONGOING", 0, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+
+    assert result.demotions_applied == 0
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING
+
+
+def test_manage_reactor_occupancy_derives_slot_when_not_passed(db_session: Session):
+    """The legacy Streamlit caller (legacy/streamlit_frontend/new_experiment.py:398)
+    passes no reactor_slot. It must still be scoped by series.
+
+    Seeds an occupant in BOTH the wrong slot (R05, must survive) and the right
+    slot (CF05, must be demoted), so the test can't pass by accident: marked
+    would also read 0 if slot derivation silently failed and the function's
+    None-slot early return fired instead of scoping correctly.
+    """
+    from datetime import datetime
+
+    hpht = _seed_experiment(
+        db_session, "HPHT_SLOT_218", 97213, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=5, date=datetime(2026, 1, 1),
+    )
+    cf_occupant = _seed_experiment(
+        db_session, "CF_SLOT_305", 97215, ExperimentStatus.ONGOING, "Core Flood",
+        reactor_number=5, date=datetime(2026, 1, 1),
+    )
+    cf = _seed_experiment(
+        db_session, "CF_SLOT_304", 97214, ExperimentStatus.ONGOING, "Core Flood",
+        reactor_number=5,
+    )
+
+    marked, warnings = ExperimentStatusService.manage_reactor_occupancy(
+        db_session, cf, 5, commit=False
+    )
+
+    assert marked == 1
+    db_session.refresh(hpht)
+    assert hpht.status == ExperimentStatus.ONGOING
+    db_session.refresh(cf_occupant)
+    assert cf_occupant.status == ExperimentStatus.COMPLETED
+
+
+def test_cf_spelled_type_is_occupancy_bearing(db_session: Session):
+    """'CF' is a production spelling the deleted local _OCCUPANCY_TYPES set
+    ({'hpht', 'core flood'}) would have missed. database.reactor_slot treats
+    it as occupancy-bearing (issue #97, approved widening) — confirm an
+    ONGOING experiment typed literally 'CF' contends with a 'Core Flood'-typed
+    row targeting the same numbered rig, and derives a CF.. slot."""
+    from datetime import datetime
+
+    cf_spelled = _seed_experiment(
+        db_session, "CF_SLOT_306", 97216, ExperimentStatus.ONGOING, "CF",
+        reactor_number=20, date=datetime(2026, 1, 1),
+    )
+    core_flood = _seed_experiment(
+        db_session, "CF_SLOT_307", 97217, ExperimentStatus.COMPLETED, "Core Flood",
+        reactor_number=20,
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["CF_SLOT_307", "ONGOING", 20, "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+
+    assert len(preview.demotions) == 1
+    demotion = preview.demotions[0]
+    assert demotion.experiment_id == "CF_SLOT_306"
+    assert demotion.reactor_slot == "CF20"
+
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+    assert result.demotions_applied == 1
+    db_session.refresh(cf_spelled)
+    assert cf_spelled.status == ExperimentStatus.COMPLETED

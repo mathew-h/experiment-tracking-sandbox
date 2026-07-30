@@ -1374,3 +1374,107 @@ def test_dashboard_query_count_not_increased(client, db_session):
     # upper bound rather than an exact count, since the change-request query is
     # conditional on there being occupied cards.
     assert len(statements) <= 8, f"Expected at most 8 statements, got {len(statements)}"
+
+
+def test_serum_with_stray_reactor_number_never_reaches_the_grid(client, db_session):
+    """Pins a PRESERVED guarantee, not a new one: a Serum vial was already
+    excluded on develop via the old `experiment_type.in_(["HPHT", "Core
+    Flood"])` filter, and it still is post-#97 because a Serum row derives
+    `reactor_slot = NULL`. This test passes identically on develop and here —
+    it does not by itself prove the slot predicate is doing the excluding.
+    `test_reactor_number_zero_never_reaches_the_grid` below is the
+    discriminating test in this group: it fails on the old filter (which let
+    reactor_number=0 through) and passes only with the reactor_slot guarantee.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="SLOT97_SERUM_001",
+        experiment_number=97501,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="SLOT97_SERUM_001",
+        reactor_number=6,
+        experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    ids = {c["experiment_id"] for c in resp.json()["reactors"]}
+    assert "SLOT97_SERUM_001" not in ids
+
+
+def test_reactor_number_zero_never_reaches_the_grid(client, db_session):
+    """reactor_number = 0 derives to no slot, so no R00 card can render.
+
+    The old filter pair (reactor_number IS NOT NULL + experiment_type IN (...))
+    let an HPHT on 0 through; only #85's label-set filter in _occupancy kept R00
+    out of the KPI counts. Now it never reaches the card list at all.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="SLOT97_ZERO_001",
+        experiment_number=97502,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="SLOT97_ZERO_001",
+        reactor_number=0,
+        experiment_type="HPHT",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    body = resp.json()
+    labels = {c["reactor_label"] for c in body["reactors"]}
+    assert "R00" not in labels
+    ids = {c["experiment_id"] for c in body["reactors"]}
+    assert "SLOT97_ZERO_001" not in ids
+
+
+def test_reactor_status_endpoint_also_excludes_slotless_rows(client, db_session):
+    """The legacy GET /reactor-status moved onto the same predicate.
+
+    Like test_serum_with_stray_reactor_number_never_reaches_the_grid above,
+    this pins a PRESERVED guarantee: the old `experiment_type.in_(...)` filter
+    already excluded this Serum row on develop, and `reactor_slot IS NULL`
+    still excludes it post-#97. `test_reactor_number_zero_never_reaches_the_grid`
+    is the discriminating test in this group.
+    """
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="SLOT97_SERUM_002",
+        experiment_number=97503,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="SLOT97_SERUM_002",
+        reactor_number=7,
+        experiment_type="Serum",
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/reactor-status")
+    assert resp.status_code == 200
+    ids = {r["experiment_id"] for r in resp.json()}
+    assert "SLOT97_SERUM_002" not in ids

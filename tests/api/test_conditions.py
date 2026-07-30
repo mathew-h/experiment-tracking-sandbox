@@ -9,6 +9,25 @@ from database.models.experiments import Experiment
 from database.models.samples import SampleInfo
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_slot_rows(db_session):
+    """The conditions router commits, which consumes the fixture's outer
+    transaction and makes rows land for real in experiments_test. Clean up
+    anything this file's slot tests create so they cannot leak into other files.
+    """
+    yield
+    from database.models.conditions import ExperimentalConditions as _EC
+    from database.models.experiments import Experiment as _E
+
+    db_session.query(_EC).filter(_EC.experiment_id.like("COND_SLOT_%")).delete(
+        synchronize_session=False
+    )
+    db_session.query(_E).filter(_E.experiment_id.like("COND_SLOT_%")).delete(
+        synchronize_session=False
+    )
+    db_session.commit()
+
+
 def _make_experiment(db, eid="COND_EXP_001", num=7001):
     exp = Experiment(experiment_id=eid, experiment_number=num, status=ExperimentStatus.ONGOING)
     db.add(exp)
@@ -213,3 +232,53 @@ def test_patch_conditions_rejects_changing_type_away_from_hpht_with_reactor(clie
     resp = client.patch(f"/api/conditions/{created['id']}", json={"experiment_type": "Serum"})
     assert resp.status_code == 422
     assert "reactor_number" in resp.json()["detail"].lower()
+
+
+def test_conditions_response_exposes_reactor_slot(client, db_session):
+    """The API surfaces the derived slot so the frontend never re-derives the label."""
+    exp = _make_experiment(db_session, "COND_SLOT_001", 97101)
+    payload = {
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Core Flood",
+        "reactor_number": 2,
+    }
+    resp = client.post("/api/conditions", json=payload)
+    assert resp.status_code == 201
+    assert resp.json()["reactor_slot"] == "CF02"
+
+
+def test_conditions_patch_recomputes_reactor_slot(client, db_session):
+    exp = _make_experiment(db_session, "COND_SLOT_002", 97102)
+    created = client.post(
+        "/api/conditions",
+        json={
+            "experiment_fk": exp.id,
+            "experiment_id": exp.experiment_id,
+            "experiment_type": "HPHT",
+            "reactor_number": 1,
+        },
+    ).json()
+    assert created["reactor_slot"] == "R01"
+
+    resp = client.patch(f"/api/conditions/{created['id']}", json={"reactor_number": 12})
+    assert resp.status_code == 200
+    assert resp.json()["reactor_slot"] == "R12"
+
+
+def test_conditions_create_ignores_a_client_supplied_reactor_slot(client, db_session):
+    """reactor_slot is not on ConditionsCreate, so an extra key is dropped by
+    Pydantic and the derived value wins."""
+    exp = _make_experiment(db_session, "COND_SLOT_003", 97103)
+    resp = client.post(
+        "/api/conditions",
+        json={
+            "experiment_fk": exp.id,
+            "experiment_id": exp.experiment_id,
+            "experiment_type": "HPHT",
+            "reactor_number": 3,
+            "reactor_slot": "CF01",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["reactor_slot"] == "R03"

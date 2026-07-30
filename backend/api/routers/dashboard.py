@@ -94,6 +94,7 @@ def get_dashboard(
     reactor_rows = db.execute(
         select(
             ExperimentalConditions.reactor_number,
+            ExperimentalConditions.reactor_slot,
             Experiment.id,
             Experiment.experiment_id,
             Experiment.status,
@@ -110,8 +111,12 @@ def get_dashboard(
         .where(
             Experiment.status.in_([ExperimentStatus.ONGOING, ExperimentStatus.QUEUED])
         )
-        .where(ExperimentalConditions.reactor_number.isnot(None))
-        .where(ExperimentalConditions.experiment_type.in_(["HPHT", "Core Flood"]))
+        # reactor_slot is NULL for anything that holds no physical vessel — a
+        # non-occupancy type, a missing reactor_number, or reactor_number <= 0.
+        # One predicate replaces the number-not-null + type-in pair, and it also
+        # excludes the reactor_number = 0 rows the old pair let through
+        # (issue #97).
+        .where(ExperimentalConditions.reactor_slot.isnot(None))
         .order_by(
             ExperimentalConditions.reactor_number,
             case(
@@ -133,8 +138,10 @@ def get_dashboard(
             else str(row.experiment_type)
             if row.experiment_type else None
         )
-        is_cf = exp_type == "Core Flood" if exp_type else False
-        label = f"CF{rn:02d}" if is_cf else f"R{rn:02d}"
+        # Stored, not re-derived (issue #97). is_cf is still needed below to keep
+        # REACTOR_SPECS off the Core Flood cards.
+        label = row.reactor_slot
+        is_cf = label.startswith("CF")
         if label in seen_labels:
             continue
         seen_labels.add(label)
@@ -142,8 +149,8 @@ def get_dashboard(
         status_val = row.status.value if hasattr(row.status, "value") else str(row.status)
         days = (now - start).days if (start and status_val == "ONGOING") else None
         # REACTOR_SPECS is keyed by bare reactor_number and only covers the R01-R16
-        # HPHT vessels. Core Flood reactors reuse the same 1/2 numbering (CF01/CF02),
-        # so this must be skipped for CF or it silently inherits R01/R02's HPHT spec.
+        # HPHT vessels. Core Flood rigs reuse the same numbering (CF01-CF03), so
+        # this must be skipped for CF or it silently inherits R01-R03's HPHT spec.
         specs = REACTOR_SPECS.get(rn, {}) if not is_cf else {}
         reactor_cards.append(ReactorCardData(
             reactor_number=rn,
@@ -313,6 +320,7 @@ def get_reactor_status(
     rows = db.execute(
         select(
             ExperimentalConditions.reactor_number,
+            ExperimentalConditions.reactor_slot,
             Experiment.id,
             Experiment.experiment_id,
             Experiment.status,
@@ -326,8 +334,10 @@ def get_reactor_status(
         # The reactor cards query (/api/dashboard/reactor-cards) includes QUEUED.
         # Do not change this filter without verifying no downstream callers depend on ONGOING-only behavior.
         .where(Experiment.status == ExperimentStatus.ONGOING)
-        .where(ExperimentalConditions.reactor_number.isnot(None))
-        .where(ExperimentalConditions.experiment_type.in_(["HPHT", "Core Flood"]))
+        # reactor_slot is NULL for anything that holds no physical vessel — a
+        # non-occupancy type, a missing reactor_number, or reactor_number <= 0
+        # (issue #97).
+        .where(ExperimentalConditions.reactor_slot.isnot(None))
         .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
     ).all()
 
@@ -336,14 +346,10 @@ def get_reactor_status(
     result: list[ReactorStatusResponse] = []
     for row in rows:
         rn = row.reactor_number
-        exp_type = (
-            row.experiment_type.value
-            if hasattr(row.experiment_type, "value")
-            else str(row.experiment_type)
-            if row.experiment_type else None
-        )
-        is_cf = exp_type == "Core Flood" if exp_type else False
-        label = f"CF{rn:02d}" if is_cf else f"R{rn:02d}"
+        # No exp_type/is_cf derivation needed here (issue #97): label is read
+        # straight from the stored slot, and ReactorStatusResponse.experiment_type
+        # is populated from row.experiment_type directly, below.
+        label = row.reactor_slot
         if label in seen:
             continue
         seen.add(label)

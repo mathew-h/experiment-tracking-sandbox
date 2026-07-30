@@ -53,8 +53,13 @@ def test_full_sync_cycle(db_session: Session) -> None:
         _notion_page("page-r03-0000-0000-0000-000000000000", "R03", "", "No Change"),
     ]
 
-    _seed(db_session, "SERUM_A", 2001, reactor=1)
-    _seed(db_session, "SERUM_B", 2002, reactor=3)
+    # experiment_type="HPHT" (issue #97): this test exercises the full
+    # import->export sync cycle, and the Serum type was incidental to that.
+    # Once export moved onto the stored reactor_slot column, a Serum vial
+    # legitimately holds no vessel to export, so it must not be the default
+    # type here or both rows silently drop out of result.exported.
+    _seed(db_session, "SERUM_A", 2001, reactor=1, etype="HPHT")
+    _seed(db_session, "SERUM_B", 2002, reactor=3, etype="HPHT")
 
     result = run_sync(client, db_session)
 

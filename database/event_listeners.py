@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session, attributes
-from .models import ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment
+from .models import ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment, ExperimentalConditions
 from .database import engine
 from .lineage_utils import update_experiment_lineage, update_orphaned_derivations
 
@@ -680,6 +680,46 @@ def calculate_additive_derived_values(mapper, connection, target):
     """
     from backend.services.calculations.registry import recalculate
     recalculate(target, None)
+
+@event.listens_for(ExperimentalConditions, 'before_insert')
+@event.listens_for(ExperimentalConditions, 'before_update')
+def set_reactor_slot(mapper, connection, target):
+    """Keep experimental_conditions.reactor_slot derived from (reactor_number, experiment_type).
+
+    Issue #97. A mapper-level listener rather than per-write-site assignment,
+    because "every path that writes reactor_number must remember to also update
+    the slot" is precisely the failure mode the column exists to eliminate. This
+    covers every path that loads an ExperimentalConditions instance and mutates
+    its attributes: both bulk-upload parsers, the conditions router,
+    experimental_conditions_service.py, and the legacy Streamlit app.
+
+    Exception: a bulk `Query.update()` (Core UPDATE) compiles straight to SQL
+    and does not invoke per-row mapper events, so it does NOT fire this
+    listener. database/data_migrations/swap_reactor_4_7_015.py:96-109 is an
+    existing precedent for that idiom. A future script changing
+    reactor_number or experiment_type this way must either avoid
+    Query.update() for those columns, or recompute reactor_slot explicitly in
+    the same script.
+
+    Same exception applies to a raw Core INSERT built from hand-assembled SQL
+    text, e.g. scripts/migrate-sqlite-to-postgres.py:152-153, which runs
+    `conn.execute(text(sql), values)` directly against the connection. That
+    also compiles straight to SQL with no ORM instance involved, so this
+    listener never fires and every row it inserts lands with reactor_slot
+    NULL. `alembic upgrade head` will not repair this afterward if the DB is
+    already stamped past the migration that backfills the column — see the
+    warning in database/CLAUDE.md. General rule: **any** write that does not
+    go through an ORM instance (bulk Query.update(), raw Core INSERT/UPDATE,
+    direct SQL) leaves reactor_slot stale and must recompute it explicitly.
+
+    Same pattern as calculate_additive_derived_values above: mutating a column
+    attribute in before_insert/before_update is included in the emitted
+    INSERT/UPDATE. Note the corollary — the value is only correct *after* a
+    flush. Code needing the slot for values it has just assigned, before
+    flushing, must call derive_reactor_slot directly.
+    """
+    from .reactor_slot import derive_reactor_slot
+    target.reactor_slot = derive_reactor_slot(target.reactor_number, target.experiment_type)
 
 @event.listens_for(Session, 'before_flush')
 def update_experiment_lineage_on_flush(session, flush_context, instances):

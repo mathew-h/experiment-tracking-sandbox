@@ -228,3 +228,249 @@ def test_creating_three_replicates_via_bulk_upload(db_session: Session):
     assert rep_b.base_experiment_id == "HPHT_I69_010"
     assert rep_c.base_experiment_id == "HPHT_I69_010"
     assert {rep_a.replicate_label, rep_b.replicate_label, rep_c.replicate_label} == {"a", "b", "c"}
+
+
+# ---------------------------------------------------------------------------
+# Reactor occupancy gates on the new-experiments path (issue #97, Defect 3)
+# ---------------------------------------------------------------------------
+
+def test_serum_row_with_reactor_number_does_not_demote_hpht_occupant(db_session: Session):
+    """Mirror of test_apply_no_demotion_for_serum_type_even_with_reactor_number
+    (test_experiment_status.py:506) on the other write path, which had no
+    equivalent. A Serum vial holds no vessel, so it cannot evict one.
+
+    This is NOT a live bug reproduction: Task 4's derive-fallback inside
+    `manage_reactor_occupancy` (experiment_status.py:401-410) already resolves
+    the slot from `new_experiment.conditions.experiment_type` whenever the
+    call site omits `reactor_slot`, and both call sites in new_experiments.py
+    did that before this task. So a Serum row already derived `None` and
+    returned `(0, [])` even under the old, un-gated call. This test now pins
+    that behaviour against regression now that the call site passes
+    `reactor_slot` explicitly (removing the dependency on the lazy
+    `.conditions` load happening at just the right moment).
+    """
+    occupant = _seed_experiment(db_session, "HPHT_9731", 97301, status=ExperimentStatus.ONGOING)
+    db_session.add(ExperimentalConditions(
+        experiment_id=occupant.experiment_id,
+        experiment_fk=occupant.id,
+        reactor_number=3,
+        experiment_type="HPHT",
+    ))
+    _seed_experiment(db_session, "SERUM_9741", 97302, status=ExperimentStatus.COMPLETED)
+    db_session.flush()
+    assert occupant.conditions.reactor_slot == "R03"
+
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [["SERUM_9741", None, None, None, None, "ONGOING", None, True]],
+        ),
+        "conditions": (
+            ["experiment_id", "reactor_number", "experiment_type"],
+            [["SERUM_9741", 3, "Serum"]],
+        ),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING, (
+        "a Serum row with a stray reactor_number completed the HPHT in R03"
+    )
+    assert not any("Auto-completed" in m for m in info), (
+        f"no auto-completion should be reported, got: {info}"
+    )
+
+
+def test_core_flood_row_does_not_demote_hpht_in_same_number(db_session: Session):
+    """The cross-series collision on the new-experiments path. R01 and CF01 are
+    different vessels.
+
+    This is NOT a live bug reproduction either: Task 4's derive-fallback
+    inside `manage_reactor_occupancy` already scopes occupancy to the
+    canonical slot (`derive_reactor_slot(1, "Core Flood") == "CF01"`, not the
+    bare integer 1), so a Core Flood row already missed the HPHT sitting in
+    R01 before this task's edits. This test pins that behaviour against
+    regression now that the call site passes `reactor_slot` explicitly rather
+    than relying on the fallback deriving it from a possibly-unflushed
+    `.conditions` relationship.
+    """
+    occupant = _seed_experiment(db_session, "HPHT_9732", 97303, status=ExperimentStatus.ONGOING)
+    db_session.add(ExperimentalConditions(
+        experiment_id=occupant.experiment_id,
+        experiment_fk=occupant.id,
+        reactor_number=1,
+        experiment_type="HPHT",
+    ))
+    _seed_experiment(db_session, "CF_9742", 97304, status=ExperimentStatus.COMPLETED)
+    db_session.flush()
+
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [["CF_9742", None, None, None, None, "ONGOING", None, True]],
+        ),
+        "conditions": (
+            ["experiment_id", "reactor_number", "experiment_type"],
+            [["CF_9742", 1, "Core Flood"]],
+        ),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING, (
+        "loading Core Flood rig 1 completed the HPHT in R01"
+    )
+
+
+def test_hpht_row_still_demotes_the_occupant_of_the_same_slot(db_session: Session):
+    """Guard against over-correcting. Two HPHTs in R14 is a real collision and the
+    demotion must survive — this is the behaviour test_reactivation_via_overwrite_
+    demotes_prior_reactor_occupant (line 79) covers via the same path.
+    """
+    occupant = _seed_experiment(db_session, "HPHT_9733", 97305, status=ExperimentStatus.ONGOING)
+    db_session.add(ExperimentalConditions(
+        experiment_id=occupant.experiment_id,
+        experiment_fk=occupant.id,
+        reactor_number=14,
+        experiment_type="HPHT",
+    ))
+    _seed_experiment(db_session, "HPHT_9743", 97306, status=ExperimentStatus.COMPLETED)
+    db_session.flush()
+
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [["HPHT_9743", None, None, None, None, "ONGOING", None, True]],
+        ),
+        "conditions": (
+            ["experiment_id", "reactor_number", "experiment_type"],
+            [["HPHT_9743", 14, "HPHT"]],
+        ),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    # A fresh query, not db_session.refresh(occupant): manage_reactor_occupancy is
+    # called with commit=False, so the demotion is an unflushed pending change.
+    # Session.refresh() expires the instance's attributes BEFORE autoflushing,
+    # discarding that pending write and reloading the stale (pre-demotion) row;
+    # a fresh query autoflushes first, so it observes the demotion. Same reason
+    # test_reactivation_via_overwrite_demotes_prior_reactor_occupant (line 79)
+    # re-queries rather than calling refresh().
+    occupant_after = db_session.query(Experiment).filter_by(experiment_id="HPHT_9733").first()
+    assert occupant_after.status == ExperimentStatus.COMPLETED
+    assert any("R14" in m for m in info), (
+        f"the auto-completion message should name the slot, got: {info}"
+    )
+
+
+def test_zero_reactor_number_does_not_demote_anyone(db_session: Session):
+    """reactor_number = 0 is not a slot, so it evicts nobody.
+
+    NOTE: this passes both before and after the change — before, because `if
+    conditions.reactor_number` is falsy for 0; after, because derive_reactor_slot
+    returns None for 0. It is here because the fix replaces the falsy check with
+    `is not None`, and without this guard that swap would silently start treating
+    R00 as a real slot. The eight R00 rows in the 2026-07-28 prod audit are this case.
+    """
+    occupant = _seed_experiment(db_session, "HPHT_9734", 97307, status=ExperimentStatus.ONGOING)
+    db_session.add(ExperimentalConditions(
+        experiment_id=occupant.experiment_id,
+        experiment_fk=occupant.id,
+        reactor_number=0,
+        experiment_type="HPHT",
+    ))
+    _seed_experiment(db_session, "HPHT_9744", 97308, status=ExperimentStatus.COMPLETED)
+    db_session.flush()
+    assert occupant.conditions.reactor_slot is None
+
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [["HPHT_9744", None, None, None, None, "ONGOING", None, True]],
+        ),
+        "conditions": (
+            ["experiment_id", "reactor_number", "experiment_type"],
+            [["HPHT_9744", 0, "HPHT"]],
+        ),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    db_session.refresh(occupant)
+    assert occupant.status == ExperimentStatus.ONGOING
+
+
+def test_auto_copied_conditions_from_parent_demotes_hpht_occupant(db_session: Session):
+    """Task 4's review left an open concern: the auto-copy call site
+    (new_experiments.py:905, "Auto-copy conditions for experiments with parents
+    but no conditions sheet entry") routes through the same derive-fallback as
+    the conditions-sheet path, but nothing asserted a demotion actually fires
+    there. This closes that gap.
+
+    HPHT_9735-2 is a sequential re-run of HPHT_9735 with NO row on the
+    conditions sheet -- in fact no conditions sheet at all in this workbook, so
+    the conditions-sheet block (new_experiments.py:780-841, gated on
+    `if 'conditions' in normalized`) never runs. The only way HPHT_9735-2 gets
+    a reactor_number/experiment_type is via find_parent_for_copy() resolving
+    HPHT_9735 as its parent and the "Auto-copy conditions" loop
+    (new_experiments.py:845-913) copying the parent's ExperimentalConditions
+    fields onto a freshly created ExperimentalConditions row -- which is
+    exactly the :903-913 branch under test. This IS the evidence it takes the
+    inherited-conditions branch and not the conditions-sheet branch: there is
+    no 'conditions' sheet in the xlsx at all, so the conditions-sheet branch
+    has nothing to iterate and cannot be what sets reactor_number/type here.
+    """
+    parent = _seed_experiment(db_session, "HPHT_9735", 97309, status=ExperimentStatus.COMPLETED)
+    db_session.add(ExperimentalConditions(
+        experiment_id=parent.experiment_id,
+        experiment_fk=parent.id,
+        reactor_number=5,
+        experiment_type="HPHT",
+    ))
+    occupant = _seed_experiment(db_session, "HPHT_9745", 97310, status=ExperimentStatus.ONGOING)
+    db_session.add(ExperimentalConditions(
+        experiment_id=occupant.experiment_id,
+        experiment_fk=occupant.id,
+        reactor_number=5,
+        experiment_type="HPHT",
+    ))
+    db_session.flush()
+    assert occupant.conditions.reactor_slot == "R05"
+
+    # Single-sheet workbook: experiments only. No 'conditions' sheet at all, so
+    # HPHT_9735-2 can only acquire a reactor_number/experiment_type via the
+    # auto-copy-from-parent branch, never via the conditions-sheet branch.
+    xlsx = _experiments_excel([
+        ["HPHT_9735-2", None, None, None, None, "ONGOING", None, False],
+    ])
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+
+    child = db_session.query(Experiment).filter_by(experiment_id="HPHT_9735-2").first()
+    assert child is not None, "sequential re-run was not created"
+    assert child.conditions is not None, "auto-copy branch did not create a conditions row"
+    assert child.conditions.reactor_number == 5, "conditions were not copied from parent"
+    assert child.conditions.experiment_type == "HPHT"
+
+    occupant_after = db_session.query(Experiment).filter_by(experiment_id="HPHT_9745").first()
+    assert occupant_after.status == ExperimentStatus.COMPLETED, (
+        "auto-copied conditions did not trigger reactor occupancy demotion"
+    )
+    assert any("R05" in m for m in info), (
+        f"the auto-completion message should name the slot, got: {info}"
+    )
