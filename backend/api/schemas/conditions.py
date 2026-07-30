@@ -71,6 +71,7 @@ class ConditionsResponse(BaseModel):
     total_ferrous_iron_g: Optional[float] = None
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
+    reactor_slot: Optional[str] = None
     feedstock: Optional[str] = None
     particle_size: Optional[str] = None
     stir_speed_rpm: Optional[float] = None

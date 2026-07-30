@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session, attributes
-from .models import ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment
+from .models import ExternalAnalysis, SampleInfo, ChemicalAdditive, ElementalAnalysis, Experiment, ExperimentalConditions
 from .database import engine
 from .lineage_utils import update_experiment_lineage, update_orphaned_derivations
 
@@ -680,6 +680,26 @@ def calculate_additive_derived_values(mapper, connection, target):
     """
     from backend.services.calculations.registry import recalculate
     recalculate(target, None)
+
+@event.listens_for(ExperimentalConditions, 'before_insert')
+@event.listens_for(ExperimentalConditions, 'before_update')
+def set_reactor_slot(mapper, connection, target):
+    """Keep experimental_conditions.reactor_slot derived from (reactor_number, experiment_type).
+
+    Issue #97. A mapper-level listener rather than per-write-site assignment,
+    because "every path that writes reactor_number must remember to also update
+    the slot" is precisely the failure mode the column exists to eliminate. This
+    covers both bulk-upload parsers, the conditions router, the legacy Streamlit
+    app and the database/data_migrations/ scripts with one hook.
+
+    Same pattern as calculate_additive_derived_values above: mutating a column
+    attribute in before_insert/before_update is included in the emitted
+    INSERT/UPDATE. Note the corollary — the value is only correct *after* a
+    flush. Code needing the slot for values it has just assigned, before
+    flushing, must call derive_reactor_slot directly.
+    """
+    from .reactor_slot import derive_reactor_slot
+    target.reactor_slot = derive_reactor_slot(target.reactor_number, target.experiment_type)
 
 @event.listens_for(Session, 'before_flush')
 def update_experiment_lineage_on_flush(session, flush_context, instances):

@@ -109,3 +109,98 @@ def test_column_accepts_and_returns_a_slot_value(db_session: Session):
     db_session.flush()
     db_session.expire(cond)
     assert cond.reactor_slot == "R04"
+
+
+def test_listener_recomputes_slot_when_reactor_number_changes(db_session: Session):
+    exp = Experiment(
+        experiment_id="HPHT_SLOT_002",
+        experiment_number=97002,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+        experiment_type="HPHT",
+        reactor_number=4,
+    )
+    db_session.add(cond)
+    db_session.flush()
+    assert cond.reactor_slot == "R04"
+
+    cond.reactor_number = 9
+    db_session.flush()
+    db_session.refresh(cond)
+    assert cond.reactor_slot == "R09"
+
+
+def test_listener_recomputes_slot_when_experiment_type_changes(db_session: Session):
+    """Changing HPHT -> Core Flood moves the row from R02 to CF02 — a different vessel."""
+    exp = Experiment(
+        experiment_id="HPHT_SLOT_003",
+        experiment_number=97003,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+        experiment_type="HPHT",
+        reactor_number=2,
+    )
+    db_session.add(cond)
+    db_session.flush()
+    assert cond.reactor_slot == "R02"
+
+    cond.experiment_type = "Core Flood"
+    db_session.flush()
+    db_session.refresh(cond)
+    assert cond.reactor_slot == "CF02"
+
+
+def test_listener_nulls_slot_for_non_occupancy_type(db_session: Session):
+    """A Serum vial carrying a stray reactor_number holds no slot. This is the
+    structural half of the eligibility gate — the eight R00 SERUM_JW vials in the
+    2026-07-28 prod audit become invisible to every occupancy query."""
+    exp = Experiment(
+        experiment_id="SERUM_SLOT_004",
+        experiment_number=97004,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+        experiment_type="Serum",
+        reactor_number=3,
+    )
+    db_session.add(cond)
+    db_session.flush()
+    db_session.refresh(cond)
+    assert cond.reactor_slot is None
+
+
+def test_listener_overwrites_a_hand_assigned_slot(db_session: Session):
+    """The column is derived. Assigning it directly must not stick — the model
+    comment says so and this is what enforces it."""
+    exp = Experiment(
+        experiment_id="HPHT_SLOT_005",
+        experiment_number=97005,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+        experiment_type="HPHT",
+        reactor_number=6,
+        reactor_slot="CF99",
+    )
+    db_session.add(cond)
+    db_session.flush()
+    db_session.refresh(cond)
+    assert cond.reactor_slot == "R06"
