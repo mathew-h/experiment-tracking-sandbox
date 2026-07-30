@@ -350,3 +350,78 @@ class TestRollupTimepointVials:
         )).fetchone()
         assert row[0] == 1
         assert row[1] is None
+
+
+class TestRollupVialLevelIds:
+    """Issue #111: the Dashboard moved to one row per unique experiment ID, so
+    replicate spread must come from the rollup rather than from avg/SD columns
+    on the sheet.
+
+    ID form matters here. A replicate letter only binds to a NUMERIC index —
+    `_REPLICATE_LETTER_RE = r'^(\\d+)([a-z])$'` in
+    database/experiment_id_parser.py matches the final underscore-separated
+    segment. 'ROLL_910a' parses to base 'ROLL_910' + label 'a', but an
+    alphanumeric index like 'ROLL_R10a' does not parse as a replicate at all
+    and each vial would become its own base — silently producing n=1 groups and
+    a vacuous test.
+    """
+
+    def test_three_vials_at_one_timepoint_give_mean_and_sd(self, view_db):
+        """ROLL_910a/b/c-t1 aggregate to n=3 with an n-1 SD.
+
+        The -t token is stripped before lineage grouping, so all three land on
+        base 'ROLL_910' at bucket 1.0.
+        """
+        exp_a = _make_experiment(view_db, "ROLL_910a-t1", 9101)
+        exp_b = _make_experiment(view_db, "ROLL_910b-t1", 9102)
+        exp_c = _make_experiment(view_db, "ROLL_910c-t1", 9103)
+
+        for exp, h2 in ((exp_a, 10.0), (exp_b, 20.0), (exp_c, 30.0)):
+            er = _make_result(view_db, exp, bucket_days=1.0)
+            _make_scalar(view_db, er, gross_nh4=1.0, h2_ppm=h2)
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_910'
+                  AND time_post_reaction_bucket_days = 1.0
+            """)
+        ).fetchone()
+
+        assert row is not None, "vial-level IDs must group under their base"
+        mapping = row._mapping
+        assert mapping["n_replicates"] == 3
+        assert mapping["mean_h2_ppm"] == pytest.approx(20.0)
+        assert mapping["sd_h2_ppm"] == pytest.approx(10.0)
+
+    def test_timepoints_stay_in_separate_buckets(self, view_db):
+        """3 letters x 2 timepoints is 6 vials but two independent buckets."""
+        for letter, num, h2_t1, h2_t3 in (
+            ("a", 9111, 10.0, 100.0),
+            ("b", 9112, 20.0, 200.0),
+            ("c", 9113, 30.0, 300.0),
+        ):
+            exp_t1 = _make_experiment(view_db, f"ROLL_920{letter}-t1", num)
+            _make_scalar(view_db, _make_result(view_db, exp_t1, bucket_days=1.0),
+                         gross_nh4=1.0, h2_ppm=h2_t1)
+            exp_t3 = _make_experiment(view_db, f"ROLL_920{letter}-t3", num + 100)
+            _make_scalar(view_db, _make_result(view_db, exp_t3, bucket_days=3.0),
+                         gross_nh4=1.0, h2_ppm=h2_t3)
+        view_db.commit()
+
+        rows = view_db.execute(
+            text("""
+                SELECT time_post_reaction_bucket_days, n_replicates, mean_h2_ppm
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_920'
+                ORDER BY time_post_reaction_bucket_days
+            """)
+        ).fetchall()
+
+        assert len(rows) == 2, "each timepoint is its own bucket"
+        assert rows[0]._mapping["n_replicates"] == 3
+        assert rows[0]._mapping["mean_h2_ppm"] == pytest.approx(20.0)
+        assert rows[1]._mapping["n_replicates"] == 3
+        assert rows[1]._mapping["mean_h2_ppm"] == pytest.approx(200.0)

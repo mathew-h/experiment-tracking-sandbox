@@ -35,6 +35,27 @@ the upload zone. The former "Sync from SharePoint" button was removed (issue #74
 — the file is now always uploaded manually, and the `file` field is required on
 the endpoint.
 
+**One row per vial.** Each unique experiment ID gets its own row. Replicates are
+separate vials, so `SERUM_001` with replicates a, b, c sampled at days 1 and 3
+is six rows — `SERUM_001a-t1`, `SERUM_001b-t1`, `SERUM_001c-t1`, `SERUM_001a-t3`,
+`SERUM_001b-t3`, `SERUM_001c-t3` — not two rows with an a/b/c column each. If two
+rows share an experiment ID and Duration, **both are rejected** and listed under
+Errors, because there is no safe way to tell which reading you meant to keep.
+
+You no longer put averages or standard deviations on the sheet. Enter each
+vial's own reading; the app computes the replicate mean and SD and shows them on
+the experiment group page.
+
+**Hydrogen columns.** `FL H2 (ppm)` (Full Loop) is used whenever it has a value;
+`DI H2 (ppm)` is used only when the Full Loop cell is blank. Gas volume and
+pressure are taken from whichever block supplied the concentration, so do not
+mix them by hand. A `0` is treated as a real reading of zero — leave the cell
+**empty** if there was no measurement.
+
+If you rename a Dashboard column, the upload now tells you: any unmatched column
+whose name mentions H2 appears under **Warnings** in the result panel rather
+than being ignored.
+
 ### Expected sheet: `Dashboard`
 
 | Column | Required | Notes |
@@ -47,14 +68,17 @@ the endpoint.
 | ICP Run Date | | Date |
 | GC Run Date | | Date |
 | NH4 (mM) | | Ammonium concentration |
-| H2 (ppm) | | H₂ concentration in ppm vol/vol |
-| Gas Volume (mL) | | |
-| Gas Pressure (psi) | | Converted to MPa automatically |
+| FL H2 (ppm) | | Full Loop H₂ in ppm vol/vol. Takes precedence over `DI H2 (ppm)`. Also accepted: `H2 (ppm)` |
+| FL Gas Volume (mL) | | Also accepted: `Gas Volume (mL)` |
+| FL Gas Pressure (psi) | | Converted to MPa automatically. Also accepted: `Gas Pressure (psi)` |
+| DI H2 (ppm) | | Direct-injection H₂, used only when `FL H2 (ppm)` is blank. Also accepted: `DI avg H2 (ppm)` |
+| DI gas volume (mL) | | Used only when the DI reading wins |
+| DI gas pressure (psi) | | Used only when the DI reading wins |
 | Sample pH | | |
 | Sample Conductivity (mS/cm) | | |
 | Sampled Solution Volume (mL) | | Volume of production fluid collected at this timepoint (mL) |
 | Modification | | Brine modification note |
-| Overwrite | | `TRUE` / `FALSE` — overwrite existing result row at same timepoint |
+| OVERWRITE | | `TRUE` / `FALSE` — overwrite existing result row at same timepoint. Also accepted: `Overwrite` |
 
 Rows where both Experiment ID and Duration (Days) are present create or update a
 `ScalarResults` record. The calc engine re-runs for every affected row.

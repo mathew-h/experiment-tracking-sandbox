@@ -1,27 +1,145 @@
 """
 Master Results bulk upload — reads from fixed SharePoint path or uploaded bytes.
 
-Dashboard sheet column spec:
-  Experiment ID | Duration (Days) | Description | Sample Date | NMR Run Date |
-  ICP Run Date  | GC Run Date     | XRD Run Date | NH4 (mM)   | H2 (ppm)    | Gas Volume (mL) |
-  Gas Pressure (psi) | Sample pH | Sample Conductivity (mS/cm) |
-  Sampled Solution Volume (mL) | Modification | Overwrite
+Dashboard sheet column spec (v3, issue #111, 2026-07-30):
+  Experiment ID | Description | Sample Date | Duration (Days) | NH4 (mM) |
+  FL H2 (ppm)   | FL Gas Volume (mL) | FL Gas Pressure (psi) | Sample pH |
+  Sample Conductivity (mS/cm) | Modification | NMR Run Date |
+  Sampled Solution Volume (mL) | ICP Run Date | GC Run Date | XRD Run Date |
+  OVERWRITE | DI H2 (ppm) | DI gas volume (mL) | DI gas pressure (psi)
+
+One row per unique experiment ID. Replicate letters are separate vials, so
+SERUM_001a/b/c at days 1 and 3 is six rows (SERUM_001a-t1, SERUM_001b-t1, ...),
+not two rows with per-letter columns. Two rows sharing an ID and timepoint are
+both rejected. Cross-replicate mean and SD are computed by
+v_results_scalar_rollup, not carried on the sheet.
+
+Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
+blank, and gas volume/pressure come from the same block. A value of 0 is a real
+reading, not a blank.
+
+Older spellings are still accepted — the pre-rename 'H2 (ppm)', 'Gas Volume
+(mL)', 'Gas Pressure (psi)', 'Overwrite', and v2's 'DI avg H2 (ppm)'. v2's wide
+'DI a/b/c H2 (ppm)' and 'DI SD (ppm)' are ignored with a warning. See
+_HEADER_ALIASES.
 """
 from __future__ import annotations
 
 import datetime as dt
 import io
+import re
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
-from backend.services.result_merge_utils import apply_id_timepoint
+from backend.services.result_merge_utils import apply_id_timepoint, normalize_timepoint
 from database.experiment_id_parser import split_timepoint_token
 
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
+
+# Canonical Dashboard headers, keyed by the lowercased sheet header.
+#
+# Issue #111: the sheet was restructured twice. The single 'H2 (ppm)' block was
+# renamed to a Full Loop ('FL ...') block and 'Overwrite' became 'OVERWRITE';
+# then the wide DI block ('DI a/b/c H2 (ppm)' + avg + SD) collapsed to one
+# 'DI H2 (ppm)' when a/b/c moved to their own rows. Every spelling is accepted
+# so archived workbooks keep parsing; the values on the right are the only
+# names the row reads below use.
+_HEADER_ALIASES: Dict[str, str] = {
+    # Full Loop — pre-rename spelling first in each pair
+    "h2 (ppm)": "FL H2 (ppm)",
+    "fl h2 (ppm)": "FL H2 (ppm)",
+    "gas volume (ml)": "FL Gas Volume (mL)",
+    "fl gas volume (ml)": "FL Gas Volume (mL)",
+    "gas pressure (psi)": "FL Gas Pressure (psi)",
+    "fl gas pressure (psi)": "FL Gas Pressure (psi)",
+    # GC direct injection — 'DI avg' is the v2 spelling of v3's 'DI H2'
+    "di h2 (ppm)": "DI H2 (ppm)",
+    "di avg h2 (ppm)": "DI H2 (ppm)",
+    "di gas volume (ml)": "DI gas volume (mL)",
+    "di gas pressure (psi)": "DI gas pressure (psi)",
+    # Casing-only normalisations (previously done inline)
+    "overwrite": "Overwrite",
+    "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
+    "replicate": "Replicate",
+}
+
+# H2 as a standalone token, so 'H2S (ppm)' and 'H2O' never look like a dropped
+# hydrogen column while a real rename ('GC Loop H2 ppm') still does.
+_H2_TOKEN = re.compile(r"\bh2\b", re.IGNORECASE)
+
+# Columns whose header mentions H2 and that the parser deliberately handles.
+_RECOGNIZED_H2_COLUMNS = {
+    "FL H2 (ppm)",
+    "DI H2 (ppm)",
+}
+
+# v2's wide DI block. Those letters are replicate VIALS, and v3 gives each vial
+# its own row, so there is no correct way to fold three values into one result.
+# Recognized so they are named in a specific warning rather than a generic one.
+_WIDE_DI_COLUMNS = {
+    "DI a H2 (ppm)",
+    "DI b H2 (ppm)",
+    "DI c H2 (ppm)",
+    "DI SD (ppm)",
+}
+
+
+@dataclass
+class MasterUploadResult:
+    """Master Results upload outcome.
+
+    Exists because the legacy 5-tuple has no slot for warnings and ~20 tests
+    plus the router unpack it positionally. `from_bytes` keeps returning the
+    tuple; `from_bytes_ex` returns this.
+    """
+
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    feedbacks: List[Dict[str, Any]] = field(default_factory=list)
+
+    def as_tuple(self) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
+        """Legacy 5-tuple shape. Warnings are dropped — callers that need them
+        should use from_bytes_ex()."""
+        return self.created, self.updated, self.skipped, self.errors, self.feedbacks
+
+
+def _normalize_headers(columns: Any) -> List[str]:
+    """Map sheet headers onto canonical names.
+
+    A sheet can carry two spellings of one field — a hand-merged workbook with
+    both 'DI avg H2 (ppm)' and 'DI H2 (ppm)', or 'H2 (ppm)' beside its v3
+    replacement 'FL H2 (ppm)'. Renaming both to the canonical name would give
+    pandas duplicate columns, and `row.get()` would then return a Series rather
+    than a scalar; `_parse_float` raises on that and its `except Exception`
+    swallows the value — the exact silent loss issue #111 exists to fix.
+
+    Two rules prevent it:
+      1. A column never takes a canonical name that another column in the same
+         sheet already carries literally. The literal (v3) column wins and the
+         aliased one keeps its raw header.
+      2. Any remaining collision falls back to the raw header.
+    """
+    raw = [str(c).strip() for c in columns]
+    raw_names = set(raw)
+    out: List[str] = []
+    seen: set[str] = set()
+    for name in raw:
+        canonical = _HEADER_ALIASES.get(name.lower(), name)
+        if canonical != name and canonical in raw_names:
+            canonical = name
+        if canonical in seen:
+            canonical = name
+        out.append(canonical)
+        seen.add(canonical)
+    return out
 
 
 def _parse_float(val: Any) -> Optional[float]:
@@ -83,114 +201,253 @@ def _find_sheet(xls: pd.ExcelFile) -> Optional[str]:
     return xls.sheet_names[0] if xls.sheet_names else None
 
 
-def _process_bytes(
-    db: Session, file_bytes: bytes
-) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
+def _resolve_h2(
+    row: Any,
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str], Optional[float]]:
+    """Pick the winning GC reading for one Dashboard row (issue #111).
+
+    Full Loop takes precedence over direct injection (Mat, 2026-07-30); DI is
+    used only when the Full Loop cell is blank. Gas volume and pressure are
+    taken from the same block as the winning concentration, because
+    _calculate_hydrogen() combines all three into h2_micromoles — pairing a
+    Full Loop ppm with a DI sampling volume would compute a number that
+    describes no real injection.
+
+    A value of 0 is a real measurement and wins normally; only a blank cell
+    falls through.
+
+    Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source, di_ppm), where
+    source is 'full_loop', 'di', or None when neither block has a
+    concentration. di_ppm is this row's own DI parse, returned whether or not
+    DI won — callers that need to know whether a DI reading was superseded
+    read it from here rather than re-parsing the cell themselves, so that
+    decision can never drift from the precedence choice made above.
+    """
+    di_ppm = _parse_float(row.get("DI H2 (ppm)"))
+
+    fl_ppm = _parse_float(row.get("FL H2 (ppm)"))
+    if fl_ppm is not None:
+        return (
+            fl_ppm,
+            _parse_float(row.get("FL Gas Volume (mL)")),
+            _parse_float(row.get("FL Gas Pressure (psi)")),
+            "full_loop",
+            di_ppm,
+        )
+
+    if di_ppm is not None:
+        return (
+            di_ppm,
+            _parse_float(row.get("DI gas volume (mL)")),
+            _parse_float(row.get("DI gas pressure (psi)")),
+            "di",
+            di_ppm,
+        )
+
+    # No concentration in either block. Keep reading the Full Loop gas columns
+    # so a row recording only the sampling geometry behaves as it did pre-#111.
+    return (
+        None,
+        _parse_float(row.get("FL Gas Volume (mL)")),
+        _parse_float(row.get("FL Gas Pressure (psi)")),
+        None,
+        di_ppm,
+    )
+
+
+def _resolve_row_identity(
+    row: Any, row_num: int
+) -> Tuple[Optional[str], Optional[float], Optional[str], bool]:
+    """Resolve one Dashboard row to its (experiment_id, timepoint).
+
+    Extracted from the upsert loop so the duplicate pre-pass and the loop share
+    one implementation (issue #111). Behavior is unchanged from the inline
+    version — same skips, same error strings.
+
+    Returns (experiment_id, time_post_reaction, error_message, skip):
+      * skip=True      — intentionally passed over; count toward `skipped`
+      * error_message  — per-row error; count toward `errors`
+      * both None/False — a good row
+    """
+    raw_id = row.get("Experiment ID")
+    # A numeric 0 in this column is a stale/blank Excel formula cache, never a
+    # real experiment ID (e.g. Master_Results_Tracker_v3.xlsx reads 0.0 here on
+    # all 499 rows) — skip it the same as None/NaN/empty string.
+    if (raw_id is None
+            or (isinstance(raw_id, float) and pd.isna(raw_id))
+            or (isinstance(raw_id, (int, float)) and raw_id == 0)):
+        return None, None, None, True
+    exp_id = str(raw_id).strip()
+    if not exp_id:
+        return None, None, None, True
+
+    # Skip calibration-standard rows (Issue #39)
+    if "standard" in exp_id.lower():
+        return None, None, None, True
+
+    # Split the '-t<days>' token once, up front, so both the replicate
+    # combination below and the Duration fill further down share a single
+    # split (issue #81 I1/M-fix — do not re-split exp_id later).
+    stem, id_timepoint = split_timepoint_token(exp_id)
+
+    # Optional replicate column: resolve base + letter to the sibling ID
+    # before anything downstream sees exp_id (issue #70 P3). A token ID
+    # ("SERUM_001-t7") combined with a real Replicate letter is rejected —
+    # the letter must be encoded in the ID itself (e.g. SERUM_001a-t7).
+    try:
+        combined = combine_replicate_id(
+            stem if id_timepoint is not None else exp_id, row.get("Replicate"),
+        )
+        if id_timepoint is not None and combined != stem:
+            raise ValueError(
+                "Replicate column cannot be combined with a -t<days> ID token; "
+                "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
+            )
+        if id_timepoint is None:
+            exp_id = combined
+    except ValueError as exc:
+        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False
+
+    # Issue #81: '-t<days>' in the experiment ID is canonical for the
+    # timepoint — fill a blank Duration from it, error a conflict.
+    duration_raw = row.get("Duration (Days)")
+    if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
+        if id_timepoint is None:
+            return exp_id, None, None, True
+        return exp_id, id_timepoint, None, False
+
+    time_post_reaction = _parse_float(duration_raw)
+    if time_post_reaction is None:
+        return exp_id, None, f"Row {row_num}: invalid Duration (Days) '{duration_raw}'", False
+
+    try:
+        time_post_reaction = apply_id_timepoint(id_timepoint, time_post_reaction)
+    except ValueError as exc:
+        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False
+
+    return exp_id, time_post_reaction, None, False
+
+
+def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     """
     Parse the Master Results Excel and upsert scalar results.
-    Returns (created, updated, skipped, errors, feedbacks).
     """
     from backend.services.scalar_results_service import ScalarResultsService  # noqa: PLC0415
 
-    errors: List[str] = []
-    feedbacks: List[Dict[str, Any]] = []
+    out = MasterUploadResult()
+    errors = out.errors
+    warnings = out.warnings
+    feedbacks = out.feedbacks
     created = updated = skipped = 0
 
     try:
         xls = pd.ExcelFile(io.BytesIO(file_bytes))
     except Exception as exc:
-        return 0, 0, 0, [f"Failed to read file: {exc}"], []
+        errors.append(f"Failed to read file: {exc}")
+        return out
 
     sheet_name = _find_sheet(xls)
     if sheet_name is None:
-        return 0, 0, 0, ["File has no sheets."], []
+        errors.append("File has no sheets.")
+        return out
 
     try:
         df = xls.parse(sheet_name)
     except Exception as exc:
-        return 0, 0, 0, [f"Failed to parse sheet '{sheet_name}': {exc}"], []
+        errors.append(f"Failed to parse sheet '{sheet_name}': {exc}")
+        return out
 
-    df.columns = [str(c).strip() for c in df.columns]
-    # Normalise the optional volume column header to canonical casing.
-    df.columns = [
-        "Sampled Solution Volume (mL)" if c.lower() == "sampled solution volume (ml)" else c
-        for c in df.columns
-    ]
-    # Normalise the optional replicate column header to canonical casing.
-    df.columns = [
-        "Replicate" if c.lower() == "replicate" else c
-        for c in df.columns
-    ]
+    df.columns = _normalize_headers(df.columns)
 
     # Validate required columns
     required = {"Experiment ID", "Duration (Days)"}
     missing = required - set(df.columns)
     if missing:
-        return 0, 0, 0, [
+        errors.append(
             f"Sheet '{sheet_name}' is missing required columns: {', '.join(sorted(missing))}. "
             f"Available: {', '.join(df.columns[:10])}"
-        ], []
+        )
+        return out
 
+    # Issue #111: an H2 column the parser cannot map used to vanish silently —
+    # every other field upserted fine, so a sync looked healthy while the
+    # hydrogen value was lost. Say so instead.
+    stale_wide_di = [c for c in df.columns if c in _WIDE_DI_COLUMNS]
+    if stale_wide_di:
+        warnings.append(
+            "Ignoring wide direct-injection column(s): "
+            + ", ".join(f"'{c}'" for c in sorted(stale_wide_di))
+            + ". Those letters are replicate vials — give each one row per "
+              "experiment ID (e.g. SERUM_001a-t1, SERUM_001b-t1) and put its "
+              "reading in 'DI H2 (ppm)'."
+        )
+
+    # Match H2 only as a standalone token. A substring test would also fire on
+    # an H2S or H2O column, telling a researcher a hydrogen reading was dropped
+    # when none was — a false alarm in exactly the place this warning is meant
+    # to be trustworthy. A genuine rename keeps H2 as its own token
+    # ('GC Loop H2 ppm'), so detection is unaffected.
+    unmapped_h2 = [
+        c for c in df.columns
+        if _H2_TOKEN.search(c)
+        and c not in _RECOGNIZED_H2_COLUMNS
+        and c not in _WIDE_DI_COLUMNS
+    ]
+    if unmapped_h2:
+        warnings.append(
+            "Unrecognized H2 column(s) ignored: "
+            + ", ".join(f"'{c}'" for c in sorted(unmapped_h2))
+            + ". No hydrogen value was read from them — check the Dashboard "
+              "headers against the parser's expected names."
+        )
+
+    if not _RECOGNIZED_H2_COLUMNS & set(df.columns):
+        warnings.append(
+            f"Sheet '{sheet_name}' has no recognized H2 column "
+            "('FL H2 (ppm)' or 'DI H2 (ppm)') — no hydrogen data was ingested."
+        )
+
+    # Phase 1 — resolve every row's identity, then find collisions. v3 is one
+    # row per unique experiment ID (issue #111): two rows claiming the same
+    # vial at the same day are two readings fighting over one timepoint, and
+    # letting the later one win would destroy the earlier silently. Both are
+    # rejected. A collision is only discoverable once the LATER row has been
+    # read, by which point the earlier row has already been flushed, counted
+    # and given a feedback record — hence a pre-pass rather than an in-loop
+    # check. (The upload commits once, at the endpoint, via _finalize_write.)
+    resolved: List[Tuple[int, str, float, Any]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
-        exp_id = str(row.get("Experiment ID") or "").strip()
-        if not exp_id:
+        exp_id, time_post_reaction, error, skip = _resolve_row_identity(row, row_num)
+        if skip:
             skipped += 1
             continue
-
-        # Skip calibration-standard rows (Issue #39)
-        if "standard" in exp_id.lower():
-            skipped += 1
+        if error is not None:
+            errors.append(error)
             continue
+        resolved.append((row_num, exp_id, time_post_reaction, row))
 
-        # Split the '-t<days>' token once, up front, so both the replicate
-        # combination below and the Duration fill further down share a single
-        # split (issue #81 I1/M-fix — do not re-split exp_id later).
-        stem, id_timepoint = split_timepoint_token(exp_id)
+    # Keyed on the normalized (rounded) timepoint so 7.0 and 7.00005 — which
+    # `find_timepoint_candidates` would merge into the same result row anyway
+    # — collide here too. This narrows the gap but does not close it:
+    # normalization only rounds to 4 decimals, so two values on opposite sides
+    # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
+    # even though they fall within the ±1e-4 tolerance of each other.
+    key_counts: Dict[Tuple[str, float], int] = {}
+    for _, exp_id, time_post_reaction, _row in resolved:
+        key = (exp_id, normalize_timepoint(time_post_reaction))
+        key_counts[key] = key_counts.get(key, 0) + 1
 
-        # Optional replicate column: resolve base + letter to the sibling ID
-        # before anything downstream sees exp_id (issue #70 P3). A token ID
-        # ("SERUM_001-t7") combined with a real Replicate letter is rejected —
-        # the letter must be encoded in the ID itself (e.g. SERUM_001a-t7).
-        try:
-            combined = combine_replicate_id(
-                stem if id_timepoint is not None else exp_id, row.get("Replicate"),
+    # Phase 2 — upsert what is left.
+    for row_num, exp_id, time_post_reaction, row in resolved:
+        if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
+            errors.append(
+                f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
+                f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "
+                f"— give each vial its own ID (e.g. SERUM_001a-t7, SERUM_001b-t7). "
+                f"No row for this vial-day was written."
             )
-            if id_timepoint is not None and combined != stem:
-                raise ValueError(
-                    "Replicate column cannot be combined with a -t<days> ID token; "
-                    "encode the letter in the ID itself (e.g. SERUM_001a-t7)."
-                )
-            if id_timepoint is None:
-                exp_id = combined
-        except ValueError as exc:
-            errors.append(f"Row {row_num} ({exp_id}): {exc}")
             continue
-
-        # Issue #81: '-t<days>' in the experiment ID is canonical for the
-        # timepoint — fill a blank Duration from it, error a conflict.
-        # (id_timepoint already computed above.)
-
-        duration_raw = row.get("Duration (Days)")
-        if duration_raw is None or (isinstance(duration_raw, float) and pd.isna(duration_raw)):
-            if id_timepoint is None:
-                skipped += 1
-                continue
-            time_post_reaction = id_timepoint
-        else:
-            time_post_reaction = _parse_float(duration_raw)
-            if time_post_reaction is None:
-                errors.append(
-                    f"Row {row_num}: invalid Duration (Days) '{duration_raw}'"
-                )
-                continue
-            try:
-                time_post_reaction = apply_id_timepoint(
-                    id_timepoint, time_post_reaction,
-                )
-            except ValueError as exc:
-                errors.append(f"Row {row_num} ({exp_id}): {exc}")
-                continue
 
         description = str(row.get("Description") or "").strip() or None
         sample_date = _parse_date(row.get("Sample Date"))
@@ -200,9 +457,7 @@ def _process_bytes(
         xrd_run_date = _parse_date(row.get("XRD Run Date"))
 
         nh4_mm = _parse_float(row.get("NH4 (mM)"))
-        h2_ppm = _parse_float(row.get("H2 (ppm)"))
-        gas_vol_ml = _parse_float(row.get("Gas Volume (mL)"))
-        gas_psi = _parse_float(row.get("Gas Pressure (psi)"))
+        h2_ppm, gas_vol_ml, gas_psi, h2_source, di_ppm = _resolve_h2(row)
         gas_mpa = gas_psi * _PSI_TO_MPA if gas_psi is not None else None
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
@@ -246,7 +501,16 @@ def _process_bytes(
             else:
                 updated += 1
             savepoint.commit()
-            feedbacks.append({"row": row_num, "experiment_id": exp_id, "action": action})
+            feedbacks.append({
+                "row": row_num,
+                "experiment_id": exp_id,
+                "action": action,
+                "h2_source": h2_source,
+                # di_ppm comes from _resolve_h2's own parse — re-reading the
+                # cell here would let this flag drift from the precedence
+                # decision if the DI branch ever gains filtering.
+                "h2_di_superseded": h2_source == "full_loop" and di_ppm is not None,
+            })
 
         except ValueError as exc:
             savepoint.rollback()
@@ -255,7 +519,8 @@ def _process_bytes(
             savepoint.rollback()
             errors.append(f"Row {row_num} ({exp_id}): unexpected error — {exc}")
 
-    return created, updated, skipped, errors, feedbacks
+    out.created, out.updated, out.skipped = created, updated, skipped
+    return out
 
 
 class MasterBulkUploadService:
@@ -288,14 +553,20 @@ class MasterBulkUploadService:
         except Exception as exc:
             return 0, 0, 0, [f"Failed to read Master Results file: {exc}"], []
 
-        return _process_bytes(db, file_bytes)
+        return _process_bytes(db, file_bytes).as_tuple()
 
     @staticmethod
     def from_bytes(
         db: Session, file_bytes: bytes
     ) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
+        """Parse a manually uploaded Master Results file.
+
+        Legacy 5-tuple shape, kept for existing callers. Use from_bytes_ex()
+        to also receive warnings.
         """
-        Parse a manually uploaded Master Results file.
-        Returns (created, updated, skipped, errors, feedbacks).
-        """
+        return _process_bytes(db, file_bytes).as_tuple()
+
+    @staticmethod
+    def from_bytes_ex(db: Session, file_bytes: bytes) -> MasterUploadResult:
+        """Parse a manually uploaded Master Results file, warnings included."""
         return _process_bytes(db, file_bytes)

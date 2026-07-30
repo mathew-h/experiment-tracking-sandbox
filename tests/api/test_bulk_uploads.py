@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import app
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
+from backend.services.bulk_uploads.master_bulk_upload import MasterUploadResult
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +324,7 @@ def test_aeris_xrd_dry_run_rolls_back(client, db_session):
 
 def test_master_results_upload_returns_response_shape(client):
     mock_svc = MagicMock()
-    mock_svc.from_bytes.return_value = (3, 1, 0, [], [])
+    mock_svc.from_bytes_ex.return_value = MasterUploadResult(created=3, updated=1, skipped=0)
     fake_mod = MagicMock()
     fake_mod.MasterBulkUploadService = mock_svc
 
@@ -338,7 +339,7 @@ def test_master_results_upload_returns_response_shape(client):
 
 def test_master_results_dry_run_rolls_back(client, db_session):
     mock_svc = MagicMock()
-    mock_svc.from_bytes.return_value = (3, 1, 0, [], [])
+    mock_svc.from_bytes_ex.return_value = MasterUploadResult(created=3, updated=1, skipped=0)
     fake_mod = MagicMock()
     fake_mod.MasterBulkUploadService = mock_svc
 
@@ -355,6 +356,36 @@ def test_master_results_dry_run_rolls_back(client, db_session):
     assert body["dry_run"] is True
     mock_rollback.assert_called_once()
     mock_commit.assert_not_called()
+
+
+def test_master_results_response_includes_warnings(client):
+    """The endpoint forwards parser warnings into UploadResponse.warnings.
+
+    Guards the #111 fix end to end: a warning raised in the parser has to reach
+    the researcher, since BulkUploadRow.tsx renders result.warnings and nothing
+    else would show that a column was ignored.
+    """
+    mock_svc = MagicMock()
+    mock_svc.from_bytes_ex.return_value = MasterUploadResult(
+        created=1, updated=0, skipped=0,
+        errors=[],
+        warnings=["Unrecognized H2 column(s) ignored: 'GC Loop H2 ppm'."],
+        feedbacks=[{"row": 2, "experiment_id": "X_1", "action": "created",
+                    "h2_source": None, "h2_di_superseded": False}],
+    )
+    fake_mod = MagicMock()
+    fake_mod.MasterBulkUploadService = mock_svc
+
+    with patch.dict(sys.modules, {"backend.services.bulk_uploads.master_bulk_upload": fake_mod}):
+        resp = client.post(
+            "/api/bulk-uploads/master-results",
+            files={"file": ("master.xlsx", io.BytesIO(b"fake"), "application/vnd.ms-excel")},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] == 1
+    assert any("GC Loop H2 ppm" in w for w in body["warnings"])
 
 
 def test_master_results_no_file_returns_422(client):
