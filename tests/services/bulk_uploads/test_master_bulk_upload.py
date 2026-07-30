@@ -1005,16 +1005,24 @@ def test_di_used_when_full_loop_absent(db_session: Session):
 def test_di_wins_ignores_stray_full_loop_gas_geometry(db_session: Session):
     """When DI supplies the concentration, FL gas volume/pressure are ignored.
 
-    The mirror of test_full_loop_wins_when_both_present. _calculate_hydrogen
-    combines concentration, volume and pressure, so pairing a DI reading with
-    Full Loop geometry would describe an injection that never happened.
+    Load-bearing, not defensive (issue #114 addendum, 2026-07-30). Measured on
+    the live v3 Dashboard: 35 rows resolve to DI, and every one of them also
+    carries populated Full Loop geometry left over from a previous run — the GC
+    sheets always carry some stale columns. Geometry therefore has to come from
+    the block that won the concentration. Had precedence been built as
+    "concentration from the winner, geometry from Full Loop", all 35 rows would
+    compute h2_micromoles from 4235 mL instead of 30 mL — a 141x overstatement
+    that produces a plausible-looking number, with nothing to flag it.
+
+    The mirror of test_full_loop_wins_when_both_present.
     """
     _seed_experiment(db_session, "HPHT_MIX01", 8881)
 
     xlsx = _master_excel_v3([
+        # FL geometry is real carryover magnitude; DI's is a real injection.
         _v3_row("HPHT_MIX01", 7.0,
-                fl_h2=None, fl_vol=3935.0, fl_psi=90.0,
-                di_h2=42.0, di_vol=10.0, di_psi=15.0),
+                fl_h2=None, fl_vol=4235.0, fl_psi=90.0,
+                di_h2=42.0, di_vol=30.0, di_psi=14.7),
     ])
     created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
         db_session, xlsx
@@ -1030,10 +1038,10 @@ def test_di_wins_ignores_stray_full_loop_gas_geometry(db_session: Session):
         .one()
     ).scalar_data
     assert scalar.h2_concentration == pytest.approx(42.0)
-    assert scalar.gas_sampling_volume_ml == pytest.approx(10.0), (
-        "must be DI's volume, not FL's 3935"
+    assert scalar.gas_sampling_volume_ml == pytest.approx(30.0), (
+        "must be DI's 30 mL injection volume, never FL's 4235 mL carryover"
     )
-    assert scalar.gas_sampling_pressure_MPa == pytest.approx(15.0 * _PSI_TO_MPA, rel=1e-3)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(14.7 * _PSI_TO_MPA, rel=1e-3)
 
 
 def test_zero_h2_is_a_real_measurement(db_session: Session):
