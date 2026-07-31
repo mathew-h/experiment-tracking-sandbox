@@ -771,13 +771,14 @@ def _v3_row(
     di_h2: float | None = None,
     di_vol: float | None = None,
     di_psi: float | None = None,
+    gc_date: str | None = None,
 ) -> list:
     """Build one Dashboard row in _V3_HEADERS order."""
     return [
         experiment_id, description, None, duration, nh4,
         fl_h2, fl_vol, fl_psi,
         ph, None, None, None,
-        None, None, None, None,
+        None, None, gc_date, None,
         overwrite,
         di_h2, di_vol, di_psi,
     ]
@@ -1271,7 +1272,9 @@ def test_h2s_column_is_not_reported_as_a_dropped_h2_reading(db_session: Session)
     _seed_experiment(db_session, "HPHT_WARN07", 8827)
 
     headers = list(_V3_HEADERS) + ["H2S (ppm)", "H2O (%)"]
-    row = _v3_row("HPHT_WARN07", 7.0, fl_h2=115.0) + [12.0, 3.0]
+    # GC date supplied so the strict `warnings == []` below still means
+    # "no H2S/H2O misdetection" and not "no #115 missing-GC-date warning".
+    row = _v3_row("HPHT_WARN07", 7.0, fl_h2=115.0, gc_date="2026-01-01") + [12.0, 3.0]
     xlsx = make_excel_multisheet({"Dashboard": (headers, [row])})
 
     result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
@@ -1556,3 +1559,57 @@ def test_zero_experiment_id_is_skipped_not_treated_as_an_experiment(db_session: 
     assert skipped == 2
     assert created == 1
     assert [f["experiment_id"] for f in feedbacks] == ["HPHT_ZERO01"]
+
+
+# ---------------------------------------------------------------------------
+# Missing GC Run Date warning (issue #115)
+# ---------------------------------------------------------------------------
+
+def test_warns_when_h2_reading_has_no_gc_run_date(db_session: Session):
+    """An H2 reading with a blank 'GC Run Date' is named in one file warning.
+
+    The reading is stored and no error is raised, so nothing else tells the
+    researcher that the Dashboard's GC Measurements card (issue #85) will not
+    count this row. 115 of 1056 dev-DB scalar rows carry a GC run date and all
+    fall in Mar-May 2026 while H2 readings kept arriving -- that silence is the
+    bug reported in issue #115.
+    """
+    _seed_experiment(db_session, "HPHT_GCW01", 8901)
+    _seed_experiment(db_session, "HPHT_GCW02", 8902)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_GCW01", 7.0, fl_h2=115.0),                          # H2, no date
+        _v3_row("HPHT_GCW02", 7.0, fl_h2=120.0, gc_date="2026-07-29"),    # H2 + date
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 2
+
+    missing = [w for w in result.warnings if "GC Run Date" in w]
+    assert len(missing) == 1, (
+        f"exactly one file-level warning, not one per row, got: {result.warnings}"
+    )
+    assert "1 row" in missing[0], missing[0]
+    assert "(2)" in missing[0], (
+        f"the warning must name the sheet row so it can be found, got: {missing[0]}"
+    )
+    assert "(3)" not in missing[0], (
+        f"row 3 supplied a GC run date and must not be named, got: {missing[0]}"
+    )
+
+
+def test_no_gc_date_warning_when_row_has_no_h2_reading(db_session: Session):
+    """A row with no H2 reading did no GC work, so a blank date is not notable.
+
+    Same reasoning as the DI-supersede warning above: a warning that fires on
+    ordinary sheets is one researchers learn to ignore.
+    """
+    _seed_experiment(db_session, "HPHT_GCW03", 8903)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_GCW03", 7.0, nh4=5.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 1
+    assert [w for w in result.warnings if "GC Run Date" in w] == []

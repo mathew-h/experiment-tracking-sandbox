@@ -499,6 +499,8 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # Rows where Full Loop overrode a populated direct-injection cell. Reported
     # once, at file level, after the loop (issue #114 item 1).
     superseded_rows: List[int] = []
+    # Rows whose H2 reading landed with no GC Run Date (issue #115).
+    missing_gc_date_rows: List[int] = []
     for row_num, exp_id, time_post_reaction, row in resolved:
         if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
             row_errors.append((row_num, (
@@ -567,6 +569,8 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             di_superseded = h2_source == "full_loop" and di_ppm is not None
             if di_superseded:
                 superseded_rows.append(row_num)
+            if h2_ppm is not None and gc_run_date is None:
+                missing_gc_date_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
                 "experiment_id": exp_id,
@@ -600,6 +604,27 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             f"{len(superseded_rows)} {label} ({shown}). 'DI H2 (ppm)' also held a "
             "value there and Full Loop takes precedence, so the direct-injection "
             "reading was not stored and cannot be recovered from the database."
+        )
+
+    # A blank GC Run Date fails silently in every direction: the H2 reading is
+    # stored, no error is raised, and nothing in the app renders the field -- so
+    # the Dashboard's GC Measurements card (issue #85) just stops counting the
+    # row. That is issue #115: 115 of 1056 dev-DB scalar rows carry a GC run
+    # date and every one falls in Mar-May 2026, while H2 readings kept arriving
+    # through July. Gated on an H2 reading being present, so a row that did no
+    # GC work stays quiet. This WILL fire on most uploads until the column is
+    # filled in again -- that is the intended signal, not noise to soften.
+    if missing_gc_date_rows:
+        shown = ", ".join(str(r) for r in missing_gc_date_rows[:10])
+        if len(missing_gc_date_rows) > 10:
+            shown += f", and {len(missing_gc_date_rows) - 10} more"
+        label = "row" if len(missing_gc_date_rows) == 1 else "rows"
+        warnings.append(
+            f"'GC Run Date' is blank on {len(missing_gc_date_rows)} {label} "
+            f"({shown}) carrying an H2 reading. The reading was stored, but the "
+            "Dashboard's 'GC Measurements' card counts GC Run Date entries — "
+            "these rows are not counted there until the date is filled in and "
+            "the sheet re-uploaded."
         )
 
     # Stable sort — two errors on one row keep the order they were found in.
