@@ -134,7 +134,10 @@ injection (`DI H2 (ppm)`, `DI gas volume (mL)`, `DI gas pressure (psi)`) is
 used only when the Full Loop concentration cell is blank. The blocks are never
 mixed — pairing a Full Loop concentration with a DI sampling volume would
 compute micromoles for an injection that never happened. A concentration of `0`
-is a real measurement and is stored as such.
+is a real measurement and is stored as such. Volume and pressure are read **only
+when a concentration resolved** (issue #114): a row with no `H2 (ppm)` in either
+block stores none of the three, because the sheet's gas columns carry the
+previous run's values and were never computable without a concentration anyway.
 
 **Replicate spread is not calculated here.** Mean and standard deviation across
 replicate vials come from `v_results_scalar_rollup` (`mean_h2_ppm`,

@@ -28,6 +28,19 @@ def _seed_experiment(db: Session, experiment_id: str, exp_num: int) -> Experimen
     return exp
 
 
+def _upload(db: Session, xlsx: bytes) -> tuple:
+    """(created, updated, skipped, errors, feedbacks) for the positional tests.
+
+    Deliberately local to the tests. The parser no longer offers a return shape
+    that drops `warnings` — MasterUploadResult.as_tuple and the two entry points
+    that called it were deleted by issue #114 item 4, because anything wired to
+    them would compute warnings and throw them away. Tests that assert on
+    warnings use from_bytes_ex directly.
+    """
+    r = MasterBulkUploadService.from_bytes_ex(db, xlsx)
+    return r.created, r.updated, r.skipped, r.errors, r.feedbacks
+
+
 def _master_excel(rows: list[list]) -> bytes:
     headers = [
         "Experiment ID", "Duration (Days)", "Description", "Sample Date",
@@ -43,14 +56,14 @@ def _master_excel(rows: list[list]) -> bytes:
 # ---------------------------------------------------------------------------
 
 def test_from_bytes_creates_result_row(db_session: Session):
-    """from_bytes() with a valid Dashboard sheet creates a scalar result."""
+    """Uploading a valid Dashboard sheet creates a scalar result."""
     _seed_experiment(db_session, "HPHT_MAST001", 7701)
 
     xlsx = _master_excel([
         ["HPHT_MAST001", 7.0, "Day 7", None, None, None, None,
          5.2, None, None, None, 7.1, 12.5, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -66,11 +79,11 @@ def test_from_bytes_updates_existing_result_with_overwrite(db_session: Session):
 
     xlsx1 = _master_excel([["HPHT_MAST002", 7.0, "Day 7", None, None, None, None,
                              5.0, None, None, None, 7.0, None, None, "FALSE"]])
-    MasterBulkUploadService.from_bytes(db_session, xlsx1)
+    _upload(db_session, xlsx1)
 
     xlsx2 = _master_excel([["HPHT_MAST002", 7.0, "Day 7 updated", None, None, None, None,
                              6.5, None, None, None, 7.2, None, None, "TRUE"]])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx2
     )
 
@@ -85,7 +98,7 @@ def test_missing_required_columns_returns_error(db_session: Session):
         ["Sample ID", "Days"],
         [["HPHT_MAST001", 7.0]],
     )
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -102,7 +115,7 @@ def test_gas_pressure_psi_converted_to_mpa(db_session: Session):
         ["HPHT_MAST003", 7.0, "Day 7", None, None, None, None,
          5.0, 120.0, 5.0, psi_val, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -121,24 +134,6 @@ def test_gas_pressure_psi_converted_to_mpa(db_session: Session):
     assert result.scalar_data.gas_sampling_pressure_MPa == expected_mpa
 
 
-def test_sync_from_path_file_not_found_returns_error(db_session: Session):
-    """sync_from_path() returns a clear error when the configured file doesn't exist."""
-    import os
-
-    os.environ["MASTER_RESULTS_PATH"] = "/nonexistent/path/master.xlsx"
-    # Invalidate cached settings so our env var is picked up
-    try:
-        from backend.config.settings import get_settings
-        get_settings.cache_clear()
-    except AttributeError:
-        pass
-
-    created, updated, skipped, errors, _ = MasterBulkUploadService.sync_from_path(db_session)
-
-    assert created == 0
-    assert any("not found" in e.lower() or "nonexistent" in e.lower() for e in errors)
-
-
 def test_missing_duration_rows_skipped(db_session: Session):
     """Rows with no Duration (Days) value are counted as skipped, not errors."""
     _seed_experiment(db_session, "HPHT_MAST004", 7704)
@@ -148,7 +143,7 @@ def test_missing_duration_rows_skipped(db_session: Session):
         ["HPHT_MAST004", None, "missing duration", None, None, None, None,
          5.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -168,7 +163,7 @@ def test_from_bytes_matches_experiment_with_leading_zeros(db_session: Session):
         ["HPHT_001", 5.0, "Day 5", None, None, None, None,
          3.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -185,7 +180,7 @@ def test_from_bytes_matches_experiment_with_dot_separator(db_session: Session):
         ["Serum.MH.101", 10.0, "Day 10", None, None, None, None,
          None, None, None, None, 6.8, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -202,7 +197,7 @@ def test_from_bytes_matches_experiment_with_leading_zeros_and_symbols(db_session
         ["HPHT-014B", 3.0, "Day 3", None, None, None, None,
          None, None, None, None, 7.5, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -225,7 +220,7 @@ def test_standard_row_skipped_silently(db_session: Session):
         ["150uL NMR Standard", 7.0, "Day 7", None, None, None, None,
          5.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -241,7 +236,7 @@ def test_nmr_standard_row_skipped(db_session: Session):
         ["NMR Standard", 7.0, "Day 7", None, None, None, None,
          None, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -258,7 +253,7 @@ def test_real_experiment_not_affected_by_standard_filter(db_session: Session):
         ["CF-015-GC-01", 7.0, "Day 7", None, None, None, None,
          5.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -288,7 +283,7 @@ def test_sampled_solution_volume_parsed(db_session: Session):
         ["HPHT_VOL001", 7.0, "Day 7", None, None, None, None,
          None, None, None, None, 7.0, None, 15.5, None, "FALSE"],
     ])})
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -322,7 +317,7 @@ def test_sampled_solution_volume_blank(db_session: Session):
         ["HPHT_VOL002", 7.0, "Day 7", None, None, None, None,
          None, None, None, None, 7.0, None, None, None, "FALSE"],
     ])})
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -349,7 +344,7 @@ def test_sampled_solution_volume_column_absent(db_session: Session):
         ["HPHT_VOL003", 7.0, "Day 7", None, None, None, None,
          None, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -383,7 +378,7 @@ def test_sampled_solution_volume_case_insensitive(db_session: Session):
         ["HPHT_VOL004", 7.0, "Day 7", None, None, None, None,
          None, None, None, None, 7.0, None, 20.0, None, "FALSE"],
     ])})
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -425,7 +420,7 @@ def test_xrd_run_date_parsed_and_stored(db_session: Session):
          5.0, None, None, None, 7.1, None, None, None, "FALSE"],
     ])})
 
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -473,7 +468,7 @@ def test_replicate_column_routes_to_sibling(db_session: Session):
         ["P3MAST_701", None, 7.0, "Day 7 parent", None, None, None, None,
          4.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -509,7 +504,7 @@ def test_invalid_replicate_is_per_row_error(db_session: Session):
         ["P3MAST_702", "a", 7.0, "good", None, None, None, None,
          6.0, None, None, None, None, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -536,7 +531,7 @@ def test_whitespace_duration_counts_as_blank_and_defers_to_the_id(db_session: Se
     xlsx = _master_excel_v3([
         _v3_row("SERUM_WS_001a-t3", " ", description="undated row", nh4=1.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -561,7 +556,7 @@ def test_whitespace_duration_without_a_token_is_skipped(db_session: Session):
     xlsx = _master_excel_v3([
         _v3_row("SERUM_WS_002", "  ", description="no day anywhere", nh4=1.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -578,7 +573,7 @@ def test_non_numeric_duration_is_still_an_error(db_session: Session):
     xlsx = _master_excel_v3([
         _v3_row("SERUM_WS_003a-t3", "three", description="typo", nh4=1.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -597,7 +592,7 @@ def test_master_blank_duration_filled_from_id(db_session: Session):
         ["SERUM_090a-t7", None, "vial day 7", None, None, None, None,
          2.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -671,7 +666,7 @@ def test_master_matching_duration_accepted(db_session: Session):
         ["SERUM_092a-t7", 7.0, "right day", None, None, None, None,
          2.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -687,7 +682,7 @@ def test_master_blank_duration_without_token_still_skipped(db_session: Session):
         ["SERUM_093", None, "no duration", None, None, None, None,
          2.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -711,7 +706,7 @@ def test_master_token_id_with_replicate_letter_errors_row(db_session: Session):
         ["SERUM_094", None, 5.0, "good row", None, None, None, None,
          1.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -729,7 +724,7 @@ def test_master_token_id_with_blank_replicate_uploads_fine(db_session: Session):
         ["SERUM_095a-t7", None, None, "blank replicate", None, None, None, None,
          2.0, None, None, None, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -803,7 +798,7 @@ def test_v3_fl_h2_columns_are_ingested(db_session: Session):
     xlsx = _master_excel_v3([
         _v3_row("HPHT_FL001", 7.0, fl_h2=115.04, fl_vol=3935.0, fl_psi=90.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -835,14 +830,14 @@ def test_v3_uppercase_overwrite_header_is_honoured(db_session: Session):
     _seed_experiment(db_session, "HPHT_FL002", 8802)
 
     first = _master_excel_v3([_v3_row("HPHT_FL002", 7.0, nh4=5.0, ph=7.0)])
-    MasterBulkUploadService.from_bytes(db_session, first)
+    _upload(db_session, first)
 
     # Repeat NH4 but leave Sample pH blank, with OVERWRITE set.
     second = _master_excel_v3([
         _v3_row("HPHT_FL002", 7.0, description="Day 7 revised",
                 nh4=6.5, ph=None, overwrite=1.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, second
     )
 
@@ -899,7 +894,7 @@ def test_both_spellings_end_to_end_keeps_the_v3_value(db_session: Session):
     row = [999.0] + _v3_row("HPHT_FL005", 7.0, fl_h2=115.0, fl_vol=3935.0, fl_psi=90.0)
     xlsx = make_excel_multisheet({"Dashboard": (headers, [row])})
 
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -926,7 +921,7 @@ def test_legacy_h2_header_still_parses(db_session: Session):
         ["HPHT_FL004", 7.0, "Day 7", None, None, None, None,
          5.0, 88.0, 500.0, 145.0, 7.0, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -957,7 +952,7 @@ def test_full_loop_wins_when_both_present(db_session: Session):
                 fl_h2=115.0, fl_vol=3935.0, fl_psi=90.0,
                 di_h2=42.0, di_vol=10.0, di_psi=15.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -983,7 +978,7 @@ def test_di_used_when_full_loop_absent(db_session: Session):
     xlsx = _master_excel_v3([
         _v3_row("HPHT_PREC02", 7.0, fl_h2=None, di_h2=42.0, di_vol=10.0, di_psi=15.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1005,18 +1000,26 @@ def test_di_used_when_full_loop_absent(db_session: Session):
 def test_di_wins_ignores_stray_full_loop_gas_geometry(db_session: Session):
     """When DI supplies the concentration, FL gas volume/pressure are ignored.
 
-    The mirror of test_full_loop_wins_when_both_present. _calculate_hydrogen
-    combines concentration, volume and pressure, so pairing a DI reading with
-    Full Loop geometry would describe an injection that never happened.
+    Load-bearing, not defensive (issue #114 addendum, 2026-07-30). Measured on
+    the live v3 Dashboard: 35 rows resolve to DI, and every one of them also
+    carries populated Full Loop geometry left over from a previous run — the GC
+    sheets always carry some stale columns. Geometry therefore has to come from
+    the block that won the concentration. Had precedence been built as
+    "concentration from the winner, geometry from Full Loop", all 35 rows would
+    compute h2_micromoles from 4235 mL instead of 30 mL — a 141x overstatement
+    that produces a plausible-looking number, with nothing to flag it.
+
+    The mirror of test_full_loop_wins_when_both_present.
     """
     _seed_experiment(db_session, "HPHT_MIX01", 8881)
 
     xlsx = _master_excel_v3([
+        # FL geometry is real carryover magnitude; DI's is a real injection.
         _v3_row("HPHT_MIX01", 7.0,
-                fl_h2=None, fl_vol=3935.0, fl_psi=90.0,
-                di_h2=42.0, di_vol=10.0, di_psi=15.0),
+                fl_h2=None, fl_vol=4235.0, fl_psi=90.0,
+                di_h2=42.0, di_vol=30.0, di_psi=14.7),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1030,10 +1033,12 @@ def test_di_wins_ignores_stray_full_loop_gas_geometry(db_session: Session):
         .one()
     ).scalar_data
     assert scalar.h2_concentration == pytest.approx(42.0)
-    assert scalar.gas_sampling_volume_ml == pytest.approx(10.0), (
-        "must be DI's volume, not FL's 3935"
+    assert scalar.gas_sampling_volume_ml == pytest.approx(30.0), (
+        "must be DI's 30 mL injection volume, never FL's 4235 mL carryover"
     )
-    assert scalar.gas_sampling_pressure_MPa == pytest.approx(15.0 * _PSI_TO_MPA, rel=1e-3)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(14.7 * _PSI_TO_MPA, rel=1e-3), (
+        "must be DI's 14.7 psi, never FL's 90 psi"
+    )
 
 
 def test_zero_h2_is_a_real_measurement(db_session: Session):
@@ -1048,7 +1053,7 @@ def test_zero_h2_is_a_real_measurement(db_session: Session):
     xlsx = _master_excel_v3([
         _v3_row("HPHT_PREC03", 7.0, fl_h2=0.0, fl_vol=3785.0, fl_psi=30.0, di_h2=99.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1080,7 +1085,7 @@ def test_v2_di_avg_header_maps_onto_di_h2(db_session: Session):
     xlsx = make_excel_multisheet({"Dashboard": (headers, [
         _v3_row("HPHT_PREC05", 7.0, di_h2=42.0, di_vol=10.0, di_psi=15.0),
     ])})
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1101,7 +1106,7 @@ def test_no_gc_reading_leaves_h2_unset(db_session: Session):
     _seed_experiment(db_session, "HPHT_PREC04", 8814)
 
     xlsx = _master_excel_v3([_v3_row("HPHT_PREC04", 7.0, nh4=5.0)])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1116,6 +1121,75 @@ def test_no_gc_reading_leaves_h2_unset(db_session: Session):
     ).scalar_data
     assert scalar.h2_concentration is None
     assert scalar.h2_concentration_unit is None
+
+
+def test_geometry_without_a_concentration_is_not_stored(db_session: Session):
+    """Carryover gas columns with no reading attached are dropped.
+
+    The GC sheets always carry stale values in some columns (Mat, 2026-07-30) and
+    the field of record is 'H2 (ppm)'. Measured on the v3 Dashboard, 207 rows
+    carry FL geometry with no FL concentration; storing it would put 4235 mL into
+    ScalarResults where no later reader could tell it from a real measurement.
+    Nothing is computed from it either way — _calculate_hydrogen requires a
+    concentration.
+    """
+    _seed_experiment(db_session, "HPHT_GEO01", 8895)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_GEO01", 7.0, nh4=5.0,
+                fl_h2=None, fl_vol=4235.0, fl_psi=90.0,
+                di_h2=None, di_vol=30.0, di_psi=14.7),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 1, "the row must still upload — NH4 is real data"
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_GEO01")
+        .one()
+    ).scalar_data
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(5.0)
+    assert scalar.h2_concentration is None
+    assert scalar.gas_sampling_volume_ml is None, "carryover volume must not be stored"
+    assert scalar.gas_sampling_pressure_MPa is None, "carryover pressure must not be stored"
+
+
+def test_overwrite_clears_stale_geometry_when_the_reading_goes_away(db_session: Session):
+    """OVERWRITE on a concentration-less row clears geometry instead of rewriting carryover.
+
+    gas_sampling_volume_ml and gas_sampling_pressure_MPa are both in
+    SCALAR_UPDATABLE_FIELDS (backend/services/scalar_results_service.py:17), so
+    with overwrite=True every field absent from the row is set to None. Dropping
+    the carryover geometry therefore also stops a re-upload from re-asserting a
+    volume the second sheet no longer claims a reading for.
+    """
+    _seed_experiment(db_session, "HPHT_GEO02", 8896)
+
+    first = _master_excel_v3([
+        _v3_row("HPHT_GEO02", 7.0, fl_h2=115.0, fl_vol=4235.0, fl_psi=90.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("HPHT_GEO02", 7.0, fl_h2=None, fl_vol=4235.0, fl_psi=90.0, overwrite=1.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.updated == 1
+
+    scalar = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_GEO02")
+        .one()
+    ).scalar_data
+    assert scalar.h2_concentration is None
+    assert scalar.gas_sampling_volume_ml is None
+    assert scalar.gas_sampling_pressure_MPa is None
 
 
 # ---------------------------------------------------------------------------
@@ -1255,18 +1329,37 @@ def test_feedback_records_which_gc_block_was_used(db_session: Session):
     assert by_id["HPHT_WARN05"]["h2_source"] == "di"
     assert by_id["HPHT_WARN05"]["h2_di_superseded"] is False
 
+    superseded = [w for w in result.warnings if "instead of direct injection" in w]
+    assert len(superseded) == 1, (
+        f"exactly one file-level warning, not one per row, got: {result.warnings}"
+    )
+    assert "1 row" in superseded[0], superseded[0]
+    assert "(2)" in superseded[0], (
+        f"the warning must name the sheet row so it can be found, got: {superseded[0]}"
+    )
 
-def test_from_bytes_tuple_shape_unchanged(db_session: Session):
-    """from_bytes() still returns the legacy 5-tuple — no caller breaks."""
-    _seed_experiment(db_session, "HPHT_WARN06", 8826)
 
-    xlsx = _master_excel_v3([_v3_row("HPHT_WARN06", 7.0, nh4=5.0)])
-    out = MasterBulkUploadService.from_bytes(db_session, xlsx)
+def test_no_supersede_warning_when_precedence_is_uncontested(db_session: Session):
+    """The warning fires only when a DI value actually lost.
 
-    assert len(out) == 5
-    created, updated, skipped, errors, feedbacks = out
-    assert created == 1
-    assert isinstance(errors, list) and isinstance(feedbacks, list)
+    A warning that appears on ordinary sheets is a warning researchers learn to
+    ignore. FL-only, DI-only and neither-block rows are all the normal case —
+    measured on the v3 Dashboard, 0 of 499 rows carry a reading in both blocks.
+    """
+    _seed_experiment(db_session, "HPHT_SUP01", 8891)
+    _seed_experiment(db_session, "HPHT_SUP02", 8892)
+    _seed_experiment(db_session, "HPHT_SUP03", 8893)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_SUP01", 7.0, fl_h2=115.0),              # FL only
+        _v3_row("HPHT_SUP02", 7.0, di_h2=42.0, di_vol=30.0),  # DI only
+        _v3_row("HPHT_SUP03", 7.0, nh4=5.0),                  # neither
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 3
+    assert [w for w in result.warnings if "direct injection" in w] == []
 
 
 # ---------------------------------------------------------------------------
@@ -1286,7 +1379,7 @@ def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
         _v3_row("SERUM_DUP01a", 7.0, description="first", fl_h2=10.0),
         _v3_row("SERUM_DUP01a", 7.0, description="second", fl_h2=20.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1305,6 +1398,40 @@ def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
     ) == 0
 
 
+# ---------------------------------------------------------------------------
+# Error ordering (issue #114 item 3)
+# ---------------------------------------------------------------------------
+
+def test_errors_are_listed_in_sheet_row_order(db_session: Session):
+    """The error list reads top-down against the spreadsheet.
+
+    _process_bytes resolves every row's identity (Phase 1) before upserting any
+    row (Phase 2), so appending in execution order put EVERY Phase-1 error above
+    EVERY Phase-2 one. Here row 2 fails in Phase 2 (no such experiment) and row 3
+    fails in Phase 1 (unparseable Duration); before issue #114 the row 3 message
+    came first, which is the opposite of how the sheet reads.
+
+    Nothing is seeded on purpose. create_scalar_result_ex falls back to
+    auto_create_treatment_experiment (backend/services/scalar_results_service.py
+    :86-95), which needs an existing parent experiment — with an empty table
+    there is none, so the not-found ValueError is guaranteed.
+    """
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_ORD_MISSING", 7.0),   # sheet row 2 — Phase 2: experiment not found
+        _v3_row("HPHT_ORD02", "not a day"),  # sheet row 3 — Phase 1: invalid Duration
+    ])
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.errors) == 2, f"expected one error per row, got: {result.errors}"
+    assert result.errors[0].startswith("Row 2 ("), (
+        f"the row 2 Phase-2 failure must come first, got: {result.errors}"
+    )
+    assert result.errors[1].startswith("Row 3:"), (
+        f"the row 3 Phase-1 failure must come second, got: {result.errors}"
+    )
+
+
 def test_same_vial_different_timepoints_is_fine(db_session: Session):
     """The same vial at two different days is two legitimate rows."""
     _seed_experiment(db_session, "SERUM_DUP02a", 8832)
@@ -1313,7 +1440,7 @@ def test_same_vial_different_timepoints_is_fine(db_session: Session):
         _v3_row("SERUM_DUP02a", 1.0, description="day 1", fl_h2=10.0),
         _v3_row("SERUM_DUP02a", 3.0, description="day 3", fl_h2=20.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1335,7 +1462,7 @@ def test_replicate_letters_are_distinct_vials(db_session: Session):
         _v3_row("SERUM_DUP03b", 1.0, fl_h2=20.0),
         _v3_row("SERUM_DUP03c", 1.0, fl_h2=30.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1355,7 +1482,7 @@ def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session
         _v3_row("SERUM_DUP04-t7", None, description="from token", fl_h2=10.0),
         _v3_row("SERUM_DUP04-t7", 7.0, description="explicit", fl_h2=20.0),
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, _ = _upload(
         db_session, xlsx
     )
 
@@ -1373,7 +1500,7 @@ def test_duplicate_does_not_block_other_rows(db_session: Session):
         _v3_row("SERUM_DUP05a", 7.0, description="dup two", fl_h2=20.0),
         _v3_row("SERUM_DUP05b", 7.0, description="fine", fl_h2=30.0),
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -1397,7 +1524,7 @@ def test_blank_nan_experiment_id_is_skipped_not_duplicated(db_session: Session):
         _v3_row(None, 7.0, description="another blank", nh4=2.0),
         _v3_row("HPHT_NAN01", 7.0, description="real row", nh4=3.0),
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 
@@ -1421,7 +1548,7 @@ def test_zero_experiment_id_is_skipped_not_treated_as_an_experiment(db_session: 
         _v3_row(0.0, 7.0, description="another stale row", nh4=2.0),
         _v3_row("HPHT_ZERO01", 7.0, description="real row", nh4=3.0),
     ])
-    created, updated, skipped, errors, feedbacks = MasterBulkUploadService.from_bytes(
+    created, updated, skipped, errors, feedbacks = _upload(
         db_session, xlsx
     )
 

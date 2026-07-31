@@ -61,9 +61,27 @@ pressure are taken from whichever block supplied the concentration, so do not
 mix them by hand. A `0` is treated as a real reading of zero — leave the cell
 **empty** if there was no measurement.
 
+If a row has a reading in **both** blocks, Full Loop wins and the
+direct-injection value is not stored anywhere. The upload names those rows under
+**Warnings** so you can see it happened — the discarded reading cannot be
+recovered from the database afterwards.
+
+**Gas volume and pressure need a reading to go with them.** A row with no
+`H2 (ppm)` in either block imports no gas volume or pressure either, even when
+those cells are filled in. The GC sheets carry values forward from previous runs,
+so geometry with no concentration beside it is stale rather than measured, and
+nothing is computed from it in any case.
+
 If you rename a Dashboard column, the upload now tells you: any unmatched column
 whose name mentions H2 appears under **Warnings** in the result panel rather
 than being ignored.
+
+**Errors are listed in sheet order.** Row errors appear in the same order as the
+rows in the spreadsheet, so you can work down the list against the file. A
+problem with the file as a whole — a missing required column — comes first,
+since it has no row number. (The deprecated wide `DI a/b/c H2 (ppm)` columns
+are reported under **Warnings**, not Errors — the rest of the file still
+uploads.)
 
 ### Expected sheet: `Dashboard`
 

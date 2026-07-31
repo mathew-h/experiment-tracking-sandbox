@@ -1,5 +1,5 @@
 """
-Master Results bulk upload — reads from fixed SharePoint path or uploaded bytes.
+Master Results bulk upload — parses an uploaded Dashboard workbook.
 
 Dashboard sheet column spec (v3, issue #111, 2026-07-30):
   Experiment ID | Description | Sample Date | Duration (Days) | NH4 (mM) |
@@ -16,7 +16,8 @@ v_results_scalar_rollup, not carried on the sheet.
 
 Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
 blank, and gas volume/pressure come from the same block. A value of 0 is a real
-reading, not a blank.
+reading, not a blank. A row with no reading in either block stores no gas
+geometry either — those columns carry stale values from previous runs.
 
 Older spellings are still accepted — the pre-rename 'H2 (ppm)', 'Gas Volume
 (mL)', 'Gas Pressure (psi)', 'Overwrite', and v2's 'DI avg H2 (ppm)'. v2's wide
@@ -96,9 +97,10 @@ _WIDE_DI_COLUMNS = {
 class MasterUploadResult:
     """Master Results upload outcome.
 
-    Exists because the legacy 5-tuple has no slot for warnings and ~20 tests
-    plus the router unpack it positionally. `from_bytes` keeps returning the
-    tuple; `from_bytes_ex` returns this.
+    The one return shape. Issue #111 introduced it beside a legacy 5-tuple that
+    had no slot for `warnings`; issue #114 deleted the tuple and the two entry
+    points that produced it, since anything wired to them would compute warnings
+    and drop them on the floor.
     """
 
     created: int = 0
@@ -107,11 +109,6 @@ class MasterUploadResult:
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     feedbacks: List[Dict[str, Any]] = field(default_factory=list)
-
-    def as_tuple(self) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
-        """Legacy 5-tuple shape. Warnings are dropped — callers that need them
-        should use from_bytes_ex()."""
-        return self.created, self.updated, self.skipped, self.errors, self.feedbacks
 
 
 def _normalize_headers(columns: Any) -> List[str]:
@@ -221,10 +218,12 @@ def _resolve_h2(
 
     Returns (h2_ppm, gas_volume_mL, gas_pressure_psi, source, di_ppm), where
     source is 'full_loop', 'di', or None when neither block has a
-    concentration. di_ppm is this row's own DI parse, returned whether or not
-    DI won — callers that need to know whether a DI reading was superseded
-    read it from here rather than re-parsing the cell themselves, so that
-    decision can never drift from the precedence choice made above.
+    concentration — in which case the geometry is None too, since the gas
+    columns carry the previous run's values. di_ppm is this row's own DI parse,
+    returned whether or not DI won — callers that need to know whether a DI
+    reading was superseded read it from here rather than re-parsing the cell
+    themselves, so that decision can never drift from the precedence choice
+    made above.
     """
     di_ppm = _parse_float(row.get("DI H2 (ppm)"))
 
@@ -247,15 +246,16 @@ def _resolve_h2(
             di_ppm,
         )
 
-    # No concentration in either block. Keep reading the Full Loop gas columns
-    # so a row recording only the sampling geometry behaves as it did pre-#111.
-    return (
-        None,
-        _parse_float(row.get("FL Gas Volume (mL)")),
-        _parse_float(row.get("FL Gas Pressure (psi)")),
-        None,
-        di_ppm,
-    )
+    # No concentration in either block, so no geometry either (issue #114). The
+    # pre-#111 allowance here kept the Full Loop gas columns so a row recording
+    # only sampling geometry behaved as it always had. That assumed a blank gas
+    # cell meant no data; carryover is now a permanent condition of the GC sheets
+    # and 'H2 (ppm)' is the field of record (Mat, 2026-07-30), so those columns
+    # hold a previous run's values on 207 of 499 rows. Nothing was computed from
+    # them — _calculate_hydrogen needs a concentration — but persisting them put
+    # a 4235 mL volume in ScalarResults that no later reader could tell from a
+    # real measurement.
+    return (None, None, None, None, di_ppm)
 
 
 def _is_blank_duration(val: Any) -> bool:
@@ -375,26 +375,41 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     from backend.services.scalar_results_service import ScalarResultsService  # noqa: PLC0415
 
     out = MasterUploadResult()
-    errors = out.errors
+    sheet_errors = out.errors
     warnings = out.warnings
     feedbacks = out.feedbacks
     created = updated = skipped = 0
 
+    # Row-level errors carry their sheet row number and are sorted in at the end
+    # (issue #114 item 3). This function is two-phase by necessity — identity and
+    # duplicate tallying for every row, then the upserts — so appending straight
+    # to out.errors listed every Phase-1 error above every Phase-2 one: a row 5
+    # Duration error above a row 2 upsert failure, while researchers read this
+    # list against the sheet top-down. Sheet-level messages have no row number
+    # and belong at the top; every one of them returns immediately, so
+    # out.errors is empty by the time the sort runs, and extending rather than
+    # assigning keeps them first if a non-returning one is ever added. Row-level
+    # warnings have no equivalent ordering guarantee — that is only safe today
+    # because every row warning is emitted in Phase 1 while the sole Phase-2
+    # warning is file-level and appended last, so a future Phase-2 row warning
+    # would need this same treatment.
+    row_errors: List[Tuple[int, str]] = []
+
     try:
         xls = pd.ExcelFile(io.BytesIO(file_bytes))
     except Exception as exc:
-        errors.append(f"Failed to read file: {exc}")
+        sheet_errors.append(f"Failed to read file: {exc}")
         return out
 
     sheet_name = _find_sheet(xls)
     if sheet_name is None:
-        errors.append("File has no sheets.")
+        sheet_errors.append("File has no sheets.")
         return out
 
     try:
         df = xls.parse(sheet_name)
     except Exception as exc:
-        errors.append(f"Failed to parse sheet '{sheet_name}': {exc}")
+        sheet_errors.append(f"Failed to parse sheet '{sheet_name}': {exc}")
         return out
 
     df.columns = _normalize_headers(df.columns)
@@ -403,7 +418,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     required = {"Experiment ID", "Duration (Days)"}
     missing = required - set(df.columns)
     if missing:
-        errors.append(
+        sheet_errors.append(
             f"Sheet '{sheet_name}' is missing required columns: {', '.join(sorted(missing))}. "
             f"Available: {', '.join(df.columns[:10])}"
         )
@@ -465,7 +480,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             skipped += 1
             continue
         if error is not None:
-            errors.append(error)
+            row_errors.append((row_num, error))
             continue
         resolved.append((row_num, exp_id, time_post_reaction, row))
 
@@ -481,14 +496,17 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         key_counts[key] = key_counts.get(key, 0) + 1
 
     # Phase 2 — upsert what is left.
+    # Rows where Full Loop overrode a populated direct-injection cell. Reported
+    # once, at file level, after the loop (issue #114 item 1).
+    superseded_rows: List[int] = []
     for row_num, exp_id, time_post_reaction, row in resolved:
         if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
-            errors.append(
+            row_errors.append((row_num, (
                 f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
                 f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "
                 f"— give each vial its own ID (e.g. SERUM_001a-t7, SERUM_001b-t7). "
                 f"No row for this vial-day was written."
-            )
+            )))
             continue
 
         description = str(row.get("Description") or "").strip() or None
@@ -543,23 +561,49 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             else:
                 updated += 1
             savepoint.commit()
+            # di_ppm comes from _resolve_h2's own parse — re-reading the cell
+            # here would let this flag drift from the precedence decision if the
+            # DI branch ever gains filtering.
+            di_superseded = h2_source == "full_loop" and di_ppm is not None
+            if di_superseded:
+                superseded_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
                 "experiment_id": exp_id,
                 "action": action,
                 "h2_source": h2_source,
-                # di_ppm comes from _resolve_h2's own parse — re-reading the
-                # cell here would let this flag drift from the precedence
-                # decision if the DI branch ever gains filtering.
-                "h2_di_superseded": h2_source == "full_loop" and di_ppm is not None,
+                "h2_di_superseded": di_superseded,
             })
 
         except ValueError as exc:
             savepoint.rollback()
-            errors.append(f"Row {row_num} ({exp_id}): {exc}")
+            row_errors.append((row_num, f"Row {row_num} ({exp_id}): {exc}"))
         except Exception as exc:
             savepoint.rollback()
-            errors.append(f"Row {row_num} ({exp_id}): unexpected error — {exc}")
+            row_errors.append((row_num, f"Row {row_num} ({exp_id}): unexpected error — {exc}"))
+
+    # The per-row h2_di_superseded flag above reaches the client in `feedbacks`
+    # and nothing renders it, so a researcher could not learn from the app why a
+    # stored value is not the DI number they entered — and the discarded reading
+    # is not persisted either. One file-level warning says it in the panel the UI
+    # already draws (issue #114 item 1). Deliberately silent when precedence was
+    # never contested: 0 of 499 rows on the v3 Dashboard (2026-07-30) carry a
+    # reading in both blocks, and a warning that fires on ordinary sheets is one
+    # researchers learn to ignore.
+    if superseded_rows:
+        shown = ", ".join(str(r) for r in superseded_rows[:10])
+        if len(superseded_rows) > 10:
+            shown += f", and {len(superseded_rows) - 10} more"
+        label = "row" if len(superseded_rows) == 1 else "rows"
+        warnings.append(
+            f"Full Loop reading used instead of direct injection on "
+            f"{len(superseded_rows)} {label} ({shown}). 'DI H2 (ppm)' also held a "
+            "value there and Full Loop takes precedence, so the direct-injection "
+            "reading was not stored and cannot be recovered from the database."
+        )
+
+    # Stable sort — two errors on one row keep the order they were found in.
+    out.errors.extend(message for _, message in sorted(row_errors, key=lambda item: item[0]))
 
     out.created, out.updated, out.skipped = created, updated, skipped
     return out
@@ -567,48 +611,12 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
 
 class MasterBulkUploadService:
     @staticmethod
-    def sync_from_path(db: Session) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
-        """
-        Read the Master Results file from the configured path.
-        Priority: AppConfig table > MASTER_RESULTS_PATH env/settings.
-        Returns (created, updated, skipped, errors, feedbacks).
-        """
-        from backend.config.settings import get_settings  # noqa: PLC0415
-        from database.models.app_config import AppConfig  # noqa: PLC0415
-
-        cfg = db.query(AppConfig).filter_by(key="master_results_path").first()
-        path = cfg.value if cfg else get_settings().master_results_path
-
-        try:
-            with open(path, "rb") as fh:
-                file_bytes = fh.read()
-        except FileNotFoundError:
-            return 0, 0, 0, [
-                f"Master Results file not found at: {path}. "
-                "Configure the path via Bulk Uploads → Master Results Sync → Settings."
-            ], []
-        except PermissionError:
-            return 0, 0, 0, [
-                f"Permission denied reading: {path}. "
-                "Ensure the file is not open in Excel."
-            ], []
-        except Exception as exc:
-            return 0, 0, 0, [f"Failed to read Master Results file: {exc}"], []
-
-        return _process_bytes(db, file_bytes).as_tuple()
-
-    @staticmethod
-    def from_bytes(
-        db: Session, file_bytes: bytes
-    ) -> Tuple[int, int, int, List[str], List[Dict[str, Any]]]:
-        """Parse a manually uploaded Master Results file.
-
-        Legacy 5-tuple shape, kept for existing callers. Use from_bytes_ex()
-        to also receive warnings.
-        """
-        return _process_bytes(db, file_bytes).as_tuple()
-
-    @staticmethod
     def from_bytes_ex(db: Session, file_bytes: bytes) -> MasterUploadResult:
-        """Parse a manually uploaded Master Results file, warnings included."""
+        """Parse an uploaded Master Results file.
+
+        The only entry point. `POST /api/bulk-uploads/master-results` requires a
+        multipart file (issue #74 removed path-based sync along with the
+        /master-results/config endpoints and the sync button), so there is no
+        second way in.
+        """
         return _process_bytes(db, file_bytes)

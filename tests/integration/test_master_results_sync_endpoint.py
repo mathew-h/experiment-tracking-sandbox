@@ -61,12 +61,10 @@ def test_sync_writes_sampled_solution_volume(db_session: Session):
         ["CF_INT001", 14.0, "Day 14", None, None, None, None,
          None, None, None, None, 7.1, None, 42.5, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
-        db_session, xlsx
-    )
+    outcome = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
-    assert errors == [], f"Unexpected errors: {errors}"
-    assert created == 1
+    assert outcome.errors == [], f"Unexpected errors: {outcome.errors}"
+    assert outcome.created == 1
 
     result = (
         db_session.query(ExperimentalResults)
@@ -87,12 +85,10 @@ def test_sync_without_sampled_solution_volume_column(db_session: Session):
         ["CF_INT002", 14.0, "Day 14", None, None, None, None,
          None, None, None, None, 7.1, None, None, "FALSE"],
     ])
-    created, updated, skipped, errors, _ = MasterBulkUploadService.from_bytes(
-        db_session, xlsx
-    )
+    outcome = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
-    assert errors == [], f"Unexpected errors: {errors}"
-    assert created == 1
+    assert outcome.errors == [], f"Unexpected errors: {outcome.errors}"
+    assert outcome.created == 1
 
     result = (
         db_session.query(ExperimentalResults)
