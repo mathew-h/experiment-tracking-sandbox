@@ -102,4 +102,30 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     expect(bars[0].querySelectorAll(':scope > div').length).toBe(16)
     expect(bars[1].querySelectorAll(':scope > div').length).toBe(3)
   })
+
+  it('explains a zero GC count instead of implying an idle lab (issue #115)', async () => {
+    vi.mocked(dashboardApi.full).mockResolvedValue({
+      summary: makeSummary({ gc_measurements_7wd: 0, gc_experiments_7wd: 0 }),
+      reactors: [],
+      timeline: [],
+      recent_activity: [],
+    })
+    renderDashboard()
+    expect(
+      await screen.findByText(/no GC Run Date recorded in this window/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/across 0 experiments/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the experiment-count subtitle when the GC count is non-zero', async () => {
+    vi.mocked(dashboardApi.full).mockResolvedValue({
+      summary: makeSummary({ gc_measurements_7wd: 5, gc_experiments_7wd: 3 }),
+      reactors: [],
+      timeline: [],
+      recent_activity: [],
+    })
+    renderDashboard()
+    expect(await screen.findByText(/across 3 experiments/)).toBeInTheDocument()
+    expect(screen.queryByText(/no GC Run Date recorded/)).not.toBeInTheDocument()
+  })
 })

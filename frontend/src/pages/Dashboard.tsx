@@ -78,10 +78,16 @@ export function DashboardPage() {
           value={data?.summary.gc_measurements_7wd ?? '—'}
           sub={
             data
-              ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end} · across ${data.summary.gc_experiments_7wd} experiment${data.summary.gc_experiments_7wd === 1 ? '' : 's'}`
+              ? data.summary.gc_measurements_7wd === 0
+                ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end} · no GC Run Date recorded in this window`
+                : `${data.summary.workday_window_start} – ${data.summary.workday_window_end} · across ${data.summary.gc_experiments_7wd} experiment${data.summary.gc_experiments_7wd === 1 ? '' : 's'}`
               : undefined
           }
-          title={data ? `${data.summary.workday_window_start} – ${data.summary.workday_window_end}` : undefined}
+          title={
+            data
+              ? `Counts results whose GC Run Date falls in ${data.summary.workday_window_start} – ${data.summary.workday_window_end}. A row with an H₂ reading but a blank GC Run Date is not counted.`
+              : undefined
+          }
         />
 
         <MetricCard
