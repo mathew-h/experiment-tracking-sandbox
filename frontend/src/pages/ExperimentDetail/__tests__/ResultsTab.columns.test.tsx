@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ResultsTab } from '../ResultsTab'
@@ -165,5 +165,39 @@ describe('ResultsTab — H2-first columns', () => {
     const row = await screen.findByText('T+7')
     fireEvent.click(row)
     expect(screen.queryByText('not recorded')).not.toBeInTheDocument()
+  })
+
+  it('shows the missing-GC flag even while the scalar fetch is still pending', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, has_scalar: true, h2_concentration: 512, gc_run_date: null },
+    ])
+    // Never-resolving promise (same idiom as Dashboard.test.tsx:82) — pins that the
+    // run-dates block does not wait behind the scalar query's loading spinner.
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockReturnValue(new Promise(() => {}))
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    const row = await screen.findByText('T+7')
+    fireEvent.click(row)
+    expect(await screen.findByText('not recorded')).toBeInTheDocument()
+  })
+
+  it('renders set NMR and XRD run dates without rendering the unset ICP date', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      {
+        ...baseResult,
+        nmr_run_date: '2026-05-01T00:00:00Z',
+        xrd_run_date: '2026-06-15T00:00:00Z',
+        icp_run_date: null,
+        h2_concentration: null,
+        gc_run_date: null,
+      },
+    ])
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    const row = await screen.findByText('T+7')
+    fireEvent.click(row)
+    const heading = await screen.findByText('Instrument Run Dates')
+    const section = heading.parentElement as HTMLElement
+    expect(within(section).getByText('2026-05-01')).toBeInTheDocument()
+    expect(within(section).getByText('2026-06-15')).toBeInTheDocument()
+    expect(within(section).queryByText(/^ICP:/)).not.toBeInTheDocument()
   })
 })

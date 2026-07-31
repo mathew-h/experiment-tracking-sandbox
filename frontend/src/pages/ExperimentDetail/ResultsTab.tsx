@@ -42,8 +42,6 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
     enabled: result.has_icp,
   })
 
-  if (loadingScalar) return <div className="py-3 pl-6"><PageSpinner /></div>
-
   // GC renders even when blank if an H2 reading exists: a field that appears
   // only when populated cannot show a researcher that it is missing, which is
   // the whole point here (issue #115).
@@ -52,7 +50,9 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
 
   return (
     <div className="bg-surface-raised border-t border-surface-border px-6 py-3 space-y-3">
-      {scalar && (
+      {loadingScalar ? (
+        <div className="py-3 pl-6"><PageSpinner /></div>
+      ) : scalar && (
         <div>
           <p className="text-xs font-semibold text-ink-secondary mb-1">Scalar Results</p>
           <div className="grid grid-cols-3 gap-x-6 gap-y-1">
