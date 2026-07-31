@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ResultsTab } from '../ResultsTab'
 import type { ResultWithFlags } from '@/api/experiments'
 import * as experimentsApiModule from '@/api/experiments'
+import * as resultsApiModule from '@/api/results'
 
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
@@ -127,5 +128,42 @@ describe('ResultsTab — H2-first columns', () => {
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
     await screen.findByText('T+7')
     expect(screen.queryByText('MOD')).not.toBeInTheDocument()
+  })
+
+  it('shows the GC run date in the expanded row when it is set', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, has_scalar: true, h2_concentration: 512, gc_run_date: '2026-07-29T00:00:00Z' },
+    ])
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValue(null)
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    const row = await screen.findByText('T+7')
+    fireEvent.click(row)
+    expect(await screen.findByText('Instrument Run Dates')).toBeInTheDocument()
+    expect(await screen.findByText('2026-07-29')).toBeInTheDocument()
+  })
+
+  it('flags a missing GC run date when the row has an H2 reading', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, has_scalar: true, h2_concentration: 512, gc_run_date: null },
+    ])
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValue(null)
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    const row = await screen.findByText('T+7')
+    fireEvent.click(row)
+    expect(await screen.findByText('not recorded')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/not counted by the Dashboard's GC Measurements card/)
+    ).toBeInTheDocument()
+  })
+
+  it('does not flag a missing GC run date when the row has no H2 reading', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, has_scalar: true, h2_concentration: null, gc_run_date: null },
+    ])
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValue(null)
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    const row = await screen.findByText('T+7')
+    fireEvent.click(row)
+    expect(screen.queryByText('not recorded')).not.toBeInTheDocument()
   })
 })
