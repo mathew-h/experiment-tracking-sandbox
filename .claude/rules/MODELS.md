@@ -242,6 +242,20 @@ Stores solution chemistry measurements.
     IDs, not columns. The upload rejects two rows sharing an ID and timepoint.
     Cross-replicate mean/SD therefore come from `v_results_scalar_rollup`
     (`mean_h2_ppm` / `sd_h2_ppm`), not from the spreadsheet.
+  - **Overwrite is bounded by the source's own columns (issue #116):** on the
+    `overwrite=True` branch, `create_scalar_result_ex` clears only the fields
+    named in the optional `_sheet_fields` key of `result_data`. Absent that key
+    it iterates all of `SCALAR_UPDATABLE_FIELDS`, which is what let an
+    `Overwrite=TRUE` Master Results row null the eight entries that sheet has no
+    column for — `background_ammonium_concentration_mM` among them, which
+    defaults to 0.2 mM when NULL and therefore moved net ammonium and
+    `grams_per_ton_yield` silently. `master_bulk_upload.py` now derives
+    `_sheet_fields` from the keys of its own `result_data` literal, so adding a
+    sheet column cannot leave the new field unclearable. A declared column left
+    blank still clears — required, or an overwrite re-upload re-asserts the
+    stale GC carryover geometry issue #114 removed. `scalar_results.py` and
+    `quick_upload.py` also reach this branch and declare nothing, so they keep
+    the whole-list behavior and the same latent bug; tracked separately.
   - **Geometry requires a reading (issue #114):** a Master Results row with no
     `H2 (ppm)` in either GC block stores no `gas_sampling_volume_ml` or
     `gas_sampling_pressure_MPa` either. Those sheet columns carry the previous

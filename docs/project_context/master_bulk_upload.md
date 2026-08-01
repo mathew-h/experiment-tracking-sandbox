@@ -25,13 +25,14 @@ Description, Sample Date, NMR Run Date, ICP Run Date, GC Run Date, NH4 (mM), H2 
 - **Numeric Parsing (`_parse_numeric`):** Handles errors like `#DIV/0!`, empty strings, and numbers containing commas, converting valid entries to floats.
 - **Unit Conversions:** Converts `Gas Pressure (psi)` to MPa automatically by multiplying by `0.00689476`.
 - **Overwrite Behavior:** Looks for a per-row `Overwrite` flag (e.g., "TRUE") or falls back to the global setting. If existing results are found and overwrite is false, the row is skipped to prevent accidental data loss.
+- **Overwrite Scope (issue #116):** overwrite is bounded to the fields this sheet has columns for. The parser passes `_sheet_fields` — derived from the keys of its own `result_data` literal, so it cannot drift — and `create_scalar_result_ex` clears only within that set. A carried column left blank still clears (this is what keeps #114's stale carryover geometry from being re-asserted); the eight `SCALAR_UPDATABLE_FIELDS` entries with no column here (`background_ammonium_concentration_mM`, `ammonium_quant_method`, `final_nitrate_concentration_mM`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `final_dissolved_oxygen_mg_L`, `background_experiment_id`, `ferrous_iron_yield`) are left untouched. Callers that pass no `_sheet_fields` keep the previous whole-list behavior.
 
 ## Timepoint ID Token (Issue #81)
 - If the resolved Experiment ID carries a `-t<days>` token (e.g. `SERUM_001a-t7`), a blank `Duration (Days)` cell is filled from the ID; a different `Duration (Days)` value errors the row rather than being silently overwritten. This is the one case where `Duration (Days)` may be omitted and the row still processes.
 - Checked at the string level in `master_bulk_upload.py` (`split_timepoint_token`, `apply_id_timepoint`) before the row reaches `ScalarResultsService`, which applies the same rule again as a second layer of defense.
 
 ## Data Model and Flow
-Delegates the parsed and cleaned records to `ScalarResultsService.bulk_create_scalar_results_ex`. Validates that the experiment exists in the database before attempting to insert or update results.
+Calls `ScalarResultsService.create_scalar_result_ex` once per row, each inside its own SAVEPOINT so one bad row does not discard the rows already written. Validates that the experiment exists in the database before attempting to insert or update results.
 
 ## Warnings
 
@@ -39,4 +40,4 @@ Delegates the parsed and cleaned records to `ScalarResultsService.bulk_create_sc
 - **Superseded direct-injection reading (issue #114):** if a row carries an H2 reading in both the Full Loop and direct-injection GC blocks, Full Loop wins and the file-level warnings list names the affected rows once, at file level.
 
 ## Output
-Returns a tuple: `(created, updated, skipped, errors, feedbacks)`.
+`from_bytes_ex` returns a `MasterUploadResult` with `created`, `updated`, `skipped`, `errors`, `feedbacks` and `warnings`. The tuple-returning `as_tuple`, `from_bytes` and `sync_from_path` were deleted by issue #114 item 4 — they dropped `warnings` by construction.

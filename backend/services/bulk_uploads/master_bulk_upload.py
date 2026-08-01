@@ -546,10 +546,26 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "final_ph": ph,
             "final_conductivity_mS_cm": conductivity,
             "sampling_volume_mL": sampling_vol_ml,
-            "_overwrite": overwrite,
         }
-        # Remove None-valued optional fields so the service skips them
-        result_data = {k: v for k, v in result_data.items() if v is not None or k == "_overwrite"}
+        # Issue #116: declare the fields this sheet has columns for, so an
+        # OVERWRITE row can clear one it carries and left blank without nulling
+        # the eight SCALAR_UPDATABLE_FIELDS entries the Dashboard never carries
+        # (background ammonium, quant method, nitrate, alkalinity, CO2 partial
+        # pressure, dissolved oxygen, background experiment ID, ferrous iron
+        # yield) -- all UI-entered, by someone other than whoever runs the
+        # upload. Derived from the literal above rather than restated, so adding
+        # a column here cannot silently leave the new field unclearable.
+        sheet_fields = frozenset(result_data)
+
+        # Remove None-valued optional fields so the service skips them.
+        # Underscore-prefixed control keys are directives, not data, and are
+        # kept regardless of value.
+        result_data["_overwrite"] = overwrite
+        result_data["_sheet_fields"] = sheet_fields
+        result_data = {
+            k: v for k, v in result_data.items()
+            if v is not None or k.startswith("_")
+        }
 
         savepoint = db.begin_nested()
         try:
