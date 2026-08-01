@@ -11,6 +11,25 @@
 
 ---
 
+## Discovered (2026-08-01, during issue #116)
+
+Two bulk-upload parsers still carry the bug #116 fixed for Master Results.
+`backend/services/bulk_uploads/scalar_results.py:305` and `quick_upload.py:304` both set
+`_overwrite` and pass no `_sheet_fields`, so `create_scalar_result_ex`'s overwrite branch
+still iterates all 21 `SCALAR_UPDATABLE_FIELDS` for them — an overwrite upload through
+either nulls every field its workbook has no column for, including
+`background_ammonium_concentration_mM`, which falls back to 0.2 mM and therefore moves net
+ammonium and `grams_per_ton_yield` silently. Left unfixed by explicit user scope decision:
+unlike the Master Results Dashboard, these sheets have no fixed schema, so the declared
+field set must be derived per-file from the columns actually present, across two more
+locked parsers with their own test suites. The service-side mechanism shipped with #116 is
+already general — opting each in is one added key once that per-file derivation is settled.
+Recorded in `docs/issues/issue-master-results-overwrite-wipes-unlisted-fields.md` under
+Follow-up. Worth doing before any work that encourages overwrite uploads through the Quick
+Upload or Scalar Results paths.
+
+---
+
 ## Discovered (2026-07-27, during issue #85)
 
 While implementing issue #85 (dashboard KPI cards), verified a real, unfixed bug in
