@@ -30,6 +30,20 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `sampling_description`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `cumulative_ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
 | `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `v_ppm` (36 element columns) |
+| `public.v_results_scalar_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph` |
+
+---
+
+## Replicate & Timepoint Handling
+
+`v_results_scalar_rollup` is the **cross-replicate statistics** view — one row per `(base_experiment_id, time_post_reaction_bucket_days)`, giving mean/median/sample-std across a replicate set. Use it for any visual showing "mean ± std across replicates" rather than aggregating `v_results_scalar` in a Power BI measure.
+
+- **Grouping key:** `COALESCE(e.base_experiment_id, e.experiment_id)` — the same key used by `v_experiment_additives_summary`. A replicate letter (`a`, `b`, `c`) is a distinct scientific unit; a sequential suffix (`-2`, `-3`) on a base ID or a letter is a re-run of that same unit, not a new replicate — but this view's `n_replicates` cannot distinguish the two cases (a base with sequential re-runs and no lettered replicates still yields `n_replicates >= 2`, since both share `base_experiment_id`). Do not label `n_replicates` as "replicate count" in a visual without confirming the underlying group actually uses lettered replicates.
+- **Outlier handling:** rows from experiments flagged `is_outlier = true` are excluded from every aggregate in this view, including `n_replicates`. `is_outlier` and `replicate_label` are **not exposed in any Power BI view** — there is no way to filter or slice on them directly from the model; the rollup view's exclusion happens upstream in SQL.
+- **Group parent inclusion:** the group parent ("replicate 0," no letter suffix) shares the grouping key with its lettered siblings and is included in the mean/median/std unless flagged `is_outlier` — there's no separate opt-out for a parent run.
+- **Timepoint tokens:** a trailing `-t<days>` token on an experiment ID (e.g. `SERUM_001a-t7`) encodes a destructively-sampled vial's day. The token is stripped before grouping, so `SERUM_001a-t7` still rolls up under base `SERUM_001`.
+- **`v_results_scalar` cumulative column caveat:** `cumulative_ferrous_iron_yield_h2_pct` in `v_results_scalar` partitions by individual `experiment_id`, **not** by the base/group key — replicate siblings accumulate independently and never sum across each other. A single-timepoint `-t` vial's cumulative value equals just that one row. Do not use this column to build a group-level cumulative-yield chart; aggregate at the `v_results_scalar_rollup` grain instead.
+- **Join key:** `v_results_scalar_rollup` joins to `v_experiments` on `base_experiment_id = experiment_id` (for a bare base row) or via a calculated column matching `COALESCE(base_experiment_id, experiment_id)` on the experiments side, since `v_experiments` does not itself expose a pre-computed group key column.
 
 ---
 
@@ -58,6 +72,8 @@ v_experiments (experiment_id)    1 ──── * v_dim_timepoints (experiment_i
 v_dim_timepoints (result_id)    1 ──── 1 v_results_scalar (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_results_h2 (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_results_icp (result_id)
+
+v_experiments (base_experiment_id or experiment_id)  * ──── 1 v_results_scalar_rollup (base_experiment_id, time_post_reaction_bucket_days)
 
 v_sample_info (sample_id)       1 ──── * v_experiments (sample_id)
 v_sample_info (sample_id)       1 ──── * v_sample_characterization (sample_id)
@@ -131,6 +147,10 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
   `v_experiments` via `experiment_id` — it is intentionally **not** routed through
   `v_dim_timepoints`. XRD measurements follow a different schedule than scalar/H2/ICP
   results and may not align with primary result timepoints.
+- `v_results_scalar_rollup` has no ICP aggregation (permanently out of scope) and no
+  `result_id` — it is keyed on `base_experiment_id` + `time_post_reaction_bucket_days`,
+  not on an individual result row, so it cannot be joined 1:1 into `v_dim_timepoints`.
+  See "Replicate & Timepoint Handling" above for grouping and outlier semantics.
 
 ---
 
