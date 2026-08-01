@@ -1649,3 +1649,55 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
 - **Docs updated:** yes.
 - **Process:** 6-task subagent-driven build, 10 commits, six task reviews, two task fix rounds (Task 5 variable shadowing; Task 6 three doc-accuracy findings), whole-branch review on the most capable model (verdict: ready to merge with fixes — 0 Critical, 2 Important, both false doc statements), one fix wave, one scoped re-review. One reviewer finding was itself wrong (a test docstring said to name the deleted method never did) and was correctly declined rather than forced. One finding was plan-mandated and the controller ruled on it instead of escalating, on the grounds that a factual error inside a requirement is not a trade-off the user chose; disclosed at the time. Ledger was at `.superpowers/sdd/2026-07-30-issue-114-master-results-residual-gaps/`.
 - **PR:** none — merged locally to `develop` per the user's choice at the finishing-a-branch menu. Branch never pushed.
+
+## 2026-08-01 | issue #115 — GC Measurements KPI reads 0/0 while the lab is active
+
+- **Diagnosis first, because it changed the work:** the KPI query was never broken. `gc_run_date`
+  is populated on 115 of 1056 dev-DB `scalar_results` rows and **every one falls in Mar–May 2026**;
+  restricted to rows that carry an H2 reading, coverage ran Mar 35/51 · Apr 59/61 · May 16/16 and
+  then stopped. Across 9,615 audited `scalar_results` updates (Feb–May 2026, 6,510 in April alone)
+  the only field ever recorded going non-null → NULL was `gross_ammonium_concentration_mM`, 3
+  times — so the "overwrite re-upload wipes the date" hypothesis in the issue has **zero**
+  instances in the data. The card was accurately reporting a real void that nothing in the app
+  made visible. The query, the workday window and the frontend wiring are all unchanged.
+- **Honest limit:** the dev DB's real data ends ~May 2026 (its June–July rows are `HPHT_901*` /
+  `SERUM_DEMO_901*` fixtures from #111/#114), so it cannot prove what happened on the lab PC in
+  June–July. Corrected production queries were handed off instead — the issue's original Q2/Q3
+  cite `scalar_results.created_at`/`updated_at`, **neither of which exists**; the replacement Q2
+  reads `modifications_log` JSONB and answers the wipe question directly. All four were executed
+  against the dev DB before shipping, so they are copy-paste correct rather than merely plausible.
+- **Files changed:**
+  - `backend/services/bulk_uploads/master_bulk_upload.py` (LOCKED — additive only, per explicit
+    user authorization): one file-level warning when a row carries an H2 reading with a missing or
+    unreadable `GC Run Date`, plus one denominator counter. Reports coverage (`n of total` rows
+    carrying an H2 reading), naming sheet rows only at ≤10. Silent when the row has no H2 reading.
+    No parse/write logic touched.
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `ExpandedRow` renders NMR/ICP/GC/XRD run
+    dates from `ResultWithFlags` (all three backend layers already shipped; render-only). A blank
+    GC date shows `not recorded` plus an explanatory line when the row has an H2 reading. Also
+    removed the `loadingScalar` early return that hid the block behind an unrelated fetch.
+  - `frontend/src/pages/Dashboard.tsx` — GC card subtitle reads `no GC Run Date recorded in this
+    window` at zero instead of `across 0 experiments`; tooltip states the counting rule both ways.
+  - `docs/issues/issue-115-gc-run-date-visibility.md` (new),
+    `docs/issues/issue-master-results-overwrite-wipes-unlisted-fields.md` (new),
+    `docs/issues/issue-results-api-missing-run-dates.md`, `docs/user_guide/DASHBOARD.md`,
+    `docs/upload_templates/master_bulk_upload.md`, `docs/superpowers/plans/2026-07-31-issue-115-…md`
+  - Tests: `tests/services/bulk_uploads/test_master_bulk_upload.py`,
+    `frontend/src/pages/ExperimentDetail/__tests__/ResultsTab.columns.test.tsx`,
+    `frontend/src/pages/__tests__/Dashboard.test.tsx`
+- **Tests added:** yes — backend: warning fires with the right denominator, silent without an H2
+  reading, and the >10-row coverage branch (the realistic production path, since a full re-upload
+  processes every row) asserts a ratio with no row list. Frontend: GC date rendered, `not recorded`
+  when an H2 reading exists without one, absent when it doesn't, the header absent in that case,
+  the mixed non-GC-date render path, the block surviving a never-resolving scalar fetch, and both
+  Dashboard subtitle branches. 349 backend / 207 frontend passing.
+- **Scoped out deliberately (user decision, 2026-07-31):** (1) the `overwrite=True` field-wipe —
+  real in the code and worse than the issue framed it (an `Overwrite=TRUE` Master Results upload
+  nulls the **eight** fields the sheet never carries, incl. `background_ammonium_concentration_mM`,
+  which moves net ammonium) but with zero observed instances and not the cause of the 0/0. Handed
+  off to its own doc. (2) redefining the KPI to count H2 readings instead of GC run dates.
+- **Known limit, now documented:** the KPI window is **rolling** (last 7 workdays), so the Mar–Jul
+  2026 gap can never appear on the card. Backfilling correct historical dates does not help; only
+  dates entered going forward will count. This branch stops the omission recurring — it cannot
+  repair the number originally reported.
+- **Decision logged:** yes — `docs/working/decisions.md`
