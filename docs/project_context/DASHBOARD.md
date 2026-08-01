@@ -31,9 +31,13 @@ shows a tooltip stating exactly what it counts.
 
 Two places help close that gap:
 
-- **Master Results upload** now warns when a row arrives with an H₂ reading
-  but a blank `GC Run Date` column, naming the affected spreadsheet rows so
-  they can be corrected and re-uploaded.
+- **Master Results upload** now warns when rows arrive with an H₂ reading but
+  a blank `GC Run Date` column, reporting how many of the H₂-bearing rows are
+  affected (e.g. "1 of 2 rows"). When 10 or fewer rows are affected, the
+  specific spreadsheet rows are named. Filling in the date is still worth
+  doing for record-keeping, but it will not make an old row appear on the
+  GC Measurements card — that card only looks at the last 7 workdays, so
+  only dates entered from now on will be counted.
 - **The Results tab** shows the NMR, ICP, GC, and XRD run dates for each
   timepoint. If a timepoint has an H₂ reading but no GC run date, the GC line
   reads "not recorded" in place of a date, with a short note explaining that

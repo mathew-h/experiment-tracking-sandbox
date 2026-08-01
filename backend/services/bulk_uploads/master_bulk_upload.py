@@ -641,11 +641,15 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         else:
             where = ""
         label = "row" if total == 1 else "rows"
+        stored_clause = (
+            "The reading was stored, but this upload supplied no run date for it."
+            if n == 1
+            else "The readings were stored, but this upload supplied no run date for them."
+        )
         warnings.append(
             f"'GC Run Date' is missing or unreadable on {n} of {total} {label} "
-            f"carrying an H2 reading{where}. The readings were stored; no run "
-            "date was supplied for those rows (any date already recorded is "
-            "left untouched). The Dashboard's 'GC Measurements' card counts GC "
+            f"carrying an H2 reading{where}. {stored_clause} "
+            "The Dashboard's 'GC Measurements' card counts GC "
             "Run Date entries falling in the last 7 workdays, so backfilling "
             "an older date will not make a row appear there — only dates "
             "entered going forward will count."

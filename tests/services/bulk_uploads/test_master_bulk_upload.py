@@ -1597,6 +1597,9 @@ def test_warns_when_h2_reading_has_no_gc_run_date(db_session: Session):
     assert "1 of 2 rows" in missing[0], (
         f"the denominator must count only H2-bearing rows, got: {missing[0]}"
     )
+    assert "The reading was stored" in missing[0], (
+        f"singular clause must be used at n=1, got: {missing[0]}"
+    )
     assert "(2)" in missing[0], (
         f"at or below the 10-row threshold the sheet row must be named, got: {missing[0]}"
     )
