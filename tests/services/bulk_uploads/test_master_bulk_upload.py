@@ -1573,6 +1573,10 @@ def test_warns_when_h2_reading_has_no_gc_run_date(db_session: Session):
     count this row. 115 of 1056 dev-DB scalar rows carry a GC run date and all
     fall in Mar-May 2026 while H2 readings kept arriving -- that silence is the
     bug reported in issue #115.
+
+    Also pins the denominator (rows carrying an H2 reading, not all rows) is
+    right when some of those rows DO have a date: 2 rows carry H2 here, one
+    missing its date, so the warning must read "1 of 2", not "1 of 1".
     """
     _seed_experiment(db_session, "HPHT_GCW01", 8901)
     _seed_experiment(db_session, "HPHT_GCW02", 8902)
@@ -1590,9 +1594,11 @@ def test_warns_when_h2_reading_has_no_gc_run_date(db_session: Session):
     assert len(missing) == 1, (
         f"exactly one file-level warning, not one per row, got: {result.warnings}"
     )
-    assert "1 row" in missing[0], missing[0]
+    assert "1 of 2 rows" in missing[0], (
+        f"the denominator must count only H2-bearing rows, got: {missing[0]}"
+    )
     assert "(2)" in missing[0], (
-        f"the warning must name the sheet row so it can be found, got: {missing[0]}"
+        f"at or below the 10-row threshold the sheet row must be named, got: {missing[0]}"
     )
     assert "(3)" not in missing[0], (
         f"row 3 supplied a GC run date and must not be named, got: {missing[0]}"
@@ -1613,3 +1619,38 @@ def test_no_gc_date_warning_when_row_has_no_h2_reading(db_session: Session):
     assert result.errors == [], f"Unexpected errors: {result.errors}"
     assert result.created == 1
     assert [w for w in result.warnings if "GC Run Date" in w] == []
+
+
+def test_warns_with_coverage_form_above_the_row_list_threshold(db_session: Session):
+    """Above 10 missing rows, the warning reports a ratio, not a row list.
+
+    ~128 H2-bearing scalar rows exist Mar-May 2026 alone, and a full Master
+    Results re-upload processes every row, so this many-rows branch is the
+    realistic first firing in production -- not a corner case. Enumerating
+    every row number here would be exactly the noise the file otherwise
+    avoids, so above the <=10 threshold (matching the #114 supersede warning)
+    the warning reports n/total with no row list and no "and N more".
+    """
+    rows = []
+    for i in range(11):
+        exp_id = f"HPHT_GCM{i:02d}"
+        _seed_experiment(db_session, exp_id, 8920 + i)
+        rows.append(_v3_row(exp_id, 7.0, fl_h2=100.0 + i))
+
+    xlsx = _master_excel_v3(rows)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 11
+
+    missing = [w for w in result.warnings if "GC Run Date" in w]
+    assert len(missing) == 1, (
+        f"exactly one file-level warning, not one per row, got: {result.warnings}"
+    )
+    assert "11 of 11 rows" in missing[0], missing[0]
+    assert "H2 reading (" not in missing[0], (
+        f"above the threshold no row-number list should follow the phrase, got: {missing[0]}"
+    )
+    assert "more" not in missing[0], (
+        f"the overflow phrasing ('and N more') must not appear here, got: {missing[0]}"
+    )

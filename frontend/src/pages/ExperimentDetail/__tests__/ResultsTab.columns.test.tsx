@@ -165,6 +165,7 @@ describe('ResultsTab — H2-first columns', () => {
     const row = await screen.findByText('T+7')
     fireEvent.click(row)
     expect(screen.queryByText('not recorded')).not.toBeInTheDocument()
+    expect(screen.queryByText('Instrument Run Dates')).not.toBeInTheDocument()
   })
 
   it('shows the missing-GC flag even while the scalar fetch is still pending', async () => {
@@ -173,7 +174,9 @@ describe('ResultsTab — H2-first columns', () => {
     ])
     // Never-resolving promise (same idiom as Dashboard.test.tsx:82) — pins that the
     // run-dates block does not wait behind the scalar query's loading spinner.
-    vi.mocked(resultsApiModule.resultsApi.getScalar).mockReturnValue(new Promise(() => {}))
+    // mockReturnValueOnce, not mockReturnValue: this mock must not leak into
+    // later tests in the file (there is no clearMocks/restoreMocks configured).
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockReturnValueOnce(new Promise(() => {}))
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
     const row = await screen.findByText('T+7')
     fireEvent.click(row)

@@ -51,7 +51,7 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
   return (
     <div className="bg-surface-raised border-t border-surface-border px-6 py-3 space-y-3">
       {loadingScalar ? (
-        <div className="py-3 pl-6"><PageSpinner /></div>
+        <PageSpinner />
       ) : scalar && (
         <div>
           <p className="text-xs font-semibold text-ink-secondary mb-1">Scalar Results</p>
