@@ -96,7 +96,10 @@ Wherever `xrd_run_date` currently renders (grep `frontend/src/` — it comes thr
 
 Not part of the original scope, but it's in the same code path and directly undermines the point of exposing these fields.
 
-`master_bulk_upload.py:232` strips `None` values from `result_data`:
+`master_bulk_upload.py`'s `# Remove None-valued optional fields so the service
+skips them` comprehension strips `None` values from `result_data` (line number
+not cited here — it has already drifted once across branches; the comment
+text is the stable reference):
 
 ```python
 result_data = {k: v for k, v in result_data.items() if v is not None or k == "_overwrite"}

@@ -37,16 +37,40 @@ of 61 H2 rows carried a date. Candidate (b) — the column simply stopped being
 filled in — is what the data supports. The KPI query is correct and was
 reporting a real void, not a bug in the count itself.
 
+The audit trail's coverage of `gc_run_date` specifically was verified, not
+assumed: `create_scalar_result_ex` (`backend/services/scalar_results_service.py`)
+snapshots and diffs every field in `SCALAR_UPDATABLE_FIELDS` (lines 14–21,
+`gc_run_date` included) both on create and on update, and writes the result to
+`ModificationsLog.old_values`/`new_values` (lines 189–205) whenever any field in
+that list changes. So the empty Q2 result above rules out a `gc_run_date` wipe
+on the overwrite path itself — not merely on the eight fields the Master
+Results sheet never carries at all (see
+`issue-master-results-overwrite-wipes-unlisted-fields.md`), which is a weaker
+claim than what Q2 actually establishes.
+
 **Honest limit: this DB's real data ends in May 2026.** It cannot prove what
 happened on the lab PC in June–July, which is exactly the window the reported
 symptom falls in. The **Production confirmation** section below hands off the
 corrected queries to run against the live database.
 
+**The rolling window means the original gap can never show up here, ever.**
+The KPI counts `gc_run_date` values in the *last 7 workdays* — a moving
+window, not all-time coverage. The Mar–May 2026 rows that do carry a date will
+never re-enter that window again, no matter what anyone does today, and
+backfilling correct historical dates onto them would not help either: a
+backfilled date is still a date in the past, outside the rolling window. This
+branch stops the omission from recurring going forward (the upload warning
+fires the moment a new H2 reading lands without a date, and the Results tab
+and Dashboard both make a blank date visible) — but it cannot repair, and was
+never going to repair, the `0` Mat originally reported. That number was, and
+will remain, an accurate read of an empty window; only new dates entered from
+now on can change what the card shows next.
+
 ## What shipped
 
 | # | What | Commit |
 |---|---|---|
-| 1 | Master Results upload emits one file-level warning naming sheet rows that carry an H2 reading with a blank `GC Run Date`. Silent when the row has no H2 reading. | `191cf5f` |
+| 1 | Master Results upload emits one file-level warning when an H2 reading arrives with a missing or unreadable `GC Run Date`, reporting how many of the H2-bearing rows were affected (naming the sheet rows only at 10 or fewer; a ratio above that). Silent when the row has no H2 reading. | `191cf5f`, fixed up post-review |
 | 2 | The Results tab's expanded row renders NMR / ICP / GC / XRD run dates from data the API already returned (`ResultWithFlagsResponse`). A blank GC date shows `not recorded` in warning colour, plus an explanatory line, whenever the row has an H2 reading. | `478081b` |
 | 2b | Decoupled that block from the scalar fetch's loading state, so the signal is never masked by a slow request. | `c107d2b` |
 | 3 | The Dashboard GC card's subtitle now reads `no GC Run Date recorded in this window` when the count is zero (instead of `across 0 experiments`, which read as an idle lab), and a tooltip states what the card counts. | `b1e0f2b` |
@@ -59,8 +83,9 @@ than a line in a doc nobody reads until it's too late.
 ## Acceptance criteria
 
 - [x] Master Results upload warns, once per file, when an H2 reading arrives
-      with no `GC Run Date`, naming the affected sheet rows; silent when the
-      row has no H2 reading
+      with a missing or unreadable `GC Run Date`, reporting the affected
+      share of H2-bearing rows (naming rows only at 10 or fewer); silent when
+      the row has no H2 reading
 - [x] The Results tab's expanded row shows the NMR / ICP / GC / XRD run dates
       the API already returns
 - [x] A blank GC run date renders visibly (`not recorded`, warning colour)
