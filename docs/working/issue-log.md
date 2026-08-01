@@ -1701,3 +1701,66 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   dates entered going forward will count. This branch stops the omission recurring — it cannot
   repair the number originally reported.
 - **Decision logged:** yes — `docs/working/decisions.md`
+
+## 2026-08-01 | issue #116 — Overwrite=TRUE nulled the eight fields the sheet never carries
+
+- **The reproduction came first and changed nothing about the diagnosis, but proved it.**
+  `issue-results-api-missing-run-dates.md` §3 asked for this in July and it had never been
+  written. Two tests seeded a scalar row with all eight UI-only fields set, ran an
+  `Overwrite=TRUE` Master Results upload, and watched them fail: all eight wiped, named in
+  the failure output. The mechanism was confirmed against the code path rather than by
+  inspection for the first time.
+- **The ticket's proposed fix would have broken #114.** Its Recommended-fix section floated
+  "only write keys present in `result_data`". But #114 shipped
+  `test_overwrite_clears_stale_geometry_when_the_reading_goes_away`
+  (`test_master_bulk_upload.py:1161`), which *depends* on overwrite nulling absent fields —
+  that is what removes stale GC carryover geometry when a row's H2 reading disappears
+  (207 of 499 rows on the live sheet carry a previous run's values). Presence-based
+  clearing would have re-asserted them. The rule had to separate *unmapped* from
+  *mapped-but-blank*, which is a different fix from the one the ticket described. Caught
+  before writing code, by grepping what already depended on the branch being changed.
+- **Fix:** `create_scalar_result_ex` pops an optional `_sheet_fields` and, on the overwrite
+  branch, writes only fields inside it (`sheet_fields is None` → previous behavior exactly,
+  so the two non-opted-in callers are untouched). `master_bulk_upload.py` declares its set
+  as `frozenset(result_data)` captured **before** the `None`-strip — derived from the dict
+  literal, not restated beside it, so a future sheet column cannot silently land outside the
+  declared set. The strip's guard widened from `k == "_overwrite"` to `k.startswith("_")`.
+  The first draft used a hand-maintained module constant; it was replaced during refactor
+  precisely because it could drift from the literal it mirrored.
+- **Files changed:**
+  - `backend/services/scalar_results_service.py` — `_sheet_fields` pop + bounded overwrite loop.
+  - `backend/services/bulk_uploads/master_bulk_upload.py` (LOCKED — additive only, per
+    explicit user authorization 2026-08-01, same shape as the #115 precedent): declares the
+    derived set, widens the strip guard. No parse or write logic touched.
+  - `tests/services/bulk_uploads/test_master_bulk_upload.py` — 3 tests.
+  - `.claude/rules/MODELS.md`, `docs/user_guide/BULK_UPLOADS.md`,
+    `docs/upload_templates/master_bulk_upload.md`,
+    `docs/issues/issue-master-results-overwrite-wipes-unlisted-fields.md`.
+- **Tests added:** yes — 3. Two pin the preservation (one on `background_ammonium_concentration_mM`
+  specifically, since it is the only one of the eight that moves a reported number; one on all
+  eight as a set). The third pins the opposite half of the rule — a carried column left blank
+  still clears — using conductivity rather than the gas columns so it does not depend on
+  `_resolve_h2` precedence. Without it the fix would be indistinguishable from "overwrite never
+  clears anything". `tests/services/bulk_uploads/` 269 → 272.
+- **Verification:** full backend suite 1308 passed / 3 failed / 4 skipped. The 3 are the
+  documented `tests/test_pg_backup_restore.py` baseline and were **re-run on `develop` this
+  session and fail identically there** — the #114 entry flagged that this check had been
+  skipped, so it was actually done this time rather than inherited.
+- **Scoped out (user decision, 2026-08-01):** `scalar_results.py` and `quick_upload.py` reach
+  the same branch and declare nothing, so they retain the whole-list behavior and the same
+  latent bug. Their sheets have no fixed schema, so the declared set must be derived per-file
+  from the columns actually present — a different and less certain fix across two more locked
+  parsers. The service-side mechanism is already general; opting them in is one key each.
+- **Two stale claims fixed in `docs/upload_templates/master_bulk_upload.md`**, both found
+  while editing it rather than sought: it credited the flow to `bulk_create_scalar_results_ex`
+  (this parser calls `create_scalar_result_ex` per row, each in its own SAVEPOINT), and its
+  Output section still documented the tuple return #114 item 4 deleted.
+- **Not mine, left uncommitted:** `docs/POWERBI_MODEL.md` was modified at 18:15 during this
+  session by something outside it (OneDrive sync is the likely source; the repo lives in a
+  synced folder). It adds `v_results_scalar_rollup` to the Power BI view table plus a
+  Replicate & Timepoint Handling section — unrelated to #116. The `--all` PreToolUse sync
+  hook then propagated it to `docs/project_context/POWERBI_MODEL.md`. Both left unstaged.
+- **Decision logged:** no — bounding overwrite to a declared field set is a bug fix with a
+  recorded rationale, not a new architectural pattern. The scope call (Master Results only)
+  is in the issue doc's Follow-up section.
+- **Docs updated:** yes.

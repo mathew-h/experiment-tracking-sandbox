@@ -1,5 +1,12 @@
 # bug: Master Results `Overwrite=TRUE` nulls eight fields the sheet never carries
 
+> **Status 2026-08-01 — SHIPPED on `fix/issue-116-overwrite-wipes-unlisted-fields`.**
+> The reproduction test the ticket asked for was written first and confirmed all
+> eight fields wiped against the real code path. Fixed by bounding the overwrite
+> branch to the fields the calling source declares it has columns for. Scoped to
+> Master Results by user decision; `scalar_results.py` and `quick_upload.py`
+> share the bug class and are unchanged — see Follow-up below.
+>
 > **Scoped out of #115 by user decision, 2026-07-31.** Raised while
 > investigating the Dashboard's GC Measurements KPI reading 0 (issue #115).
 > Confirmed **not** the cause of that symptom (see Negative evidence below),
@@ -142,6 +149,68 @@ and its fix does not transfer here.
   upload's response can be audited for exactly this kind of silent clear.
 - Re-run `issue-115-gc-run-date-visibility.md`'s Q2 against production; a
   non-empty result for any of the eight fields reprioritises this ticket.
+
+## What shipped
+
+**The reproduction, first.** `test_overwrite_preserves_background_ammonium_the_sheet_never_carries`
+and `test_overwrite_preserves_every_field_absent_from_the_sheet_schema` were
+written before any fix and watched fail. The second named all eight fields in its
+failure output, so the mechanism is now confirmed against the code path rather
+than by inspection — closing the ask left open since
+`issue-results-api-missing-run-dates.md` §3.
+
+**The constraint the ticket did not know about.** #114 shipped
+`test_overwrite_clears_stale_geometry_when_the_reading_goes_away`
+(`test_master_bulk_upload.py:1161`), which *depends* on overwrite nulling fields
+absent from `result_data` — that is how stale GC carryover geometry is removed
+when a row's H2 reading disappears. The "only write keys present in the dict"
+fix the ticket floated would have broken it and re-introduced #114's problem. So
+the rule could not be presence-based; it had to distinguish *unmapped* from
+*mapped-but-blank*.
+
+**The fix.** `create_scalar_result_ex` pops an optional `_sheet_fields` from
+`result_data` and, on the overwrite branch, writes only fields inside that set:
+
+```python
+for field in SCALAR_UPDATABLE_FIELDS:
+    if sheet_fields is None or field in sheet_fields:
+        setattr(scalar_data, field, result_data.get(field))
+```
+
+`sheet_fields is None` preserves the previous behavior exactly, so the two
+callers not opted in are untouched. `master_bulk_upload.py` declares its set as
+`frozenset(result_data)` taken *before* the `None`-strip — derived from the dict
+literal rather than restated beside it, so a future sheet column cannot silently
+land outside the declared set. The strip's guard widened from `k == "_overwrite"`
+to `k.startswith("_")` so control keys survive it regardless of value.
+
+- **Files:** `backend/services/scalar_results_service.py`,
+  `backend/services/bulk_uploads/master_bulk_upload.py` (LOCKED — additive only,
+  per explicit user authorization 2026-08-01, matching the #115 precedent: no
+  parse or write logic touched),
+  `tests/services/bulk_uploads/test_master_bulk_upload.py`,
+  `.claude/rules/MODELS.md`, `docs/user_guide/BULK_UPLOADS.md`,
+  `docs/upload_templates/master_bulk_upload.md`.
+- **Tests:** 3 added. `tests/services/bulk_uploads/` 269 → 272, all passing.
+  Full backend suite 1308 passed / 3 failed — the 3 are the documented
+  `tests/test_pg_backup_restore.py` baseline, **verified identical on `develop`
+  in this session** rather than assumed (the #114 entry noted that check was
+  skipped last time).
+- **Two stale claims fixed in `docs/upload_templates/master_bulk_upload.md`**,
+  both found while editing it: it credited the flow to
+  `bulk_create_scalar_results_ex` (this parser calls `create_scalar_result_ex`
+  per row, inside a SAVEPOINT each), and its Output section still described the
+  tuple return that #114 item 4 deleted.
+
+## Follow-up
+
+`scalar_results.py:304` and `quick_upload.py:304` feed the same overwrite branch
+and declare no `_sheet_fields`, so an overwrite upload through either still nulls
+every `SCALAR_UPDATABLE_FIELDS` entry their file has no column for. Deliberately
+out of scope (user decision, 2026-08-01): their sheets have no fixed schema, so
+the declared set would have to be derived per-file from the columns actually
+present, across two more locked parsers. The service-side mechanism is already
+general — opting them in is one added key each once that derivation is settled.
 
 ## Labels
 

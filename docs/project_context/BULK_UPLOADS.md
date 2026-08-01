@@ -110,6 +110,20 @@ uploads.)
 Rows where both Experiment ID and Duration (Days) are present create or update a
 `ScalarResults` record. The calc engine re-runs for every affected row.
 
+**What `OVERWRITE = TRUE` does and does not touch.** It rewrites the columns in
+the table above, including clearing one you leave blank — that is how a stale gas
+volume is removed when a row's H₂ reading goes away. It does **not** touch fields
+this sheet has no column for. Background ammonium, ammonium quant method, final
+nitrate, final alkalinity, CO₂ partial pressure, dissolved oxygen, background
+experiment ID and ferrous iron yield are entered on the experiment's Results tab,
+and an overwrite upload leaves them exactly as they were.
+
+> Before 2026-08-01 an overwrite row nulled all eight (issue #116). Background
+> ammonium falls back to 0.2 mM when empty and net ammonium is
+> `gross − background`, so a cleared value shifted the reported yield with no
+> error shown. If you ran an `OVERWRITE = TRUE` Master Results upload before that
+> date, check those fields on the affected timepoints.
+
 **Replicates:** rows may carry either a full lettered ID (`SERUM_001a`) in Experiment ID, or the bare base ID plus the optional `Replicate` column (`a`–`z`; `0` or blank = the group parent). Base + letter is resolved to the sibling experiment before upsert. Unresolved or conflicting rows are skipped with a per-row error — the rest of the file still uploads. See the [Replicates guide](REPLICATES.md#uploading-replicate-results).
 
 ---
