@@ -75,7 +75,13 @@ class ScalarResultsService:
         """
         # Extract overwrite flag (default False)
         overwrite = result_data.pop('_overwrite', False)
-        
+
+        # Issue #116: the set of fields the caller's source schema has columns
+        # for. `None` means the caller declares nothing, so overwrite spans
+        # every field -- the pre-#116 behaviour, retained for callers that have
+        # not opted in. See the overwrite branch below for why this matters.
+        sheet_fields = result_data.pop('_sheet_fields', None)
+
         # Ensure h2_concentration_unit defaults to ppm if concentration is present
         if result_data.get('h2_concentration') is not None:
             if not result_data.get('h2_concentration_unit'):
@@ -127,8 +133,19 @@ class ScalarResultsService:
             }
 
             if overwrite:
+                # Issue #116: `result_data` cannot distinguish "the source has
+                # no column for this field" from "the column is there and the
+                # cell was blank" -- callers that strip None values collapse
+                # both to an absent key. Clearing on the first is a silent data
+                # loss (a Master Results overwrite nulled the eight UI-entered
+                # fields its sheet never carries, one of which moves net
+                # ammonium); clearing on the second is required, or a re-upload
+                # re-asserts stale carryover values. `_sheet_fields` restores
+                # the distinction: a field outside the declared set is one this
+                # upload has no authority over, so it is left alone.
                 for field in SCALAR_UPDATABLE_FIELDS:
-                    setattr(scalar_data, field, result_data.get(field))
+                    if sheet_fields is None or field in sheet_fields:
+                        setattr(scalar_data, field, result_data.get(field))
             else:
                 for field in SCALAR_UPDATABLE_FIELDS:
                     if field in result_data:

@@ -1657,3 +1657,122 @@ def test_warns_with_coverage_form_above_the_row_list_threshold(db_session: Sessi
     assert "more" not in missing[0], (
         f"the overflow phrasing ('and N more') must not appear here, got: {missing[0]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Overwrite scope: the sheet may only clear the fields it has columns for
+# (issue #116)
+# ---------------------------------------------------------------------------
+
+# The eight SCALAR_UPDATABLE_FIELDS entries the Dashboard sheet has no column
+# for. Entered through the UI, never through this upload -- so an OVERWRITE row
+# has nothing to say about them and must leave them alone.
+_UI_ONLY_FIELDS = {
+    "background_ammonium_concentration_mM": 0.85,
+    "ammonium_quant_method": "NMR",
+    "final_nitrate_concentration_mM": 1.4,
+    "final_alkalinity_mg_L": 120.0,
+    "co2_partial_pressure_MPa": 0.31,
+    "final_dissolved_oxygen_mg_L": 6.2,
+    "background_experiment_id": "SERUM_BLANK_01",
+    "ferrous_iron_yield": 12.5,
+}
+
+
+def _scalar_for(db: Session, experiment_id: str):
+    """The single scalar row of a one-result experiment."""
+    return (
+        db.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == experiment_id)
+        .one()
+    ).scalar_data
+
+
+def _seed_row_with_ui_fields(db: Session, experiment_id: str, exp_num: int) -> None:
+    """Create a scalar row via upload, then set the UI-only fields on it.
+
+    Mirrors the real sequence: the row arrives from a Master Results upload, and
+    a researcher later fills in the fields the spreadsheet does not carry.
+    """
+    _seed_experiment(db, experiment_id, exp_num)
+    MasterBulkUploadService.from_bytes_ex(db, _master_excel_v3([
+        _v3_row(experiment_id, 7.0, nh4=3.1, ph=7.0),
+    ]))
+    scalar = _scalar_for(db, experiment_id)
+    for field, value in _UI_ONLY_FIELDS.items():
+        setattr(scalar, field, value)
+    db.flush()
+
+
+def test_overwrite_preserves_background_ammonium_the_sheet_never_carries(
+    db_session: Session,
+):
+    """An OVERWRITE row correcting NH4 must not clear the background it can't see.
+
+    This is the one of the eight that changes a reported number rather than
+    merely losing provenance. Net ammonium is max(0, gross - background) and
+    background defaults to 0.2 mM when NULL (docs/CALCULATIONS.md), so wiping a
+    recorded 0.85 silently moves net from 2.55 to 3.2 mM with no error.
+    """
+    _seed_row_with_ui_fields(db_session, "SERUM_OW116A", 9161)
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, _master_excel_v3([
+        _v3_row("SERUM_OW116A", 7.0, nh4=3.4, ph=7.0, overwrite=1.0),
+    ]))
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.updated == 1
+
+    scalar = _scalar_for(db_session, "SERUM_OW116A")
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(3.4), (
+        "the correction the upload was actually for must still land"
+    )
+    assert scalar.background_ammonium_concentration_mM == pytest.approx(0.85), (
+        "the sheet has no background column, so OVERWRITE has no authority to clear it"
+    )
+
+
+def test_overwrite_preserves_every_field_absent_from_the_sheet_schema(
+    db_session: Session,
+):
+    """All eight UI-only fields survive an OVERWRITE row, not just the ammonium one."""
+    _seed_row_with_ui_fields(db_session, "SERUM_OW116B", 9162)
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, _master_excel_v3([
+        _v3_row("SERUM_OW116B", 7.0, nh4=3.4, ph=7.0, overwrite=1.0),
+    ]))
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+
+    scalar = _scalar_for(db_session, "SERUM_OW116B")
+    wiped = [f for f, expected in _UI_ONLY_FIELDS.items() if getattr(scalar, f) != expected]
+    assert wiped == [], f"OVERWRITE cleared fields the sheet has no column for: {wiped}"
+
+
+def test_overwrite_still_clears_a_mapped_column_left_blank(db_session: Session):
+    """The other half of the rule: a column the sheet DOES carry still clears.
+
+    Without this, the #116 fix would be indistinguishable from "OVERWRITE never
+    clears anything", which would re-assert the stale GC carryover geometry that
+    issue #114 removed. Conductivity is used here rather than the gas columns so
+    the assertion does not depend on _resolve_h2's precedence logic.
+    """
+    _seed_experiment(db_session, "SERUM_OW116C", 9163)
+    MasterBulkUploadService.from_bytes_ex(db_session, _master_excel_v3([
+        _v3_row("SERUM_OW116C", 7.0, nh4=3.1, ph=7.0),
+    ]))
+    scalar = _scalar_for(db_session, "SERUM_OW116C")
+    scalar.final_conductivity_mS_cm = 12.5
+    db_session.flush()
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, _master_excel_v3([
+        _v3_row("SERUM_OW116C", 7.0, nh4=3.4, ph=7.0, overwrite=1.0),
+    ]))
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+
+    scalar = _scalar_for(db_session, "SERUM_OW116C")
+    assert scalar.final_conductivity_mS_cm is None, (
+        "'Sample Conductivity (mS/cm)' is a sheet column left blank -- OVERWRITE clears it"
+    )
