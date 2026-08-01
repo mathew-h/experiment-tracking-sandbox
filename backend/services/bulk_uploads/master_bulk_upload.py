@@ -499,6 +499,11 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # Rows where Full Loop overrode a populated direct-injection cell. Reported
     # once, at file level, after the loop (issue #114 item 1).
     superseded_rows: List[int] = []
+    # Rows whose H2 reading landed with no GC Run Date (issue #115).
+    missing_gc_date_rows: List[int] = []
+    # Denominator for the coverage warning below: rows actually written that
+    # carried an H2 reading (missing_gc_date_rows is the numerator).
+    h2_reading_rows = 0
     for row_num, exp_id, time_post_reaction, row in resolved:
         if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
             row_errors.append((row_num, (
@@ -567,6 +572,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             di_superseded = h2_source == "full_loop" and di_ppm is not None
             if di_superseded:
                 superseded_rows.append(row_num)
+            if h2_ppm is not None:
+                h2_reading_rows += 1
+                if gc_run_date is None:
+                    missing_gc_date_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
                 "experiment_id": exp_id,
@@ -600,6 +609,50 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             f"{len(superseded_rows)} {label} ({shown}). 'DI H2 (ppm)' also held a "
             "value there and Full Loop takes precedence, so the direct-injection "
             "reading was not stored and cannot be recovered from the database."
+        )
+
+    # A missing or unreadable GC Run Date fails silently in every direction: the
+    # H2 reading is stored, no error is raised, and nothing in the app renders
+    # the field -- so the Dashboard's GC Measurements card (issue #85) just
+    # stops counting the row. That is issue #115: 115 of 1056 dev-DB scalar
+    # rows carry a GC run date and every one falls in Mar-May 2026, while H2
+    # readings kept arriving through July. Gated on an H2 reading being
+    # present, so a row that did no GC work stays quiet. This WILL fire on
+    # most uploads until the column is filled in again -- that is the intended
+    # signal, not noise to soften.
+    #
+    # The gate (h2_ppm is not None and gc_run_date is None) is a fact about the
+    # SHEET CELL, not the stored row: on the non-overwrite path a blank cell is
+    # stripped before the service call (the "Remove None-valued optional
+    # fields" comprehension above) and an existing stored gc_run_date is left
+    # untouched, so the wording below never claims the row goes uncounted --
+    # only that no date was supplied on this upload.
+    #
+    # Reported as coverage (n of total), not a full row list: on a real upload
+    # this is the ~128-row production path, not a corner case, so naming every
+    # row would be exactly the noise this file otherwise avoids. Individual
+    # rows are still named when there are few enough (<=10) to be a useful
+    # lookup, matching the #114 supersede warning's threshold above.
+    if missing_gc_date_rows:
+        n = len(missing_gc_date_rows)
+        total = h2_reading_rows
+        if n <= 10:
+            where = " (" + ", ".join(str(r) for r in missing_gc_date_rows) + ")"
+        else:
+            where = ""
+        label = "row" if total == 1 else "rows"
+        stored_clause = (
+            "The reading was stored, but this upload supplied no run date for it."
+            if n == 1
+            else "The readings were stored, but this upload supplied no run date for them."
+        )
+        warnings.append(
+            f"'GC Run Date' is missing or unreadable on {n} of {total} {label} "
+            f"carrying an H2 reading{where}. {stored_clause} "
+            "The Dashboard's 'GC Measurements' card counts GC "
+            "Run Date entries falling in the last 7 workdays, so backfilling "
+            "an older date will not make a row appear there — only dates "
+            "entered going forward will count."
         )
 
     # Stable sort — two errors on one row keep the order they were found in.

@@ -13,11 +13,35 @@ Four cards at the top of the page:
 | Metric | Description |
 |--------|-------------|
 | **Reactor Occupancy** | Segmented bar over the 16 HPHT vessel slots (R01–R16): green ticks = ongoing, amber = queued, grey = empty. Subtitle shows queued/empty counts. |
-| **GC Measurements** | Count of GC runs (`scalar_results.gc_run_date`) in the last 7 workdays, plus the number of distinct experiments they came from. |
+| **GC Measurements** | Count of results whose **GC Run Date** falls in the last 7 workdays, plus the number of distinct experiments they came from. |
 | **Serum Vials Started** | Count of Serum experiment vials (including replicates) whose start date falls in the last 7 workdays, plus the number of distinct base experiments. |
 | **Core Floods Ongoing** | Segmented bar over the 3 core flood rig slots (CF01–CF03), same tick treatment as Reactor Occupancy. |
 
 **"Last 7 workdays"** means the last 7 Monday–Friday dates in the lab's local timezone (`America/New_York`), including today if today is a workday. US federal holidays are not skipped and are treated as ordinary workdays. The exact window (e.g. "Jul 21 – Jul 29") is shown on hover over the GC Measurements and Serum Vials Started cards.
+
+### A GC Measurements count of 0 means "no GC Run Date recorded," not "no GC work"
+
+The card only counts a result if its **GC Run Date** field is filled in. A
+result can have a hydrogen (H₂) reading — meaning GC was actually run — and
+still not be counted here, if the run date was never entered. When that
+happens, the card's subtitle says so directly: "no GC Run Date recorded in
+this window," rather than "across 0 experiments," so a `0` doesn't read as an
+idle lab when it actually means a data-entry gap. Hovering over the card
+shows a tooltip stating exactly what it counts.
+
+Two places help close that gap:
+
+- **Master Results upload** now warns when rows arrive with an H₂ reading but
+  a blank `GC Run Date` column, reporting how many of the H₂-bearing rows are
+  affected (e.g. "1 of 2 rows"). When 10 or fewer rows are affected, the
+  specific spreadsheet rows are named. Filling in the date is still worth
+  doing for record-keeping, but it will not make an old row appear on the
+  GC Measurements card — that card only looks at the last 7 workdays, so
+  only dates entered from now on will be counted.
+- **The Results tab** shows the NMR, ICP, GC, and XRD run dates for each
+  timepoint. If a timepoint has an H₂ reading but no GC run date, the GC line
+  reads "not recorded" in place of a date, with a short note explaining that
+  it isn't counted on the Dashboard until the date is filled in.
 
 ---
 

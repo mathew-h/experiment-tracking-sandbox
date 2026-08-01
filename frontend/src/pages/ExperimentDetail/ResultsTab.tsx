@@ -21,6 +21,14 @@ function fmtPct(n: number | null | undefined, decimals = 1) {
 
 const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_5rem_4.5rem_4rem_6rem_9rem_1.5rem]'
 
+/** Instrument run dates carried on ResultWithFlags — provenance, not measurements. */
+const RUN_DATE_FIELDS = [
+  ['NMR', 'nmr_run_date'],
+  ['ICP', 'icp_run_date'],
+  ['GC', 'gc_run_date'],
+  ['XRD', 'xrd_run_date'],
+] as const
+
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
     queryKey: ['scalar', result.id],
@@ -34,11 +42,17 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
     enabled: result.has_icp,
   })
 
-  if (loadingScalar) return <div className="py-3 pl-6"><PageSpinner /></div>
+  // GC renders even when blank if an H2 reading exists: a field that appears
+  // only when populated cannot show a researcher that it is missing, which is
+  // the whole point here (issue #115).
+  const gcMissing = result.gc_run_date == null && result.h2_concentration != null
+  const anyRunDate = RUN_DATE_FIELDS.some(([, key]) => result[key] != null)
 
   return (
     <div className="bg-surface-raised border-t border-surface-border px-6 py-3 space-y-3">
-      {scalar && (
+      {loadingScalar ? (
+        <PageSpinner />
+      ) : scalar && (
         <div>
           <p className="text-xs font-semibold text-ink-secondary mb-1">Scalar Results</p>
           <div className="grid grid-cols-3 gap-x-6 gap-y-1">
@@ -57,6 +71,31 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
               </div>
             ) : null)}
           </div>
+        </div>
+      )}
+      {(anyRunDate || gcMissing) && (
+        <div>
+          <p className="text-xs font-semibold text-ink-secondary mb-1">Instrument Run Dates</p>
+          <div className="grid grid-cols-4 gap-x-4 gap-y-1">
+            {RUN_DATE_FIELDS.map(([label, key]) => {
+              const missing = key === 'gc_run_date' && gcMissing
+              if (result[key] == null && !missing) return null
+              return (
+                <div key={label} className="text-xs">
+                  <span className="text-ink-muted">{label}: </span>
+                  <span className={`font-mono-data ${missing ? 'text-status-warning' : 'text-ink-primary'}`}>
+                    {missing ? 'not recorded' : fmtDate(result[key])}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          {gcMissing && (
+            <p className="text-xs text-ink-muted mt-1">
+              An H₂ reading is stored for this timepoint but no GC run date, so it is
+              not counted by the Dashboard's GC Measurements card.
+            </p>
+          )}
         </div>
       )}
       {result.has_brine_modification && (

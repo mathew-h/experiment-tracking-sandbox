@@ -33,5 +33,10 @@ Description, Sample Date, NMR Run Date, ICP Run Date, GC Run Date, NH4 (mM), H2 
 ## Data Model and Flow
 Delegates the parsed and cleaned records to `ScalarResultsService.bulk_create_scalar_results_ex`. Validates that the experiment exists in the database before attempting to insert or update results.
 
+## Warnings
+
+- **Missing GC Run Date (issue #115):** if a row carries an `H2 (ppm)` reading (either GC block) but the `GC Run Date` cell is missing or unreadable, the upload still stores the reading — nothing errors — but emits one file-level warning reporting how many of the H2-bearing rows were affected (e.g. "missing or unreadable on 3 of 40 rows carrying an H2 reading"). The affected sheet rows are named only when there are 10 or fewer; above that the warning reports the ratio with no row list. Silent when the row has no H2 reading at all. The gate is a fact about the sheet cell, not the stored row: on the non-overwrite path a blank cell is stripped before it reaches the service, so any `gc_run_date` already stored is left untouched — the warning says only that no date was supplied on this upload, not that the row goes uncounted. This matters because the Dashboard's "GC Measurements" KPI card counts `GC Run Date` entries falling in the last 7 workdays, not H2 readings — and because that window is rolling, backfilling an older date can never make a row appear there; only dates entered going forward will count. See `docs/issues/issue-115-gc-run-date-visibility.md`.
+- **Superseded direct-injection reading (issue #114):** if a row carries an H2 reading in both the Full Loop and direct-injection GC blocks, Full Loop wins and the file-level warnings list names the affected rows once, at file level.
+
 ## Output
 Returns a tuple: `(created, updated, skipped, errors, feedbacks)`.

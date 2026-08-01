@@ -331,3 +331,33 @@ this work exists to prevent.
    contention is invisible — not a wrong count.
 3. **Nothing at the database level prevents a double-booking.** Every entry point is narrower, but
    none is closed. Prod had 4 genuinely contended slots on 2026-07-30.
+
+---
+
+## 2026-08-01 — Upload warnings must not assert stored state from a sheet-cell gate (issue #115)
+
+**Decision:** a bulk-upload warning derived from a *spreadsheet cell* may describe only what the
+sheet supplied. It must never tell the researcher what is or isn't in the database as a result.
+
+**Why:** the #115 missing-`GC Run Date` warning got this wrong twice, in two different clauses,
+and both were caught in review rather than by tests.
+
+1. First wording: *"these rows are not counted there until the date is filled in."* The gate is
+   `h2_ppm is not None and gc_run_date is None` — a fact about the cell. On the **non-overwrite**
+   path a blank cell is stripped by the None-filter and the stored `gc_run_date` is **preserved**,
+   so the row may well still be counted. Worse, the Results tab reads *stored* state, so it would
+   render that date normally with no flag — the upload panel and the experiment page would tell the
+   researcher opposite things about the same vial.
+2. Replacement wording: *"(any date already recorded is left untouched)."* True on the
+   non-overwrite path, **false on `Overwrite=TRUE`** — there the stripped blank makes the service's
+   overwrite branch `setattr(gc_run_date, None)` and the stored date is wiped. The code comment
+   scoped the claim correctly; only the user-facing string dropped the scoping.
+
+**How to apply:** state what the sheet did ("this upload supplied no run date for it") and what a
+downstream consumer's *rule* is ("the card counts entries falling in the last 7 workdays"). Do not
+state what the row now holds. The parser cannot see it — each row carries its own `Overwrite` flag,
+so any stored-state claim is at best true for a subset of the rows the warning names.
+
+**Related:** the same asymmetry is why the KPI's rolling window makes the reported gap
+unrecoverable — a warning that promises "fill it in and re-upload" would be advertising a remedy
+the window cannot deliver. Both corrections shipped in `654c8d9`.
