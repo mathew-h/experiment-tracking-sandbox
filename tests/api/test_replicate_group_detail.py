@@ -195,7 +195,7 @@ class TestGroupRollupEndpoint:
         via_group = client.get("/api/experiments/groups/RGD_010/rollup").json()
         via_wrapper = client.get("/api/experiments/RGD_010a/rollup").json()
         assert via_group == via_wrapper
-        assert via_group[0]["n_replicates"] == 2
+        assert via_group[0]["n_vials"] == 2
 
     def test_group_rollup_unknown_base_id_404(self, client, db_session, reporting_views):
         resp = client.get("/api/experiments/groups/NOPE_DOES_NOT_EXIST/rollup")

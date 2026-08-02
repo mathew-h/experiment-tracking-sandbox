@@ -56,7 +56,7 @@ class TestRollupEndpoint:
         assert resp.status_code == 200
         (row,) = resp.json()
         assert row["base_experiment_id"] == "RUP_001"
-        assert row["n_replicates"] == 3
+        assert row["n_vials"] == 3
         assert row["mean_gross_ammonium_mM"] == pytest.approx(2.0)
         assert row["sd_gross_ammonium_mM"] == pytest.approx(1.0)
 
@@ -82,7 +82,7 @@ class TestRollupEndpoint:
         members[2].is_outlier = True
         db_session.commit()
         (row,) = client.get("/api/experiments/RUP_003a/rollup").json()
-        assert row["n_replicates"] == 2
+        assert row["n_vials"] == 2
         assert row["mean_gross_ammonium_mM"] == pytest.approx(1.5)
 
 
@@ -97,7 +97,7 @@ class TestRollupH2Ppm:
             _add_primary_scalar(db_session, member, 7.0, 1.0, h2_ppm=float((i + 1) * 100))  # 100, 200, 300
         db_session.commit()
         (row,) = client.get("/api/experiments/RUP_H2_001a/rollup").json()
-        assert row["n_replicates"] == 3
+        assert row["n_vials"] == 3
         assert row["mean_h2_ppm"] == pytest.approx(200.0)
         assert row["sd_h2_ppm"] == pytest.approx(100.0)
 
@@ -107,7 +107,7 @@ class TestRollupH2Ppm:
         _add_primary_scalar(db_session, member, 7.0, 1.0, h2_ppm=420.0)
         db_session.commit()
         (row,) = client.get("/api/experiments/RUP_H2_002a/rollup").json()
-        assert row["n_replicates"] == 1
+        assert row["n_vials"] == 1
         assert row["mean_h2_ppm"] == pytest.approx(420.0)
         assert row["sd_h2_ppm"] is None
 
@@ -121,7 +121,7 @@ class TestRollupH2Ppm:
         members[2].is_outlier = True  # drop the 300 value
         db_session.commit()
         (row,) = client.get("/api/experiments/RUP_H2_003a/rollup").json()
-        assert row["n_replicates"] == 2
+        assert row["n_vials"] == 2
         assert row["mean_h2_ppm"] == pytest.approx(150.0)
 
 
@@ -243,9 +243,9 @@ class TestRollupFromHandEnteredResults:
         buckets = [r["time_post_reaction_bucket_days"] for r in rows]
         assert buckets == [7.0, 14.0]
         day7, day14 = rows
-        assert day7["n_replicates"] == 2
+        assert day7["n_vials"] == 2
         assert day7["mean_gross_ammonium_mM"] == pytest.approx(2.0)
-        assert day14["n_replicates"] == 1
+        assert day14["n_vials"] == 1
         assert day14["mean_gross_ammonium_mM"] == pytest.approx(5.0)
 
 

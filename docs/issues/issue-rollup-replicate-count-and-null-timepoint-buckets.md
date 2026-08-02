@@ -1,11 +1,29 @@
 # bug: `v_results_scalar_rollup.n_replicates` is wrong in 32% of groups; 41% of primary results have a NULL timepoint bucket
 
-> **Status 2026-08-01 — INVESTIGATED, NOT YET FIXED.** Branch
+> **Status 2026-08-01 — FIXES 1, 4, 5 and 6 SHIPPED; 2 and 3 still open.** Branch
 > `fix/rollup-replicate-count-mismatch`. All figures below were measured against
 > the production backup `docs/sample_data/experiments_20260801_010003.sql`
 > (pg_dump -Fc, PostgreSQL 18.3, taken 2026-08-01 01:00) restored into the local
-> dev database. No code or data has been changed. Fixes are proposed, ranked, and
-> validated against the restored data but await sign-off.
+> dev database.
+>
+> **User decisions (2026-08-01):** backfill NULL buckets *only* where a day token
+> is available; day 3 is the truth for the six `-t3` vials; breaking the
+> `n_replicates` column name is acceptable.
+>
+> **What shipped**
+> - **Fix 1** — `n_replicates` replaced by `n_vials` / `n_replicate_letters` /
+>   `n_values`, LEFT JOIN → INNER. Carried through the API schema, the TS type
+>   and the React group page (the column is not Power-BI-only: the app reads it
+>   via `replicate_groups.resolve_rollup_rows`). 4 new tests; 1312 backend tests
+>   pass, 14 frontend.
+> - **Fix 4** — `database/data_migrations/demote_stale_t3_prefix_rows_017.py`.
+>   **The investigation below was wrong about the remedy** and the script does not
+>   do what Fix 4 originally proposed — see the correction in that section.
+> - **Fixes 5 and 6** — documentation, applied.
+>
+> **Still open:** Fix 2 (`NULLS NOT DISTINCT`, needs schema-checklist sign-off)
+> and Fix 3 (the NULL-bucket backfill, whose scope changed materially — see the
+> correction in that section).
 
 ## Reported symptoms
 
@@ -228,28 +246,70 @@ not build while they exist. Requires an Alembic migration; it is a constraint
 *tightening*, so it is not purely additive and needs sign-off per
 `.claude/rules/schema-checklist.md` Phase 2.
 
-### Fix 3 — backfill the 807 NULL buckets
+### Fix 3 — backfill the 807 NULL buckets — **SCOPE CORRECTED, STILL OPEN**
 
-Two tiers:
+User decision: backfill only where a day token is available. That authorises the
+206 `_day<N>_` rows and leaves the other ~601 NULL, which is the right call —
+those have no recoverable timepoint in any column and inventing one would be
+fabrication. In Power BI, label the NULL bucket "unspecified" rather than
+plotting it.
 
-- **206 rows** are mechanically recoverable from the `_day<N>_` token in
-  `description`. Safe, scriptable, verifiable.
-- **~601 rows** have no recoverable timepoint. These need a product decision:
-  leave them NULL (and let the rollup keep one honest NULL bucket per group),
-  or have a researcher supply the days. **I recommend leaving them NULL and
-  labelling the bucket "unspecified" in Power BI rather than inventing a day.**
+**But the 206 are not a simple `UPDATE`, and the original plan above was wrong.**
+Checking for unique-index collisions before writing the migration showed:
 
-Deduplicating the 198 duplicate primary pairs should ride along with this, since
-correct buckets will separate most of them naturally.
+| | rows |
+|---|---|
+| clean, collision-free backfills | **16** |
+| would collide with a primary row already holding that (experiment, day) | **190** |
 
-### Fix 4 — correct the 6 stale `-t3` rows
+The 190 are **re-ingested duplicates**, not new timepoints. Their twin already
+sits in the correct bucket; the NULL-bucket copy is an older ingest of the same
+measurement, differing only in capitalisation (`SERUM_JW_054_day1_5x` vs
+`SERUM_JW_054_Day1_5x`). Measured across all 190:
 
-A one-off data migration setting `time_post_reaction_days` and
-`time_post_reaction_bucket_days` to 3 for those 6 result rows. **Needs a
-researcher to confirm the vials really were sampled at day 3** — the ID says 3,
-the Duration column said 6–7, and the ID is canonical by the 2026-07-30 rule, but
-these rows were written under the old rule so the Duration figure may be the
-accurate one. Do not guess.
+- 186/190 raw labels match case-insensitively, 186/190 dilution factors match
+- **174/190 are value-identical** on Fe and Ni
+- 16 differ on some element; only **3** differ materially on Fe (max gap 2.1 ppm)
+- 178/190 the NULL-bucket row is the older of the pair
+
+So the remedy for those 190 is **deduplication, not backfill** — demote or delete
+the stale copy, as Fix 4 does for its six. **Escalated, not actioned**, because
+two things need a human: whether to demote (reversible, keeps the row) or delete,
+and which copy wins for the 16 rows whose values disagree. Only the 16
+collision-free rows are a mechanical backfill, and they are not worth a migration
+on their own.
+
+Deduplicating the 198 NULL-bucket duplicate primary pairs overlaps heavily with
+this and should be done in the same pass.
+
+### Fix 4 — the 6 stale `-t3` rows — **SHIPPED, but not as proposed**
+
+The proposal above was to re-bucket the six rows to day 3. **That would have
+failed**, and the reasoning behind it was wrong.
+
+Inspecting the vials before writing the migration showed **each of the six
+already holds a correct day-3 row** (result_ids 1926–1931, described
+"Master upload — day 3.") created after the 2026-07-30 fix, alongside the stale
+day-6/7 row. Re-bucketing would have collided with the good row under
+`uq_primary_result_per_experiment_bucket`.
+
+It also made the question of "which day is true" moot. The six stale rows are
+**empty shells**: every scalar measurement column is NULL
+(`gross_ammonium_concentration_mM`, `final_ph`, `h2_concentration`,
+conductivity, nitrate, alkalinity, DO, gas volume, yields, sampling volume) and
+zero result files are attached. The real H₂ readings live on the day-3 rows. So
+nothing is lost by removing them from reporting, and the user's "day 3" answer is
+satisfied by the row that already exists.
+
+Shipped as `database/data_migrations/demote_stale_t3_prefix_rows_017.py`, which
+**demotes** (`is_primary_timepoint_result = FALSE`) rather than deleting —
+every reporting view filters on that flag, so demotion clears the phantom bucket
+while leaving the rows recoverable. Rows are selected by rule (empty + a correct
+row already exists for the ID's day), not by hardcoded id, and the script is
+dry-run by default. Applied to the restored dev copy:
+`SERUM_pH_001` now reads 3 vials / 3 letters at every bucket.
+
+**Not yet applied to production.**
 
 ### Fix 5 — document the Power BI trap
 
@@ -274,12 +334,25 @@ NULL-bucket rows. 807 remain.
 4. **Fix 4** — after researcher confirmation.
 5. **Fix 2** — last, once duplicates are gone.
 
-## Open questions for the user
+## Open questions — answered 2026-08-01
 
-1. The ~601 NULL-bucket rows with no recoverable timepoint — leave NULL, or
-   assign a day?
-2. The 6 `-t3` vials — is day 3 (the ID) or day 6–7 (the Duration column) the
-   truth?
-3. Should `n_replicates` be renamed? It counts vials, and `n_letters` is the
-   actual replicate count. Renaming is a breaking change for any existing Power
-   BI report bound to the column.
+1. ~601 unrecoverable NULL-bucket rows → **leave NULL** ("only if a day token is
+   available").
+2. The 6 `-t3` vials → **day 3**. Resolved without a data edit: the correct
+   day-3 rows already existed; the stale rows were empty and are now demoted.
+3. Rename `n_replicates`? → **"break it if necessary, no reports have been
+   built."** Done. Note the column was *not* Power-BI-only — the React replicate
+   group page reads it through the API, so the rename was carried through
+   `backend/api/schemas/results.py`, `frontend/src/api/experiments.ts` and
+   `GroupedResultsView.tsx` as well.
+
+## Still needing a decision
+
+1. **Fix 3's 190 duplicate rows** — demote (reversible) or delete? And for the 16
+   whose values disagree between the two copies, which wins?
+2. **Fix 2** — tightening `uq_primary_result_per_experiment_bucket` to
+   `NULLS NOT DISTINCT` is a non-additive constraint change, so per
+   `.claude/rules/schema-checklist.md` Phase 2 it needs explicit sign-off. It is
+   also blocked on Fix 3 clearing the 198 duplicate pairs first.
+3. **Applying to production** — the view change lands automatically on app
+   restart, but migration 017 must be run against the lab PC deliberately.

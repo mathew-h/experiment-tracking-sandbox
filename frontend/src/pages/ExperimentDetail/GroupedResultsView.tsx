@@ -219,7 +219,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           {rollup.map((r) => (
             <TableRow key={`${r.base_experiment_id}-${r.time_post_reaction_bucket_days}`}>
               <Td className="font-mono-data">{fmt(r.time_post_reaction_bucket_days, 1)}</Td>
-              <Td className="font-mono-data text-ink-muted">n = {r.n_replicates}</Td>
+              <Td className="font-mono-data text-ink-muted">n = {r.n_vials}</Td>
               <Td className="font-mono-data">
                 {r.mean_h2_ppm == null
                   ? '—'

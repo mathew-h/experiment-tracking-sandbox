@@ -111,7 +111,7 @@ Cross-replicate mean/median/std per timepoint bucket, sourced from the `v_result
 **Grouping key:** `COALESCE(base_experiment_id, experiment_id)` for the given experiment — i.e. its `base_experiment_id` if set, else its own `experiment_id`.
 
 **Response `200`:** array of rows, one per `time_post_reaction_bucket_days`, ordered ascending. 21 fields per row:
-`base_experiment_id`, `time_post_reaction_bucket_days`, `n_replicates`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`. `mean_h2_ppm`/`sd_h2_ppm` (issue #90) aggregate `h2_concentration` (ppm); `sd_h2_ppm` is `null` when `n_replicates = 1`.
+`base_experiment_id`, `time_post_reaction_bucket_days`, `n_vials`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph`. `mean_h2_ppm`/`sd_h2_ppm` (issue #90) aggregate `h2_concentration` (ppm); `sd_h2_ppm` is `null` when `n_vials = 1`.
 
 **Parent inclusion (intended):** the bare group parent's own primary results share the
 grouping key with its lettered replicates, so they are averaged into the group stats
@@ -121,9 +121,9 @@ parent opt-out.
 **Errors:**
 - `404 Not Found` — no experiment matches `experiment_id`
 
-**Outlier exclusion (P4):** experiments with `is_outlier = true` are excluded from every statistic in this response, including `n_replicates` — a flagged replicate never contributes to the mean/median/std or the count, though its own data remains queryable via the per-row endpoints/views.
+**Outlier exclusion (P4):** experiments with `is_outlier = true` are excluded from every statistic in this response, including `n_vials` — a flagged replicate never contributes to the mean/median/std or the count, though its own data remains queryable via the per-row endpoints/views.
 
-**Caveat (MODELS.md):** the grouping key does not distinguish a lettered replicate set from an ordinary sequential re-run sharing the same `base_experiment_id` (e.g. `HPHT_001` + `HPHT_001-2`). `n_replicates >= 2` on this endpoint does not by itself confirm the group is a lettered replicate set — check case-by-case.
+**Caveat (MODELS.md):** the grouping key does not distinguish a lettered replicate set from an ordinary sequential re-run sharing the same `base_experiment_id` (e.g. `HPHT_001` + `HPHT_001-2`). `n_vials >= 2` on this endpoint does not by itself confirm the group is a lettered replicate set — check case-by-case.
 
 ### GET /api/experiments/{experiment_id}/replicate-group
 

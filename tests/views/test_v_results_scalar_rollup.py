@@ -92,7 +92,7 @@ def _make_scalar(db: Session, result: ExperimentalResults, gross_nh4: float,
 
 
 class TestRollupThreeReplicates:
-    def test_mean_median_stddev_and_n_replicates(self, view_db):
+    def test_mean_median_stddev_and_n_vials(self, view_db):
         exp_a = _make_experiment(view_db, "ROLL_001a", 1)
         exp_b = _make_experiment(view_db, "ROLL_001b", 2)
         exp_c = _make_experiment(view_db, "ROLL_001c", 3)
@@ -108,7 +108,7 @@ class TestRollupThreeReplicates:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", "sd_gross_ammonium_mM"
+                SELECT n_vials, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", "sd_gross_ammonium_mM"
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_001' AND time_post_reaction_bucket_days = 7.0
             """)
@@ -116,7 +116,7 @@ class TestRollupThreeReplicates:
 
         assert row is not None
         mapping = row._mapping
-        assert mapping["n_replicates"] == 3
+        assert mapping["n_vials"] == 3
         assert mapping["mean_gross_ammonium_mM"] == pytest.approx(2.0)
         assert mapping["median_gross_ammonium_mM"] == pytest.approx(2.0)
         assert mapping["sd_gross_ammonium_mM"] == pytest.approx(1.0)
@@ -131,7 +131,7 @@ class TestRollupLoneExperiment:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, "mean_gross_ammonium_mM", "sd_gross_ammonium_mM"
+                SELECT n_vials, "mean_gross_ammonium_mM", "sd_gross_ammonium_mM"
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_LONE_001' AND time_post_reaction_bucket_days = 7.0
             """)
@@ -139,9 +139,114 @@ class TestRollupLoneExperiment:
 
         assert row is not None
         mapping = row._mapping
-        assert mapping["n_replicates"] == 1
+        assert mapping["n_vials"] == 1
         assert mapping["mean_gross_ammonium_mM"] == pytest.approx(5.0)
         assert mapping["sd_gross_ammonium_mM"] is None
+
+
+class TestRollupCountsAreNotRowCounts:
+    """The counts must describe experiments and letters, not scalar rows.
+
+    Root cause A of the 2026-08-01 rollup investigation: the view counted
+    ``sr.result_id`` over a LEFT JOIN, which is neither a replicate count nor a
+    vial count. See docs/issues/issue-rollup-replicate-count-and-null-timepoint-buckets.md
+    """
+
+    def test_icp_only_timepoint_does_not_appear_in_scalar_rollup(self, view_db):
+        """A primary result with no scalar row must not produce a phantom group.
+
+        Previously this rendered a row with n_replicates = 0 and NULL statistics;
+        335 such groups existed in production (all ICP-only).
+        """
+        exp = _make_experiment(view_db, "ROLL_ICPONLY_001", 5)
+        _make_result(view_db, exp, bucket_days=7.0)  # no scalar row at all
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_vials FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_ICPONLY_001'
+            """)
+        ).fetchone()
+
+        assert row is None, "an ICP-only timepoint must be absent from the scalar rollup"
+
+    def test_counts_distinguish_vials_letters_and_values(self, view_db):
+        """Three letters, one vial each -> 3 vials, 3 letters, 3 values."""
+        for idx, letter in enumerate("abc"):
+            exp = _make_experiment(view_db, f"ROLL_CNT_001{letter}", 10 + idx)
+            er = _make_result(view_db, exp, bucket_days=7.0)
+            _make_scalar(view_db, er, gross_nh4=float(idx + 1))
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_vials, n_replicate_letters, n_values
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_CNT_001' AND time_post_reaction_bucket_days = 7.0
+            """)
+        ).fetchone()
+
+        assert row is not None
+        mapping = row._mapping
+        assert mapping["n_vials"] == 3
+        assert mapping["n_replicate_letters"] == 3
+        assert mapping["n_values"] == 3
+
+    def test_one_vial_with_two_primary_rows_counts_as_one_vial(self, view_db):
+        """A vial contributing two rows to a bucket is one vial, two values.
+
+        Constructed on the NULL bucket because that is the only place the
+        partial unique index permits it -- which is exactly how the 397 excess
+        primary rows in production arose (root cause C).
+        """
+        exp = _make_experiment(view_db, "ROLL_DUP_001", 20)
+        for gross in (1.0, 3.0):
+            er = ExperimentalResults(
+                experiment_fk=exp.id,
+                time_post_reaction_days=None,
+                time_post_reaction_bucket_days=None,
+                is_primary_timepoint_result=True,
+                description="duplicate primary on the NULL bucket",
+            )
+            view_db.add(er)
+            view_db.flush()
+            _make_scalar(view_db, er, gross_nh4=gross)
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_vials, n_values, "mean_gross_ammonium_mM"
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_DUP_001'
+                  AND time_post_reaction_bucket_days IS NULL
+            """)
+        ).fetchone()
+
+        assert row is not None
+        mapping = row._mapping
+        assert mapping["n_vials"] == 1, "two rows from one vial is still one vial"
+        assert mapping["n_values"] == 2, "both rows still feed the mean"
+        assert mapping["mean_gross_ammonium_mM"] == pytest.approx(2.0)
+
+    def test_unlettered_group_reports_zero_letters(self, view_db):
+        """Sequential re-runs share a base but have no replicate letters."""
+        exp = _make_experiment(view_db, "ROLL_SEQ_001", 30)
+        er = _make_result(view_db, exp, bucket_days=7.0)
+        _make_scalar(view_db, er, gross_nh4=4.0)
+        view_db.commit()
+
+        row = view_db.execute(
+            text("""
+                SELECT n_vials, n_replicate_letters
+                FROM v_results_scalar_rollup
+                WHERE base_experiment_id = 'ROLL_SEQ_001' AND time_post_reaction_bucket_days = 7.0
+            """)
+        ).fetchone()
+
+        assert row is not None
+        assert row._mapping["n_vials"] == 1
+        assert row._mapping["n_replicate_letters"] == 0
 
 
 class TestRollupOneRowPerBaseAndBucket:
@@ -160,7 +265,7 @@ class TestRollupOneRowPerBaseAndBucket:
 
         rows = view_db.execute(
             text("""
-                SELECT time_post_reaction_bucket_days, n_replicates
+                SELECT time_post_reaction_bucket_days, n_vials
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_BKT_001'
                 ORDER BY time_post_reaction_bucket_days
@@ -169,9 +274,9 @@ class TestRollupOneRowPerBaseAndBucket:
 
         assert len(rows) == 2
         assert rows[0]._mapping["time_post_reaction_bucket_days"] == pytest.approx(1.0)
-        assert rows[0]._mapping["n_replicates"] == 2
+        assert rows[0]._mapping["n_vials"] == 2
         assert rows[1]._mapping["time_post_reaction_bucket_days"] == pytest.approx(7.0)
-        assert rows[1]._mapping["n_replicates"] == 1
+        assert rows[1]._mapping["n_vials"] == 1
 
 
 class TestRollupOutlierExclusion:
@@ -187,7 +292,7 @@ class TestRollupOutlierExclusion:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", "sd_gross_ammonium_mM"
+                SELECT n_vials, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", "sd_gross_ammonium_mM"
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_OUT_001' AND time_post_reaction_bucket_days = 7.0
             """)
@@ -195,7 +300,7 @@ class TestRollupOutlierExclusion:
 
         assert row is not None
         mapping = row._mapping
-        assert mapping["n_replicates"] == 2
+        assert mapping["n_vials"] == 2
         assert mapping["mean_gross_ammonium_mM"] == pytest.approx(1.5)
         assert mapping["median_gross_ammonium_mM"] == pytest.approx(1.5)
         assert mapping["sd_gross_ammonium_mM"] == pytest.approx(0.70710678, abs=1e-6)
@@ -246,14 +351,14 @@ class TestRollupH2Ppm:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
+                SELECT n_vials, mean_h2_ppm, sd_h2_ppm
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_H2_001' AND time_post_reaction_bucket_days = 7.0
             """)
         ).fetchone()
         assert row is not None
         mapping = row._mapping
-        assert mapping["n_replicates"] == 3
+        assert mapping["n_vials"] == 3
         assert mapping["mean_h2_ppm"] == pytest.approx(200.0)
         assert mapping["sd_h2_ppm"] == pytest.approx(100.0)
 
@@ -265,14 +370,14 @@ class TestRollupH2Ppm:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
+                SELECT n_vials, mean_h2_ppm, sd_h2_ppm
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_H2_LONE_001' AND time_post_reaction_bucket_days = 7.0
             """)
         ).fetchone()
         assert row is not None
         mapping = row._mapping
-        assert mapping["n_replicates"] == 1
+        assert mapping["n_vials"] == 1
         assert mapping["mean_h2_ppm"] == pytest.approx(420.0)
         assert mapping["sd_h2_ppm"] is None
 
@@ -288,14 +393,14 @@ class TestRollupH2Ppm:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, mean_h2_ppm
+                SELECT n_vials, mean_h2_ppm
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_H2_OUT_001' AND time_post_reaction_bucket_days = 7.0
             """)
         ).fetchone()
         assert row is not None
         mapping = row._mapping
-        assert mapping["n_replicates"] == 2
+        assert mapping["n_vials"] == 2
         assert mapping["mean_h2_ppm"] == pytest.approx(150.0)
 
 
@@ -312,7 +417,7 @@ class TestRollupTimepointVials:
             _make_scalar(view_db, result, gross_nh4=nh4)
         view_db.commit()
         row = view_db.execute(text(
-            'SELECT n_replicates, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", '
+            'SELECT n_vials, "mean_gross_ammonium_mM", "median_gross_ammonium_mM", '
             '"sd_gross_ammonium_mM" FROM v_results_scalar_rollup '
             "WHERE base_experiment_id = 'SERUM_050' "
             "AND time_post_reaction_bucket_days = 7.0"
@@ -333,7 +438,7 @@ class TestRollupTimepointVials:
         _make_scalar(view_db, result7, gross_nh4=4.0)
         view_db.commit()
         buckets = view_db.execute(text(
-            "SELECT time_post_reaction_bucket_days, n_replicates "
+            "SELECT time_post_reaction_bucket_days, n_vials "
             "FROM v_results_scalar_rollup WHERE base_experiment_id = 'SERUM_051' "
             "ORDER BY time_post_reaction_bucket_days"
         )).fetchall()
@@ -345,7 +450,7 @@ class TestRollupTimepointVials:
         _make_scalar(view_db, result, gross_nh4=2.5)
         view_db.commit()
         row = view_db.execute(text(
-            'SELECT n_replicates, "sd_gross_ammonium_mM" FROM v_results_scalar_rollup '
+            'SELECT n_vials, "sd_gross_ammonium_mM" FROM v_results_scalar_rollup '
             "WHERE base_experiment_id = 'SERUM_052'"
         )).fetchone()
         assert row[0] == 1
@@ -383,7 +488,7 @@ class TestRollupVialLevelIds:
 
         row = view_db.execute(
             text("""
-                SELECT n_replicates, mean_h2_ppm, sd_h2_ppm
+                SELECT n_vials, mean_h2_ppm, sd_h2_ppm
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_910'
                   AND time_post_reaction_bucket_days = 1.0
@@ -392,7 +497,7 @@ class TestRollupVialLevelIds:
 
         assert row is not None, "vial-level IDs must group under their base"
         mapping = row._mapping
-        assert mapping["n_replicates"] == 3
+        assert mapping["n_vials"] == 3
         assert mapping["mean_h2_ppm"] == pytest.approx(20.0)
         assert mapping["sd_h2_ppm"] == pytest.approx(10.0)
 
@@ -413,7 +518,7 @@ class TestRollupVialLevelIds:
 
         rows = view_db.execute(
             text("""
-                SELECT time_post_reaction_bucket_days, n_replicates, mean_h2_ppm
+                SELECT time_post_reaction_bucket_days, n_vials, mean_h2_ppm
                 FROM v_results_scalar_rollup
                 WHERE base_experiment_id = 'ROLL_920'
                 ORDER BY time_post_reaction_bucket_days
@@ -421,7 +526,7 @@ class TestRollupVialLevelIds:
         ).fetchall()
 
         assert len(rows) == 2, "each timepoint is its own bucket"
-        assert rows[0]._mapping["n_replicates"] == 3
+        assert rows[0]._mapping["n_vials"] == 3
         assert rows[0]._mapping["mean_h2_ppm"] == pytest.approx(20.0)
-        assert rows[1]._mapping["n_replicates"] == 3
+        assert rows[1]._mapping["n_vials"] == 3
         assert rows[1]._mapping["mean_h2_ppm"] == pytest.approx(200.0)
