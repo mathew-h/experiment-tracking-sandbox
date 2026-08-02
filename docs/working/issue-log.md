@@ -1764,3 +1764,59 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   recorded rationale, not a new architectural pattern. The scope call (Master Results only)
   is in the issue doc's Follow-up section.
 - **Docs updated:** yes.
+
+## 2026-08-01 | inline — rollup replicate counts wrong; NULL timepoint buckets
+- **Trigger:** user restored the 2026-08-01 production backup into dev and reported that
+  `v_results_scalar_rollup` replicate counts did not match the raw experiment IDs, plus
+  "I can see all experiments on the data app but not all IDs in Power BI / SQL".
+- **Files changed:** `database/event_listeners.py` (rollup view SQL),
+  `backend/api/schemas/results.py`, `frontend/src/api/experiments.ts`,
+  `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx`,
+  `database/data_migrations/demote_stale_t3_prefix_rows_017.py` (new),
+  `tests/views/test_v_results_scalar_rollup.py`, `tests/api/test_experiment_rollup.py`,
+  `tests/api/test_replicate_group_detail.py`,
+  `frontend/src/pages/ExperimentDetail/__tests__/GroupedResultsView.test.tsx`,
+  `docs/issues/issue-rollup-replicate-count-and-null-timepoint-buckets.md` (new),
+  `docs/POWERBI_MODEL.md`, `docs/PSQL_ACCESS.md`, `docs/api/API_REFERENCE.md`,
+  `docs/user_guide/REPLICATES.md`, `.claude/rules/MODELS.md`.
+- **Four root causes, all measured against the restored backup (1009 experiments):**
+  (A) `n_replicates` was `COUNT(sr.result_id)` over a LEFT JOIN — counted scalar ROWS, wrong
+  in 457/1412 groups, 335 of them reading 0 (every one an ICP-only timepoint rendering a
+  phantom row in a *scalar* rollup). (B) 807/1959 primary rows (41%) have a NULL
+  `time_post_reaction_bucket_days`, collapsing all timepoints of a group into one row —
+  legacy only, zero created since 2026-03. (C) `uq_primary_result_per_experiment_bucket` is
+  inert on NULL buckets because Postgres treats NULLs as distinct: 198 duplicate primary
+  pairs / 397 excess rows on NULL buckets, **zero** on real ones. (D) six stale `-t3` vials
+  parked at day 6/7.
+- **Shipped:** `n_replicates` → `n_vials` / `n_replicate_letters` / `n_values`, LEFT→INNER
+  join. Production effect: 1412→1077 groups, miscounts 457→0, phantom groups 335→0.
+  Migration 017 demotes the six stale rows (applied to dev only).
+- **Tests added:** yes — 4 in `tests/views/`, pinning the three counts separately, ICP-only
+  exclusion, and one-vial-two-rows. 12 existing assertions renamed to `n_vials`.
+- **Verification:** full backend suite 1312 passed / 3 failed / 4 skipped — the 3 are the
+  documented `tests/test_pg_backup_restore.py` baseline (1308 + 4 new = 1312 checks out).
+  Frontend: 14 vitest pass, eslint clean, `tsc --noEmit` adds no new errors (the 3 in
+  `ResultsTab.columns.test.tsx` are pre-existing and in a file not touched here).
+  flake8 on `results.py` 31→30.
+- **Scope grew mid-task:** the rename was approved on the belief that only Power BI read the
+  column, but `replicate_groups.resolve_rollup_rows` feeds it to a **required** API field
+  rendered by the React group page — so it was carried through the schema, TS type and
+  component rather than left to 500 the endpoint. Flagged to the user.
+- **Two proposals were wrong and were corrected rather than executed.** Fix 4 planned to
+  re-bucket the six `-t3` rows to day 3; each vial already held a correct day-3 row, so that
+  would have collided with the unique index — and the stale rows turned out to be empty
+  shells (every scalar column NULL, no files), so they were demoted instead. Fix 3 planned a
+  206-row backfill from `_day<N>_` description tokens; only 16 are collision-free, the other
+  190 are re-ingested duplicates of a row already in that bucket (186/190 case-insensitive
+  label match, 174/190 value-identical). Escalated, not actioned.
+- **Corrected a false claim in `MODELS.md`:** it stated a data migration had backfilled all
+  pre-existing NULL-bucket rows. 807 remain.
+- **Not a bug:** "can't see all experiment IDs" — `v_experiments` exposes all 1009; 292
+  experiments simply have no results, so any visual built on a results view drops them.
+  Documented as a warning in `POWERBI_MODEL.md` rather than "fixed".
+- **Still open (user decisions):** Fix 3's 190 duplicates (demote vs delete; which copy wins
+  for the 16 that disagree) and Fix 2 (`NULLS NOT DISTINCT`, non-additive → schema-checklist
+  Phase 2 sign-off, blocked on Fix 3). Migration 017 not yet run against production.
+- **Decision logged:** no — replacing a miscounting column and demoting empty superseded rows
+  are bug fixes with rationale recorded in the issue doc, not new architectural patterns.
+- **Docs updated:** yes.

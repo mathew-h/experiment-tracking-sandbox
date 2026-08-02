@@ -207,9 +207,9 @@ class RollupTimepointResponse(BaseModel):
     """
     base_experiment_id: str
     time_post_reaction_bucket_days: Optional[float] = None
-    # Replaced the former single `n_replicates` (2026-08-01). That column counted
-    # scalar ROWS, so it read 0 for ICP-only timepoints and over-counted a vial
-    # holding several primary rows. See
+    # Replaced the former single `n_replicates` (2026-08-01). It counted
+    # scalar ROWS, so it read 0 for ICP-only timepoints and over-counted a
+    # vial holding several primary rows. See
     # docs/issues/issue-rollup-replicate-count-and-null-timepoint-buckets.md
     n_vials: int
     n_replicate_letters: int
