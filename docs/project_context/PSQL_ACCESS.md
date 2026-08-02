@@ -272,7 +272,7 @@ timepoints that have scalar data but no H2 or ICP reading yet.
 
 ```sql
 SELECT time_post_reaction_bucket_days,
-       n_replicates,
+       n_vials,
        "mean_gross_ammonium_mM",
        "sd_gross_ammonium_mM",
        mean_h2_ppm,
@@ -283,7 +283,7 @@ ORDER BY time_post_reaction_bucket_days;
 ```
 
 ```
- time_post_reaction_bucket_days | n_replicates | mean_gross_ammonium_mM | sd_gross_ammonium_mM | mean_h2_ppm | sd_h2_ppm
+ time_post_reaction_bucket_days | n_vials | mean_gross_ammonium_mM | sd_gross_ammonium_mM | mean_h2_ppm | sd_h2_ppm
 ----------------------------------+---------------+--------------------------+------------------------+--------------+------------
                                0 |            3 |                     0.29 |                   0.06 |          115 |         12
                                7 |            3 |                     2.05 |                   0.14 |          335 |         18
@@ -291,13 +291,13 @@ ORDER BY time_post_reaction_bucket_days;
 
 Semantics to know before you trust this (full detail in `.claude/rules/MODELS.md`):
 
-- `n_replicates` and every mean/SD column **exclude** experiments flagged `is_outlier`
+- `n_vials` and every mean/SD column **exclude** experiments flagged `is_outlier`
   (a bad vial — leak, cracked septum). A flagged experiment still shows up if you query
   `v_results_scalar` directly for its own `experiment_id`; it just drops out of this rollup.
 - The group's un-lettered parent experiment (e.g. `SERUM_001` itself, if it has its own
   results) is counted in these statistics exactly like `SERUM_001a/b/c` — there's no
   separate way to exclude it other than flagging it `is_outlier` too.
-- `sd_*` is `NULL` when `n_replicates = 1` (nothing to compute a spread from) — that's
+- `sd_*` is `NULL` when `n_vials = 1` (nothing to compute a spread from) — that's
   expected, not missing data.
 
 ### H2 results: ppm → micromoles → g/ton
@@ -407,7 +407,7 @@ ORDER BY e.date;
 
 ```sql
 SELECT time_post_reaction_bucket_days,
-       n_replicates,
+       n_vials,
        "mean_gross_ammonium_mM",
        mean_h2_ppm
 FROM v_results_scalar_rollup
@@ -416,7 +416,7 @@ ORDER BY time_post_reaction_bucket_days;
 ```
 
 ```
- time_post_reaction_bucket_days | n_replicates | mean_gross_ammonium_mM | mean_h2_ppm
+ time_post_reaction_bucket_days | n_vials | mean_gross_ammonium_mM | mean_h2_ppm
 ----------------------------------+---------------+--------------------------+--------------
                                0 |            3 |                     0.29 |          115
                                7 |            3 |                     2.05 |          335
@@ -506,8 +506,8 @@ and the audit trail stay correct. If you spot bad data while exploring here, not
 - **`is_outlier` rows behave differently depending on which view you're in.** A flagged
   experiment (bad vial) still appears in every per-row view — `v_results_scalar`,
   `v_results_h2`, `v_results_icp` — and on its own page in the app. It is excluded from
-  `v_results_scalar_rollup`'s aggregates, **including `n_replicates`**. Seeing a lower
-  `n_replicates` in the rollup than the number of vials you know exist for a group is
+  `v_results_scalar_rollup`'s aggregates, **including `n_vials`**. Seeing a lower
+  `n_vials` in the rollup than the number of vials you know exist for a group is
   expected in that case, not a bug.
 
 ---

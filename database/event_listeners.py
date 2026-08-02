@@ -516,17 +516,33 @@ _VIEWS = [
     # v_results_scalar_rollup
     # One row per (base_experiment_id, timepoint bucket). Cross-replicate
     # mean/median/std for a replicate set (or a single non-replicate
-    # experiment, which yields n_replicates=1 and NULL std). Experiments
-    # flagged is_outlier are excluded from all aggregates including
-    # n_replicates (issue #70 P4) but stay in every per-row view.
+    # experiment, which yields n_vials=1 and NULL std). Experiments
+    # flagged is_outlier are excluded from all aggregates including the
+    # counts (issue #70 P4) but stay in every per-row view.
     # No ICP aggregation (permanently out of scope).
+    #
+    # Counts (2026-08-01): the former single `n_replicates` column was
+    # COUNT(sr.result_id) over a LEFT JOIN, which counted scalar ROWS -- not
+    # replicates and not vials. It read 0 for ICP-only timepoints (335 phantom
+    # groups in production) and over-counted wherever one vial held more than
+    # one primary row. It is replaced by three unambiguous counts, because the
+    # letter is the scientific unit while a '-t<days>' vial is one
+    # destructively-sampled instance of it (MODELS.md, issue #98):
+    #   n_vials             - distinct experiments contributing a scalar value
+    #   n_replicate_letters - distinct replicate letters (0 when unlettered)
+    #   n_values            - rows actually behind mean/median/sd
+    # The JOIN to scalar_results is INNER so a timepoint with no scalar data
+    # produces no row here at all. See
+    # docs/issues/issue-rollup-replicate-count-and-null-timepoint-buckets.md
     # ------------------------------------------------------------------
     ("v_results_scalar_rollup", """
         CREATE VIEW v_results_scalar_rollup AS
         SELECT
             COALESCE(e.base_experiment_id, e.experiment_id)              AS base_experiment_id,
             er.time_post_reaction_bucket_days,
-            COUNT(sr.result_id)                                          AS n_replicates,
+            COUNT(DISTINCT e.id)                                         AS n_vials,
+            COUNT(DISTINCT e.replicate_label)                            AS n_replicate_letters,
+            COUNT(*)                                                     AS n_values,
             AVG(sr."gross_ammonium_concentration_mM")                   AS "mean_gross_ammonium_mM",
             percentile_cont(0.5) WITHIN GROUP (
                 ORDER BY sr."gross_ammonium_concentration_mM")          AS "median_gross_ammonium_mM",
@@ -552,8 +568,8 @@ _VIEWS = [
             stddev_samp(sr.grams_per_ton_yield)                         AS sd_grams_per_ton_yield,
             AVG(sr.final_ph)                                            AS mean_final_ph
         FROM experimental_results er
-        JOIN experiments e         ON e.id  = er.experiment_fk
-        LEFT JOIN scalar_results sr ON sr.result_id = er.id
+        JOIN experiments e     ON e.id  = er.experiment_fk
+        JOIN scalar_results sr ON sr.result_id = er.id
         WHERE er.is_primary_timepoint_result = TRUE
           AND NOT COALESCE(e.is_outlier, false)
         GROUP BY COALESCE(e.base_experiment_id, e.experiment_id),

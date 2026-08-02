@@ -130,7 +130,7 @@ Replicate experiments must already exist (create them with the **Create replicat
 | "No parent experiment found" on Create Replicates | The base experiment doesn't exist yet | Create the base experiment first, then create replicates |
 | A replicate ID was skipped | An experiment with that exact ID already exists | Check the skipped message; rename or delete the conflicting experiment if it was a mistake |
 | Grouped results show `n=1` | This experiment has no lettered siblings yet | Use Create Replicates, or confirm you're not looking at a sequential re-run instead of a lettered set |
-| Rollup stats look wrong across a base with re-runs | The base has both lettered replicates and a sequential re-run (e.g. `HPHT_001-2`) sharing the same base ID | Rollup and grouping key don't distinguish the two — verify the group is actually a lettered set before trusting `n_replicates` |
+| Rollup stats look wrong across a base with re-runs | The base has both lettered replicates and a sequential re-run (e.g. `HPHT_001-2`) sharing the same base ID | Rollup and grouping key don't distinguish the two — verify the group is actually a lettered set before trusting `n_vials` |
 
 ---
 

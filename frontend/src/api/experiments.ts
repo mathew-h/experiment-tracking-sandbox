@@ -169,7 +169,12 @@ export interface RecentChangeRequestsResponse {
 export interface RollupTimepoint {
   base_experiment_id: string
   time_post_reaction_bucket_days: number | null
-  n_replicates: number
+  /** Distinct vials (experiments) behind this bucket's statistics. */
+  n_vials: number
+  /** Distinct replicate letters; 0 for an unlettered group. */
+  n_replicate_letters: number
+  /** Rows actually averaged — exceeds n_vials when a vial holds several. */
+  n_values: number
   mean_gross_ammonium_mM: number | null
   median_gross_ammonium_mM: number | null
   sd_gross_ammonium_mM: number | null
