@@ -188,6 +188,29 @@ Defines the parameters and setup for an experiment.
   - `total_ferrous_iron_g` (Float, nullable): mass of ferrous iron (Fe²⁺) in grams, derived from rock characterization FeO wt% × `FE_IN_FEO_FRACTION` × `rock_mass_g`; see `docs/CALCULATIONS.md` for full formula.
 - **Relationships**: `chemical_additives` → One-to-Many with `ChemicalAdditive`.
 - **Note**: Legacy fields like `catalyst`, `buffer_system`, `surfactant` are deprecated in favor of `ChemicalAdditive`.
+- **Identity (issue #109 follow-up):** `experiment_fk` is the **only** authoritative
+  link to `Experiment`; the `experiment_id` string on this table is a denormalized
+  copy that no rename path keeps in sync (187 of 1013 rows stale as of 2026-08-05,
+  backfilled by data migration
+  `database/data_migrations/dedupe_conditions_and_backfill_ids_018.py`). Never
+  resolve a conditions row by this string — resolve through `experiment_fk`.
+  - `UNIQUE (experiment_fk)` (`uq_conditions_experiment_fk`, Alembic revision
+    `00063a5dd6a8`) enforces the 1:1 with `Experiment` that `_build_list_item`,
+    `serialize_experiment_snapshot`, `v_experiments` and `v_experiment_conditions`
+    all assume. Before it, one duplicate row 500'd the experiments list
+    (`MultipleResultsFound`), duplicated the Power BI dimension key in the two
+    views above, and made the owning experiment undeletable through either delete
+    path. The migration's `upgrade()` refuses with a `RuntimeError` (listing the
+    offending `experiment_fk`s) if any duplicate remains — the dedupe script above
+    must be run with `--apply` first.
+  - `POST /api/conditions` returns **409** when a row already exists for the
+    submitted `experiment_fk`, with the existing row's id in the `detail` text.
+  - `GET /api/conditions/by-experiment/{experiment_id}`, `_build_list_item`, and
+    `serialize_experiment_snapshot` all select the **lowest-id** row rather than
+    `scalar_one_or_none()`/`.one()`, so a database that predates the constraint
+    degrades to "pick one row" instead of 500ing.
+  - Full incident record, the production measurements, and the deploy sequence:
+    `docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md`.
 
 ### `Compound`
 Inventory of chemical reagents.
