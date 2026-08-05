@@ -2,6 +2,7 @@ import pytest
 
 from database.models.experiments import Experiment
 from database.models.enums import ExperimentStatus
+from tests.pre_constraint_conditions import without_conditions_unique
 
 
 def _make_experiment(db, experiment_id="TEST_001", number=9001):
@@ -386,34 +387,38 @@ def test_list_experiments_description_search(client, db_session):
 def test_list_experiments_survives_duplicate_conditions(client, db_session):
     """_build_list_item used scalar_one_or_none on conditions, so one duplicate
     row 500'd the whole experiments page (issue #109)."""
-    exp = _make_experiment(db_session, "LISTDUP_001", 63020)
-    for string in ("LISTDUP_001", "LISTDUP_STALE"):
-        db_session.add(_EC(
-            experiment_fk=exp.id, experiment_id=string, experiment_type="Serum",
-        ))
-    db_session.commit()
+    # Pre-dates uq_conditions_experiment_fk (issue #109) — see helper docstring.
+    with without_conditions_unique(db_session):
+        exp = _make_experiment(db_session, "LISTDUP_001", 63020)
+        for string in ("LISTDUP_001", "LISTDUP_STALE"):
+            db_session.add(_EC(
+                experiment_fk=exp.id, experiment_id=string, experiment_type="Serum",
+            ))
+        db_session.commit()
 
-    resp = client.get("/api/experiments", params={"search": "LISTDUP_001"})
-    assert resp.status_code == 200
-    items = resp.json()["items"]
-    assert [i["experiment_id"] for i in items] == ["LISTDUP_001"]
-    assert resp.json()["total"] == 1
+        resp = client.get("/api/experiments", params={"search": "LISTDUP_001"})
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert [i["experiment_id"] for i in items] == ["LISTDUP_001"]
+        assert resp.json()["total"] == 1
 
 
 def test_get_experiment_survives_duplicate_conditions(client, db_session):
     """get_experiment used scalar_one_or_none on conditions, so one duplicate
     row 500'd the experiment detail page (issue #109)."""
-    exp = _make_experiment(db_session, "LISTDUP_002", 63021)
-    for string in ("LISTDUP_002", "LISTDUP_002_STALE"):
-        db_session.add(_EC(
-            experiment_fk=exp.id, experiment_id=string, experiment_type="Serum",
-        ))
-    db_session.commit()
+    # Pre-dates uq_conditions_experiment_fk (issue #109) — see helper docstring.
+    with without_conditions_unique(db_session):
+        exp = _make_experiment(db_session, "LISTDUP_002", 63021)
+        for string in ("LISTDUP_002", "LISTDUP_002_STALE"):
+            db_session.add(_EC(
+                experiment_fk=exp.id, experiment_id=string, experiment_type="Serum",
+            ))
+        db_session.commit()
 
-    resp = client.get("/api/experiments/LISTDUP_002")
-    assert resp.status_code == 200
-    assert resp.json()["experiment_id"] == "LISTDUP_002"
-    assert resp.json()["conditions"]["experiment_type"] == "Serum"
+        resp = client.get("/api/experiments/LISTDUP_002")
+        assert resp.status_code == 200
+        assert resp.json()["experiment_id"] == "LISTDUP_002"
+        assert resp.json()["conditions"]["experiment_type"] == "Serum"
 
 
 def test_upsert_additive_no_conditions(client, db_session):
