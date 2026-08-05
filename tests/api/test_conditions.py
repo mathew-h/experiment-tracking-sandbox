@@ -332,3 +332,35 @@ def test_by_experiment_404s_for_an_experiment_with_no_conditions(client, db_sess
 
 def test_by_experiment_404s_for_an_unknown_experiment(client):
     assert client.get("/api/conditions/by-experiment/BYFK_NOPE").status_code == 404
+
+
+def test_post_conditions_rejects_a_second_row_for_the_same_experiment(client, db_session):
+    """The duplicate's actual entry point: POST had no existence check, so a
+    stale-string 404 on the detail page let 'Add Details' insert a second row."""
+    exp = _make_experiment(db_session, "BYFK_005", 62005)
+    first = client.post("/api/conditions", json={
+        "experiment_fk": exp.id, "experiment_id": exp.experiment_id, "temperature_c": 90.0,
+    })
+    assert first.status_code == 201
+
+    second = client.post("/api/conditions", json={
+        "experiment_fk": exp.id, "experiment_id": exp.experiment_id, "temperature_c": 90.0,
+    })
+    assert second.status_code == 409
+    assert str(first.json()["id"]) in second.json()["detail"]
+
+
+def test_post_conditions_409_does_not_insert(client, db_session):
+    from database.models.conditions import ExperimentalConditions
+
+    exp = _make_experiment(db_session, "BYFK_006", 62006)
+    client.post("/api/conditions", json={
+        "experiment_fk": exp.id, "experiment_id": exp.experiment_id,
+    })
+    client.post("/api/conditions", json={
+        "experiment_fk": exp.id, "experiment_id": exp.experiment_id,
+    })
+    rows = db_session.query(ExperimentalConditions).filter(
+        ExperimentalConditions.experiment_fk == exp.id
+    ).all()
+    assert len(rows) == 1

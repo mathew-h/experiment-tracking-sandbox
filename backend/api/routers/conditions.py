@@ -78,6 +78,23 @@ def create_conditions(
 ) -> ConditionsResponse:
     """Create conditions and compute derived fields (water_to_rock_ratio)."""
     _validate_reactor_number(payload.reactor_number, payload.experiment_type)
+    existing = db.execute(
+        select(ExperimentalConditions.id)
+        .where(ExperimentalConditions.experiment_fk == payload.experiment_fk)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
+    if existing is not None:
+        # ExperimentalConditions is 1:1 with Experiment. Before this check, a
+        # stale-string 404 from by-experiment made the detail page render its
+        # "no conditions" empty state for an experiment that had them, and
+        # "Add Details" inserted a second row (issue #109 follow-up).
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Conditions already exist for this experiment (id={existing}). "
+                "Reload the page and edit them instead of adding new details."
+            ),
+        )
     cond = ExperimentalConditions(**payload.model_dump())
     db.add(cond)
     db.flush()
