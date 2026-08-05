@@ -177,3 +177,55 @@ def test_xrd_slot_collision_is_skipped_not_raised(db_session: Session):
     assert victim_phase.experiment_id == "SYNC_TEST_007"  # left stale on purpose
     # Everything else still synced.
     assert result.conditions == 1
+
+
+def test_xrd_slot_collision_within_one_call_is_skipped(db_session: Session):
+    """Two of this experiment's OWN phases wanting the same target slot.
+
+    Both rows belong to `experiment_fk` and share (time, mineral) but carry
+    different stale `experiment_id` strings — the shape left behind when an
+    earlier rename synced some XRD rows and not others. Only one can hold
+    (new_id, time, mineral).
+
+    The blocker SELECT alone cannot catch this: sessions run autoflush=False,
+    so the first row's assignment is still pending and invisible to the second
+    row's query. Both would be assigned new_id and the next flush would raise
+    IntegrityError on uq_xrd_phase_experiment_time_mineral.
+
+    `time_post_reaction_days` is non-NULL on both rows deliberately —
+    uq_xrd_phase_experiment_time_mineral is a plain UniqueConstraint, so
+    PostgreSQL treats NULLs as distinct and the constraint would never fire.
+    """
+    exp = _seed(db_session, "SYNC_TEST_009", 8801009)
+    # A second phase of the SAME experiment, same slot, different stale string.
+    stale_twin = XRDPhase(
+        experiment_id="SYNC_TEST_009_OLD",
+        experiment_fk=exp.id,
+        mineral_name="Magnetite",      # same mineral as _seed's phase
+        amount=3.0,
+        time_post_reaction_days=7.0,   # same timepoint as _seed's phase
+    )
+    db_session.add(stale_twin)
+    db_session.flush()
+
+    exp.experiment_id = "SYNC_TEST_009a-t7"
+    db_session.flush()
+
+    result = sync_denormalized_experiment_id(db_session, exp.id, "SYNC_TEST_009a-t7")
+    db_session.flush()  # must NOT raise IntegrityError
+
+    phases = (
+        db_session.query(XRDPhase)
+        .filter(XRDPhase.experiment_fk == exp.id)
+        .order_by(XRDPhase.id)
+        .all()
+    )
+    assert len(phases) == 2
+    # Exactly one took the slot; the other was left stale and reported.
+    assert result.xrd_phases == 1
+    assert result.xrd_phases_skipped == [stale_twin.id]
+    assert phases[0].experiment_id == "SYNC_TEST_009a-t7"
+    assert stale_twin.experiment_id == "SYNC_TEST_009_OLD", "should be left stale"
+    # The rest of the fan-out is unaffected by the XRD skip.
+    assert result.conditions == 1
+    assert result.notes == 1
