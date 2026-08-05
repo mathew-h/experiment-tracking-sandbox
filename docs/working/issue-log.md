@@ -1841,8 +1841,9 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   `tests/pre_constraint_conditions.py` (new), `tests/api/test_experiments.py`,
   `tests/services/test_experiment_deletion.py`,
   `tests/services/bulk_uploads/test_experiment_deletion_bulk.py`,
+  `tests/api/test_additives.py`, `tests/api/test_conditions.py`,
   `docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md` (new),
-  `.claude/rules/MODELS.md`, `docs/api/API_REFERENCE.md`.
+  `.claude/rules/MODELS.md`, `docs/api/API_REFERENCE.md`, `.claude/commands/deploy.md`.
 - **Root cause:** `experimental_conditions` carries two identities — the authoritative
   `experiment_fk` and a denormalized `experiment_id` string no rename path updates. 187 of
   1013 production rows (18%) were stale; 175 named an experiment with no conditions row at
@@ -1864,14 +1865,31 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   incorrect "cannot fan out" comment corrected; `UNIQUE (experiment_fk)`
   (`uq_conditions_experiment_fk`) added via Alembic revision `00063a5dd6a8`, whose
   `upgrade()` refuses with a `RuntimeError` listing offenders if duplicates remain.
+- **Found by the final whole-branch review and also shipped:** the three additives endpoints
+  (`GET`/`PUT`/`DELETE /api/experiments/{id}/additives`) still resolved the conditions row by
+  the stale string. For the 6 duplicated strings that was a 500; for the 175 an empty list or
+  404; and for the 12 whose string names a *different* experiment, the `PUT` wrote the
+  additive onto **that other experiment's** conditions row — silent cross-experiment data
+  corruption nobody had reported. All three now resolve via `experiment_fk`, and each
+  handler fetches its `Experiment` up front, so a non-existent experiment 404s before any
+  write instead of proceeding with the audit-log row skipped.
 - **Tests added:** yes — migration 018 dedupe/backfill/BLOCKED-group coverage, the unique
   constraint, a fresh-install migration check, and `tests/pre_constraint_conditions.py`'s
   `without_conditions_unique` helper used by 9 tests across `tests/api/`, `tests/models/`
   and `tests/services/` to simulate a pre-#109 database and prove the tolerant readers
   degrade rather than 500.
-- **Verification:** full backend suite 3 failed / 1332 passed / 4 skipped — the 3 are the
-  documented pre-existing `tests/test_pg_backup_restore.py` baseline. `alembic upgrade →
-  downgrade → upgrade` clean on dev; constraint confirmed present on dev via psql.
+- **Verification:** full backend suite 3 failed / **1337** passed / 4 skipped, run
+  independently at the final HEAD — the 3 are the documented pre-existing
+  `tests/test_pg_backup_restore.py` baseline. `alembic upgrade → downgrade → upgrade` clean
+  on dev; constraint confirmed present on dev via psql. `flake8` gained no non-E501 findings
+  on any changed file (the two E127s the new additives helper introduced were fixed; E501 at
+  79 is unconfigured repo-wide noise against the project's Black-88 standard).
+- **Deploy hazard — read before promoting to `main`.** `update.ps1:228` runs
+  `alembic upgrade head` unconditionally and `Abort`s on a non-zero exit, and the new
+  migration's pre-flight raises while the duplicate exists. So the nightly update will fail
+  at Step 5 — skipping the Step 6 frontend rebuild — every night until
+  `dedupe_conditions_and_backfill_ids_018.py --apply` has run on the lab PC. Documented as a
+  new Step 0 in `.claude/commands/deploy.md` and above the command list in the issue doc.
 - **Scope notes:** two things found during the investigation are recorded but not fixed —
   `_id_match.py::normalize_id` conflates 13 real experiment pairs (touches locked
   `bulk_uploads` parsers, needs its own `/start-task`), and
@@ -1886,4 +1904,16 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   the constraint lands. The 018 script has not yet been applied to any database, including
   dev; production deploy sequence (dedupe --apply, then alembic upgrade head, then Power BI
   refresh) is recorded in the issue doc.
+- **Decision logged (user, 2026-08-05), third:** bulk rename
+  (`backend/services/bulk_uploads/new_experiments.py:543-575`) syncs experiment notes and
+  `modifications_log` rows but **not** `experimental_conditions.experiment_id` — this is the
+  mechanism that produced all 187 stale strings, so migration 018's backfill will decay with
+  every future bulk rename. Tracked as a follow-up rather than fixed here: it needs a locked
+  bulk-upload parser change with its own sign-off, and the damage is now capped (the
+  constraint and the 409 guard mean a stale string can no longer yield a duplicate row, only
+  a 404 on the conditions tab).
+- **Parked, not fixed:** the "no rename path updates the string" wording survives in
+  `database/models/conditions.py:9-12` (locked) and `backend/api/routers/conditions.py:50-52`;
+  both sat outside the final fix wave's permitted file list. The precise statement is in
+  `.claude/rules/MODELS.md` and the issue doc.
 - **Docs updated:** yes.

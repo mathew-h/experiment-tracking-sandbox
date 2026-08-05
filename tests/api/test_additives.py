@@ -219,9 +219,11 @@ def test_patch_additive_method_at_max_length_succeeds(client, db_session):
 # conditions via experiment_fk, never the denormalized (and possibly stale)
 # ExperimentalConditions.experiment_id string. ---
 
-def _setup_experiment_with_stale_conditions(db, exp_id, stale_string, number,
-                                             compound_name=None, amount=5.0,
-                                             unit=AmountUnit.GRAM, with_additive=True):
+def _setup_experiment_with_stale_conditions(
+    db, exp_id, stale_string, number,
+    compound_name=None, amount=5.0,
+    unit=AmountUnit.GRAM, with_additive=True,
+):
     """Same shape as _setup_experiment_with_additive, but the conditions row's
     denormalized experiment_id string does NOT match the experiment's real ID
     -- simulating the debris a rename leaves when the string isn't synced

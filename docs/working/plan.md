@@ -11,6 +11,33 @@
 
 ---
 
+## Discovered (2026-08-05, during the issue #109 follow-up)
+
+Two things that affect any future work touching bulk uploads, both left unfixed by explicit
+scope decision.
+
+**1. Bulk rename does not sync `experimental_conditions.experiment_id`.**
+`backend/services/bulk_uploads/new_experiments.py:543-575` updates the experiment's notes and
+its `modifications_log` rows on a rename, but not the denormalized `experiment_id` string on
+its conditions row. This is the mechanism that produced 187 stale strings out of 1013
+production rows, which is what let one experiment acquire two conditions rows and 500 the
+experiments list. Migration 018 backfills them, but the backfill **decays with every future
+bulk rename** until this is fixed. Damage is now capped — `UNIQUE (experiment_fk)` plus the
+409 guard on `POST /api/conditions` mean a stale string can no longer produce a duplicate row,
+only a 404 on the conditions tab — so this is a slow regression, not a live break. Needs its
+own `/start-task`: `bulk_uploads/` is locked and has its own test suite. **Do this before any
+work that encourages bulk renames.**
+
+**2. `_id_match.py::normalize_id` conflates 13 real experiment pairs.** It strips punctuation
+and leading zeros, so `SERUM_JW_010-2` and `SERUM_JW_102` both normalize to `serumjw102`
+(also `_011-2`/`_112`, `_012_2`/`_122`, `_012_3`/`_123`, `_013_2`/`_132`, `_013-3`/`_133`,
+`_014_2`/`_142`, `_014-3`/`_143`, `_015_2`/`_152`, `_015-3`/`_153`, `_016_2`/`_162`,
+`_016-3`/`_163`, `_009-2`/`_092`). `fuzzy_find_experiment` returns `.first()` of whichever it
+finds, so any parser using it can attach results to the wrong experiment silently. All 13
+pairs are live production data. Also locked-parser territory.
+
+---
+
 ## Discovered (2026-08-01, during issue #116)
 
 Two bulk-upload parsers still carry the bug #116 fixed for Master Results.
