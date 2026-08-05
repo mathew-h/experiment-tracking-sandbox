@@ -2,74 +2,151 @@
 
 Normalization rules (applied in order):
   1. Lowercase
-  2. Strip all non-alphanumeric characters
-  3. Strip leading zeros from each numeric segment
+  2. Split into maximal alphabetic and numeric runs, discarding every
+     non-alphanumeric character
+  3. Strip leading zeros inside each numeric run (an all-zero run becomes "0")
+  4. Join the runs with a single "_"
 
 Examples:
-  "20250502_2A"  → "202505022a"   (no leading zeros)
-  "20250502-2A"  → "202505022a"
-  "HPHT_001"     → "hpht1"        (leading zeros stripped)
-  "HPHT-001"     → "hpht1"
-  "HPHT_1"       → "hpht1"
-  "HPHT_100"     → "hpht100"      (100 has no leading zeros)
+  "20250502_2A"  -> "20250502_2_a"
+  "20250502-2A"  -> "20250502_2_a"
+  "HPHT_001"     -> "hpht_1"
+  "HPHT-001"     -> "hpht_1"
+  "HPHT_1"       -> "hpht_1"
+  "HPHT001"      -> "hpht_1"       (missing separator is inserted)
+  "HPHT_100"     -> "hpht_100"     (100 has no leading zeros)
+
+Why runs are DELIMITED rather than concatenated
+-----------------------------------------------
+The previous key deleted every separator before stripping leading zeros, so a
+sequential re-run collapsed onto an unrelated experiment: "SERUM_JW_010-2" and
+"SERUM_JW_102" both became "serumjw102". 13 real experiment pairs and 3 sample
+pairs in the dev DB were affected (measured 2026-08-05), and the finders below
+resolved the collision by returning an arbitrary one of the two -- silently
+attaching bulk-uploaded results to the wrong experiment.
+
+Keeping a delimiter between runs is a strict refinement: equal new keys imply
+identical run sequences, which imply equal old keys, so this can only split an
+old equivalence class, never merge two. Both keys collapse separator style and
+zero padding, which is the leniency the finders exist for. Two documented
+equivalences are deliberately lost -- "HPHT_0014B" no longer matches
+"HPHT_001_4B" -- because they were guesses.
 
 Both ``fuzzy_find_sample`` and ``fuzzy_find_experiment`` try an exact DB match
 first (single indexed query), then fall back to loading all rows and comparing
 normalized IDs in Python. The exact-match fast path means the fallback scan is
-only needed when the file's ID format differs from the stored one.
+only needed when the file's ID format differs from the stored one. Neither ever
+resolves an ambiguous key -- see ``find_experiment_matches``.
 """
 from __future__ import annotations
 
 import re
 from typing import Optional, TypedDict
 
+import structlog
 from sqlalchemy.orm import Session
 
 from database import Experiment, SampleInfo
 
+log = structlog.get_logger(__name__)
+
+
+_RUN_RE = re.compile(r"[0-9]+|[a-z]+")
+
 
 def normalize_id(raw: str) -> str:
-    """Lowercase, strip all non-alphanumeric chars, then strip leading zeros.
+    """Lowercase, split into alpha/digit runs, unpad each digit run, join with "_".
 
-    Leading-zero stripping targets sequences of zeros that are preceded by a
-    non-digit (or start of string) and followed by at least one more digit.
-    This means:
-      - "001" → "1"
-      - "100" → "100"  (the 1 is not a leading zero)
-      - "0"   → "0"    (lone zero, nothing follows)
+    Runs keep a delimiter between them so that a numeric boundary cannot be
+    erased. "SERUM_JW_010-2" -> "serum_jw_10_2" while "SERUM_JW_102" ->
+    "serum_jw_102": distinct, where the old concatenating key made them equal.
+    An all-zero run collapses to "0" ("HPHT_00" -> "hpht_0").
     """
-    s = re.sub(r"[^a-z0-9]", "", raw.lower())
-    s = re.sub(r"(?<!\d)0+(?=\d)", "", s)
-    return s
+    runs: list[str] = []
+    for run in _RUN_RE.findall(raw.lower()):
+        if run.isdigit():
+            run = run.lstrip("0") or "0"
+        runs.append(run)
+    return "_".join(runs)
 
 
-def fuzzy_find_sample(db: Session, raw_id: str) -> Optional[SampleInfo]:
-    """Return the SampleInfo whose sample_id matches ``raw_id`` after normalization.
+class AmbiguousExperimentIdError(ValueError):
+    """More than one stored experiment matches one normalized ID.
 
-    Tries exact match first; falls back to normalized scan if not found.
+    Raised by callers that must not fall through to a "not found" path --
+    `ScalarResultsService._find_experiment`'s caller auto-CREATES an experiment
+    when the lookup returns None, so a silent None on an ambiguous ID would
+    fabricate a row.
+    """
+
+    def __init__(self, raw_id: str, candidates: list[str]) -> None:
+        self.raw_id = raw_id
+        self.candidates = candidates
+        super().__init__(
+            f"Experiment ID '{raw_id}' is ambiguous - it matches "
+            f"{len(candidates)} experiments: {', '.join(candidates)}. "
+            f"Use the exact experiment_id."
+        )
+
+
+def find_sample_matches(db: Session, raw_id: str) -> list[SampleInfo]:
+    """Every SampleInfo matching ``raw_id``. Exact match short-circuits to one.
+
+    A list, not an Optional, so a caller can tell "no match" from "several" --
+    the distinction the old .first() destroyed.
     """
     sample = db.query(SampleInfo).filter(SampleInfo.sample_id == raw_id).first()
     if sample:
-        return sample
+        return [sample]
     target = normalize_id(raw_id)
-    for s in db.query(SampleInfo).all():
-        if normalize_id(s.sample_id) == target:
-            return s
+    return [s for s in db.query(SampleInfo).all() if normalize_id(s.sample_id) == target]
+
+
+def find_experiment_matches(db: Session, raw_id: str) -> list[Experiment]:
+    """Every Experiment matching ``raw_id``. Exact match short-circuits to one."""
+    exp = db.query(Experiment).filter(Experiment.experiment_id == raw_id).first()
+    if exp:
+        return [exp]
+    target = normalize_id(raw_id)
+    return [e for e in db.query(Experiment).all() if normalize_id(e.experiment_id) == target]
+
+
+def fuzzy_find_sample(db: Session, raw_id: str) -> Optional[SampleInfo]:
+    """The SampleInfo matching ``raw_id``, or None if none or several match.
+
+    Never picks one of several: an arbitrary choice attaches data to the wrong
+    sample with no trace.
+    """
+    matches = find_sample_matches(db, raw_id)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        log.warning(
+            "ambiguous_sample_id",
+            raw_id=raw_id,
+            normalized=normalize_id(raw_id),
+            candidates=sorted(s.sample_id for s in matches),
+        )
     return None
 
 
 def fuzzy_find_experiment(db: Session, raw_id: str) -> Optional[Experiment]:
-    """Return the Experiment whose experiment_id matches ``raw_id`` after normalization.
+    """The Experiment matching ``raw_id``, or None if none or several match.
 
-    Tries exact match first; falls back to normalized scan if not found.
+    Returns None rather than raising so existing callers keep working. Callers
+    that must distinguish ambiguity from absence should use
+    ``find_experiment_matches`` and raise ``AmbiguousExperimentIdError``.
     """
-    exp = db.query(Experiment).filter(Experiment.experiment_id == raw_id).first()
-    if exp:
-        return exp
-    target = normalize_id(raw_id)
-    for e in db.query(Experiment).all():
-        if normalize_id(e.experiment_id) == target:
-            return e
+    matches = find_experiment_matches(db, raw_id)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        log.warning(
+            "ambiguous_experiment_id",
+            raw_id=raw_id,
+            normalized=normalize_id(raw_id),
+            candidates=sorted(e.experiment_id for e in matches),
+        )
     return None
 
 
