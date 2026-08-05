@@ -5,6 +5,19 @@ allowed-tools: Bash
 
 You are executing a production deployment merge. Follow every step in order. Stop and report to the user at any failure point — do not attempt to recover automatically.
 
+## Step 0 — Pending-migration pre-flight check
+
+Before merging any branch whose migration can refuse to apply (e.g. a
+duplicate-data guard), confirm the required data cleanup has already been run
+on the lab PC. `update.ps1` Step 5 runs `alembic upgrade head`
+unconditionally on every nightly deploy and aborts the whole run — skipping
+Step 6's frontend rebuild — on a non-zero exit. If a pending migration's
+pre-flight raises (e.g. a `RuntimeError` refusing to add a constraint while
+duplicate rows remain), the nightly deploy fails at Step 5 every night until
+the cleanup is applied on the lab PC. If this deploy includes such a
+migration, tell the user before continuing and confirm the cleanup script has
+been run on the lab PC first.
+
 ## Step 1 — Pre-flight checks
 
 Run these three checks in sequence. Stop if any fails.

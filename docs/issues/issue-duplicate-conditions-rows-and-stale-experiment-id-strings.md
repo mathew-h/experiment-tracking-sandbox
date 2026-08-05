@@ -13,8 +13,12 @@
 
 `experimental_conditions` carries two identities for the same relationship:
 `experiment_fk` (authoritative, non-null FK to `experiments.id`) and a
-denormalized `experiment_id` string column. No rename path updates the string
-once it is written. Measured against the production dump:
+denormalized `experiment_id` string column. The single-experiment rename path
+(`PATCH /api/experiments/{id}`) does update it. The **bulk** rename path
+(`backend/services/bulk_uploads/new_experiments.py:543-575`) does not — it
+syncs `ExperimentNotes.experiment_id` and `ModificationsLog.experiment_id` on
+a rename but not this column, which is the actual remaining source of
+staleness (see Follow-up below). Measured against the production dump:
 
 - **187 of 1013 conditions rows (18%)** carry a string that is not their
   experiment's real `experiment_id`.
@@ -150,7 +154,42 @@ on `experimental_conditions.experiment_fk`, because `Experiment.conditions` is
 `uselist=False` and the ORM cascade only reaches one row. That constraint is
 present in both the 2026-08-05 production dump and the dev DB.
 
+## Follow-up
+
+**The bulk rename leak is still open, so 018's backfill will decay.**
+`backend/services/bulk_uploads/new_experiments.py:543-575` syncs
+`ExperimentNotes.experiment_id` and `ModificationsLog.experiment_id` on a bulk
+rename but not `experimental_conditions.experiment_id` (see Root cause,
+corrected above). Every bulk rename workbook re-creates stale-string debris,
+and the `GET`/`PUT`/`DELETE /api/experiments/{experiment_id}/additives`
+endpoints — fixed to resolve via `experiment_fk` in this fix wave — are what
+used to regress as a result while they still resolved by the stale string.
+Fixing the bulk parser itself is locked-file work
+(`backend/services/bulk_uploads/` is locked per `.claude/CLAUDE.md` Section 5)
+and is legitimately out of scope here — it needs its own `/start-task` and
+explicit user sign-off before `new_experiments.py` is touched.
+
+## Resolved questions
+
+**`_IGNORED_COLUMNS` omits the legacy `total_ferrous_iron` column, but this
+does not block the real cleanup.** Verified against the 2026-08-05 dump: conds
+901 and 1062 (the one production duplicate group) differ **only** on the
+already-ignored columns (`id`, `experiment_id`, `created_at`, `updated_at`);
+`total_ferrous_iron` and `total_ferrous_iron_g` are both `NULL` on both rows.
+The group is deletable as-is; the gap would only matter for a future
+duplicate that actually diverges on that column.
+
 ## Deploy to the lab PC
+
+**Warning — do this before the branch reaches `main`, or the nightly deploy
+starts failing.** `update.ps1` Step 5 runs `alembic upgrade head`
+unconditionally on every nightly run and aborts the whole deploy on a non-zero
+exit — before Step 6's frontend rebuild. Once this branch is on `main`, the
+migration's pre-flight raises a `RuntimeError` listing the duplicate every
+night until the 018 cleanup below has been applied on the lab PC, so every
+nightly update fails at Step 5 and the frontend never gets rebuilt. Run steps
+1–3 below on the lab PC in the same sitting as the merge, or before the next
+nightly window, whichever is sooner.
 
 Order is load-bearing — the migration's pre-flight refuses if duplicates
 remain, so the cleanup must run first. The 018 script has **not** yet been
