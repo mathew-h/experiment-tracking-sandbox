@@ -8,10 +8,12 @@ class ExperimentalConditions(Base):
 
     # ExperimentalConditions is 1:1 with Experiment, and experiment_fk is the
     # only authoritative link. The experiment_id String below is a denormalized
-    # convenience copy that the rename paths do not keep in sync (187 of 1013
-    # production rows were stale as of 2026-08-05) -- never resolve a conditions
-    # row by it. See issue #109 follow-up:
-    # docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md
+    # convenience copy -- never resolve a conditions row by it. Both rename
+    # paths now keep it in sync (PATCH /api/experiments/{id} and the bulk
+    # upload parser, via backend/services/denormalized_ids.py), but 187 of 1013
+    # production rows were stale as of 2026-08-05 and are only corrected by
+    # running database/data_migrations/dedupe_conditions_and_backfill_ids_018.py.
+    # See docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md
     __table_args__ = (
         UniqueConstraint("experiment_fk", name="uq_conditions_experiment_fk"),
     )

@@ -190,13 +190,19 @@ Defines the parameters and setup for an experiment.
 - **Note**: Legacy fields like `catalyst`, `buffer_system`, `surfactant` are deprecated in favor of `ChemicalAdditive`.
 - **Identity (issue #109 follow-up):** `experiment_fk` is the **only** authoritative
   link to `Experiment`; the `experiment_id` string on this table is a denormalized
-  copy. The single-experiment rename path (`PATCH /api/experiments/{id}`) does
-  keep it in sync; the **bulk** rename path
-  (`backend/services/bulk_uploads/new_experiments.py`) does not — it syncs
-  `ExperimentNotes.experiment_id` and `ModificationsLog.experiment_id` on a
-  rename but not this column, which is the source of new staleness going
-  forward (187 of 1013 rows stale as of 2026-08-05, backfilled by data
-  migration `database/data_migrations/dedupe_conditions_and_backfill_ids_018.py`).
+  copy. Both rename paths keep it in sync as of 2026-08-05: `PATCH /api/experiments/{id}`
+  and the bulk parser (`backend/services/bulk_uploads/new_experiments.py`) both
+  call `backend/services/denormalized_ids.py::sync_denormalized_experiment_id`,
+  which is the **single definition** of the five-table fan-out
+  (`experimental_conditions`, `experiment_notes`, `modifications_log`,
+  `external_analyses`, `xrd_phases`). Add a sixth table there, not at a call site.
+  `xrd_phases` rows whose new `(experiment_id, time_post_reaction_days,
+  mineral_name)` slot is already taken are **left stale and reported** rather
+  than renamed — renaming into an occupied `uq_xrd_phase_experiment_time_mineral`
+  slot would abort the whole rename with an `IntegrityError`.
+  187 of 1013 rows were stale as of 2026-08-05 from the pre-fix bulk path and
+  are corrected only by running
+  `database/data_migrations/dedupe_conditions_and_backfill_ids_018.py`.
   Never resolve a conditions row by this string — resolve through `experiment_fk`.
   - `UNIQUE (experiment_fk)` (`uq_conditions_experiment_fk`, Alembic revision
     `00063a5dd6a8`) enforces the 1:1 with `Experiment` that `_build_list_item`,

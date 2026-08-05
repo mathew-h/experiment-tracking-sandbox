@@ -13,12 +13,14 @@
 
 `experimental_conditions` carries two identities for the same relationship:
 `experiment_fk` (authoritative, non-null FK to `experiments.id`) and a
-denormalized `experiment_id` string column. The single-experiment rename path
-(`PATCH /api/experiments/{id}`) does update it. The **bulk** rename path
-(`backend/services/bulk_uploads/new_experiments.py:543-575`) does not — it
-syncs `ExperimentNotes.experiment_id` and `ModificationsLog.experiment_id` on
-a rename but not this column, which is the actual remaining source of
-staleness (see Follow-up below). Measured against the production dump:
+denormalized `experiment_id` string column. At the time this bug was
+investigated, the single-experiment rename path (`PATCH /api/experiments/{id}`)
+kept it in sync, but the **bulk** rename path
+(`backend/services/bulk_uploads/new_experiments.py:543-575`) did not — it
+synced `ExperimentNotes.experiment_id` and `ModificationsLog.experiment_id` on
+a rename but not this column, which was the source of new staleness behind
+the cleanup below. **That leak is now closed — see Follow-up.** Measured
+against the production dump:
 
 - **187 of 1013 conditions rows (18%)** carry a string that is not their
   experiment's real `experiment_id`.
@@ -154,20 +156,34 @@ on `experimental_conditions.experiment_fk`, because `Experiment.conditions` is
 `uselist=False` and the ORM cascade only reaches one row. That constraint is
 present in both the 2026-08-05 production dump and the dev DB.
 
-## Follow-up
+## Follow-up — CLOSED 2026-08-05
 
-**The bulk rename leak is still open, so 018's backfill will decay.**
-`backend/services/bulk_uploads/new_experiments.py:543-575` syncs
-`ExperimentNotes.experiment_id` and `ModificationsLog.experiment_id` on a bulk
-rename but not `experimental_conditions.experiment_id` (see Root cause,
-corrected above). Every bulk rename workbook re-creates stale-string debris,
-and the `GET`/`PUT`/`DELETE /api/experiments/{experiment_id}/additives`
-endpoints — fixed to resolve via `experiment_fk` in this fix wave — are what
-used to regress as a result while they still resolved by the stale string.
-Fixing the bulk parser itself is locked-file work
-(`backend/services/bulk_uploads/` is locked per `.claude/CLAUDE.md` Section 5)
-and is legitimately out of scope here — it needs its own `/start-task` and
-explicit user sign-off before `new_experiments.py` is touched.
+**The bulk rename leak is fixed, so 018's backfill no longer decays.** The
+fan-out now has a single definition,
+`backend/services/denormalized_ids.py::sync_denormalized_experiment_id`, called
+by both rename paths: `PATCH /api/experiments/{id}` and
+`backend/services/bulk_uploads/new_experiments.py` (locked file, edited with
+user sign-off 2026-08-05). It covers all five tables that carry a denormalized
+`experiment_id` — `experimental_conditions`, `experiment_notes`,
+`modifications_log`, `external_analyses`, `xrd_phases` — where the bulk path
+previously did two and PATCH did four.
+
+Two behavioral notes:
+
+- **`PATCH` now also updates pre-existing `modifications_log.experiment_id`
+  rows**, which it did not before; the bulk path always did. Delete-snapshot
+  rows (`experiment_fk = NULL`) are never matched, so history for deleted
+  experiments is untouched.
+- **XRD slot collisions are skipped, not raised.**
+  `uq_xrd_phase_experiment_time_mineral` is keyed on the *string*. If another
+  row already holds `(new_id, time_post_reaction_days, mineral_name)`, the
+  phase row keeps its old string and is reported — in the upload `warnings`
+  for the bulk path, and via structlog for PATCH. Renaming into an occupied
+  slot would raise `IntegrityError` and take the whole rename down.
+
+`database/data_migrations/dedupe_conditions_and_backfill_ids_018.py` is still
+required to correct the 187 rows already stale; nothing new accumulates behind
+it. Deploy sequence unchanged — see "Deploy to the lab PC" above.
 
 ## Resolved questions
 
