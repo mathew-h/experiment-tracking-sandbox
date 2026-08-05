@@ -43,9 +43,12 @@ from __future__ import annotations
 import re
 from typing import Optional, TypedDict
 
+import structlog
 from sqlalchemy.orm import Session
 
 from database import Experiment, SampleInfo
+
+log = structlog.get_logger(__name__)
 
 
 _RUN_RE = re.compile(r"[0-9]+|[a-z]+")
@@ -67,33 +70,83 @@ def normalize_id(raw: str) -> str:
     return "_".join(runs)
 
 
-def fuzzy_find_sample(db: Session, raw_id: str) -> Optional[SampleInfo]:
-    """Return the SampleInfo whose sample_id matches ``raw_id`` after normalization.
+class AmbiguousExperimentIdError(ValueError):
+    """More than one stored experiment matches one normalized ID.
 
-    Tries exact match first; falls back to normalized scan if not found.
+    Raised by callers that must not fall through to a "not found" path --
+    `ScalarResultsService._find_experiment`'s caller auto-CREATES an experiment
+    when the lookup returns None, so a silent None on an ambiguous ID would
+    fabricate a row.
+    """
+
+    def __init__(self, raw_id: str, candidates: list[str]) -> None:
+        self.raw_id = raw_id
+        self.candidates = candidates
+        super().__init__(
+            f"Experiment ID '{raw_id}' is ambiguous - it matches "
+            f"{len(candidates)} experiments: {', '.join(candidates)}. "
+            f"Use the exact experiment_id."
+        )
+
+
+def find_sample_matches(db: Session, raw_id: str) -> list[SampleInfo]:
+    """Every SampleInfo matching ``raw_id``. Exact match short-circuits to one.
+
+    A list, not an Optional, so a caller can tell "no match" from "several" --
+    the distinction the old .first() destroyed.
     """
     sample = db.query(SampleInfo).filter(SampleInfo.sample_id == raw_id).first()
     if sample:
-        return sample
+        return [sample]
     target = normalize_id(raw_id)
-    for s in db.query(SampleInfo).all():
-        if normalize_id(s.sample_id) == target:
-            return s
+    return [s for s in db.query(SampleInfo).all() if normalize_id(s.sample_id) == target]
+
+
+def find_experiment_matches(db: Session, raw_id: str) -> list[Experiment]:
+    """Every Experiment matching ``raw_id``. Exact match short-circuits to one."""
+    exp = db.query(Experiment).filter(Experiment.experiment_id == raw_id).first()
+    if exp:
+        return [exp]
+    target = normalize_id(raw_id)
+    return [e for e in db.query(Experiment).all() if normalize_id(e.experiment_id) == target]
+
+
+def fuzzy_find_sample(db: Session, raw_id: str) -> Optional[SampleInfo]:
+    """The SampleInfo matching ``raw_id``, or None if none or several match.
+
+    Never picks one of several: an arbitrary choice attaches data to the wrong
+    sample with no trace.
+    """
+    matches = find_sample_matches(db, raw_id)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        log.warning(
+            "ambiguous_sample_id",
+            raw_id=raw_id,
+            normalized=normalize_id(raw_id),
+            candidates=sorted(s.sample_id for s in matches),
+        )
     return None
 
 
 def fuzzy_find_experiment(db: Session, raw_id: str) -> Optional[Experiment]:
-    """Return the Experiment whose experiment_id matches ``raw_id`` after normalization.
+    """The Experiment matching ``raw_id``, or None if none or several match.
 
-    Tries exact match first; falls back to normalized scan if not found.
+    Returns None rather than raising so existing callers keep working. Callers
+    that must distinguish ambiguity from absence should use
+    ``find_experiment_matches`` and raise ``AmbiguousExperimentIdError``.
     """
-    exp = db.query(Experiment).filter(Experiment.experiment_id == raw_id).first()
-    if exp:
-        return exp
-    target = normalize_id(raw_id)
-    for e in db.query(Experiment).all():
-        if normalize_id(e.experiment_id) == target:
-            return e
+    matches = find_experiment_matches(db, raw_id)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        log.warning(
+            "ambiguous_experiment_id",
+            raw_id=raw_id,
+            normalized=normalize_id(raw_id),
+            candidates=sorted(e.experiment_id for e in matches),
+        )
     return None
 
 
