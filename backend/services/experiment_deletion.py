@@ -223,9 +223,16 @@ def serialize_experiment_snapshot(db: Session, exp: Experiment) -> dict[str, Any
     Every value is JSON-primitive because this lands in ModificationsLog.old_values
     (a JSONB column) -- enums and datetimes would otherwise fail the flush.
     """
+    # .first(), not scalar_one_or_none(): a duplicate conditions row used to
+    # raise MultipleResultsFound here, inside delete_experiment_cascade, which
+    # made the experiment undeletable through both the single-delete endpoint
+    # and the bulk uploader (issue #109). impact.conditions still counts every
+    # row; only the snapshot narrows to one.
     conditions = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-    ).scalar_one_or_none()
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
 
     additives: list[dict[str, Any]] = []
     if conditions is not None:

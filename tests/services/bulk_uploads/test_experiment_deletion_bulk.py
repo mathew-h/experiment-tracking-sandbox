@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 
 from database.models.enums import ExperimentStatus
 from database.models.experiments import Experiment, ModificationsLog
+from database.models.conditions import ExperimentalConditions
 
 from .excel_helpers import make_excel
 
@@ -227,3 +228,24 @@ def test_delete_reports_an_empty_id_list_as_an_error(db_session, ids):
 
     assert result.errors
     assert result.deleted == []
+
+
+def test_duplicate_conditions_row_does_not_block_bulk_delete(db_session):
+    """The user-visible symptom: the ID came back in `failed` with 'Multiple rows
+    were found when one or none was required' and was undeletable."""
+    from backend.services.bulk_uploads.experiment_deletion_bulk import delete_experiments_from_file
+
+    exp = _experiment(db_session, "BULKDUP_001", 63010)
+    for string in ("BULKDUP_001", "BULKDUP_STALE"):
+        db_session.add(ExperimentalConditions(
+            experiment_fk=exp.id, experiment_id=string, temperature_c=90.0
+        ))
+    db_session.commit()
+
+    result = delete_experiments_from_file(
+        db_session, _ids_file(["BULKDUP_001"]), "delete.xlsx", modified_by="tester"
+    )
+
+    assert result.deleted == ["BULKDUP_001"]
+    assert result.failed == []
+    assert result.missing == []

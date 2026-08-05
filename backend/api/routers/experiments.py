@@ -69,9 +69,14 @@ def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
 def _build_list_item(db: Session, exp: Experiment) -> dict:
     """Build the ExperimentListItem payload dict for one experiment row."""
     item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
+    # .first() with an explicit order, not scalar_one_or_none(): UNIQUE
+    # (experiment_fk) forbids a second row going forward, but one duplicate on a
+    # pre-constraint database used to 500 this entire endpoint (issue #109).
     cond = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-    ).scalar_one_or_none()
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     item_data["experiment_type"] = cond.experiment_type if cond else None
     item_data["reactor_number"] = cond.reactor_number if cond else None
     additive_row = db.execute(
@@ -129,8 +134,12 @@ def list_experiments(
     # Outer-join conditions/first-note so type, reactor #, and description filters run in
     # SQL before pagination — filtering these in Python after offset/limit produced wrong
     # totals and could return an empty page 1 even when matches existed (#64). Both joins
-    # are at most 1 row per experiment (ExperimentalConditions is 1:1; note_sq is keyed by
-    # min note id), so this cannot fan out rows or inflate `total`.
+    # are at most 1 row per experiment, so this cannot fan out rows or inflate
+    # `total`: note_sq is keyed by min note id, and ExperimentalConditions is 1:1
+    # with Experiment -- enforced by UNIQUE (experiment_fk) via the
+    # `uq_conditions_experiment_fk` constraint (issue #109). Before that
+    # constraint the 1:1 was assumed here and nowhere enforced, and a single
+    # duplicate row did fan out.
     stmt = (
         select(Experiment)
         .outerjoin(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)

@@ -383,6 +383,23 @@ def test_list_experiments_description_search(client, db_session):
     assert len(resp2.json()["items"]) == 1
 
 
+def test_list_experiments_survives_duplicate_conditions(client, db_session):
+    """_build_list_item used scalar_one_or_none on conditions, so one duplicate
+    row 500'd the whole experiments page (issue #109)."""
+    exp = _make_experiment(db_session, "LISTDUP_001", 63020)
+    for string in ("LISTDUP_001", "LISTDUP_STALE"):
+        db_session.add(_EC(
+            experiment_fk=exp.id, experiment_id=string, experiment_type="Serum",
+        ))
+    db_session.commit()
+
+    resp = client.get("/api/experiments", params={"search": "LISTDUP_001"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert [i["experiment_id"] for i in items] == ["LISTDUP_001"]
+    assert resp.json()["total"] == 1
+
+
 def test_upsert_additive_no_conditions(client, db_session):
     """Experiment exists but has no conditions row — should 404."""
     from sqlalchemy import select, func as sqlfunc
@@ -1712,11 +1729,12 @@ def _cleanup_status_slot_rows(db_session):
     yield
     from database.models.conditions import ExperimentalConditions as _EC
 
-    db_session.query(_EC).filter(_EC.experiment_id.like("SLOT409_%")).delete(
-        synchronize_session=False
-    )
+    db_session.query(_EC).filter(
+        _EC.experiment_id.like("SLOT409_%") | _EC.experiment_id.like("LISTDUP_%")
+    ).delete(synchronize_session=False)
     db_session.query(Experiment).filter(
         Experiment.experiment_id.like("SLOT409_%")
+        | Experiment.experiment_id.like("LISTDUP_%")
     ).delete(synchronize_session=False)
     db_session.commit()
 
