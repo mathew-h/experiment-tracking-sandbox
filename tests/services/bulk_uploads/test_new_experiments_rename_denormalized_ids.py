@@ -109,9 +109,34 @@ def test_bulk_rename_syncs_conditions_string(pg_session: Session):
 
 
 def test_bulk_rename_syncs_all_five_tables(pg_session: Session):
-    """Full parity with PATCH /api/experiments/{id}."""
+    """Full parity with PATCH /api/experiments/{id}.
+
+    `ExperimentNotes` is asserted separately below, NOT in the loop, because on
+    the `overwrite=True` branch a passing loop assertion would prove nothing:
+
+    1. The parser deletes *every* note for the experiment (`new_experiments.py`,
+       "clearing existing notes for overwrite") — and it does so AFTER the sync
+       has run, so the seeded row is gone by assertion time.
+    2. A blank `initial_note` cell does not parse to `None`: `pd.read_excel`
+       yields `float('nan')` and the parser stringifies it, so it inserts a
+       *fresh* note reading `"nan"` carrying `experiment.experiment_id` — the
+       new ID by construction, whatever the sync did.
+
+    So the loop would have been green even with the notes sync deleted. The
+    notes sync is genuinely covered by
+    `tests/services/test_denormalized_ids.py::test_syncs_all_five_tables` and by
+    `tests/api/test_experiments_rename_sync.py`, neither of which runs the
+    overwrite branch. The `"nan"` insert is a separate live bug in the locked
+    parser: `docs/issues/issue-blank-initial-note-parses-to-nan.md`.
+    """
     exp = _seed_with_children(pg_session, "BULKSYNC_002", 8803002)
     exp_pk = exp.id
+    seeded_note_pk = (
+        pg_session.query(ExperimentNotes.id)
+        .filter(ExperimentNotes.experiment_fk == exp_pk)
+        .scalar()
+    )
+    assert seeded_note_pk is not None
 
     xlsx = make_excel(
         _EXP_HEADERS,
@@ -123,7 +148,7 @@ def test_bulk_rename_syncs_all_five_tables(pg_session: Session):
     )
     assert errors == [], f"Unexpected errors: {errors}"
 
-    for model in (ExperimentalConditions, ExperimentNotes, ModificationsLog,
+    for model in (ExperimentalConditions, ModificationsLog,
                   ExternalAnalysis, XRDPhase):
         rows = pg_session.query(model).filter(model.experiment_fk == exp_pk).all()
         assert rows, f"{model.__name__} row vanished"
@@ -131,6 +156,20 @@ def test_bulk_rename_syncs_all_five_tables(pg_session: Session):
             assert row.experiment_id == "BULKSYNC_002b-t3", (
                 f"{model.__name__} not synced: {row.experiment_id!r}"
             )
+
+    # Notes: assert what actually happens, so this cannot read as a sync check.
+    assert pg_session.get(ExperimentNotes, seeded_note_pk) is None, (
+        "expected the overwrite branch to have deleted the seeded note"
+    )
+    remaining = (
+        pg_session.query(ExperimentNotes)
+        .filter(ExperimentNotes.experiment_fk == exp_pk)
+        .all()
+    )
+    assert [n.note_text for n in remaining] == ["nan"], (
+        "expected the blank initial_note cell to have inserted a literal 'nan' "
+        "note — see docs/issues/issue-blank-initial-note-parses-to-nan.md"
+    )
 
 
 def test_conditions_sheet_after_rename_sees_new_string(pg_session: Session):
