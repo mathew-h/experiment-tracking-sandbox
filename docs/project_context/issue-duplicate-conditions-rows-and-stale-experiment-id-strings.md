@@ -234,12 +234,12 @@ not equivalent and a human must choose which survives before `--apply` or
 Both were found during this investigation and are real. Neither is touched
 here.
 
-1. **`_id_match.py::normalize_id` conflates 13 real experiment pairs.** It
-   strips punctuation and leading zeros, so `SERUM_JW_010-2` and `SERUM_JW_102`
-   both normalize to `serumjw102`; `fuzzy_find_experiment` returns `.first()`
-   of whichever it finds, so a bulk upload can attach results to the wrong
-   experiment silently. Fixing it touches locked `bulk_uploads` parsers and
-   their suites — needs its own `/start-task`.
+1. **`_id_match.py::normalize_id` conflated 13 real experiment pairs — FIXED
+   2026-08-05** on branch `fix/id-match-ambiguity`. `normalize_id` is now
+   run-delimited (0 collisions on the dev DB, experiments and samples), and the
+   finders return all matches rather than `.first()`, so an ambiguous ID is
+   reported instead of resolved by luck. Full record:
+   `docs/issues/issue-fuzzy-experiment-id-conflation.md`.
 2. **`backend/services/experimental_conditions_service.py:39` creates a
    conditions row with no existence check.** It is reachable only from
    `legacy/streamlit_frontend/`, which the current app never imports, so the
