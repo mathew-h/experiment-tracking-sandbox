@@ -1,10 +1,20 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
 
 class ExperimentalConditions(Base):
     __tablename__ = "experimental_conditions"
+
+    # ExperimentalConditions is 1:1 with Experiment, and experiment_fk is the
+    # only authoritative link. The experiment_id String below is a denormalized
+    # convenience copy that the rename paths do not keep in sync (187 of 1013
+    # production rows were stale as of 2026-08-05) -- never resolve a conditions
+    # row by it. See issue #109 follow-up:
+    # docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md
+    __table_args__ = (
+        UniqueConstraint("experiment_fk", name="uq_conditions_experiment_fk"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     experiment_id = Column(String, nullable=False, index=True) # Human-readable ID
