@@ -4,11 +4,14 @@ backfill every stale denormalized experiment_id string from its experiment_fk.
 Background
 ----------
 experimental_conditions carries two identities: experiment_fk (authoritative,
-non-null FK) and a denormalized experiment_id string that no rename path
-updates. As of the 2026-08-05 production dump, 187 of 1013 rows (18%) carry a
-string that is not their experiment's ID -- almost all of it rename debris from
-the replicate/-t<days> ID migration (e.g. cond 901 still says
-'SERUM_cation_031' for the experiment now called 'SERUM_Cation_011a-t5').
+non-null FK) and a denormalized experiment_id string that, until 2026-08-05, no
+rename path updated -- both paths now sync it via
+backend/services/denormalized_ids.py, so nothing new accumulates behind this
+cleanup (see the issue doc's Follow-up). As of the 2026-08-05 production dump,
+187 of 1013 rows (18%) carry a string that is not their experiment's ID --
+almost all of it rename debris from the replicate/-t<days> ID migration (e.g.
+cond 901 still says 'SERUM_cation_031' for the experiment now called
+'SERUM_Cation_011a-t5').
 
 That mismatch is what produced the duplicate. GET /api/conditions/by-experiment
 resolved conditions by the STRING, so it 404'd for 175 experiments that do have

@@ -11,7 +11,6 @@ from sqlalchemy import func
 from database import (
     Experiment,
     ExperimentNotes,
-    ModificationsLog,
     ExperimentalConditions,
     ChemicalAdditive,
     Compound,
@@ -25,6 +24,7 @@ from backend.services.bulk_uploads.experiment_status import ExperimentStatusServ
 from backend.services.experiment_validation import parse_experiment_id as parse_exp_id_validation, validate_experiment_id, extract_lineage_info
 from backend.services.calculations.registry import recalculate
 from database.lineage_utils import update_experiment_lineage
+from backend.services.denormalized_ids import sync_denormalized_experiment_id
 
 
 def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment]:
@@ -556,19 +556,26 @@ class NewExperimentsUploadService:
                                 # Recalculate lineage fields based on new experiment_id
                                 update_experiment_lineage(db, experiment)
 
-                                # Update denormalized experiment_id in related ExperimentNotes records
-                                notes_to_update = db.query(ExperimentNotes).filter(
-                                    ExperimentNotes.experiment_fk == experiment.id
-                                ).all()
-                                for note in notes_to_update:
-                                    note.experiment_id = exp_id
-                                
-                                # Update denormalized experiment_id in related ModificationsLog records
-                                mods_to_update = db.query(ModificationsLog).filter(
-                                    ModificationsLog.experiment_fk == experiment.id
-                                ).all()
-                                for mod in mods_to_update:
-                                    mod.experiment_id = exp_id
+                                # Point every denormalized experiment_id copy at the new
+                                # name. Before this, only notes and modifications_log were
+                                # synced, so every rename workbook left a stale
+                                # experimental_conditions.experiment_id behind -- the
+                                # mechanism behind 187 of 1013 stale rows measured
+                                # 2026-08-05, and the reason migration 018's backfill was
+                                # going to decay. The fan-out has one definition in
+                                # backend/services/denormalized_ids.py, shared with
+                                # PATCH /api/experiments/{id} (issue #109 follow-up).
+                                id_sync = sync_denormalized_experiment_id(
+                                    db, experiment.id, exp_id
+                                )
+                                if id_sync.xrd_phases_skipped:
+                                    warnings.append(
+                                        f"[experiments] Row {idx+2}: renamed "
+                                        f"'{old_experiment_id}' -> '{exp_id}', but "
+                                        f"{len(id_sync.xrd_phases_skipped)} XRD phase row(s) "
+                                        f"kept the old ID string because another row already "
+                                        f"holds that (experiment_id, timepoint, mineral) slot."
+                                    )
                                 
                                 # Flush rename changes so subsequent queries see the new ID
                                 db.flush()

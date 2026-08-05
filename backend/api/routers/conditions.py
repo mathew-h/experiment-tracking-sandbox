@@ -48,11 +48,13 @@ def get_conditions_by_experiment(
     """Return conditions for a given experiment_id string. 404 if none exist.
 
     Resolved through experiment_fk, never through the denormalized
-    ExperimentalConditions.experiment_id string: that string is not kept in sync
-    by the rename paths (187 of 1013 rows were stale as of 2026-08-05), so a
-    string-keyed lookup both missed rows that exist and matched rows belonging
-    to another experiment. A 404 here is what made the detail page offer "Add
-    Details" and create a duplicate conditions row -- see
+    ExperimentalConditions.experiment_id string. Both rename paths now sync that
+    string (backend/services/denormalized_ids.py), but 187 of 1013 production
+    rows are stale until dedupe_conditions_and_backfill_ids_018.py runs, and the
+    FK is authoritative regardless. A string-keyed lookup both missed rows that
+    exist and matched rows belonging to another experiment; the resulting 404 is
+    what made the detail page offer "Add Details" and create a duplicate
+    conditions row -- see
     docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md
 
     .first() rather than .scalar_one_or_none(): UNIQUE (experiment_fk) makes a

@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select, func, text, update, case, or_
+from sqlalchemy import select, func, text, case, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -31,8 +31,6 @@ from backend.api.schemas.results import (
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
-from database.models.analysis import ExternalAnalysis
-from database.models.xrd import XRDPhase
 from database.models.notion_sync import ReactorChangeRequest
 from database.models.samples import SampleInfo
 from backend.api.schemas.notion_sync import (
@@ -43,6 +41,7 @@ from backend.services.calculations.registry import recalculate
 from backend.services.experiment_deletion import (
     DeleteImpact, collect_delete_impact, delete_experiment_cascade,
 )
+from backend.services.denormalized_ids import sync_denormalized_experiment_id
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -726,10 +725,12 @@ def list_experiment_additives(
     ).scalar_one_or_none()
     if exp is None:
         return []
-    # Resolve via experiment_fk, not the denormalized string (issue #109): the
-    # string is not kept in sync by every rename path, so a string-keyed lookup
-    # could 500 on a duplicated string, return [] for a real experiment, or
-    # (worse, in the PUT/DELETE variants below) touch another experiment's row.
+    # Resolve via experiment_fk, not the denormalized string (issue #109): both
+    # rename paths now sync that string, but rows stale from before that fix
+    # remain until dedupe_conditions_and_backfill_ids_018.py runs, so a
+    # string-keyed lookup could 500 on a duplicated string, return [] for a real
+    # experiment, or (worse, in the PUT/DELETE variants below) touch another
+    # experiment's row.
     conditions = db.execute(
         select(ExperimentalConditions)
         .where(ExperimentalConditions.experiment_fk == exp.id)
@@ -1288,31 +1289,18 @@ def update_experiment(
                         count=backlinked,
                         user=current_user.uid,
                     )
-            # Keep denormalized string in conditions in sync so additives endpoints work.
-            # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
-            cond = db.execute(
-                select(ExperimentalConditions)
-                .where(ExperimentalConditions.experiment_fk == exp.id)
-                .order_by(ExperimentalConditions.id)
-            ).scalars().first()
-            if cond is not None:
-                cond.experiment_id = new_id
-            # Sync denormalized experiment_id across all tables that carry it
-            db.execute(
-                update(ExperimentNotes)
-                .where(ExperimentNotes.experiment_fk == exp.id)
-                .values(experiment_id=new_id)
-            )
-            db.execute(
-                update(ExternalAnalysis)
-                .where(ExternalAnalysis.experiment_fk == exp.id)
-                .values(experiment_id=new_id)
-            )
-            db.execute(
-                update(XRDPhase)
-                .where(XRDPhase.experiment_fk == exp.id)
-                .values(experiment_id=new_id)
-            )
+            # Point every denormalized experiment_id copy at the new name. One
+            # definition of the fan-out lives in backend/services/denormalized_ids.py
+            # so this path and the bulk-upload rename path cannot drift apart again
+            # (issue #109 follow-up). experiment_fk stays the only authoritative link.
+            id_sync = sync_denormalized_experiment_id(db, exp.id, new_id)
+            if id_sync.xrd_phases_skipped:
+                log.warning(
+                    "experiment_rename_xrd_slot_conflict",
+                    experiment_id=new_id,
+                    skipped_phase_ids=id_sync.xrd_phases_skipped,
+                    user=current_user.uid,
+                )
             db.add(ModificationsLog(
                 experiment_id=new_id,
                 experiment_fk=exp.id,
