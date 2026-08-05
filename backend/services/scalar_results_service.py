@@ -1,4 +1,6 @@
 from typing import Optional, Dict, Any, List, Tuple
+
+import structlog
 from sqlalchemy.orm import Session, joinedload
 from database import Experiment, ExperimentalResults, ScalarResults, ModificationsLog
 from backend.services.result_merge_utils import (
@@ -9,6 +11,8 @@ from backend.services.result_merge_utils import (
     choose_parent_candidate,
     update_cumulative_times_for_chain,
 )
+
+log = structlog.get_logger(__name__)
 
 # All updatable scalar fields -- shared by create and audit-trail logic.
 SCALAR_UPDATABLE_FIELDS = [
@@ -348,12 +352,24 @@ class ScalarResultsService:
     def _find_experiment(db: Session, experiment_id: str) -> Optional[Experiment]:
         """Find an experiment by ID using full fuzzy normalization.
 
-        Delegates to ``fuzzy_find_experiment`` from ``_id_match``, which normalizes
-        by lowercasing, stripping all non-alphanumeric characters, and stripping
-        leading zeros from numeric segments.
+        Raises ``AmbiguousExperimentIdError`` (a ValueError) when several stored
+        experiments share the normalized key. Returning None there would be
+        actively dangerous: ``create_scalar_result_ex`` treats None as "not
+        found" and falls through to ``auto_create_treatment_experiment``, so an
+        ambiguous ID would fabricate an experiment row. The per-row handlers in
+        the scalar and master bulk parsers already catch ValueError and report
+        it as a row error.
         """
-        from backend.services.bulk_uploads._id_match import fuzzy_find_experiment  # noqa: PLC0415
-        return fuzzy_find_experiment(db, experiment_id)
+        from backend.services.bulk_uploads._id_match import (  # noqa: PLC0415
+            AmbiguousExperimentIdError,
+            find_experiment_matches,
+        )
+        matches = find_experiment_matches(db, experiment_id)
+        if len(matches) > 1:
+            raise AmbiguousExperimentIdError(
+                experiment_id, sorted(e.experiment_id for e in matches)
+            )
+        return matches[0] if matches else None
     
     @staticmethod
     def _find_or_create_experimental_result(
@@ -438,7 +454,21 @@ class ScalarResultsService:
         Returns:
             List of ScalarResults objects
         """
-        experiment = ScalarResultsService._find_experiment(db, experiment_id)
+        from backend.services.bulk_uploads._id_match import (  # noqa: PLC0415
+            AmbiguousExperimentIdError,
+        )
+        try:
+            experiment = ScalarResultsService._find_experiment(db, experiment_id)
+        except AmbiguousExperimentIdError as exc:
+            # Read helper behind a GET -- an ambiguous ID is an empty result,
+            # not a 500. Logged here because the raising path in _id_match does
+            # not log (only the fuzzy_find_* wrappers do).
+            log.warning(
+                "ambiguous_experiment_id_on_read",
+                experiment_id=experiment_id,
+                candidates=exc.candidates,
+            )
+            return []
         if not experiment:
             return []
         return (
