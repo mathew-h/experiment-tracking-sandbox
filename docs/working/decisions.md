@@ -361,3 +361,38 @@ so any stored-state claim is at best true for a subset of the rows the warning n
 **Related:** the same asymmetry is why the KPI's rolling window makes the reported gap
 unrecoverable — a warning that promises "fill it in and re-upload" would be advertising a remedy
 the window cannot deliver. Both corrections shipped in `654c8d9`.
+
+## 2026-08-05 — `experiment_fk` is the only identity of a conditions row; the `experiment_id` string is never a lookup key (issue #109 follow-up)
+
+**Decision:** `experimental_conditions` has exactly one authoritative link to `Experiment` —
+`experiment_fk`. The `experiment_id` String on that table is a denormalized display copy. No code
+may resolve, join, or match a conditions row by it. `UNIQUE (experiment_fk)`
+(`uq_conditions_experiment_fk`, Alembic `00063a5dd6a8`) now enforces the 1:1 that the codebase had
+been assuming in four places and enforcing in none.
+
+**Why:** no rename path kept that string current — 187 of 1013 production rows (18%) held a value
+that was not their experiment's ID. `GET /api/conditions/by-experiment` resolved by it, so it
+404'd for an experiment that *did* have conditions; the detail tab then rendered its "no
+conditions" empty state, and `POST /api/conditions` — which had no existence check — inserted a
+second row. That one duplicate 500'd the entire experiments list (`_build_list_item`), fanned out
+the list join under a comment asserting it could not, duplicated the `experiment_id` key in
+`v_experiments`/`v_experiment_conditions` so Power BI rejected the relationship, and raised inside
+`delete_experiment_cascade` (`serialize_experiment_snapshot`), making the experiment undeletable
+through both delete paths. The same string lookup in the additives endpoints was worse than a
+crash: for the 12 rows whose string names a *different* experiment, `PUT` wrote the additive onto
+that other experiment's conditions row.
+
+**How to apply:** resolve conditions as `Experiment.experiment_id` → `ExperimentalConditions
+.experiment_fk`. On a database that predates the constraint, read defensively —
+`.order_by(ExperimentalConditions.id).scalars().first()`, never `scalar_one_or_none()`/`.one()` —
+so a legacy duplicate degrades to "pick the oldest row" instead of a 500. Any new write path that
+creates a conditions row must first check for an existing one and return 409, not rely on the
+constraint to produce a 500. A test that deliberately needs a duplicate must wrap itself in
+`tests/pre_constraint_conditions.py::without_conditions_unique(session)`; nine do.
+
+**Related:** the constraint is added by a migration whose `upgrade()` refuses with a `RuntimeError`
+rather than half-applying, so `database/data_migrations/dedupe_conditions_and_backfill_ids_018.py
+--apply` must run first — and because `update.ps1:228` runs `alembic upgrade head` unconditionally
+and aborts on failure, that ordering is a deploy prerequisite, not a preference. Still open: bulk
+rename (`new_experiments.py:543-575`) syncs notes and `modifications_log` but not this string, so
+the backfill decays until that locked parser is fixed.

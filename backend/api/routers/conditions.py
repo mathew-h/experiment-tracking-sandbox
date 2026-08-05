@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.services.calculations.registry import recalculate
 from database.models.conditions import ExperimentalConditions
+from database.models.experiments import Experiment
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.conditions import ConditionsCreate, ConditionsUpdate, ConditionsResponse
@@ -44,10 +45,26 @@ def get_conditions_by_experiment(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ConditionsResponse:
-    """Return conditions for a given experiment_id string. 404 if no conditions record exists."""
+    """Return conditions for a given experiment_id string. 404 if none exist.
+
+    Resolved through experiment_fk, never through the denormalized
+    ExperimentalConditions.experiment_id string: that string is not kept in sync
+    by the rename paths (187 of 1013 rows were stale as of 2026-08-05), so a
+    string-keyed lookup both missed rows that exist and matched rows belonging
+    to another experiment. A 404 here is what made the detail page offer "Add
+    Details" and create a duplicate conditions row -- see
+    docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md
+
+    .first() rather than .scalar_one_or_none(): UNIQUE (experiment_fk) makes a
+    second row impossible going forward, but this endpoint must not 500 on a
+    database that predates the constraint.
+    """
     cond = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+        select(ExperimentalConditions)
+        .join(Experiment, Experiment.id == ExperimentalConditions.experiment_fk)
+        .where(Experiment.experiment_id == experiment_id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     if cond is None:
         raise HTTPException(status_code=404, detail="Conditions not found for this experiment")
     return ConditionsResponse.model_validate(cond)
@@ -61,6 +78,23 @@ def create_conditions(
 ) -> ConditionsResponse:
     """Create conditions and compute derived fields (water_to_rock_ratio)."""
     _validate_reactor_number(payload.reactor_number, payload.experiment_type)
+    existing = db.execute(
+        select(ExperimentalConditions.id)
+        .where(ExperimentalConditions.experiment_fk == payload.experiment_fk)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
+    if existing is not None:
+        # ExperimentalConditions is 1:1 with Experiment. Before this check, a
+        # stale-string 404 from by-experiment made the detail page render its
+        # "no conditions" empty state for an experiment that had them, and
+        # "Add Details" inserted a second row (issue #109 follow-up).
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Conditions already exist for this experiment (id={existing}). "
+                "Reload the page and edit them instead of adding new details."
+            ),
+        )
     cond = ExperimentalConditions(**payload.model_dump())
     db.add(cond)
     db.flush()

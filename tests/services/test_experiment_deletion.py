@@ -15,6 +15,7 @@ from database.models.analysis import ExternalAnalysis
 from database.models.characterization import Analyte, ElementalAnalysis
 from database.models.xrd import XRDPhase
 from database.models.notion_sync import ReactorChangeRequest
+from tests.pre_constraint_conditions import without_conditions_unique
 
 TEST_DB_URL = "postgresql://experiments_user:password@localhost:5432/experiments_test"
 _engine = create_engine(TEST_DB_URL, pool_pre_ping=True)
@@ -404,3 +405,34 @@ def test_delete_nulls_replicate_children_parent_fk_but_keeps_the_group_string(db
     # resolves the group by string (MODELS.md, issue #87).
     assert child.base_experiment_id == "DEL_GP_001"
     assert child.replicate_label == "a"
+
+
+def test_delete_succeeds_with_two_conditions_rows(db):
+    """Regression (issue #109): serialize_experiment_snapshot used
+    scalar_one_or_none on conditions, so a duplicate row raised
+    MultipleResultsFound inside delete_experiment_cascade -- which is why the
+    bulk-delete tool reported the row as failed and could not remove it."""
+    from backend.services.experiment_deletion import delete_experiment_cascade
+
+    # Pre-dates uq_conditions_experiment_fk (issue #109) — see helper docstring.
+    with without_conditions_unique(db):
+        exp = Experiment(experiment_id="DUPCOND_001", experiment_number=63001,
+                         status=ExperimentStatus.ONGOING)
+        db.add(exp)
+        db.flush()
+        db.add(ExperimentalConditions(experiment_fk=exp.id, experiment_id="DUPCOND_001",
+                                      temperature_c=90.0))
+        db.add(ExperimentalConditions(experiment_fk=exp.id, experiment_id="DUPCOND_OLD",
+                                      temperature_c=90.0))
+        db.commit()
+
+        impact = delete_experiment_cascade(db, exp, modified_by="tester")
+
+        assert impact.conditions == 2
+        assert db.execute(
+            select(Experiment).where(Experiment.experiment_id == "DUPCOND_001")
+        ).scalar_one_or_none() is None
+        assert db.execute(
+            select(func.count()).select_from(ExperimentalConditions)
+            .where(ExperimentalConditions.experiment_fk == exp.id)
+        ).scalar_one() == 0

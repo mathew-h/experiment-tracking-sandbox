@@ -143,6 +143,50 @@ def test_alembic_stamped_at_head(fresh_db_engine):
     assert len(rows) == 1, f"Expected 1 alembic_version row, got: {rows}"
 
 
+def test_unique_conditions_experiment_fk_constraint_exists(fresh_db_engine):
+    """A fresh DB (create_all + stamp head, i.e. it has run every migration
+    including 00063a5dd6a8) must carry uq_conditions_experiment_fk on
+    experimental_conditions.experiment_fk (issue #109 follow-up)."""
+    inspector = inspect(fresh_db_engine)
+    unique_constraints = inspector.get_unique_constraints("experimental_conditions")
+    names = {uc["name"] for uc in unique_constraints}
+    assert "uq_conditions_experiment_fk" in names, (
+        f"uq_conditions_experiment_fk missing from experimental_conditions "
+        f"unique constraints: {unique_constraints}"
+    )
+
+
+def test_second_conditions_row_for_one_experiment_is_rejected(fresh_db_engine):
+    """DB-level enforcement: a second experimental_conditions row for the same
+    experiment_fk must raise IntegrityError on a fresh, fully-migrated DB."""
+    from sqlalchemy.exc import IntegrityError
+
+    with fresh_db_engine.begin() as conn:
+        exp_id = conn.execute(
+            text(
+                "INSERT INTO experiments (experiment_id, experiment_number, status) "
+                "VALUES ('FRESH_UQCOND_001', 970001, 'ONGOING') RETURNING id"
+            )
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO experimental_conditions (experiment_id, experiment_fk) "
+                "VALUES ('FRESH_UQCOND_001', :fk)"
+            ),
+            {"fk": exp_id},
+        )
+
+    with pytest.raises(IntegrityError):
+        with fresh_db_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO experimental_conditions (experiment_id, experiment_fk) "
+                    "VALUES ('FRESH_UQCOND_001', :fk)"
+                ),
+                {"fk": exp_id},
+            )
+
+
 def test_no_pending_migrations(fresh_db_engine):
     """alembic check should report no pending migrations on the fresh-installed DB."""
     # str(engine.url) masks the password — reconstruct from known constants

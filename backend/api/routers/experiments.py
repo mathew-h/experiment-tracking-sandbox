@@ -69,9 +69,14 @@ def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
 def _build_list_item(db: Session, exp: Experiment) -> dict:
     """Build the ExperimentListItem payload dict for one experiment row."""
     item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
+    # .first() with an explicit order, not scalar_one_or_none(): UNIQUE
+    # (experiment_fk) forbids a second row going forward, but one duplicate on a
+    # pre-constraint database used to 500 this entire endpoint (issue #109).
     cond = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-    ).scalar_one_or_none()
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     item_data["experiment_type"] = cond.experiment_type if cond else None
     item_data["reactor_number"] = cond.reactor_number if cond else None
     additive_row = db.execute(
@@ -129,8 +134,12 @@ def list_experiments(
     # Outer-join conditions/first-note so type, reactor #, and description filters run in
     # SQL before pagination — filtering these in Python after offset/limit produced wrong
     # totals and could return an empty page 1 even when matches existed (#64). Both joins
-    # are at most 1 row per experiment (ExperimentalConditions is 1:1; note_sq is keyed by
-    # min note id), so this cannot fan out rows or inflate `total`.
+    # are at most 1 row per experiment, so this cannot fan out rows or inflate
+    # `total`: note_sq is keyed by min note id, and ExperimentalConditions is 1:1
+    # with Experiment -- enforced by UNIQUE (experiment_fk) via the
+    # `uq_conditions_experiment_fk` constraint (issue #109). Before that
+    # constraint the 1:1 was assumed here and nowhere enforced, and a single
+    # duplicate row did fan out.
     stmt = (
         select(Experiment)
         .outerjoin(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
@@ -712,9 +721,20 @@ def list_experiment_additives(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[AdditiveResponse]:
     """List chemical additives for an experiment by its string ID. Returns [] if no conditions exist."""
-    conditions = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
+    if exp is None:
+        return []
+    # Resolve via experiment_fk, not the denormalized string (issue #109): the
+    # string is not kept in sync by every rename path, so a string-keyed lookup
+    # could 500 on a duplicated string, return [] for a real experiment, or
+    # (worse, in the PUT/DELETE variants below) touch another experiment's row.
+    conditions = db.execute(
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     if conditions is None:
         return []
     rows = db.execute(
@@ -738,9 +758,19 @@ def upsert_experiment_additive(
     Accepts experiment string ID and resolves conditions row internally.
     ChemicalAdditive.experiment_id is a FK to experimental_conditions.id (not experiments.id).
     """
-    conditions = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment conditions not found")
+    # Resolve via experiment_fk, not the denormalized string (issue #109):
+    # a stale string could otherwise write this additive onto another
+    # experiment's conditions row.
+    conditions = db.execute(
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment conditions not found")
     compound = db.get(Compound, compound_id)
@@ -768,18 +798,16 @@ def upsert_experiment_additive(
         db.add(additive)
     db.flush()
     recalculate(additive, db)
-    exp = db.execute(select(Experiment).where(Experiment.experiment_id == experiment_id)).scalar_one_or_none()
     new_vals = {"amount": additive.amount, "unit": additive.unit.value if additive.unit else None}
-    if exp is not None:
-        db.add(ModificationsLog(
-            experiment_id=experiment_id,
-            experiment_fk=exp.id,
-            modified_by=current_user.uid,
-            modification_type=mod_type,
-            modified_table="chemical_additives",
-            old_values=old_vals,
-            new_values=new_vals,
-        ))
+    db.add(ModificationsLog(
+        experiment_id=experiment_id,
+        experiment_fk=exp.id,
+        modified_by=current_user.uid,
+        modification_type=mod_type,
+        modified_table="chemical_additives",
+        old_values=old_vals,
+        new_values=new_vals,
+    ))
     db.commit()
     db.refresh(additive)
     log.info("additive_upserted", experiment_id=experiment_id, compound_id=compound_id)
@@ -794,9 +822,18 @@ def delete_experiment_additive(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> Response:
     """Remove a chemical additive from an experiment."""
-    conditions = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_id == experiment_id)
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    # Resolve via experiment_fk, not the denormalized string (issue #109) —
+    # see the GET/PUT variants above for the failure modes a string match hits.
+    conditions = db.execute(
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
     additive = db.execute(
@@ -806,7 +843,6 @@ def delete_experiment_additive(
     ).scalar_one_or_none()
     if additive is None:
         raise HTTPException(status_code=404, detail="Additive not found")
-    exp = db.execute(select(Experiment).where(Experiment.experiment_id == experiment_id)).scalar_one_or_none()
     compound = db.get(Compound, compound_id)
     old_vals = {
         "compound_id": compound_id,
@@ -815,16 +851,15 @@ def delete_experiment_additive(
         "unit": additive.unit.value if additive.unit else None,
     }
     db.delete(additive)
-    if exp is not None:
-        db.add(ModificationsLog(
-            experiment_id=experiment_id,
-            experiment_fk=exp.id,
-            modified_by=current_user.uid,
-            modification_type="delete",
-            modified_table="chemical_additives",
-            old_values=old_vals,
-            new_values=None,
-        ))
+    db.add(ModificationsLog(
+        experiment_id=experiment_id,
+        experiment_fk=exp.id,
+        modified_by=current_user.uid,
+        modification_type="delete",
+        modified_table="chemical_additives",
+        old_values=old_vals,
+        new_values=None,
+    ))
     db.commit()
     log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
     return Response(status_code=204)
@@ -1024,9 +1059,12 @@ def get_experiment(
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
 
+    # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
     cond = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-    ).scalar_one_or_none()
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     notes = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.experiment_fk == exp.id)
@@ -1250,10 +1288,13 @@ def update_experiment(
                         count=backlinked,
                         user=current_user.uid,
                     )
-            # Keep denormalized string in conditions in sync so additives endpoints work
+            # Keep denormalized string in conditions in sync so additives endpoints work.
+            # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
             cond = db.execute(
-                select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-            ).scalar_one_or_none()
+                select(ExperimentalConditions)
+                .where(ExperimentalConditions.experiment_fk == exp.id)
+                .order_by(ExperimentalConditions.id)
+            ).scalars().first()
             if cond is not None:
                 cond.experiment_id = new_id
             # Sync denormalized experiment_id across all tables that carry it
@@ -1290,9 +1331,12 @@ def update_experiment(
         old_sample_id = exp.sample_id
         exp.sample_id = new_sample_id
         db.flush()
+        # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
         cond = db.execute(
-            select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-        ).scalar_one_or_none()
+            select(ExperimentalConditions)
+            .where(ExperimentalConditions.experiment_fk == exp.id)
+            .order_by(ExperimentalConditions.id)
+        ).scalars().first()
         if cond is not None:
             recalculate(cond, db)
             db.flush()
