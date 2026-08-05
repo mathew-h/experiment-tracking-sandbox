@@ -7,33 +7,97 @@ from backend.services.bulk_uploads._id_match import normalize_id
 
 
 @pytest.mark.parametrize("raw, expected", [
-    # Force lowercase
-    ("HPHT_1", "hpht1"),
-    ("Serum_MH_101", "serummh101"),
+    # Force lowercase; runs are joined with a single underscore
+    ("HPHT_1", "hpht_1"),
+    ("Serum_MH_101", "serum_mh_101"),
 
-    # Strip all non-alphanumeric symbols (not just - and _)
-    ("HPHT-001", "hpht1"),        # hyphen
-    ("HPHT_001", "hpht1"),        # underscore
-    ("HPHT 001", "hpht1"),        # space
-    ("HPHT.001", "hpht1"),        # dot
-    ("HPHT/001", "hpht1"),        # slash
-    ("HPHT(001)", "hpht1"),       # parens
+    # Every separator collapses to the canonical delimiter
+    ("HPHT-001", "hpht_1"),        # hyphen
+    ("HPHT_001", "hpht_1"),        # underscore
+    ("HPHT 001", "hpht_1"),        # space
+    ("HPHT.001", "hpht_1"),        # dot
+    ("HPHT/001", "hpht_1"),        # slash
+    ("HPHT(001)", "hpht_1"),       # parens
 
-    # Strip leading zeros from numeric segments
-    ("hpht001", "hpht1"),         # leading zeros after alpha prefix
-    ("HPHT_0014B", "hpht14b"),    # leading zeros mid-id
-    ("HPHT_001_4B", "hpht14b"),   # strip symbol then leading zeros
+    # A missing separator is inserted at the alpha/digit boundary, so an
+    # unseparated file ID still matches the stored separated one
+    ("hpht001", "hpht_1"),
+    ("HPHT001", "hpht_1"),
+
+    # Leading zeros are stripped inside each digit run, not across runs
+    ("HPHT_0014B", "hpht_14_b"),
+    ("HPHT_001_4B", "hpht_1_4_b"),  # NOT equal to the line above -- see below
 
     # No false positives — zeros that are NOT leading
-    ("HPHT_100", "hpht100"),      # 1 then 00 — not leading
-    ("HPHT_0", "hpht0"),          # single zero alone, not followed by digit
-    ("HPHT_00", "hpht0"),         # collision: second 0 satisfies lookahead, first is stripped — same as HPHT_0
-    ("20250502_2A", "202505022a"), # date-style ID — internal zeros stay
-    ("hpht1", "hpht1"),           # already normalized
+    ("HPHT_100", "hpht_100"),      # 1 then 00 — not leading
+    ("HPHT_0", "hpht_0"),          # lone zero survives
+    ("HPHT_00", "hpht_0"),         # all-zero run collapses to a single 0
+    ("20250502_2A", "20250502_2_a"),  # date-style ID — internal zeros stay
+
+    # Idempotent: normalizing an already-normalized key is a no-op
+    ("hpht_1", "hpht_1"),
 ])
 def test_normalize_id(raw, expected):
     """normalize_id produces the expected canonical string for each input."""
     assert normalize_id(raw) == expected
+
+
+# ── Regression: the 13 real experiment pairs the old key conflated ────────────
+#
+# The old key deleted separators AND stripped leading zeros, so a sequential
+# re-run (SERUM_JW_010-2) collapsed onto an unrelated experiment (SERUM_JW_102).
+# fuzzy_find_experiment then returned .first() of the two, so a bulk upload could
+# attach results to the wrong experiment silently. All 13 pairs below exist in
+# the dev DB (measured 2026-08-05).
+
+_CONFLATED_PAIRS = [
+    ("SERUM_JW_092", "SERUM_JW_009-2"),
+    ("SERUM_JW_102", "SERUM_JW_010-2"),
+    ("SERUM_JW_112", "SERUM_JW_011-2"),
+    ("SERUM_JW_122", "SERUM_JW_012_2"),
+    ("SERUM_JW_123", "SERUM_JW_012_3"),
+    ("SERUM_JW_132", "SERUM_JW_013_2"),
+    ("SERUM_JW_133", "SERUM_JW_013-3"),
+    ("SERUM_JW_142", "SERUM_JW_014_2"),
+    ("SERUM_JW_143", "SERUM_JW_014-3"),
+    ("SERUM_JW_152", "SERUM_JW_015_2"),
+    ("SERUM_JW_153", "SERUM_JW_015-3"),
+    ("SERUM_JW_162", "SERUM_JW_016_2"),
+    ("SERUM_JW_163", "SERUM_JW_016-3"),
+]
+
+
+@pytest.mark.parametrize("left, right", _CONFLATED_PAIRS)
+def test_real_experiment_pairs_no_longer_collide(left, right):
+    """Two distinct real experiments must never share a normalized key."""
+    assert normalize_id(left) != normalize_id(right), (
+        f"{left} and {right} both normalize to {normalize_id(left)!r}"
+    )
+
+
+_CONFLATED_SAMPLE_PAIRS = [
+    ("23UM042", "23UM004.2"),
+    ("23UM052", "23UM005.2"),
+    ("202505255?", "20250525_5"),
+]
+
+
+@pytest.mark.parametrize("left, right", _CONFLATED_SAMPLE_PAIRS)
+def test_real_sample_pairs_no_longer_collide(left, right):
+    """The same defect reached fuzzy_find_sample; 3 real dev-DB pairs."""
+    assert normalize_id(left) != normalize_id(right), (
+        f"{left} and {right} both normalize to {normalize_id(left)!r}"
+    )
+
+
+@pytest.mark.parametrize("left, right", [
+    ("HPHT_001", "hpht1"),      # separator present vs absent
+    ("HPHT-001", "HPHT_1"),     # different separator, padded vs unpadded
+    ("20250502_2A", "20250502-2a"),
+])
+def test_intended_equivalences_survive(left, right):
+    """The leniency the finders actually rely on must not be lost."""
+    assert normalize_id(left) == normalize_id(right)
 
 
 # ── find_similar_samples ──────────────────────────────────────────────────────
