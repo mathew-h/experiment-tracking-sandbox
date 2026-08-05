@@ -19,12 +19,12 @@ def _cleanup_slot_rows(db_session):
     from database.models.conditions import ExperimentalConditions as _EC
     from database.models.experiments import Experiment as _E
 
-    db_session.query(_EC).filter(_EC.experiment_id.like("COND_SLOT_%")).delete(
-        synchronize_session=False
-    )
-    db_session.query(_E).filter(_E.experiment_id.like("COND_SLOT_%")).delete(
-        synchronize_session=False
-    )
+    db_session.query(_EC).filter(
+        _EC.experiment_id.like("COND_SLOT_%") | _EC.experiment_id.like("BYFK_%")
+    ).delete(synchronize_session=False)
+    db_session.query(_E).filter(
+        _E.experiment_id.like("COND_SLOT_%") | _E.experiment_id.like("BYFK_%")
+    ).delete(synchronize_session=False)
     db_session.commit()
 
 
@@ -282,3 +282,53 @@ def test_conditions_create_ignores_a_client_supplied_reactor_slot(client, db_ses
     )
     assert resp.status_code == 201
     assert resp.json()["reactor_slot"] == "R03"
+
+
+# --- by-experiment resolves through experiment_fk, not the denormalized string ---
+
+
+def test_by_experiment_finds_conditions_whose_string_is_stale(client, db_session):
+    """The real production bug: a rename left the conditions string pointing at
+    the old ID, so a string-keyed lookup 404'd on a row that exists -- which is
+    what made the UI offer 'Add Details' and create a duplicate."""
+    from database.models.conditions import ExperimentalConditions
+
+    exp = _make_experiment(db_session, "BYFK_001", 62001)
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id="BYFK_OLD_NAME", temperature_c=90.0
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/conditions/by-experiment/BYFK_001")
+    assert resp.status_code == 200
+    assert resp.json()["temperature_c"] == 90.0
+
+
+def test_by_experiment_ignores_another_experiments_stale_string(client, db_session):
+    """A stale string naming THIS experiment must not hand back another
+    experiment's conditions."""
+    from database.models.conditions import ExperimentalConditions
+
+    target = _make_experiment(db_session, "BYFK_002", 62002)
+    other = _make_experiment(db_session, "BYFK_003", 62003)
+    db_session.add(ExperimentalConditions(
+        experiment_fk=other.id, experiment_id="BYFK_002", temperature_c=180.0
+    ))
+    db_session.add(ExperimentalConditions(
+        experiment_fk=target.id, experiment_id="BYFK_002", temperature_c=60.0
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/conditions/by-experiment/BYFK_002")
+    assert resp.status_code == 200
+    assert resp.json()["temperature_c"] == 60.0
+    assert resp.json()["experiment_fk"] == target.id
+
+
+def test_by_experiment_404s_for_an_experiment_with_no_conditions(client, db_session):
+    _make_experiment(db_session, "BYFK_004", 62004)
+    assert client.get("/api/conditions/by-experiment/BYFK_004").status_code == 404
+
+
+def test_by_experiment_404s_for_an_unknown_experiment(client):
+    assert client.get("/api/conditions/by-experiment/BYFK_NOPE").status_code == 404
