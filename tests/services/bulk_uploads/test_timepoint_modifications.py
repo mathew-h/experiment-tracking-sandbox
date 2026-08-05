@@ -185,3 +185,30 @@ def test_unknown_experiment_id_recorded_as_error(db_session: Session):
 
     assert updated == 0
     assert any("NONEXISTENT_EXP" in e for e in errors)
+
+
+def test_ambiguous_experiment_id_reports_candidates(db_session: Session):
+    """An ambiguous ID must name both candidates, not just say 'not found'.
+
+    AMBTPM_1 and AMBTPM_001 share the normalized key ambtpm_1, so .first() used
+    to attach the modification to whichever row came back.
+    """
+    db_session.add_all([
+        Experiment(experiment_id="AMBTPM_1", experiment_number=8806001,
+                   status=ExperimentStatus.ONGOING),
+        Experiment(experiment_id="AMBTPM_001", experiment_number=8806002,
+                   status=ExperimentStatus.ONGOING),
+    ])
+    db_session.flush()
+
+    xlsx = make_excel(
+        ["experiment_id", "time_point", "modification_description"],
+        [["ambtpm-01", 7.0, "swapped brine"]],
+    )
+    updated, skipped, errors, _ = TimepointModificationsService.bulk_set_from_bytes(
+        db_session, xlsx
+    )
+
+    assert updated == 0
+    assert any("ambiguous" in e.lower() for e in errors), errors
+    assert any("AMBTPM_1" in e and "AMBTPM_001" in e for e in errors), errors

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import Experiment, ExperimentalResults, ModificationsLog
 from backend.services.result_merge_utils import find_timepoint_candidates
-from backend.services.bulk_uploads._id_match import fuzzy_find_experiment
+from backend.services.bulk_uploads._id_match import find_experiment_matches
 
 # Column aliases accepted in the upload file
 _EXPERIMENT_ID_ALIASES = {"experiment_id", "experiment id", "exp_id", "exp id"}
@@ -140,10 +140,21 @@ class TimepointModificationsService:
                     row_overwrite = _parse_bool(ow_val)
 
             # --- Resolve experiment (fuzzy: case-insensitive, symbols stripped) ---
-            experiment = fuzzy_find_experiment(db, exp_id)
-            if not experiment:
+            # All matches, not .first(): two stored IDs can share a normalized key,
+            # and picking one silently attached the modification to the wrong
+            # experiment. Name both so the researcher can use the exact ID.
+            matches = find_experiment_matches(db, exp_id)
+            if len(matches) > 1:
+                candidates = ", ".join(sorted(e.experiment_id for e in matches))
+                errors.append(
+                    f"Row {row_num}: experiment '{exp_id}' is ambiguous - it matches "
+                    f"{len(matches)} experiments: {candidates}. Use the exact experiment_id."
+                )
+                continue
+            if not matches:
                 errors.append(f"Row {row_num}: experiment '{exp_id}' not found")
                 continue
+            experiment = matches[0]
             canonical_exp_id = experiment.experiment_id
 
             # --- Find matching timepoint row ---
