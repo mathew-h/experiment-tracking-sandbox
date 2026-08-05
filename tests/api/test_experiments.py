@@ -400,6 +400,22 @@ def test_list_experiments_survives_duplicate_conditions(client, db_session):
     assert resp.json()["total"] == 1
 
 
+def test_get_experiment_survives_duplicate_conditions(client, db_session):
+    """get_experiment used scalar_one_or_none on conditions, so one duplicate
+    row 500'd the experiment detail page (issue #109)."""
+    exp = _make_experiment(db_session, "LISTDUP_002", 63021)
+    for string in ("LISTDUP_002", "LISTDUP_002_STALE"):
+        db_session.add(_EC(
+            experiment_fk=exp.id, experiment_id=string, experiment_type="Serum",
+        ))
+    db_session.commit()
+
+    resp = client.get("/api/experiments/LISTDUP_002")
+    assert resp.status_code == 200
+    assert resp.json()["experiment_id"] == "LISTDUP_002"
+    assert resp.json()["conditions"]["experiment_type"] == "Serum"
+
+
 def test_upsert_additive_no_conditions(client, db_session):
     """Experiment exists but has no conditions row — should 404."""
     from sqlalchemy import select, func as sqlfunc

@@ -47,8 +47,21 @@ them have no usable DB-level protection:
 Deployed constraints are not guaranteed to match the model declarations: the
 dev and test DBs are built with Base.metadata.create_all (which honors the
 ondelete clauses), while the lab PC came up through the Alembic chain, whose
-initial migration declared none. Everything here is therefore explicit in
-application code, so behavior is identical either way.
+initial migration declared none. A normal single-row delete is therefore
+explicit in application code either way, so behavior is identical regardless
+of how the DB was provisioned.
+
+Exception: a pre-constraint anomaly left one production experiment with TWO
+experimental_conditions rows for the same experiment_fk (issue #109).
+serialize_experiment_snapshot() and _build_list_item() (backend/api/routers/
+experiments.py) now tolerate this by reading only the lowest-id row, but the
+delete itself still goes through Experiment.conditions, which is
+uselist=False -- so db.delete(exp) cascades only the ONE row the ORM believes
+exists. The second row is removed by Postgres' ON DELETE CASCADE on
+experimental_conditions.experiment_fk, not by anything in this module. This
+is the one place deletion genuinely depends on a DB-level constraint being
+present; it is confirmed present in both the 2026-08-05 production dump and
+the dev DB.
 """
 from __future__ import annotations
 

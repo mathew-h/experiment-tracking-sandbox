@@ -1033,9 +1033,12 @@ def get_experiment(
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
 
+    # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
     cond = db.execute(
-        select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-    ).scalar_one_or_none()
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id)
+    ).scalars().first()
     notes = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.experiment_fk == exp.id)
@@ -1259,10 +1262,13 @@ def update_experiment(
                         count=backlinked,
                         user=current_user.uid,
                     )
-            # Keep denormalized string in conditions in sync so additives endpoints work
+            # Keep denormalized string in conditions in sync so additives endpoints work.
+            # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
             cond = db.execute(
-                select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-            ).scalar_one_or_none()
+                select(ExperimentalConditions)
+                .where(ExperimentalConditions.experiment_fk == exp.id)
+                .order_by(ExperimentalConditions.id)
+            ).scalars().first()
             if cond is not None:
                 cond.experiment_id = new_id
             # Sync denormalized experiment_id across all tables that carry it
@@ -1299,9 +1305,12 @@ def update_experiment(
         old_sample_id = exp.sample_id
         exp.sample_id = new_sample_id
         db.flush()
+        # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
         cond = db.execute(
-            select(ExperimentalConditions).where(ExperimentalConditions.experiment_fk == exp.id)
-        ).scalar_one_or_none()
+            select(ExperimentalConditions)
+            .where(ExperimentalConditions.experiment_fk == exp.id)
+            .order_by(ExperimentalConditions.id)
+        ).scalars().first()
         if cond is not None:
             recalculate(cond, db)
             db.flush()
