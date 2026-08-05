@@ -725,10 +725,12 @@ def list_experiment_additives(
     ).scalar_one_or_none()
     if exp is None:
         return []
-    # Resolve via experiment_fk, not the denormalized string (issue #109): the
-    # string is not kept in sync by every rename path, so a string-keyed lookup
-    # could 500 on a duplicated string, return [] for a real experiment, or
-    # (worse, in the PUT/DELETE variants below) touch another experiment's row.
+    # Resolve via experiment_fk, not the denormalized string (issue #109): both
+    # rename paths now sync that string, but rows stale from before that fix
+    # remain until dedupe_conditions_and_backfill_ids_018.py runs, so a
+    # string-keyed lookup could 500 on a duplicated string, return [] for a real
+    # experiment, or (worse, in the PUT/DELETE variants below) touch another
+    # experiment's row.
     conditions = db.execute(
         select(ExperimentalConditions)
         .where(ExperimentalConditions.experiment_fk == exp.id)
