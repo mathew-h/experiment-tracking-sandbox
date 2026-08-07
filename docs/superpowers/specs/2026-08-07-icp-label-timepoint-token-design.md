@@ -331,7 +331,25 @@ Master Results.
 
 ## 6. Tests
 
-Extend `tests/test_icp_parsing.py`:
+Tests go in **`tests/test_icp_handling.py`**, the real suite (1144 lines, 176
+asserts, pytest classes with a SQLite in-memory `test_db` fixture).
+
+Corrected 2026-08-07: an earlier draft of this section named
+`tests/test_icp_parsing.py`. That file is a print-only script — it re-implements
+`extract_sample_info` locally, asserts nothing, and never imports
+`backend.services.icp_service`. It is worthless as a regression harness and is
+left untouched. `tests/test_icp_service.py` is likewise `main()`-shaped with only
+5 asserts.
+
+A useful consequence: `TestICPServiceBasicFunctionality::test_extract_sample_info_valid_labels`
+(`tests/test_icp_handling.py:118-120`) already asserts **exact dict equality**
+against the three keys, so the §4.1 `all_elements` trap is *already* guarded by an
+existing test — adding a key to the returned dict breaks it. All 7 labels in
+`test_extract_sample_info_invalid_labels` still return `None` under the new
+grammar (verified by hand, including `Standard_1`, whose trailing `_1` does match
+`_DILUTION_RE` but which then has no timepoint source).
+
+New cases:
 
 | Case | Expectation |
 |---|---|
@@ -346,7 +364,7 @@ Extend `tests/test_icp_parsing.py`:
 | `HPHT_231_21x` | `None`, **and** counted as a reported skip |
 | `SERUM_Cation_005c-T5_21x` | `None`, **and** counted as a reported skip |
 | `Standard 1`, `Blank`, `HPHT_231` | `None`, **not** reported |
-| `extract_sample_info` (non-`_ex`) | returns exactly `{experiment_id, time_post_reaction, dilution_factor}` — guards the §4.1 `all_elements` trap |
+| `extract_sample_info` (non-`_ex`) | returns exactly `{experiment_id, time_post_reaction, dilution_factor}` — guards the §4.1 `all_elements` trap (already covered by the existing exact-equality test) |
 
 Aggregation tests on `process_icp_dataframe_ex`: one disagreement warning per
 file (not per row); the ≤10 label-list cap; the skip count reaching
@@ -358,9 +376,11 @@ the `ICPResults` row hangs off the `ExperimentalResults` whose
 returned. Per `docs/working/` precedent, seed and roll back rather than relying on
 dev-DB contents.
 
-Existing suites that must stay green: `tests/test_icp_parsing.py`,
-`tests/test_icp_service.py`, `tests/test_icp_handling.py`,
-`tests/api/test_bulk_uploads.py`, `tests/test_time_field_guardrails.py`.
+Existing suites that must stay green: `tests/test_icp_handling.py` (in particular
+`test_extract_sample_info_valid_labels`, `test_extract_sample_info_invalid_labels`
+and `test_process_icp_dataframe_success`, whose 2-tuple unpack is why
+`process_icp_dataframe` keeps its arity), `tests/api/test_bulk_uploads.py`, and
+`tests/test_time_field_guardrails.py`.
 
 ---
 
