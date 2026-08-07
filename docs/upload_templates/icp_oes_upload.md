@@ -24,13 +24,29 @@ This service processes long-format ICP elemental analysis data, extracting sampl
 ## Parsing Logic
 
 ### Sample Identification (`Label` Parsing)
-Sample metadata is extracted directly from the `Label` column via regex matching the pattern `ExpID_(Day|Time)Number_DilutionFactorx` (e.g., `Serum_MH_011_Day5_5x` or `Serum-MH-025_Time3_10x`).
-Extracts:
-1. `experiment_id`: The ID of the experiment (dashes/underscores allowed).
-2. `time_post_reaction`: Extracted from the `Day` or `Time` suffix.
-3. `dilution_factor`: Extracted from the `[N]x` suffix.
 
-Rows that do not match this pattern (e.g., "Blank", "Standard 1") are skipped without halting the upload.
+The `Label` column is parsed right-to-left:
+
+1. `_<N>x` dilution token — **required** (the trailing `x` is optional).
+2. An optional `_Day<N>` or `_Time<N>` token.
+3. Whatever remains is the experiment ID (dashes/underscores allowed).
+
+**The experiment ID's trailing `-t<days>` token wins.** A destructively-sampled
+vial encodes its own day in its ID (`SERUM_Cation_005c-t5`), and that day is
+canonical. When the ID carries the token, any `Day<n>` in the label is ignored —
+the upload reports the disagreement in its warnings but writes every row.
+
+| Label | Experiment | Day | Dilution |
+|---|---|---|---|
+| `SERUM_Cation_005c-t5_21x` | `SERUM_Cation_005c-t5` | 5 (from ID) | 21 |
+| `SERUM_Cation_005c-t5_Day12_21x` | `SERUM_Cation_005c-t5` | 5 (from ID; `Day12` ignored, warned) | 21 |
+| `HPHT_231_Day6_21x` | `HPHT_231` | 6 (from label) | 21 |
+| `Serum_MH_011_Day5_5x` | `Serum_MH_011` | 5 (from label) | 5 |
+
+A label with **no** timepoint from either source is skipped and named in the
+upload's warnings — for example `HPHT_231_21x`, or `SERUM_Cation_005c-T5_21x`,
+because **the timepoint token is lowercase `-t` only**. Standards and blanks
+(`Standard 1`, `Blank`) are skipped silently, as before.
 
 ### Filtering and Correction
 - **Blanks Removed:** Filters out any rows where `Type` is `BLK` or `Label` contains the word "Blank" (case-insensitive).

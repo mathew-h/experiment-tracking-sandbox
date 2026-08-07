@@ -49,7 +49,7 @@ These parsers handle real instrument output formats with edge cases accumulated 
 |---|---|
 | `new_experiments.py` | Multi-sheet Excel, experiment lineage parsing |¹
 | `scalar_results.py` | Solution chemistry Excel, partial updates |
-| `icp_service.py` | Raw ICP-OES CSV, delimiter detection, dilution correction |
+| `icp_service.py` | Raw ICP-OES CSV, delimiter detection, dilution correction |³
 | `actlabs_titration_data.py` | External titration lab reports |
 | `actlabs_xrd_report.py` | External XRD lab reports |
 | `xrd_upload.py` | Generic XRD file upload handler |
@@ -83,6 +83,29 @@ rejected row is never named in a warning claiming its reading was recorded. Each
 upsert runs in its own `db.begin_nested()` SAVEPOINT, so one failing row rolls back only
 itself — a session-wide rollback would discard rows the batch had already committed.
 Preserve all six properties when touching this file.
+
+³ **Label timepoint contract (changed 2026-08-07 with explicit sign-off).** The
+`Label` column's `_Day<n>` token no longer determines a result's timepoint when the
+experiment ID carries a `-t<days>` token: the ID wins, the disagreement is reported
+in `warnings`, and no row is rejected. This matches `master_bulk_upload.py` (see ²
+and its `:383` comment) and deliberately differs from `POST /api/results`, which
+still 400s via `apply_id_timepoint`. Dilution was also unwelded from `Day`, so a
+label MAY omit `Day` entirely (`SERUM_Cation_005c-t5_21x`) — previously that
+returned `None` and the row was dropped with no error at all, so a file relabelled
+this way reported "0 created" with no explanation. Five properties are load-bearing
+when touching `extract_sample_info_ex`: (a) the `-t` grammar is delegated to
+`database/experiment_id_parser.py::split_timepoint_token` and must never be
+re-implemented here, or ICP drifts from lineage; (b) dilution is peeled **before**
+the token is split, so `-t<days>` is at end-of-string when that anchored regex runs;
+(c) `extract_sample_info` must keep returning exactly three keys, because
+`create_icp_result` splats it into `result_data` and stores every unrecognized key
+in the `all_elements` JSONB as a fake element; (d) `process_icp_dataframe` and
+`parse_and_process_icp_file` must keep their 2-tuple arity — `legacy/streamlit_frontend/bulk_uploads.py:1558,1599`
+still calls the latter; (e) the router's early "ICP parse failed" return must pass
+`warnings=`, since the all-labels-skipped case is exactly where that warning is the
+only explanation available. See
+`docs/superpowers/specs/2026-08-07-icp-label-timepoint-token-design.md` and
+`tests/test_icp_handling.py::TestICPLabelTimepointToken`.
 
 ## Alembic Migration History
 

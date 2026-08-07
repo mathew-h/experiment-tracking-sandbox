@@ -134,6 +134,17 @@ The central hub for all experimental data.
     (13 real pairs). The finders return **all** matches; nothing resolves an
     ambiguous key. See `docs/issues/issue-fuzzy-experiment-id-conflation.md`.
   - `id_timepoint_days` (Float, nullable, indexed): day value parsed from a trailing `-t<days>` ID token (e.g. `SERUM_001a-t7` → 7.0; decimals allowed). NULL = not encoded. The ID is canonical for the vial's timepoint: result creation fills a blank time from it and rejects a conflicting one (guards in `create_scalar_result_ex` and `POST /api/results`; string-level checks in the scalar/master bulk parsers). Set by `update_experiment_lineage` via `split_timepoint_token`; the token is stripped before lineage grouping, so `SERUM_001a-t7` groups under base `SERUM_001` with `replicate_label = a` and rolls up per day bucket with no view changes. A letterless `-t` vial (`SERUM_001-t7`) stays a parent-like row (base = stem, parent NULL).
+    - **ICP-OES upload honors the token but REPORTS rather than rejects (2026-08-07).**
+      `extract_sample_info_ex` (`backend/services/icp_service.py`) takes the day from
+      the ID's `-t` token and emits one file-level warning when the label's `_Day<n>`
+      disagrees — matching `master_bulk_upload.py:383` rather than
+      `apply_id_timepoint`, because an ICP label is machine-written by the worklist
+      and letting it veto the ID would reject a whole run's readings. A label may
+      therefore omit `Day` entirely (`SERUM_Cation_005c-t5_21x`); one with neither a
+      `-t` token nor a `Day`/`Time` token is skipped, counted in the response's
+      `skipped`, and named in a warning. Note the token is **lowercase `-t` only**, so
+      `-T5` and `_t5` land in that reported-skip bucket. See footnote ³ in
+      `docs/LOCKED_COMPONENTS.md`.
     - **Letter vs vial (issue #98):** a replicate *letter* is the scientific unit; a
       `-t<days>` *vial* is one destructively-sampled instance of it. The two are
       surfaced at different grains, and the collapse key is the timepoint-stripped
