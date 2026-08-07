@@ -279,7 +279,12 @@ Stores solution chemistry measurements.
     would be an additive `ScalarResults` column and a schema-checklist run.
   - **One row per vial (issue #111):** the v3 Dashboard carries one row per
     unique `experiment_id`; replicate letters are separate vials with their own
-    IDs, not columns. The upload rejects two rows sharing an ID and timepoint.
+    IDs, not columns. The upload rejects two rows sharing an ID and timepoint,
+    matched on the `_id_match.normalize_id` key rather than the raw string — so
+    `SERUM_cation_001c-t5` and `SERUM_Cation_001c-t5` are one vial-day and are
+    both rejected, where before 2026-08-07 both passed and the later row
+    silently overwrote the earlier. The rejection is reported once per
+    collision group, naming every sheet row and every distinct spelling.
     Cross-replicate mean/SD therefore come from `v_results_scalar_rollup`
     (`mean_h2_ppm` / `sd_h2_ppm`), not from the spreadsheet.
   - **Overwrite is bounded by the source's own columns (issue #116):** on the
