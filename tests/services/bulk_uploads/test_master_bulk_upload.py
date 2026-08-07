@@ -1388,10 +1388,9 @@ def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
 
     assert created == 0, "neither row may be written"
     assert updated == 0
-    assert len(errors) == 2, f"both rows must be reported, got: {errors}"
-    assert all("SERUM_DUP01a" in e for e in errors)
-    assert any("row 2" in e.lower() for e in errors)
-    assert any("row 3" in e.lower() for e in errors)
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "SERUM_DUP01a" in errors[0]
+    assert "Rows 2, 3" in errors[0], f"both rows must be named: {errors[0]}"
 
     assert (
         db_session.query(ExperimentalResults)
@@ -1490,7 +1489,8 @@ def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session
     )
 
     assert created == 0
-    assert len(errors) == 2
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "Rows 2, 3" in errors[0]
 
 
 def test_case_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
@@ -1541,6 +1541,78 @@ def test_padding_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Sessio
     assert errors, "the collision must be reported"
 
 
+def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
+    """One collision produces one error listing all its rows, not one per row.
+
+    A researcher reads this list against the sheet: 'row 2 is a duplicate' with
+    no sibling row number means opening the file and searching for the partner
+    by hand. The team's v3 workbook had 26 collisions reported as 52 lines.
+    Same shape as the ambiguous-ID fix in commit de379a1.
+    """
+    _seed_experiment(db_session, "SERUM_DUP08a", 8868)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP08a", 7.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="third", fl_h2=30.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "Rows 2, 3, 4" in errors[0], f"every row must be named: {errors[0]}"
+    assert "SERUM_DUP08a" in errors[0]
+    assert "day 7" in errors[0]
+
+
+def test_duplicate_group_names_both_spellings(db_session: Session):
+    """When the colliding rows are spelled differently, the message says so.
+
+    'Rows 29, 194 (SERUM_pH_001a-t1)' would look like a plain repeat; the
+    researcher needs to see that the two cells do not read the same, or they
+    will search the sheet for a string that is only in one of them.
+    """
+    _seed_experiment(db_session, "SERUM_DUP09c-t5", 8869)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_dup09c-t5", 5.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP09C-t5", 5.0, description="second", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "SERUM_dup09c-t5" in errors[0], f"first spelling missing: {errors[0]}"
+    assert "SERUM_DUP09C-t5" in errors[0], f"second spelling missing: {errors[0]}"
+    assert "resolve to one experiment" in errors[0], (
+        f"the message must explain why differing spellings collided: {errors[0]}"
+    )
+
+
+def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
+    """The group error sits where its earliest row sits in the sheet order.
+
+    Errors are sorted by row number so the list reads top-down against the
+    spreadsheet (issue #114 item 3). A group spanning rows 2 and 4 must appear
+    above a single-row failure on row 3, not after it.
+    """
+    _seed_experiment(db_session, "SERUM_DUP10a", 8870)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP10a", 7.0, description="dup one", fl_h2=10.0),
+        _v3_row("HPHT_DUP10_MISSING", 7.0, description="no such experiment"),
+        _v3_row("SERUM_DUP10a", 7.0, description="dup two", fl_h2=20.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.errors) == 2, f"one group + one row error: {result.errors}"
+    assert result.errors[0].startswith("Rows 2, 4 ("), (
+        f"the group anchored at row 2 must come first: {result.errors}"
+    )
+    assert result.errors[1].startswith("Row 3 ("), (
+        f"the row 3 failure must come second: {result.errors}"
+    )
+
+
 def test_duplicate_does_not_block_other_rows(db_session: Session):
     """A duplicate pair is rejected; unrelated rows in the same file still land."""
     _seed_experiment(db_session, "SERUM_DUP05a", 8861)
@@ -1556,7 +1628,8 @@ def test_duplicate_does_not_block_other_rows(db_session: Session):
     )
 
     assert created == 1
-    assert len(errors) == 2
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "Rows 2, 3" in errors[0]
     assert [f["experiment_id"] for f in feedbacks] == ["SERUM_DUP05b"]
 
 

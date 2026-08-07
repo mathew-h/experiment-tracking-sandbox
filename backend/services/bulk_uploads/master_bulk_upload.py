@@ -504,10 +504,39 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # normalization only rounds to 4 decimals, so two values on opposite sides
     # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
     # even though they fall within the ±1e-4 tolerance of each other.
-    key_counts: Dict[Tuple[str, float], int] = {}
-    for _, exp_id, time_post_reaction, _row in resolved:
+    dup_groups: Dict[Tuple[str, float], List[Tuple[int, str]]] = {}
+    for row_num, exp_id, time_post_reaction, _row in resolved:
         key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
-        key_counts[key] = key_counts.get(key, 0) + 1
+        dup_groups.setdefault(key, []).append((row_num, exp_id))
+
+    # One error per collision, not per row. Each names every row in the group,
+    # so a researcher reading this list against the sheet is told where the
+    # partner reading is instead of having to search for it — the same reason
+    # an ambiguous ID names both candidates. Anchored at the group's first row
+    # so the sort at the end of this function keeps the list in sheet order.
+    duplicate_rows: set[int] = set()
+    for (_norm_id, day), members in dup_groups.items():
+        if len(members) < 2:
+            continue
+        duplicate_rows.update(row_num for row_num, _ in members)
+        rows_text = ", ".join(str(row_num) for row_num, _ in members)
+        # dict.fromkeys keeps sheet order while dropping repeats.
+        spellings = list(dict.fromkeys(exp_id for _, exp_id in members))
+        # Differing spellings collided on the normalized key, which is not
+        # visible from the cells themselves — say so, or the researcher
+        # searches the sheet for a string only one of the rows contains.
+        variant_clause = (
+            " These spellings differ but resolve to one experiment, so one "
+            "reading would have silently overwritten the other."
+            if len(spellings) > 1 else ""
+        )
+        row_errors.append((members[0][0], (
+            f"Rows {rows_text} ({', '.join(spellings)}): duplicate experiment "
+            f"ID and timepoint (day {day:g}).{variant_clause} Each vial gets "
+            f"one row per timepoint — give each vial its own ID (e.g. "
+            f"SERUM_001a-t7, SERUM_001b-t7). No row for this vial-day was "
+            f"written."
+        )))
 
     # Phase 2 — upsert what is left.
     # Rows where Full Loop overrode a populated direct-injection cell. Reported
@@ -519,14 +548,8 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # carried an H2 reading (missing_gc_date_rows is the numerator).
     h2_reading_rows = 0
     for row_num, exp_id, time_post_reaction, row in resolved:
-        dup_key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
-        if key_counts[dup_key] > 1:
-            row_errors.append((row_num, (
-                f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
-                f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "
-                f"— give each vial its own ID (e.g. SERUM_001a-t7, SERUM_001b-t7). "
-                f"No row for this vial-day was written."
-            )))
+        # The error was already emitted once for the whole group above.
+        if row_num in duplicate_rows:
             continue
 
         description = str(row.get("Description") or "").strip() or None
