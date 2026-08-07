@@ -382,37 +382,45 @@ class ICPService:
         return result_df, warnings
     
     @staticmethod
-    def process_icp_dataframe(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def process_icp_dataframe_ex(
+        df: pd.DataFrame,
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str], int]:
         """
         Process the entire ICP DataFrame from long-format to sample-based data for upload.
-        
+
         Expected DataFrame structure:
-        - Label: Sample identifiers (e.g., 'Serum_MH_011_Day5_5x')  
+        - Label: Sample identifiers (e.g., 'Serum_MH_011_Day5_5x')
         - Element Label: Element with wavelength (e.g., 'Al 394.401', 'Fe 238.204')
         - Concentration: Raw concentration values
         - Intensity: Measurement values (for quality assessment)
         - Type: Sample type (filter out 'BLK' blanks)
-        
+
         Args:
             df: Raw ICP DataFrame in long format
-            
+
         Returns:
-            Tuple of (processed_data_list, error_messages)
+            Tuple of (processed_data_list, error_messages, warnings, skipped_count).
+            `warnings` holds at most two file-level lines: one for Day-vs-'-t'
+            disagreements and one naming labels skipped for having no timepoint.
         """
         processed_data = []
         errors = []
-        
+        warnings: List[str] = []
+        disagreement_labels: List[str] = []
+        skipped_labels: List[str] = []
+        comparable_labels = 0
+
         if df.empty:
             errors.append("DataFrame is empty")
-            return processed_data, errors
-        
+            return processed_data, errors, warnings, 0
+
         # Validate required columns
         required_columns = ['Label', 'Element Label', 'Concentration', 'Intensity']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             errors.append(f"Missing required columns: {missing_columns}")
-            return processed_data, errors
-        
+            return processed_data, errors, warnings, 0
+
         try:
             # Filter out blank samples (Type = 'BLK' or Label contains 'Blank')
             if 'Type' in df.columns:
@@ -422,20 +430,35 @@ class ICPService:
             
             if df_samples.empty:
                 errors.append("No non-blank samples found in data")
-                return processed_data, errors
-            
+                return processed_data, errors, warnings, 0
+
             # Get unique sample labels
             unique_labels = df_samples['Label'].unique()
             
             for label in unique_labels:
                 try:
-                    # Extract sample information (experiment_id, time, dilution)
-                    sample_info = ICPService.extract_sample_info(label)
-                    
-                    # Skip rows that don't match expected pattern (Standards, Blanks, etc.)
-                    if sample_info is None:
+                    info = ICPService.extract_sample_info_ex(label)
+
+                    # Skip standards, blanks and anything with no timepoint. A
+                    # label that LOOKS like a sample is named in a warning so a
+                    # whole-file labelling mistake is diagnosable instead of
+                    # reporting "0 created" with no reason.
+                    if info is None:
+                        if _LOOKS_LIKE_SAMPLE_RE.search(str(label)):
+                            skipped_labels.append(str(label))
                         continue
-                    
+
+                    if info.time_source == 'id_token' and info.label_day_days is not None:
+                        comparable_labels += 1
+                        if info.day_disagrees:
+                            disagreement_labels.append(str(label))
+
+                    sample_info = {
+                        'experiment_id': info.experiment_id,
+                        'time_post_reaction': info.time_post_reaction,
+                        'dilution_factor': info.dilution_factor,
+                    }
+
                     # Get all data for this sample
                     sample_data = df_samples[df_samples['Label'] == label].copy()
                     measurement_date = ICPService.extract_measurement_date(sample_data)
@@ -476,9 +499,48 @@ class ICPService:
         
         except Exception as e:
             errors.append(f"Error processing DataFrame: {str(e)}")
-        
+
+        # One line per file, not one per row -- mirrors master_bulk_upload.py:755-780,
+        # including its <=10 list cap. The ID wins either way so no row is
+        # rejected, which is exactly why this must stay visible without drowning
+        # the other warnings.
+        if disagreement_labels:
+            n = len(disagreement_labels)
+            noun = "label" if comparable_labels == 1 else "labels"
+            where = (
+                " (" + ", ".join(disagreement_labels) + ")" if n <= 10 else ""
+            )
+            warnings.append(
+                f"Day token disagrees with the ID's -t token on {n} of "
+                f"{comparable_labels} {noun}{where}. The ID is canonical, so each "
+                "reading was recorded at the day its ID encodes and the Day value "
+                "was not used."
+            )
+
+        if skipped_labels:
+            n = len(skipped_labels)
+            noun = "label" if n == 1 else "labels"
+            where = (
+                " (" + ", ".join(skipped_labels) + ")" if n <= 10 else ""
+            )
+            warnings.append(
+                f"{n} {noun} skipped -- no timepoint could be determined{where}. "
+                "Neither a '-t<days>' token in the experiment ID nor a Day/Time "
+                "token in the label was found. Note the timepoint token is "
+                "lowercase '-t' only."
+            )
+
+        return processed_data, errors, warnings, len(skipped_labels)
+
+    @staticmethod
+    def process_icp_dataframe(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Two-tuple view of `process_icp_dataframe_ex`, dropping warnings.
+
+        Arity is frozen: existing callers and tests unpack exactly two values.
+        """
+        processed_data, errors, _warnings, _skipped = ICPService.process_icp_dataframe_ex(df)
         return processed_data, errors
-    
+
     @staticmethod
     def _standardize_element_name(element_symbol: str) -> str:
         """
@@ -993,42 +1055,58 @@ class ICPService:
             return {'error': f"Error diagnosing CSV structure: {str(e)}"}
     
     @staticmethod
-    def parse_and_process_icp_file(file_content: bytes, manual_header_row: int = 0) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def parse_and_process_icp_file_ex(
+        file_content: bytes,
+        manual_header_row: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str], int]:
         """
         Complete workflow to parse and process ICP CSV file.
-        
+
         This function orchestrates the entire ICP data processing pipeline:
         1. Parse CSV file (skip header rows 0-2)
-        2. Filter out blank samples  
+        2. Filter out blank samples
         3. Extract experiment info from sample labels
         4. Apply dilution corrections
         5. Select best lines for each element
         6. Convert from long to wide format
         7. Validate processed data
-        
+
         Args:
             file_content: Raw bytes content of the CSV file
-            
+
         Returns:
-            Tuple of (processed_data_list, error_messages)
+            Tuple of (processed_data, errors, warnings, skipped_count).
         """
         try:
             # Step 1: Parse CSV file (skip header rows)
             df = ICPService.parse_csv_file(file_content, manual_header_row)
-            
+
             if df.empty:
-                return [], ["Parsed CSV file is empty"]
-            
+                return [], ["Parsed CSV file is empty"], [], 0
+
             # Step 2: Process the DataFrame
-            processed_data, processing_errors = ICPService.process_icp_dataframe(df)
-            
+            processed_data, processing_errors, warnings, skipped = (
+                ICPService.process_icp_dataframe_ex(df)
+            )
+
             # Step 3: Validate the processed data
             validation_errors = ICPService.validate_icp_data(processed_data)
-            
-            # Combine all errors
-            all_errors = processing_errors + validation_errors
-            
-            return processed_data, all_errors
-            
+
+            return processed_data, processing_errors + validation_errors, warnings, skipped
+
         except Exception as e:
-            return [], [f"Error in ICP file processing workflow: {str(e)}"]
+            return [], [f"Error in ICP file processing workflow: {str(e)}"], [], 0
+
+    @staticmethod
+    def parse_and_process_icp_file(
+        file_content: bytes,
+        manual_header_row: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Two-tuple view of `parse_and_process_icp_file_ex`, dropping warnings.
+
+        Arity is frozen: existing callers and tests unpack exactly two values.
+        """
+        processed_data, errors, _warnings, _skipped = (
+            ICPService.parse_and_process_icp_file_ex(file_content, manual_header_row)
+        )
+        return processed_data, errors

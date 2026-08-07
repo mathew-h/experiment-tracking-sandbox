@@ -258,6 +258,101 @@ class TestICPLabelTimepointToken:
         }
         assert result["time_post_reaction"] == 5.0
 
+    @staticmethod
+    def _csv(labels):
+        """Minimal 2-header-row ICP export with one Fe row per label."""
+        rows = "\n".join(
+            f"{label},Fe 238.204,10.0,1500,SAMP" for label in labels
+        )
+        return (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            f"{rows}\n"
+        ).encode("utf-8")
+
+    def test_disagreement_emits_one_file_level_warning(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "SERUM_Cation_005c-t5_Day12_21x",
+            "SERUM_Cation_005d-t5_Day12_21x",
+            "SERUM_Catalyst_001a-t7_Day7_21x",   # agrees: comparable, not counted
+        ]))
+        data, errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 3
+        assert skipped == 0
+        assert len(warnings) == 1
+        w = warnings[0]
+        assert "2 of 3 labels" in w
+        assert "SERUM_Cation_005c-t5_Day12_21x" in w
+        assert "SERUM_Cation_005d-t5_Day12_21x" in w
+        assert "SERUM_Catalyst_001a-t7_Day7_21x" not in w
+        # every row still written, at the ID's day
+        assert sorted(d["time_post_reaction"] for d in data) == [5.0, 5.0, 7.0]
+
+    def test_disagreement_warning_omits_label_list_above_ten(self):
+        labels = [f"SERUM_Cation_{i:03d}a-t5_Day12_21x" for i in range(11)]
+        df = ICPService.parse_csv_file(self._csv(labels))
+        _data, _errors, warnings, _skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(warnings) == 1
+        assert "11 of 11 labels" in warnings[0]
+        assert "SERUM_Cation_000a-t5_Day12_21x" not in warnings[0]
+
+    def test_labels_with_no_timepoint_are_counted_and_named(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "HPHT_231_Day6_21x",              # fine
+            "HPHT_232_21x",                   # no timepoint -> reported
+            "SERUM_Cation_005c-T5_21x",       # typo'd token -> reported
+        ]))
+        data, _errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 1
+        assert skipped == 2
+        assert len(warnings) == 1
+        assert "HPHT_232_21x" in warnings[0]
+        assert "SERUM_Cation_005c-T5_21x" in warnings[0]
+        assert "lowercase" in warnings[0]
+
+    def test_standards_and_blanks_are_never_reported(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "HPHT_231_Day6_21x", "Standard 1", "Standard_1", "HPHT_231",
+        ]))
+        data, _errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 1
+        assert skipped == 0
+        assert warnings == []
+
+    def test_clean_file_emits_no_warnings(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "SERUM_Cation_005c-t5_21x", "HPHT_231_Day6_21x",
+        ]))
+        data, errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 2
+        assert errors == []
+        assert warnings == []
+        assert skipped == 0
+
+    def test_parse_and_process_ex_threads_warnings_through(self):
+        content = self._csv(["SERUM_Cation_005c-t5_Day12_21x"])
+        data, _errors, warnings, skipped = ICPService.parse_and_process_icp_file_ex(content)
+
+        assert len(data) == 1
+        assert data[0]["time_post_reaction"] == 5.0
+        assert len(warnings) == 1
+        assert skipped == 0
+
+    def test_two_tuple_wrappers_keep_their_arity(self):
+        content = self._csv(["SERUM_Cation_005c-t5_Day12_21x"])
+        df = ICPService.parse_csv_file(content)
+
+        data, errors = ICPService.process_icp_dataframe(df)
+        assert len(data) == 1 and errors == []
+
+        data2, errors2 = ICPService.parse_and_process_icp_file(content)
+        assert len(data2) == 1 and errors2 == []
+
 
 class TestICPServiceProcessing:
     """Test ICP data processing workflows."""
