@@ -354,6 +354,83 @@ class TestICPLabelTimepointToken:
         assert len(data2) == 1 and errors2 == []
 
 
+class TestICPTimepointTokenPersistence:
+    """The ICP row must land on the ExperimentalResults for the ID's day."""
+
+    def test_icp_row_is_written_at_the_id_token_day(self, test_db):
+        exp = Experiment(
+            experiment_id="SERUM_Cation_005c-t5",
+            experiment_number=2,
+            researcher="Test Researcher",
+            date=datetime.now(),
+            status="ONGOING",
+        )
+        test_db.add(exp)
+        test_db.commit()
+
+        csv = (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            "SERUM_Cation_005c-t5_Day12_21x,Fe 238.204,10.0,1500,SAMP\n"
+            "SERUM_Cation_005c-t5_Day12_21x,Ni 231.604,2.0,600,SAMP\n"
+        ).encode("utf-8")
+
+        data, errors, warnings, skipped = ICPService.parse_and_process_icp_file_ex(csv)
+        assert errors == [], errors
+        assert skipped == 0
+        assert len(warnings) == 1
+
+        created, updated, ingest_errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert ingest_errors == [], ingest_errors
+        test_db.commit()
+
+        rows = (
+            test_db.query(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == exp.id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].time_post_reaction_days == 5.0      # the ID's day, not 12
+        assert rows[0].icp_data is not None
+        assert rows[0].icp_data.dilution_factor == 21.0
+        # dilution applied: 10.0 ppm * 21x
+        assert rows[0].icp_data.fe == pytest.approx(210.0)
+
+    def test_label_without_day_lands_on_the_same_day(self, test_db):
+        exp = Experiment(
+            experiment_id="SERUM_Cation_006a-t3",
+            experiment_number=3,
+            researcher="Test Researcher",
+            date=datetime.now(),
+            status="ONGOING",
+        )
+        test_db.add(exp)
+        test_db.commit()
+
+        csv = (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            "SERUM_Cation_006a-t3_21x,Fe 238.204,10.0,1500,SAMP\n"
+        ).encode("utf-8")
+
+        data, errors, warnings, skipped = ICPService.parse_and_process_icp_file_ex(csv)
+        assert errors == [], errors
+        assert warnings == []       # no Day token, so nothing to disagree with
+
+        _created, _updated, ingest_errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert ingest_errors == [], ingest_errors
+        test_db.commit()
+
+        rows = (
+            test_db.query(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == exp.id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].time_post_reaction_days == 3.0
+        assert rows[0].icp_data is not None
+
+
 class TestICPServiceProcessing:
     """Test ICP data processing workflows."""
     
@@ -916,9 +993,12 @@ class TestICPRouterOverwrite:
             'backend.services.icp_service.ICPService.bulk_create_icp_results',
             fake_bulk_create,
         )
+        # Must patch the _ex name the router actually calls: the 2-tuple wrapper
+        # is no longer on the request path (2026-08-07). Returning empty errors
+        # keeps the "ICP parse failed" gate shut so bulk_create is still reached.
         monkeypatch.setattr(
-            'backend.services.icp_service.ICPService.parse_and_process_icp_file',
-            lambda _: ([], []),
+            'backend.services.icp_service.ICPService.parse_and_process_icp_file_ex',
+            lambda _: ([], [], [], 0),
         )
 
         try:
