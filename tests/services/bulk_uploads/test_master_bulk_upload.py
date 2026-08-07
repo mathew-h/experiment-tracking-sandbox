@@ -2007,3 +2007,44 @@ def test_disagreement_warning_drops_the_row_list_above_ten(db_session: Session):
     assert "(" not in disagreements[0].split("rows")[1][:5], (
         f"no row list above the threshold: {disagreements[0]}"
     )
+
+
+def test_rejected_rows_are_not_counted_in_the_disagreement_warning(db_session: Session):
+    """Only rows actually written are counted and named.
+
+    The warning says the reading "was recorded at the day its ID encodes",
+    which is false for a row that was never written — and that row's own error
+    says "No row for this vial-day was written". Counting in Phase 2 after the
+    upsert (as the sibling GC-run-date warning does) keeps the two messages
+    from contradicting each other about the same row. The team's real workbook
+    has this overlap on its rows 185-211 re-entry block and on its
+    missing-experiment rows.
+    """
+    _seed_experiment(db_session, "SERUM_DIS40a-t7", 8980)
+    _seed_experiment(db_session, "SERUM_DIS41a-t7", 8981)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DIS40a-t7", 3.0, description="dup one", nh4=1.0),
+        _v3_row("SERUM_DIS40a-t7", 3.0, description="dup two", nh4=2.0),
+        _v3_row("SERUM_DIS41a-t7", 3.0, description="written", nh4=3.0),
+        _v3_row("SERUM_DIS42a-t7", 3.0, description="no such experiment", nh4=4.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.created == 1
+    assert len(result.errors) == 2, f"duplicate group + not found: {result.errors}"
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, f"got: {result.warnings}"
+    assert "1 of 1" in disagreements[0], (
+        f"only the written row counts: {disagreements[0]}"
+    )
+    assert "(4)" in disagreements[0], (
+        f"row 4 is the one that was written: {disagreements[0]}"
+    )
+    assert "(2" not in disagreements[0], (
+        f"rejected duplicate rows must not be named: {disagreements[0]}"
+    )
+    assert "5)" not in disagreements[0], (
+        f"the failed-upsert row must not be named: {disagreements[0]}"
+    )

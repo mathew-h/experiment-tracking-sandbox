@@ -500,30 +500,19 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # read, by which point the earlier row has already been flushed, counted
     # and given a feedback record — hence a pre-pass rather than an in-loop
     # check. (The upload commits once, at the endpoint, via _finalize_write.)
-    resolved: List[Tuple[int, str, float, Any]] = []
-    # Denominators for the file-level disagreement warning below. Counted here
-    # rather than warned per row: the Duration column is a formula off the
-    # Sampling sheet and drifts wholesale, so 109 of 202 rows disagreed on the
-    # team's v3 workbook (2026-08-07) — one line each buried every other
-    # warning in the upload panel.
-    comparable_rows = 0
-    disagreement_rows: List[int] = []
+    resolved: List[Tuple[int, str, float, Any, TimepointCheck]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
         exp_id, time_post_reaction, error, skip, check = _resolve_row_identity(
             row, row_num
         )
-        if check.compared:
-            comparable_rows += 1
-            if check.disagrees:
-                disagreement_rows.append(row_num)
         if skip:
             skipped += 1
             continue
         if error is not None:
             row_errors.append((row_num, error))
             continue
-        resolved.append((row_num, exp_id, time_post_reaction, row))
+        resolved.append((row_num, exp_id, time_post_reaction, row, check))
 
     # Keyed on the normalized ID, not the raw string: `_id_match.normalize_id`
     # is what the DB lookup resolves through, so two spellings that differ only
@@ -545,7 +534,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
     # even though they fall within the ±1e-4 tolerance of each other.
     dup_groups: Dict[Tuple[str, float], List[Tuple[int, str]]] = {}
-    for row_num, exp_id, time_post_reaction, _row in resolved:
+    for row_num, exp_id, time_post_reaction, _row, _check in resolved:
         key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
         dup_groups.setdefault(key, []).append((row_num, exp_id))
 
@@ -587,7 +576,16 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # Denominator for the coverage warning below: rows actually written that
     # carried an H2 reading (missing_gc_date_rows is the numerator).
     h2_reading_rows = 0
-    for row_num, exp_id, time_post_reaction, row in resolved:
+    # Denominators for the Duration-vs-ID disagreement warning further below.
+    # Counted here, after the write succeeds — not in Phase 1 where the check
+    # was computed — for the same reason h2_reading_rows is: a row that
+    # disagrees and is then rejected (a duplicate, or no matching experiment)
+    # was never written, so it cannot be described as "recorded at the day
+    # its ID encodes". Only a row that made it past both the duplicate guard
+    # and the upsert can honestly be counted or named.
+    comparable_rows = 0
+    disagreement_rows: List[int] = []
+    for row_num, exp_id, time_post_reaction, row, check in resolved:
         # The error was already emitted once for the whole group above.
         if row_num in duplicate_rows:
             continue
@@ -670,6 +668,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                 h2_reading_rows += 1
                 if gc_run_date is None:
                     missing_gc_date_rows.append(row_num)
+            if check.compared:
+                comparable_rows += 1
+                if check.disagrees:
+                    disagreement_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
                 "experiment_id": exp_id,
