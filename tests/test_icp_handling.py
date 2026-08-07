@@ -176,6 +176,89 @@ class TestICPServiceBasicFunctionality:
         assert mg_row['Element Label'] == 'Mg 285.213'   # higher intensity Mg line
 
 
+class TestICPLabelTimepointToken:
+    """The ID's '-t<days>' token is canonical for a vial's day (spec 2026-08-07)."""
+
+    def test_id_token_wins_over_disagreeing_day(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Cation_005c-t5_Day12_21x")
+        assert info is not None
+        assert info.experiment_id == "SERUM_Cation_005c-t5"
+        assert info.time_post_reaction == 5.0
+        assert info.dilution_factor == 21.0
+        assert info.time_source == "id_token"
+        assert info.label_day_days == 12.0
+        assert info.day_disagrees is True
+
+    def test_day_token_may_be_omitted_entirely(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Cation_005c-t5_21x")
+        assert info is not None
+        assert info.experiment_id == "SERUM_Cation_005c-t5"
+        assert info.time_post_reaction == 5.0
+        assert info.dilution_factor == 21.0
+        assert info.time_source == "id_token"
+        assert info.label_day_days is None
+        assert info.day_disagrees is False
+
+    def test_agreeing_day_is_not_a_disagreement(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Catalyst_001a-t7_Day7_21x")
+        assert info is not None
+        assert info.time_post_reaction == 7.0
+        assert info.day_disagrees is False
+
+    def test_fractional_token_agrees_within_tolerance(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Cation_005c-t0.5_Day0.5_21x")
+        assert info is not None
+        assert info.experiment_id == "SERUM_Cation_005c-t0.5"
+        assert info.time_post_reaction == 0.5
+        assert info.day_disagrees is False
+
+    def test_day_still_supplies_time_when_id_has_no_token(self):
+        info = ICPService.extract_sample_info_ex("HPHT_231_Day6_21x")
+        assert info is not None
+        assert info.experiment_id == "HPHT_231"
+        assert info.time_post_reaction == 6.0
+        assert info.dilution_factor == 21.0
+        assert info.time_source == "day_label"
+        assert info.label_day_days == 6.0
+        assert info.day_disagrees is False
+
+    @pytest.mark.parametrize("label,exp_id,day,dil", [
+        ("Serum_MH_011_Day5_5x", "Serum_MH_011", 5.0, 5.0),
+        ("Serum-MH-025_Time3_10x", "Serum-MH-025", 3.0, 10.0),
+        ("Serum_MH_011_Day5_5", "Serum_MH_011", 5.0, 5.0),   # trailing 'x' optional
+        ("HPHT_MH_004_Day7.5_15x", "HPHT_MH_004", 7.5, 15.0),
+    ])
+    def test_legacy_labels_are_unchanged(self, label, exp_id, day, dil):
+        info = ICPService.extract_sample_info_ex(label)
+        assert info is not None
+        assert info.experiment_id == exp_id
+        assert info.time_post_reaction == day
+        assert info.dilution_factor == dil
+        assert info.time_source == "day_label"
+
+    @pytest.mark.parametrize("label", [
+        "HPHT_231_21x",                 # dilution but no timepoint anywhere
+        "SERUM_Cation_005c-T5_21x",     # uppercase T is not the canonical token
+        "SERUM_Cation_005c_t5_21x",     # underscore spelling is not the canonical token
+        "Standard 1",
+        "Blank",
+        "Standard_1",
+        "HPHT_231",
+        "",
+    ])
+    def test_labels_with_no_timepoint_return_none(self, label):
+        assert ICPService.extract_sample_info_ex(label) is None
+
+    def test_wrapper_returns_exactly_three_keys(self):
+        """Guards the all_elements trap: create_icp_result splats this dict and
+        icp_service.py:520 stores any unknown key as a fake element."""
+        result = ICPService.extract_sample_info("SERUM_Cation_005c-t5_Day12_21x")
+        assert set(result.keys()) == {
+            "experiment_id", "time_post_reaction", "dilution_factor"
+        }
+        assert result["time_post_reaction"] == 5.0
+
+
 class TestICPServiceProcessing:
     """Test ICP data processing workflows."""
     

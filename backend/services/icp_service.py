@@ -1,19 +1,53 @@
 import pandas as pd
 import re
 import datetime as dt
-from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List, Literal, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import Experiment, ExperimentalResults, ICPResults, ModificationsLog
+from database.experiment_id_parser import split_timepoint_token
 from io import StringIO
 from frontend.config.variable_config import ICP_FIXED_ELEMENT_FIELDS
 from backend.services.result_merge_utils import (
+    TIMEPOINT_TOLERANCE_DAYS,
     create_experimental_result_row,
     ensure_primary_result_for_timepoint,
     find_timepoint_candidates,
     choose_parent_candidate,
     update_cumulative_times_for_chain,
 )
+
+# Label grammar, peeled right-to-left (spec 2026-08-07 §3). Dilution is split out
+# of the old welded '_(Day|Time)N_Nx$' pattern so that a label MAY omit Day: the
+# ID's '-t<days>' token supplies the day instead.
+_DILUTION_RE = re.compile(r'_(\d+(?:\.\d+)?)x?$', re.IGNORECASE)
+_DAY_RE = re.compile(r'_(?:Day|Time)(\d+(?:\.\d+)?)$', re.IGNORECASE)
+
+# Whether an unparseable label is worth telling the researcher about. Standards
+# and blanks ("Standard 1", "Blank", "Standard_1") match none of these and stay
+# silently skipped, as they always have. A bare ID ("HPHT_231") also stays silent
+# even though _DILUTION_RE matches its trailing '_231' — the required 'x' is what
+# distinguishes a real dilution token from an ID's numeric segment here. This
+# stricter test governs REPORTING only; it never affects whether a label parses.
+_LOOKS_LIKE_SAMPLE_RE = re.compile(r'_\d+(?:\.\d+)?x$|_(?:Day|Time)\d|-[tT]\d')
+
+
+@dataclass(frozen=True)
+class LabelInfo:
+    """Everything an ICP `Label` encodes, including provenance that is discarded.
+
+    `time_post_reaction` is the EFFECTIVE day. `label_day_days` retains what the
+    label's Day/Time token said even when it was not used, so the caller can
+    report a disagreement without re-parsing.
+    """
+    experiment_id: str
+    time_post_reaction: float
+    dilution_factor: float
+    time_source: Literal['id_token', 'day_label']
+    label_day_days: Optional[float]
+    day_disagrees: bool
+
 
 class ICPService:
     """Service for handling ICP elemental analysis data operations."""
@@ -133,60 +167,106 @@ class ICPService:
             raise ValueError(error_msg)
     
     @staticmethod
-    def extract_sample_info(label: str) -> Dict[str, Any]:
+    def extract_sample_info_ex(label: str) -> Optional[LabelInfo]:
         """
-        Extract experiment ID, time point, and dilution factor from label column.
-        
-        Expected format: 'Serum_MH_011_Day5_5x' or 'Serum-MH-011_Day5_5x'
-        Supports dashes and underscores in experiment IDs.
-        
-        Args:
-            label: Sample label string
-            
-        Returns:
-            Dictionary with experiment_id, time_post_reaction, and dilution_factor
-            Returns None if label doesn't match expected pattern (e.g., "Standard 1", "Blank")
+        Parse an ICP `Label` into experiment ID, effective timepoint and dilution.
+
+        Grammar, peeled right-to-left:
+          1. `_<N>x` dilution token (required; the trailing 'x' is optional)
+          2. optional `_Day<N>` / `_Time<N>` token
+          3. whatever remains is the experiment ID
+
+        The experiment ID's trailing '-t<days>' token is canonical for that vial's
+        day (Mat, 2026-07-30), so when present it WINS outright and the label's Day
+        value is discarded — reported by the caller, never rejected. This matches
+        `master_bulk_upload.py:383` and deliberately differs from
+        `POST /api/results`, which still 400s on a conflict via `apply_id_timepoint`:
+        a hand-entered result has one author to correct, whereas an ICP label is
+        machine-written by the worklist.
+
+        Returns None when no timepoint can be determined — no '-t' token in the ID
+        and no Day/Time token in the label — or when there is no dilution token.
+        Standards and blanks ("Standard 1", "Blank") fall out here.
+
+        Examples:
+            'SERUM_Cation_005c-t5_Day12_21x' -> day 5.0,  day_disagrees=True
+            'SERUM_Cation_005c-t5_21x'       -> day 5.0,  label_day_days=None
+            'HPHT_231_Day6_21x'              -> day 6.0,  time_source='day_label'
+            'HPHT_231_21x'                   -> None
         """
-        try:
-            # Pattern to match: ExpID_(Day|Time)Number_DilutionFactorx
-            # More robust approach to handle dashes/underscores in experiment IDs
-            # Examples: Serum_MH_011_Day5_5x, Serum-MH-025_Time3_10x, Test_Sample_A_Day1_2x
-            
-            # Use search from the end to find the last occurrence of the time pattern
-            time_pattern = r'_(Day|Time)(\d+(?:\.\d+)?)_(\d+(?:\.\d+)?)x?$'
-            time_match = re.search(time_pattern, label, re.IGNORECASE)
-            
-            if not time_match:
-                # Return None for non-matching labels (Standards, Blanks, etc.)
-                return None
-            
-            # Extract the experiment ID by removing the time pattern from the end
-            experiment_id = label[:time_match.start()]
-            time_unit = time_match.group(1).lower()
-            time_value = float(time_match.group(2))
-            dilution_factor = float(time_match.group(3))
-            
-            # Clean up trailing underscore/hyphen if present after stripping time
-            if experiment_id and experiment_id[-1] in ['_', '-']:
-                experiment_id = experiment_id[:-1]
-            
-            # Convert time to days if needed
-            if time_unit == 'time':
-                # Assume 'Time' units are in days (adjust if different)
-                time_post_reaction = time_value
-            else:  # 'day'
-                time_post_reaction = time_value
-            
-            return {
-                'experiment_id': experiment_id,
-                'time_post_reaction': time_post_reaction,
-                'dilution_factor': dilution_factor
-            }
-            
-        except Exception as e:
-            # Return None for any parsing errors instead of raising
+        if not label or not isinstance(label, str):
             return None
-    
+
+        remainder = label.strip()
+
+        dilution_match = _DILUTION_RE.search(remainder)
+        if not dilution_match:
+            return None
+        dilution_factor = float(dilution_match.group(1))
+        remainder = remainder[:dilution_match.start()]
+
+        label_day_days: Optional[float] = None
+        day_match = _DAY_RE.search(remainder)
+        if day_match:
+            label_day_days = float(day_match.group(1))
+            remainder = remainder[:day_match.start()]
+
+        experiment_id = remainder.rstrip('_-')
+        if not experiment_id:
+            return None
+
+        # Never re-implement the token grammar here: delegate to the canonical
+        # parser so ICP cannot drift from lineage. The '_t5' / '-T5' spellings are
+        # deliberately NOT accepted -- widening them changes the repo-wide ID
+        # grammar and has its own task (docs/working/issue-log.md, 2026-08-07).
+        _stem, id_timepoint_days = split_timepoint_token(experiment_id)
+
+        if id_timepoint_days is not None:
+            disagrees = (
+                label_day_days is not None
+                and abs(label_day_days - id_timepoint_days) > TIMEPOINT_TOLERANCE_DAYS
+            )
+            return LabelInfo(
+                experiment_id=experiment_id,
+                time_post_reaction=id_timepoint_days,
+                dilution_factor=dilution_factor,
+                time_source='id_token',
+                label_day_days=label_day_days,
+                day_disagrees=disagrees,
+            )
+
+        if label_day_days is None:
+            return None
+
+        return LabelInfo(
+            experiment_id=experiment_id,
+            time_post_reaction=label_day_days,
+            dilution_factor=dilution_factor,
+            time_source='day_label',
+            label_day_days=label_day_days,
+            day_disagrees=False,
+        )
+
+    @staticmethod
+    def extract_sample_info(label: str) -> Optional[Dict[str, Any]]:
+        """
+        Backward-compatible three-key view of `extract_sample_info_ex`.
+
+        The key set is deliberately FROZEN at experiment_id / time_post_reaction /
+        dilution_factor. `create_icp_result` splats this dict into `result_data`
+        and then stores every key not listed in `NON_ELEMENT_FIELDS` into the
+        `all_elements` JSONB, so a fourth key here would be persisted as a fake
+        element. Diagnostics live on `LabelInfo` instead.
+        """
+        info = ICPService.extract_sample_info_ex(label)
+        if info is None:
+            return None
+        return {
+            'experiment_id': info.experiment_id,
+            'time_post_reaction': info.time_post_reaction,
+            'dilution_factor': info.dilution_factor,
+        }
+
     @staticmethod
     def apply_dilution_correction(df: pd.DataFrame, dilution_factor: float) -> pd.DataFrame:
         """
