@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from backend.services.bulk_uploads._id_match import normalize_id
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
 from backend.services.result_merge_utils import (
     TIMEPOINT_TOLERANCE_DAYS,
@@ -484,6 +485,19 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             continue
         resolved.append((row_num, exp_id, time_post_reaction, row))
 
+    # Keyed on the normalized ID, not the raw string: `_id_match.normalize_id`
+    # is what the DB lookup resolves through, so two spellings that differ only
+    # by case or zero padding ('SERUM_cation_001c-t5' vs 'SERUM_Cation_001c-t5')
+    # name ONE stored experiment. Keying on the raw string let both rows pass
+    # this guard and both upsert onto that one experiment — the later row
+    # silently overwriting the earlier, which is precisely what the guard
+    # exists to prevent. Three such pairs were live in the team's v3 workbook
+    # (2026-08-07). The converse risk — two genuinely different experiments
+    # whose IDs differ only by case/padding, each with its own sheet row, now
+    # being rejected as a false duplicate — was accepted (Mat, 2026-08-07):
+    # 0 of 1009 dev-DB experiments share a normalized key, and a loud stop
+    # beats the silent overwrite it replaces.
+    #
     # Keyed on the normalized (rounded) timepoint so 7.0 and 7.00005 — which
     # `find_timepoint_candidates` would merge into the same result row anyway
     # — collide here too. This narrows the gap but does not close it:
@@ -492,7 +506,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # even though they fall within the ±1e-4 tolerance of each other.
     key_counts: Dict[Tuple[str, float], int] = {}
     for _, exp_id, time_post_reaction, _row in resolved:
-        key = (exp_id, normalize_timepoint(time_post_reaction))
+        key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
         key_counts[key] = key_counts.get(key, 0) + 1
 
     # Phase 2 — upsert what is left.
@@ -505,7 +519,8 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # carried an H2 reading (missing_gc_date_rows is the numerator).
     h2_reading_rows = 0
     for row_num, exp_id, time_post_reaction, row in resolved:
-        if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
+        dup_key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
+        if key_counts[dup_key] > 1:
             row_errors.append((row_num, (
                 f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
                 f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "

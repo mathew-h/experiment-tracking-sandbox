@@ -1493,6 +1493,54 @@ def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session
     assert len(errors) == 2
 
 
+def test_case_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
+    """Two spellings that resolve to ONE experiment are a duplicate, not two rows.
+
+    The pre-pass used to key on the raw ID string while the DB lookup keys on
+    _id_match.normalize_id, so 'SERUM_cation_001c-t5' and 'SERUM_Cation_001c-t5'
+    produced two different keys, both passed the guard, and both upserted onto
+    the single stored experiment — the second reading silently overwriting the
+    first with no error and no warning. Three such pairs are live in
+    Master_Results_Tracker_v3.xlsx (sheet rows 29/194, 32/195, 35/196).
+    """
+    _seed_experiment(db_session, "SERUM_DUP06c-t5", 8866)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_dup06c-t5", 5.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP06C-t5", 5.0, description="second", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0, "neither row may be written"
+    assert updated == 0
+    assert errors, "the collision must be reported"
+
+    assert (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_DUP06c-t5")
+        .count()
+    ) == 0
+
+
+def test_padding_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
+    """Zero-padding differences collapse the same way case differences do.
+
+    normalize_id strips leading zeros per digit run, so 'HPHT_007' and 'HPHT_7'
+    are one experiment to the finder and must be one row to the guard.
+    """
+    _seed_experiment(db_session, "HPHT_DUP07", 8867)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_DUP07", 7.0, description="unpadded", fl_h2=10.0),
+        _v3_row("HPHT_DUP0007", 7.0, description="padded", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0
+    assert errors, "the collision must be reported"
+
+
 def test_duplicate_does_not_block_other_rows(db_session: Session):
     """A duplicate pair is rejected; unrelated rows in the same file still land."""
     _seed_experiment(db_session, "SERUM_DUP05a", 8861)
