@@ -1917,3 +1917,74 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   both sat outside the final fix wave's permitted file list. The precise statement is in
   `.claude/rules/MODELS.md` and the issue doc.
 - **Docs updated:** yes.
+
+## 2026-08-07 | inline — Master Results upload duplicate-guard key
+
+- **Trigger:** the 2026-08-05 duplicate-conditions investigation flagged, as a scope note,
+  that `_id_match.py::normalize_id` conflates 13 real experiment pairs and that the Master
+  Results duplicate pre-pass keyed on the raw ID string rather than that normalized key —
+  itself a follow-on from the earlier `fix/id-match-ambiguity` work. Actioned as its own
+  `/start-task` since it touches a locked bulk-upload parser.
+- **Files changed:** `backend/services/bulk_uploads/master_bulk_upload.py` (locked, changed
+  under explicit sign-off from Mat, 2026-08-07), `tests/services/bulk_uploads/test_master_bulk_upload.py`,
+  `docs/LOCKED_COMPONENTS.md`, `docs/project_context/LOCKED_COMPONENTS.md`,
+  `.claude/rules/MODELS.md`, `docs/working/issue-log.md` (this entry).
+- **Shipped**, four commits against `master_bulk_upload.py`:
+  1. `7bd654b` — the Phase-1 duplicate tally re-keyed onto
+     `(_id_match.normalize_id(experiment_id), normalize_timepoint(t))` instead of the raw ID
+     string, so two spellings that differ only by case or zero padding — which the DB lookup
+     already resolves to one experiment — now collide instead of both silently upserting,
+     the later row overwriting the earlier.
+  2. `2da6474` — one error is now emitted per collision group rather than one row-error each,
+     naming every colliding row and every distinct spelling, anchored at the group's first
+     row so the sheet-order sort holds.
+  3. `2378ae9` — the per-row Duration-vs-`-t`-token disagreement warning was aggregated into
+     one file-level coverage line.
+  4. `800926c` — found during **Task 3's code review**, not during Task 4: the third
+     commit (`2378ae9`) counted disagreements in Phase 1 (at comparison time), so a row
+     that disagreed *and* was then rejected (duplicate, or a failed upsert) was named in a
+     warning claiming "each reading was recorded at the day its ID encodes" while its own
+     error said no row for that vial-day was written — the two messages contradicted each
+     other. Flagged as a plan-mandated finding; the human ruled on 2026-08-07 to move the
+     tally to Phase 2, after the write, matching the sibling GC-run-date warning's placement
+     (`h2_reading_rows`), with the warning's wording deliberately left unchanged.
+- **Accepted converse:** two genuinely different experiments whose IDs differ only by
+  case/padding would now both be rejected as a false collision. Measured 0 of 1009 dev-DB
+  experiments share a normalized key (2026-08-07), so this has not fired in practice.
+- **Tests added:** yes, in all four commits (see `tests/services/bulk_uploads/test_master_bulk_upload.py`).
+- **Verification — measured against the team's live workbook**
+  (`Master_Results_Tracker_v3.xlsx`, Dashboard sheet, read-only, 2026-08-07): the workbook
+  was edited at 09:19 on 2026-08-07, during this session (resolved rows 202 → 236; sheet
+  rows unchanged at 499). On the current file, the same-file comparison is what carries the
+  "Task 1 took effect" claim: raw-string key = **34 groups / 68 rows**; normalized key =
+  **37 groups / 74 rows**. The difference is **exactly 3 groups / 6 rows** — precisely the
+  three case-variant pairs the raw-string key specifically misses (rows 29/194, 32/195,
+  35/196, IDs differing only by `..._cation_..._c...` vs `..._Cation_..._C...` casing).
+  This **NORM = RAW + 3** invariant held on the plan's earlier snapshot too (26 raw + 3 =
+  29 projected), so the fix's demonstrated effect is the +3, and only the +3 — the absolute
+  counts (34/37 here vs. 26/29 projected) moved because the workbook grew between the two
+  measurements, not because of anything in the code.
+  Separately, a standalone script reproducing the Phase-1 logic (`_resolve_row_identity` +
+  `normalize_id` + `normalize_timepoint`, no database) found the sheet-level
+  Duration-vs-`-t`-token disagreement count was **118 of 169 comparable rows** — this is
+  **not** the number the upload will actually emit.
+  The script (a Phase-1-only reproduction with no DB) counts every row where a comparison
+  was *possible*; commit `800926c` moved the real tally to Phase 2, after the write, so the
+  live upload's warning counts and names only rows that were actually written — a strictly
+  smaller set, since every one of the 74 rejected duplicate rows above is excluded from it.
+  No database was available to compute the true Phase-2 number end-to-end in this task.
+- **Scope notes — two findings from the same investigation, deliberately not fixed:**
+  1. `database/experiment_id_parser.py::split_timepoint_token` accepts only `-t<days>`,
+     while `normalize_id` treats `_t1` and `-t1` as the same key. So `SERUM_Catalyst_005a_t1`
+     resolves to the right stored experiment but then hard-errors on the timepoint conflict,
+     where the hyphen spelling would have uploaded with a warning instead. Needs its own
+     `/start-task`: it changes the canonical ID grammar used by lineage repo-wide, not just
+     this parser.
+  2. Missing `-t` vials are not auto-created — `auto_create_treatment_experiment` handles
+     only `_`-delimited treatment variants with an existing parent. Deliberately left alone:
+     auto-creating them would have fabricated `SERUM_Catayst_002-t3` (a typo) as a real
+     experiment.
+- **Decision logged (user, 2026-08-07):** re-key the duplicate guard on the normalized ID
+  rather than the raw string, accepting the converse risk above — recorded as the footnote
+  in `docs/LOCKED_COMPONENTS.md`.
+- **Docs updated:** yes.

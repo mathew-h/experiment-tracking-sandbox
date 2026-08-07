@@ -11,8 +11,9 @@ Dashboard sheet column spec (v3, issue #111, 2026-07-30):
 One row per unique experiment ID. Replicate letters are separate vials, so
 SERUM_001a/b/c at days 1 and 3 is six rows (SERUM_001a-t1, SERUM_001b-t1, ...),
 not two rows with per-letter columns. Two rows sharing an ID and timepoint are
-both rejected. Cross-replicate mean and SD are computed by
-v_results_scalar_rollup, not carried on the sheet.
+both rejected, matched on _id_match.normalize_id so spellings differing only
+by case or zero padding count as the same ID. Cross-replicate mean and SD are
+computed by v_results_scalar_rollup, not carried on the sheet.
 
 Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
 blank, and gas volume/pressure come from the same block. A value of 0 is a real
@@ -35,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from backend.services.bulk_uploads._id_match import normalize_id
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
 from backend.services.result_merge_utils import (
     TIMEPOINT_TOLERANCE_DAYS,
@@ -91,6 +93,24 @@ _WIDE_DI_COLUMNS = {
     "DI c H2 (ppm)",
     "DI SD (ppm)",
 }
+
+
+@dataclass(frozen=True)
+class TimepointCheck:
+    """Outcome of comparing a row's Duration cell against its ID's -t token.
+
+    `compared` is False when no comparison was possible — the ID carries no
+    '-t<days>' token, or the Duration cell is blank (in which case the token
+    simply supplies the day). It is the denominator of the file-level
+    disagreement warning, which must count rows that could disagree rather
+    than every row in the sheet.
+    """
+
+    compared: bool
+    disagrees: bool
+
+
+_NO_TIMEPOINT_CHECK = TimepointCheck(compared=False, disagrees=False)
 
 
 @dataclass
@@ -284,17 +304,19 @@ def _is_blank_duration(val: Any) -> bool:
 
 def _resolve_row_identity(
     row: Any, row_num: int
-) -> Tuple[Optional[str], Optional[float], Optional[str], bool]:
+) -> Tuple[Optional[str], Optional[float], Optional[str], bool, TimepointCheck]:
     """Resolve one Dashboard row to its (experiment_id, timepoint).
 
     Extracted from the upsert loop so the duplicate pre-pass and the loop share
-    one implementation (issue #111). Behavior is unchanged from the inline
-    version — same skips, same error strings.
+    one implementation (issue #111).
 
-    Returns (experiment_id, time_post_reaction, error_message, skip, warning):
+    Returns (experiment_id, time_post_reaction, error_message, skip, check):
       * skip=True      — intentionally passed over; count toward `skipped`
       * error_message  — per-row error; count toward `errors`
-      * warning        — the row still uploads, but say something about it
+      * check          — whether this row's Duration could be compared against
+                         a '-t<days>' token and whether it disagreed. The row
+                         still uploads either way; the caller aggregates these
+                         into one file-level warning.
       * error None / skip False — a good row
     """
     raw_id = row.get("Experiment ID")
@@ -304,14 +326,14 @@ def _resolve_row_identity(
     if (raw_id is None
             or (isinstance(raw_id, float) and pd.isna(raw_id))
             or (isinstance(raw_id, (int, float)) and raw_id == 0)):
-        return None, None, None, True, None
+        return None, None, None, True, _NO_TIMEPOINT_CHECK
     exp_id = str(raw_id).strip()
     if not exp_id:
-        return None, None, None, True, None
+        return None, None, None, True, _NO_TIMEPOINT_CHECK
 
     # Skip calibration-standard rows (Issue #39)
     if "standard" in exp_id.lower():
-        return None, None, None, True, None
+        return None, None, None, True, _NO_TIMEPOINT_CHECK
 
     # Split the '-t<days>' token once, up front, so both the replicate
     # combination below and the Duration fill further down share a single
@@ -334,19 +356,29 @@ def _resolve_row_identity(
         if id_timepoint is None:
             exp_id = combined
     except ValueError as exc:
-        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False, None
+        return (
+            exp_id,
+            None,
+            f"Row {row_num} ({exp_id}): {exc}",
+            False,
+            _NO_TIMEPOINT_CHECK,
+        )
 
     # Issue #81: '-t<days>' in the experiment ID is canonical for the
     # timepoint — fill a blank Duration from it, error a conflict.
     duration_raw = row.get("Duration (Days)")
     if _is_blank_duration(duration_raw):
         if id_timepoint is None:
-            return exp_id, None, None, True, None
-        return exp_id, id_timepoint, None, False, None
+            return exp_id, None, None, True, _NO_TIMEPOINT_CHECK
+        return exp_id, id_timepoint, None, False, _NO_TIMEPOINT_CHECK
 
     time_post_reaction = _parse_float(duration_raw)
     if time_post_reaction is None:
-        return exp_id, None, f"Row {row_num}: invalid Duration (Days) '{duration_raw}'", False, None
+        return (
+            exp_id, None,
+            f"Row {row_num}: invalid Duration (Days) '{duration_raw}'",
+            False, _NO_TIMEPOINT_CHECK,
+        )
 
     # The '-t<days>' token defines the vial's elapsed days (Mat, 2026-07-30), so
     # it wins outright — a disagreeing Duration is reported, not rejected. This
@@ -355,17 +387,15 @@ def _resolve_row_identity(
     # correct, whereas the Duration column here is a formula derived from
     # sampling dates, and letting it veto the ID would reject a whole sheet's
     # readings over provenance the ID already settles.
-    warning = None
+    check = _NO_TIMEPOINT_CHECK
     if id_timepoint is not None:
-        if abs(time_post_reaction - id_timepoint) > TIMEPOINT_TOLERANCE_DAYS:
-            warning = (
-                f"Row {row_num} ({exp_id}): Duration (Days) {time_post_reaction:g} "
-                f"disagrees with the ID's -t token ({id_timepoint:g} days). The ID "
-                f"is canonical — this reading was recorded at day {id_timepoint:g}."
-            )
+        check = TimepointCheck(
+            compared=True,
+            disagrees=abs(time_post_reaction - id_timepoint) > TIMEPOINT_TOLERANCE_DAYS,
+        )
         time_post_reaction = id_timepoint
 
-    return exp_id, time_post_reaction, None, False, warning
+    return exp_id, time_post_reaction, None, False, check
 
 
 def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
@@ -388,11 +418,12 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # list against the sheet top-down. Sheet-level messages have no row number
     # and belong at the top; every one of them returns immediately, so
     # out.errors is empty by the time the sort runs, and extending rather than
-    # assigning keeps them first if a non-returning one is ever added. Row-level
-    # warnings have no equivalent ordering guarantee — that is only safe today
-    # because every row warning is emitted in Phase 1 while the sole Phase-2
-    # warning is file-level and appended last, so a future Phase-2 row warning
-    # would need this same treatment.
+    # assigning keeps them first if a non-returning one is ever added.
+    # Every warning is now file-level: the per-row Duration-vs-token warning was
+    # aggregated into a single coverage line at the end of this function, so the
+    # ordering hazard that applied to row-level warnings no longer exists. A
+    # future per-row warning would need the same row-number sorting the errors
+    # get below.
     row_errors: List[Tuple[int, str]] = []
 
     try:
@@ -470,30 +501,72 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # read, by which point the earlier row has already been flushed, counted
     # and given a feedback record — hence a pre-pass rather than an in-loop
     # check. (The upload commits once, at the endpoint, via _finalize_write.)
-    resolved: List[Tuple[int, str, float, Any]] = []
+    resolved: List[Tuple[int, str, float, Any, TimepointCheck]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
-        exp_id, time_post_reaction, error, skip, warning = _resolve_row_identity(row, row_num)
-        if warning is not None:
-            warnings.append(warning)
+        exp_id, time_post_reaction, error, skip, check = _resolve_row_identity(
+            row, row_num
+        )
         if skip:
             skipped += 1
             continue
         if error is not None:
             row_errors.append((row_num, error))
             continue
-        resolved.append((row_num, exp_id, time_post_reaction, row))
+        resolved.append((row_num, exp_id, time_post_reaction, row, check))
 
+    # Keyed on the normalized ID, not the raw string: `_id_match.normalize_id`
+    # is what the DB lookup resolves through, so two spellings that differ only
+    # by case or zero padding ('SERUM_cation_001c-t5' vs 'SERUM_Cation_001c-t5')
+    # name ONE stored experiment. Keying on the raw string let both rows pass
+    # this guard and both upsert onto that one experiment — the later row
+    # silently overwriting the earlier, which is precisely what the guard
+    # exists to prevent. Three such pairs were live in the team's v3 workbook
+    # (2026-08-07). The converse risk — two genuinely different experiments
+    # whose IDs differ only by case/padding, each with its own sheet row, now
+    # being rejected as a false duplicate — was accepted (Mat, 2026-08-07):
+    # 0 of 1009 dev-DB experiments share a normalized key, and a loud stop
+    # beats the silent overwrite it replaces.
+    #
     # Keyed on the normalized (rounded) timepoint so 7.0 and 7.00005 — which
     # `find_timepoint_candidates` would merge into the same result row anyway
     # — collide here too. This narrows the gap but does not close it:
     # normalization only rounds to 4 decimals, so two values on opposite sides
     # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
     # even though they fall within the ±1e-4 tolerance of each other.
-    key_counts: Dict[Tuple[str, float], int] = {}
-    for _, exp_id, time_post_reaction, _row in resolved:
-        key = (exp_id, normalize_timepoint(time_post_reaction))
-        key_counts[key] = key_counts.get(key, 0) + 1
+    dup_groups: Dict[Tuple[str, float], List[Tuple[int, str]]] = {}
+    for row_num, exp_id, time_post_reaction, _row, _check in resolved:
+        key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
+        dup_groups.setdefault(key, []).append((row_num, exp_id))
+
+    # One error per collision, not per row. Each names every row in the group,
+    # so a researcher reading this list against the sheet is told where the
+    # partner reading is instead of having to search for it — the same reason
+    # an ambiguous ID names both candidates. Anchored at the group's first row
+    # so the sort at the end of this function keeps the list in sheet order.
+    duplicate_rows: set[int] = set()
+    for (_norm_id, day), members in dup_groups.items():
+        if len(members) < 2:
+            continue
+        duplicate_rows.update(row_num for row_num, _ in members)
+        rows_text = ", ".join(str(row_num) for row_num, _ in members)
+        # dict.fromkeys keeps sheet order while dropping repeats.
+        spellings = list(dict.fromkeys(exp_id for _, exp_id in members))
+        # Differing spellings collided on the normalized key, which is not
+        # visible from the cells themselves — say so, or the researcher
+        # searches the sheet for a string only one of the rows contains.
+        variant_clause = (
+            " These spellings differ but resolve to one experiment, so one "
+            "reading would have silently overwritten the other."
+            if len(spellings) > 1 else ""
+        )
+        row_errors.append((members[0][0], (
+            f"Rows {rows_text} ({', '.join(spellings)}): duplicate experiment "
+            f"ID and timepoint (day {day:g}).{variant_clause} Each vial gets "
+            f"one row per timepoint — give each vial its own ID (e.g. "
+            f"SERUM_001a-t7, SERUM_001b-t7). No row for this vial-day was "
+            f"written."
+        )))
 
     # Phase 2 — upsert what is left.
     # Rows where Full Loop overrode a populated direct-injection cell. Reported
@@ -504,14 +577,18 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # Denominator for the coverage warning below: rows actually written that
     # carried an H2 reading (missing_gc_date_rows is the numerator).
     h2_reading_rows = 0
-    for row_num, exp_id, time_post_reaction, row in resolved:
-        if key_counts[(exp_id, normalize_timepoint(time_post_reaction))] > 1:
-            row_errors.append((row_num, (
-                f"Row {row_num} ({exp_id}): duplicate experiment ID and timepoint "
-                f"(day {time_post_reaction:g}). Each vial gets one row per timepoint "
-                f"— give each vial its own ID (e.g. SERUM_001a-t7, SERUM_001b-t7). "
-                f"No row for this vial-day was written."
-            )))
+    # Denominators for the Duration-vs-ID disagreement warning further below.
+    # Counted here, after the write succeeds — not in Phase 1 where the check
+    # was computed — for the same reason h2_reading_rows is: a row that
+    # disagrees and is then rejected (a duplicate, or no matching experiment)
+    # was never written, so it cannot be described as "recorded at the day
+    # its ID encodes". Only a row that made it past both the duplicate guard
+    # and the upsert can honestly be counted or named.
+    comparable_rows = 0
+    disagreement_rows: List[int] = []
+    for row_num, exp_id, time_post_reaction, row, check in resolved:
+        # The error was already emitted once for the whole group above.
+        if row_num in duplicate_rows:
             continue
 
         description = str(row.get("Description") or "").strip() or None
@@ -592,6 +669,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                 h2_reading_rows += 1
                 if gc_run_date is None:
                     missing_gc_date_rows.append(row_num)
+            if check.compared:
+                comparable_rows += 1
+                if check.disagrees:
+                    disagreement_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
                 "experiment_id": exp_id,
@@ -669,6 +750,33 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "Run Date entries falling in the last 7 workdays, so backfilling "
             "an older date will not make a row appear there — only dates "
             "entered going forward will count."
+        )
+
+    # One line, not one per row. The Dashboard's Duration column is a formula
+    # derived from sampling dates and has drifted from the '-t<days>' tokens
+    # wholesale -- a Phase-1-basis re-measurement of the team's v3 workbook
+    # (2026-08-07) found 118 of 169 comparable rows disagreeing. The number
+    # this code actually emits is necessarily smaller: the tally below runs in
+    # Phase 2, after the row is written, so rows rejected earlier in the
+    # pipeline are excluded from both the numerator and denominator. The ID
+    # wins either way (Mat, 2026-07-30) so no row is rejected for disagreeing,
+    # which is exactly why this must stay visible without drowning the other
+    # warnings. Row list only at <=10, matching the supersede and GC-date
+    # warnings above.
+    if disagreement_rows:
+        n = len(disagreement_rows)
+        label = "row" if comparable_rows == 1 else "rows"
+        where = (
+            " (" + ", ".join(str(r) for r in disagreement_rows) + ")"
+            if n <= 10 else ""
+        )
+        warnings.append(
+            f"Duration (Days) disagrees with the ID's -t token on {n} of "
+            f"{comparable_rows} {label}{where}. The ID is canonical, so each "
+            "reading was recorded at the day its ID encodes and the Duration "
+            "value was not used. That column is a formula derived from sampling "
+            "dates -- a disagreement on many rows means the formula no longer "
+            "tracks the vials' intended days."
         )
 
     # Stable sort — two errors on one row keep the order they were found in.

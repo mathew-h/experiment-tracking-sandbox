@@ -1388,10 +1388,9 @@ def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
 
     assert created == 0, "neither row may be written"
     assert updated == 0
-    assert len(errors) == 2, f"both rows must be reported, got: {errors}"
-    assert all("SERUM_DUP01a" in e for e in errors)
-    assert any("row 2" in e.lower() for e in errors)
-    assert any("row 3" in e.lower() for e in errors)
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "SERUM_DUP01a" in errors[0]
+    assert "Rows 2, 3" in errors[0], f"both rows must be named: {errors[0]}"
 
     assert (
         db_session.query(ExperimentalResults)
@@ -1490,7 +1489,129 @@ def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session
     )
 
     assert created == 0
-    assert len(errors) == 2
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "Rows 2, 3" in errors[0]
+
+
+def test_case_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
+    """Two spellings that resolve to ONE experiment are a duplicate, not two rows.
+
+    The pre-pass used to key on the raw ID string while the DB lookup keys on
+    _id_match.normalize_id, so 'SERUM_cation_001c-t5' and 'SERUM_Cation_001c-t5'
+    produced two different keys, both passed the guard, and both upserted onto
+    the single stored experiment — the second reading silently overwriting the
+    first with no error and no warning. Three such pairs are live in
+    Master_Results_Tracker_v3.xlsx (sheet rows 29/194, 32/195, 35/196).
+    """
+    _seed_experiment(db_session, "SERUM_DUP06c-t5", 8866)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_dup06c-t5", 5.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP06C-t5", 5.0, description="second", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0, "neither row may be written"
+    assert updated == 0
+    assert errors, "the collision must be reported"
+
+    assert (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_DUP06c-t5")
+        .count()
+    ) == 0
+
+
+def test_padding_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
+    """Zero-padding differences collapse the same way case differences do.
+
+    normalize_id strips leading zeros per digit run, so 'HPHT_007' and 'HPHT_7'
+    are one experiment to the finder and must be one row to the guard.
+    """
+    _seed_experiment(db_session, "HPHT_DUP07", 8867)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_DUP07", 7.0, description="unpadded", fl_h2=10.0),
+        _v3_row("HPHT_DUP0007", 7.0, description="padded", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0
+    assert errors, "the collision must be reported"
+
+
+def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
+    """One collision produces one error listing all its rows, not one per row.
+
+    A researcher reads this list against the sheet: 'row 2 is a duplicate' with
+    no sibling row number means opening the file and searching for the partner
+    by hand. As measured on the team's v3 workbook on 2026-08-07, the
+    normalized-ID key this guard now uses collapsed 37 collisions into 74
+    rows. Same shape as the ambiguous-ID fix in commit de379a1.
+    """
+    _seed_experiment(db_session, "SERUM_DUP08a", 8868)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP08a", 7.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="third", fl_h2=30.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "Rows 2, 3, 4" in errors[0], f"every row must be named: {errors[0]}"
+    assert "SERUM_DUP08a" in errors[0]
+    assert "day 7" in errors[0]
+
+
+def test_duplicate_group_names_both_spellings(db_session: Session):
+    """When the colliding rows are spelled differently, the message says so.
+
+    'Rows 29, 194 (SERUM_pH_001a-t1)' would look like a plain repeat; the
+    researcher needs to see that the two cells do not read the same, or they
+    will search the sheet for a string that is only in one of them.
+    """
+    _seed_experiment(db_session, "SERUM_DUP09c-t5", 8869)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_dup09c-t5", 5.0, description="first", fl_h2=10.0),
+        _v3_row("SERUM_DUP09C-t5", 5.0, description="second", fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "SERUM_dup09c-t5" in errors[0], f"first spelling missing: {errors[0]}"
+    assert "SERUM_DUP09C-t5" in errors[0], f"second spelling missing: {errors[0]}"
+    assert "resolve to one experiment" in errors[0], (
+        f"the message must explain why differing spellings collided: {errors[0]}"
+    )
+
+
+def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
+    """The group error sits where its earliest row sits in the sheet order.
+
+    Errors are sorted by row number so the list reads top-down against the
+    spreadsheet (issue #114 item 3). A group spanning rows 2 and 4 must appear
+    above a single-row failure on row 3, not after it.
+    """
+    _seed_experiment(db_session, "SERUM_DUP10a", 8870)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP10a", 7.0, description="dup one", fl_h2=10.0),
+        _v3_row("HPHT_DUP10_MISSING", 7.0, description="no such experiment"),
+        _v3_row("SERUM_DUP10a", 7.0, description="dup two", fl_h2=20.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.errors) == 2, f"one group + one row error: {result.errors}"
+    assert result.errors[0].startswith("Rows 2, 4 ("), (
+        f"the group anchored at row 2 must come first: {result.errors}"
+    )
+    assert result.errors[1].startswith("Row 3 ("), (
+        f"the row 3 failure must come second: {result.errors}"
+    )
 
 
 def test_duplicate_does_not_block_other_rows(db_session: Session):
@@ -1508,7 +1629,8 @@ def test_duplicate_does_not_block_other_rows(db_session: Session):
     )
 
     assert created == 1
-    assert len(errors) == 2
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "Rows 2, 3" in errors[0]
     assert [f["experiment_id"] for f in feedbacks] == ["SERUM_DUP05b"]
 
 
@@ -1775,4 +1897,160 @@ def test_overwrite_still_clears_a_mapped_column_left_blank(db_session: Session):
     scalar = _scalar_for(db_session, "SERUM_OW116C")
     assert scalar.final_conductivity_mS_cm is None, (
         "'Sample Conductivity (mS/cm)' is a sheet column left blank -- OVERWRITE clears it"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Aggregated Duration-vs-ID disagreement warning
+# ---------------------------------------------------------------------------
+
+def test_duration_disagreements_are_one_aggregated_warning(db_session: Session):
+    """Many disagreeing rows produce ONE warning, not one per row.
+
+    The Dashboard's Duration column is a formula off the Sampling sheet and has
+    drifted from the '-t<days>' tokens wholesale: a Phase-1-basis
+    re-measurement of the team's v3 workbook (2026-08-07) found 118 of 169
+    comparable rows disagreeing. (The number this code actually emits is
+    smaller, since the tally runs in Phase 2 after rejected rows are
+    excluded.) One line per row buries the other warnings, so this follows the
+    coverage form the DI-supersede (#114) and GC-run-date (#115) warnings
+    already use.
+    """
+    rows = []
+    for i in range(3):
+        exp_id = f"SERUM_DIS{i:02d}a-t7"
+        _seed_experiment(db_session, exp_id, 8940 + i)
+        rows.append(_v3_row(exp_id, 3.0, nh4=1.0))
+
+    xlsx = _master_excel_v3(rows)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a disagreement must not reject a row: {result.errors}"
+    assert result.created == 3
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, (
+        f"exactly one file-level warning, not one per row: {result.warnings}"
+    )
+    assert "3 of 3" in disagreements[0], (
+        f"the denominator must count comparable rows: {disagreements[0]}"
+    )
+    assert "(2, 3, 4)" in disagreements[0], (
+        f"at or below the 10-row threshold the rows must be named: {disagreements[0]}"
+    )
+
+
+def test_duration_disagreement_denominator_counts_comparable_rows_only(
+    db_session: Session,
+):
+    """The denominator is rows where a comparison was possible, not all rows.
+
+    A row with no '-t' token, or with a blank Duration cell, has nothing to
+    disagree with and must not inflate the denominator — the same reasoning
+    that makes the GC-date warning count only H2-bearing rows.
+    """
+    # "comparable" = the row carries both a -t token and a Duration value.
+    _seed_experiment(db_session, "SERUM_DIS10a-t7", 8950)   # comparable
+    _seed_experiment(db_session, "SERUM_DIS11a-t7", 8951)   # comparable
+    _seed_experiment(db_session, "SERUM_DIS12", 8952)       # no token
+    _seed_experiment(db_session, "SERUM_DIS13a-t7", 8953)   # blank Duration
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DIS10a-t7", 3.0, nh4=1.0),    # disagrees
+        _v3_row("SERUM_DIS11a-t7", 7.0, nh4=2.0),    # agrees
+        _v3_row("SERUM_DIS12", 5.0, nh4=3.0),        # no token
+        _v3_row("SERUM_DIS13a-t7", None, nh4=4.0),   # blank duration, ID supplies day 7
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 4
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, f"got: {result.warnings}"
+    assert "1 of 2" in disagreements[0], (
+        f"only the two token+duration rows are comparable: {disagreements[0]}"
+    )
+    assert "(2)" in disagreements[0], f"only row 2 disagreed: {disagreements[0]}"
+
+
+def test_no_disagreement_warning_when_every_row_agrees(db_session: Session):
+    """A sheet whose Durations match its tokens says nothing.
+
+    A warning that fires on ordinary sheets is one researchers learn to ignore
+    — the same rule the DI-supersede warning follows.
+    """
+    _seed_experiment(db_session, "SERUM_DIS20a-t7", 8960)
+
+    xlsx = _master_excel_v3([_v3_row("SERUM_DIS20a-t7", 7.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert [w for w in result.warnings if "-t token" in w] == []
+
+
+def test_disagreement_warning_drops_the_row_list_above_ten(db_session: Session):
+    """Above 10 disagreeing rows the warning reports a ratio and no row list.
+
+    Matches the <=10 threshold the supersede and GC-date warnings use. A
+    Phase-1-basis re-measurement found 118 of 169 comparable rows disagreeing
+    on the real workbook (2026-08-07); enumerating them is exactly the noise
+    this change removes.
+    """
+    rows = []
+    for i in range(11):
+        exp_id = f"SERUM_DIS3{i:02d}a-t7"
+        _seed_experiment(db_session, exp_id, 8970 + i)
+        rows.append(_v3_row(exp_id, 3.0, nh4=1.0))
+
+    xlsx = _master_excel_v3(rows)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, f"got: {result.warnings}"
+    assert "11 of 11" in disagreements[0]
+    assert "(2," not in disagreements[0], (
+        f"no row list above the threshold: {disagreements[0]}"
+    )
+
+
+def test_rejected_rows_are_not_counted_in_the_disagreement_warning(db_session: Session):
+    """Only rows actually written are counted and named.
+
+    The warning says the reading "was recorded at the day its ID encodes",
+    which is false for a row that was never written — and that row's own error
+    says "No row for this vial-day was written". Counting in Phase 2 after the
+    upsert (as the sibling GC-run-date warning does) keeps the two messages
+    from contradicting each other about the same row. The team's real workbook
+    has this overlap on its rows 185-211 re-entry block and on its
+    missing-experiment rows.
+    """
+    _seed_experiment(db_session, "SERUM_DIS40a-t7", 8980)
+    _seed_experiment(db_session, "SERUM_DIS41a-t7", 8981)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DIS40a-t7", 3.0, description="dup one", nh4=1.0),
+        _v3_row("SERUM_DIS40a-t7", 3.0, description="dup two", nh4=2.0),
+        _v3_row("SERUM_DIS41a-t7", 3.0, description="written", nh4=3.0),
+        _v3_row("SERUM_DIS42a-t7", 3.0, description="no such experiment", nh4=4.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.created == 1
+    assert len(result.errors) == 2, f"duplicate group + not found: {result.errors}"
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, f"got: {result.warnings}"
+    assert "1 of 1" in disagreements[0], (
+        f"only the written row counts: {disagreements[0]}"
+    )
+    assert "(4)" in disagreements[0], (
+        f"row 4 is the one that was written: {disagreements[0]}"
+    )
+    assert "(2" not in disagreements[0], (
+        f"rejected duplicate rows must not be named: {disagreements[0]}"
+    )
+    assert "5)" not in disagreements[0], (
+        f"the failed-upsert row must not be named: {disagreements[0]}"
     )
