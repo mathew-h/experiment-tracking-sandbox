@@ -94,6 +94,24 @@ _WIDE_DI_COLUMNS = {
 }
 
 
+@dataclass(frozen=True)
+class TimepointCheck:
+    """Outcome of comparing a row's Duration cell against its ID's -t token.
+
+    `compared` is False when no comparison was possible — the ID carries no
+    '-t<days>' token, or the Duration cell is blank (in which case the token
+    simply supplies the day). It is the denominator of the file-level
+    disagreement warning, which must count rows that could disagree rather
+    than every row in the sheet.
+    """
+
+    compared: bool
+    disagrees: bool
+
+
+_NO_TIMEPOINT_CHECK = TimepointCheck(compared=False, disagrees=False)
+
+
 @dataclass
 class MasterUploadResult:
     """Master Results upload outcome.
@@ -285,17 +303,19 @@ def _is_blank_duration(val: Any) -> bool:
 
 def _resolve_row_identity(
     row: Any, row_num: int
-) -> Tuple[Optional[str], Optional[float], Optional[str], bool]:
+) -> Tuple[Optional[str], Optional[float], Optional[str], bool, TimepointCheck]:
     """Resolve one Dashboard row to its (experiment_id, timepoint).
 
     Extracted from the upsert loop so the duplicate pre-pass and the loop share
-    one implementation (issue #111). Behavior is unchanged from the inline
-    version — same skips, same error strings.
+    one implementation (issue #111).
 
-    Returns (experiment_id, time_post_reaction, error_message, skip, warning):
+    Returns (experiment_id, time_post_reaction, error_message, skip, check):
       * skip=True      — intentionally passed over; count toward `skipped`
       * error_message  — per-row error; count toward `errors`
-      * warning        — the row still uploads, but say something about it
+      * check          — whether this row's Duration could be compared against
+                         a '-t<days>' token and whether it disagreed. The row
+                         still uploads either way; the caller aggregates these
+                         into one file-level warning.
       * error None / skip False — a good row
     """
     raw_id = row.get("Experiment ID")
@@ -305,14 +325,14 @@ def _resolve_row_identity(
     if (raw_id is None
             or (isinstance(raw_id, float) and pd.isna(raw_id))
             or (isinstance(raw_id, (int, float)) and raw_id == 0)):
-        return None, None, None, True, None
+        return None, None, None, True, _NO_TIMEPOINT_CHECK
     exp_id = str(raw_id).strip()
     if not exp_id:
-        return None, None, None, True, None
+        return None, None, None, True, _NO_TIMEPOINT_CHECK
 
     # Skip calibration-standard rows (Issue #39)
     if "standard" in exp_id.lower():
-        return None, None, None, True, None
+        return None, None, None, True, _NO_TIMEPOINT_CHECK
 
     # Split the '-t<days>' token once, up front, so both the replicate
     # combination below and the Duration fill further down share a single
@@ -335,19 +355,29 @@ def _resolve_row_identity(
         if id_timepoint is None:
             exp_id = combined
     except ValueError as exc:
-        return exp_id, None, f"Row {row_num} ({exp_id}): {exc}", False, None
+        return (
+            exp_id,
+            None,
+            f"Row {row_num} ({exp_id}): {exc}",
+            False,
+            _NO_TIMEPOINT_CHECK,
+        )
 
     # Issue #81: '-t<days>' in the experiment ID is canonical for the
     # timepoint — fill a blank Duration from it, error a conflict.
     duration_raw = row.get("Duration (Days)")
     if _is_blank_duration(duration_raw):
         if id_timepoint is None:
-            return exp_id, None, None, True, None
-        return exp_id, id_timepoint, None, False, None
+            return exp_id, None, None, True, _NO_TIMEPOINT_CHECK
+        return exp_id, id_timepoint, None, False, _NO_TIMEPOINT_CHECK
 
     time_post_reaction = _parse_float(duration_raw)
     if time_post_reaction is None:
-        return exp_id, None, f"Row {row_num}: invalid Duration (Days) '{duration_raw}'", False, None
+        return (
+            exp_id, None,
+            f"Row {row_num}: invalid Duration (Days) '{duration_raw}'",
+            False, _NO_TIMEPOINT_CHECK,
+        )
 
     # The '-t<days>' token defines the vial's elapsed days (Mat, 2026-07-30), so
     # it wins outright — a disagreeing Duration is reported, not rejected. This
@@ -356,17 +386,15 @@ def _resolve_row_identity(
     # correct, whereas the Duration column here is a formula derived from
     # sampling dates, and letting it veto the ID would reject a whole sheet's
     # readings over provenance the ID already settles.
-    warning = None
+    check = _NO_TIMEPOINT_CHECK
     if id_timepoint is not None:
-        if abs(time_post_reaction - id_timepoint) > TIMEPOINT_TOLERANCE_DAYS:
-            warning = (
-                f"Row {row_num} ({exp_id}): Duration (Days) {time_post_reaction:g} "
-                f"disagrees with the ID's -t token ({id_timepoint:g} days). The ID "
-                f"is canonical — this reading was recorded at day {id_timepoint:g}."
-            )
+        check = TimepointCheck(
+            compared=True,
+            disagrees=abs(time_post_reaction - id_timepoint) > TIMEPOINT_TOLERANCE_DAYS,
+        )
         time_post_reaction = id_timepoint
 
-    return exp_id, time_post_reaction, None, False, warning
+    return exp_id, time_post_reaction, None, False, check
 
 
 def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
@@ -389,11 +417,12 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # list against the sheet top-down. Sheet-level messages have no row number
     # and belong at the top; every one of them returns immediately, so
     # out.errors is empty by the time the sort runs, and extending rather than
-    # assigning keeps them first if a non-returning one is ever added. Row-level
-    # warnings have no equivalent ordering guarantee — that is only safe today
-    # because every row warning is emitted in Phase 1 while the sole Phase-2
-    # warning is file-level and appended last, so a future Phase-2 row warning
-    # would need this same treatment.
+    # assigning keeps them first if a non-returning one is ever added.
+    # Every warning is now file-level: the per-row Duration-vs-token warning was
+    # aggregated into a single coverage line at the end of this function, so the
+    # ordering hazard that applied to row-level warnings no longer exists. A
+    # future per-row warning would need the same row-number sorting the errors
+    # get below.
     row_errors: List[Tuple[int, str]] = []
 
     try:
@@ -472,11 +501,22 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # and given a feedback record — hence a pre-pass rather than an in-loop
     # check. (The upload commits once, at the endpoint, via _finalize_write.)
     resolved: List[Tuple[int, str, float, Any]] = []
+    # Denominators for the file-level disagreement warning below. Counted here
+    # rather than warned per row: the Duration column is a formula off the
+    # Sampling sheet and drifts wholesale, so 109 of 202 rows disagreed on the
+    # team's v3 workbook (2026-08-07) — one line each buried every other
+    # warning in the upload panel.
+    comparable_rows = 0
+    disagreement_rows: List[int] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
-        exp_id, time_post_reaction, error, skip, warning = _resolve_row_identity(row, row_num)
-        if warning is not None:
-            warnings.append(warning)
+        exp_id, time_post_reaction, error, skip, check = _resolve_row_identity(
+            row, row_num
+        )
+        if check.compared:
+            comparable_rows += 1
+            if check.disagrees:
+                disagreement_rows.append(row_num)
         if skip:
             skipped += 1
             continue
@@ -707,6 +747,29 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "Run Date entries falling in the last 7 workdays, so backfilling "
             "an older date will not make a row appear there — only dates "
             "entered going forward will count."
+        )
+
+    # One line, not 109. The Dashboard's Duration column is a formula derived
+    # from sampling dates and has drifted from the '-t<days>' tokens wholesale
+    # -- 109 of 202 comparable rows disagreed on the team's v3 workbook
+    # (2026-08-07). The ID wins either way (Mat, 2026-07-30) so no row is
+    # rejected, which is exactly why this must stay visible without drowning
+    # the other warnings. Row list only at <=10, matching the supersede and
+    # GC-date warnings above.
+    if disagreement_rows:
+        n = len(disagreement_rows)
+        label = "row" if comparable_rows == 1 else "rows"
+        where = (
+            " (" + ", ".join(str(r) for r in disagreement_rows) + ")"
+            if n <= 10 else ""
+        )
+        warnings.append(
+            f"Duration (Days) disagrees with the ID's -t token on {n} of "
+            f"{comparable_rows} {label}{where}. The ID is canonical, so each "
+            "reading was recorded at the day its ID encodes and the Duration "
+            "value was not used. That column is a formula derived from sampling "
+            "dates -- a disagreement on many rows means the formula no longer "
+            "tracks the vials' intended days."
         )
 
     # Stable sort — two errors on one row keep the order they were found in.

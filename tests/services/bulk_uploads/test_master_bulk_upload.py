@@ -1897,3 +1897,113 @@ def test_overwrite_still_clears_a_mapped_column_left_blank(db_session: Session):
     assert scalar.final_conductivity_mS_cm is None, (
         "'Sample Conductivity (mS/cm)' is a sheet column left blank -- OVERWRITE clears it"
     )
+
+
+# ---------------------------------------------------------------------------
+# Aggregated Duration-vs-ID disagreement warning
+# ---------------------------------------------------------------------------
+
+def test_duration_disagreements_are_one_aggregated_warning(db_session: Session):
+    """Many disagreeing rows produce ONE warning, not one per row.
+
+    The Dashboard's Duration column is a formula off the Sampling sheet and has
+    drifted from the '-t<days>' tokens wholesale: 109 of 202 resolvable rows in
+    the team's v3 workbook disagreed (2026-08-07). One line per row buries the
+    other warnings, so this follows the coverage form the DI-supersede (#114)
+    and GC-run-date (#115) warnings already use.
+    """
+    rows = []
+    for i in range(3):
+        exp_id = f"SERUM_DIS{i:02d}a-t7"
+        _seed_experiment(db_session, exp_id, 8940 + i)
+        rows.append(_v3_row(exp_id, 3.0, nh4=1.0))
+
+    xlsx = _master_excel_v3(rows)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a disagreement must not reject a row: {result.errors}"
+    assert result.created == 3
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, (
+        f"exactly one file-level warning, not one per row: {result.warnings}"
+    )
+    assert "3 of 3" in disagreements[0], (
+        f"the denominator must count comparable rows: {disagreements[0]}"
+    )
+    assert "(2, 3, 4)" in disagreements[0], (
+        f"at or below the 10-row threshold the rows must be named: {disagreements[0]}"
+    )
+
+
+def test_duration_disagreement_denominator_counts_comparable_rows_only(
+    db_session: Session,
+):
+    """The denominator is rows where a comparison was possible, not all rows.
+
+    A row with no '-t' token, or with a blank Duration cell, has nothing to
+    disagree with and must not inflate the denominator — the same reasoning
+    that makes the GC-date warning count only H2-bearing rows.
+    """
+    _seed_experiment(db_session, "SERUM_DIS10a-t7", 8950)   # token + duration: comparable
+    _seed_experiment(db_session, "SERUM_DIS11a-t7", 8951)   # token + duration: comparable
+    _seed_experiment(db_session, "SERUM_DIS12", 8952)       # no token: not comparable
+    _seed_experiment(db_session, "SERUM_DIS13a-t7", 8953)   # blank duration: not comparable
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DIS10a-t7", 3.0, nh4=1.0),    # disagrees
+        _v3_row("SERUM_DIS11a-t7", 7.0, nh4=2.0),    # agrees
+        _v3_row("SERUM_DIS12", 5.0, nh4=3.0),        # no token
+        _v3_row("SERUM_DIS13a-t7", None, nh4=4.0),   # blank duration, ID supplies day 7
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"Unexpected errors: {result.errors}"
+    assert result.created == 4
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, f"got: {result.warnings}"
+    assert "1 of 2" in disagreements[0], (
+        f"only the two token+duration rows are comparable: {disagreements[0]}"
+    )
+    assert "(2)" in disagreements[0], f"only row 2 disagreed: {disagreements[0]}"
+
+
+def test_no_disagreement_warning_when_every_row_agrees(db_session: Session):
+    """A sheet whose Durations match its tokens says nothing.
+
+    A warning that fires on ordinary sheets is one researchers learn to ignore
+    — the same rule the DI-supersede warning follows.
+    """
+    _seed_experiment(db_session, "SERUM_DIS20a-t7", 8960)
+
+    xlsx = _master_excel_v3([_v3_row("SERUM_DIS20a-t7", 7.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert [w for w in result.warnings if "-t token" in w] == []
+
+
+def test_disagreement_warning_drops_the_row_list_above_ten(db_session: Session):
+    """Above 10 disagreeing rows the warning reports a ratio and no row list.
+
+    Matches the <=10 threshold the supersede and GC-date warnings use. The real
+    workbook disagrees on 109 rows; enumerating them is exactly the noise this
+    change removes.
+    """
+    rows = []
+    for i in range(11):
+        exp_id = f"SERUM_DIS3{i:02d}a-t7"
+        _seed_experiment(db_session, exp_id, 8970 + i)
+        rows.append(_v3_row(exp_id, 3.0, nh4=1.0))
+
+    xlsx = _master_excel_v3(rows)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    disagreements = [w for w in result.warnings if "-t token" in w]
+    assert len(disagreements) == 1, f"got: {result.warnings}"
+    assert "11 of 11" in disagreements[0]
+    assert "(" not in disagreements[0].split("rows")[1][:5], (
+        f"no row list above the threshold: {disagreements[0]}"
+    )
