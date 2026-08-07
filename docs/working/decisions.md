@@ -396,3 +396,57 @@ rather than half-applying, so `database/data_migrations/dedupe_conditions_and_ba
 and aborts on failure, that ordering is a deploy prerequisite, not a preference. Still open: bulk
 rename (`new_experiments.py:543-575`) syncs notes and `modifications_log` but not this string, so
 the backfill decays until that locked parser is fixed.
+
+## 2026-08-07 — A duplicate guard must key on the same identity the lookup resolves through
+
+**Decision:** The Master Results duplicate pre-pass keys on
+`_id_match.normalize_id(experiment_id)` plus the normalized timepoint — never the raw ID
+string. Any future guard that decides "are these two inputs the same record?" must key on
+the same identity function the write path will resolve through, not on the spelling the
+source happened to use.
+
+**Why:** the guard keyed on the raw string while `fuzzy_find_experiment` resolves through
+`normalize_id`, so two spellings differing only by case or zero padding
+(`SERUM_cation_001c-t5` vs `SERUM_Cation_001c-t5`) produced two different keys, both passed
+the guard, and both upserted onto the one experiment they resolve to. The later row
+silently overwrote the earlier — no error, no warning, and no trace in the response. Three
+such pairs were live in the team's v3 workbook. A guard keyed on a different identity than
+the writer is not a weak guard; it is absent for exactly the inputs it exists to catch.
+
+**How to apply:** when adding a collision check, find the function the write path uses to
+resolve the record and key on its output. Where the two identities genuinely must differ,
+say so in a comment and state what the gap admits. Note the converse this accepts here: two
+genuinely different experiments whose IDs differ only by case or zero padding, each with its
+own sheet row, are now both rejected. Measured 0 of 1009 dev-DB experiments share a
+normalized key (2026-08-07), and a loud stop beats a silent overwrite — but the invariant to
+re-check if that ever changes is `NORM = RAW + <known variant pairs>`, not the absolute
+collision count, which moves whenever the live workbook grows.
+
+**Related:** recorded as footnote ² of `docs/LOCKED_COMPONENTS.md`; the parser is locked and
+was changed under explicit sign-off. `_id_match.normalize_id` itself is run-delimited for
+the same class of reason — see the 2026-08-05 ID-conflation work.
+
+## 2026-08-07 — A message describing what was stored is tallied after the store, not before
+
+**Decision:** Counters behind any upload warning that asserts something about persisted data
+are incremented in the write phase, after the row commits — not in the earlier phase where
+the condition is first detected. `master_bulk_upload.py`'s `comparable_rows` /
+`disagreement_rows` follow `h2_reading_rows` in this.
+
+**Why:** the Duration-vs-`-t`-token tally was first written in Phase 1, at comparison time.
+A row that disagreed *and* was then rejected — as a duplicate, or by a failing upsert — was
+still counted and named in a warning reading "each reading was recorded at the day its ID
+encodes", while that same row's own error said "No row for this vial-day was written". Two
+messages in one response contradicting each other about one row is worse than either alone:
+it makes a researcher distrust both. The overlap was not hypothetical — the workbook's
+re-entry block both disagrees and duplicates.
+
+**How to apply:** ask what tense the message is in. A warning about the *sheet* ("this
+column disagrees with that one") may be tallied at detection. A warning about the *database*
+("this reading was recorded at day N") must be tallied after the write, behind the same
+`continue` and `except` paths that decide whether a row lands. When in doubt, write the
+sentence out and check whether it is still true of a row that was rejected.
+
+**Related:** found by the Task 3 code review as a plan-mandated finding; the plan had
+specified the Phase-1 placement and the human overruled it. The warning's wording was
+deliberately left unchanged — the fix was to make the count true, not the claim vaguer.

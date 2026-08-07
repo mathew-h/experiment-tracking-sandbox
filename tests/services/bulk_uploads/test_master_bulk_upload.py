@@ -1949,10 +1949,11 @@ def test_duration_disagreement_denominator_counts_comparable_rows_only(
     disagree with and must not inflate the denominator — the same reasoning
     that makes the GC-date warning count only H2-bearing rows.
     """
-    _seed_experiment(db_session, "SERUM_DIS10a-t7", 8950)   # token + duration: comparable
-    _seed_experiment(db_session, "SERUM_DIS11a-t7", 8951)   # token + duration: comparable
-    _seed_experiment(db_session, "SERUM_DIS12", 8952)       # no token: not comparable
-    _seed_experiment(db_session, "SERUM_DIS13a-t7", 8953)   # blank duration: not comparable
+    # "comparable" = the row carries both a -t token and a Duration value.
+    _seed_experiment(db_session, "SERUM_DIS10a-t7", 8950)   # comparable
+    _seed_experiment(db_session, "SERUM_DIS11a-t7", 8951)   # comparable
+    _seed_experiment(db_session, "SERUM_DIS12", 8952)       # no token
+    _seed_experiment(db_session, "SERUM_DIS13a-t7", 8953)   # blank Duration
 
     xlsx = _master_excel_v3([
         _v3_row("SERUM_DIS10a-t7", 3.0, nh4=1.0),    # disagrees
