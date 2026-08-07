@@ -79,8 +79,10 @@ both be rejected (0 of 1009 dev-DB experiments share a normalized key, measured
 distinct spelling, anchored at the group's first row so the sheet-order sort holds.
 The per-row Duration-vs-`-t`-token warning was aggregated into one file-level coverage
 line, tallied in Phase 2 **after** the row is written (matching `h2_reading_rows`) so a
-rejected row is never named in a warning claiming its reading was recorded. Preserve all
-five properties when touching this file.
+rejected row is never named in a warning claiming its reading was recorded. Each row's
+upsert runs in its own `db.begin_nested()` SAVEPOINT, so one failing row rolls back only
+itself — a session-wide rollback would discard rows the batch had already committed.
+Preserve all six properties when touching this file.
 
 ## Alembic Migration History
 

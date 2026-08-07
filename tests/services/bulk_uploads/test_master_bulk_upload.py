@@ -1546,8 +1546,9 @@ def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
 
     A researcher reads this list against the sheet: 'row 2 is a duplicate' with
     no sibling row number means opening the file and searching for the partner
-    by hand. The team's v3 workbook had 26 collisions reported as 52 lines.
-    Same shape as the ambiguous-ID fix in commit de379a1.
+    by hand. As measured on the team's v3 workbook on 2026-08-07, the
+    normalized-ID key this guard now uses collapsed 37 collisions into 74
+    rows. Same shape as the ambiguous-ID fix in commit de379a1.
     """
     _seed_experiment(db_session, "SERUM_DUP08a", 8868)
 
@@ -1907,10 +1908,13 @@ def test_duration_disagreements_are_one_aggregated_warning(db_session: Session):
     """Many disagreeing rows produce ONE warning, not one per row.
 
     The Dashboard's Duration column is a formula off the Sampling sheet and has
-    drifted from the '-t<days>' tokens wholesale: 109 of 202 resolvable rows in
-    the team's v3 workbook disagreed (2026-08-07). One line per row buries the
-    other warnings, so this follows the coverage form the DI-supersede (#114)
-    and GC-run-date (#115) warnings already use.
+    drifted from the '-t<days>' tokens wholesale: a Phase-1-basis
+    re-measurement of the team's v3 workbook (2026-08-07) found 118 of 169
+    comparable rows disagreeing. (The number this code actually emits is
+    smaller, since the tally runs in Phase 2 after rejected rows are
+    excluded.) One line per row buries the other warnings, so this follows the
+    coverage form the DI-supersede (#114) and GC-run-date (#115) warnings
+    already use.
     """
     rows = []
     for i in range(3):
@@ -1988,9 +1992,10 @@ def test_no_disagreement_warning_when_every_row_agrees(db_session: Session):
 def test_disagreement_warning_drops_the_row_list_above_ten(db_session: Session):
     """Above 10 disagreeing rows the warning reports a ratio and no row list.
 
-    Matches the <=10 threshold the supersede and GC-date warnings use. The real
-    workbook disagrees on 109 rows; enumerating them is exactly the noise this
-    change removes.
+    Matches the <=10 threshold the supersede and GC-date warnings use. A
+    Phase-1-basis re-measurement found 118 of 169 comparable rows disagreeing
+    on the real workbook (2026-08-07); enumerating them is exactly the noise
+    this change removes.
     """
     rows = []
     for i in range(11):
@@ -2004,7 +2009,7 @@ def test_disagreement_warning_drops_the_row_list_above_ten(db_session: Session):
     disagreements = [w for w in result.warnings if "-t token" in w]
     assert len(disagreements) == 1, f"got: {result.warnings}"
     assert "11 of 11" in disagreements[0]
-    assert "(" not in disagreements[0].split("rows")[1][:5], (
+    assert "(2," not in disagreements[0], (
         f"no row list above the threshold: {disagreements[0]}"
     )
 

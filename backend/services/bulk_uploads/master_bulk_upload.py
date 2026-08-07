@@ -11,8 +11,9 @@ Dashboard sheet column spec (v3, issue #111, 2026-07-30):
 One row per unique experiment ID. Replicate letters are separate vials, so
 SERUM_001a/b/c at days 1 and 3 is six rows (SERUM_001a-t1, SERUM_001b-t1, ...),
 not two rows with per-letter columns. Two rows sharing an ID and timepoint are
-both rejected. Cross-replicate mean and SD are computed by
-v_results_scalar_rollup, not carried on the sheet.
+both rejected, matched on _id_match.normalize_id so spellings differing only
+by case or zero padding count as the same ID. Cross-replicate mean and SD are
+computed by v_results_scalar_rollup, not carried on the sheet.
 
 Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
 blank, and gas volume/pressure come from the same block. A value of 0 is a real
@@ -751,13 +752,17 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "entered going forward will count."
         )
 
-    # One line, not 109. The Dashboard's Duration column is a formula derived
-    # from sampling dates and has drifted from the '-t<days>' tokens wholesale
-    # -- 109 of 202 comparable rows disagreed on the team's v3 workbook
-    # (2026-08-07). The ID wins either way (Mat, 2026-07-30) so no row is
-    # rejected, which is exactly why this must stay visible without drowning
-    # the other warnings. Row list only at <=10, matching the supersede and
-    # GC-date warnings above.
+    # One line, not one per row. The Dashboard's Duration column is a formula
+    # derived from sampling dates and has drifted from the '-t<days>' tokens
+    # wholesale -- a Phase-1-basis re-measurement of the team's v3 workbook
+    # (2026-08-07) found 118 of 169 comparable rows disagreeing. The number
+    # this code actually emits is necessarily smaller: the tally below runs in
+    # Phase 2, after the row is written, so rows rejected earlier in the
+    # pipeline are excluded from both the numerator and denominator. The ID
+    # wins either way (Mat, 2026-07-30) so no row is rejected for disagreeing,
+    # which is exactly why this must stay visible without drowning the other
+    # warnings. Row list only at <=10, matching the supersede and GC-date
+    # warnings above.
     if disagreement_rows:
         n = len(disagreement_rows)
         label = "row" if comparable_rows == 1 else "rows"
