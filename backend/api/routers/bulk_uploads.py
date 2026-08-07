@@ -440,9 +440,16 @@ async def upload_icp_oes(
     from backend.services.icp_service import ICPService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
-        processed_data, parse_errors = ICPService.parse_and_process_icp_file(file_bytes)
+        processed_data, parse_errors, parse_warnings, skipped_count = (
+            ICPService.parse_and_process_icp_file_ex(file_bytes)
+        )
         if parse_errors and not processed_data:
-            return UploadResponse(created=0, updated=0, skipped=0, errors=parse_errors,
+            # This branch is the whole-file labelling mistake -- every label
+            # skipped, so validate_icp_data reports "No data to validate" and the
+            # gate fires. It MUST carry warnings: they are the only thing that
+            # explains why nothing uploaded.
+            return UploadResponse(created=0, updated=0, skipped=skipped_count,
+                                  errors=parse_errors, warnings=parse_warnings,
                                   message="ICP parse failed")
         created_rows, updated_count, ingest_errors = ICPService.bulk_create_icp_results(
             db, processed_data, overwrite=overwrite
@@ -457,7 +464,8 @@ async def upload_icp_oes(
     new_count = len(created_rows) - updated_count
     log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
-        created=new_count, updated=updated_count, skipped=0, errors=all_errors,
+        created=new_count, updated=updated_count, skipped=skipped_count,
+        errors=all_errors, warnings=parse_warnings,
         message=_finalize_message(f"ICP-OES: {new_count} created, {updated_count} updated", dry_run),
         dry_run=dry_run,
     )
