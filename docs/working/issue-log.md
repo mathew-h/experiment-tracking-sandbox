@@ -1940,29 +1940,34 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
      row so the sheet-order sort holds.
   3. `2378ae9` — the per-row Duration-vs-`-t`-token disagreement warning was aggregated into
      one file-level coverage line.
-  4. `800926c` — found during Task 4 verification, not in the original plan: the Phase-3
-     commit counted disagreements in Phase 1 (at comparison time), so a row that disagreed
-     *and* was then rejected (duplicate, or a failed upsert) was named in a warning claiming
-     "each reading was recorded at the day its ID encodes" while its own error said no row
-     for that vial-day was written — the two messages contradicted each other. Moved the
+  4. `800926c` — found during **Task 3's code review**, not during Task 4: the third
+     commit (`2378ae9`) counted disagreements in Phase 1 (at comparison time), so a row
+     that disagreed *and* was then rejected (duplicate, or a failed upsert) was named in a
+     warning claiming "each reading was recorded at the day its ID encodes" while its own
+     error said no row for that vial-day was written — the two messages contradicted each
+     other. Flagged as a plan-mandated finding; the human ruled on 2026-08-07 to move the
      tally to Phase 2, after the write, matching the sibling GC-run-date warning's placement
-     (`h2_reading_rows`); wording unchanged.
+     (`h2_reading_rows`), with the warning's wording deliberately left unchanged.
 - **Accepted converse:** two genuinely different experiments whose IDs differ only by
   case/padding would now both be rejected as a false collision. Measured 0 of 1009 dev-DB
-  experiments share a normalized key (2026-08-05 dump), so this has not fired in practice.
+  experiments share a normalized key (2026-08-07), so this has not fired in practice.
 - **Tests added:** yes, in all four commits (see `tests/services/bulk_uploads/test_master_bulk_upload.py`).
 - **Verification — measured against the team's live workbook**
-  (`Master_Results_Tracker_v3.xlsx`, Dashboard sheet, read-only, 2026-08-07): a standalone
-  script reproducing the Phase-1 logic (`_resolve_row_identity` + `normalize_id` +
-  `normalize_timepoint`, no database) found **37 duplicate groups covering 74 rows** — up
-  from 26 groups under the pre-fix raw-string key, confirming Task 1 took effect. The three
-  case-variant pairs the raw-string key specifically missed (rows 29/194, 32/195, 35/196,
-  IDs differing only by `..._cation_..._c...` vs `..._Cation_..._C...` casing) are present
-  among the 37. The group/row counts came in above the plan's projected 29/58 — the
-  workbook is the team's live, OneDrive-synced tracker and had grown since that projection
-  was written; the actual count, not the projection, is what shipped.
-  Separately, the same script's sheet-level Duration-vs-`-t`-token disagreement count was
-  **118 of 169 comparable rows** — this is **not** the number the upload will actually emit.
+  (`Master_Results_Tracker_v3.xlsx`, Dashboard sheet, read-only, 2026-08-07): the workbook
+  was edited at 09:19 on 2026-08-07, during this session (resolved rows 202 → 236; sheet
+  rows unchanged at 499). On the current file, the same-file comparison is what carries the
+  "Task 1 took effect" claim: raw-string key = **34 groups / 68 rows**; normalized key =
+  **37 groups / 74 rows**. The difference is **exactly 3 groups / 6 rows** — precisely the
+  three case-variant pairs the raw-string key specifically misses (rows 29/194, 32/195,
+  35/196, IDs differing only by `..._cation_..._c...` vs `..._Cation_..._C...` casing).
+  This **NORM = RAW + 3** invariant held on the plan's earlier snapshot too (26 raw + 3 =
+  29 projected), so the fix's demonstrated effect is the +3, and only the +3 — the absolute
+  counts (34/37 here vs. 26/29 projected) moved because the workbook grew between the two
+  measurements, not because of anything in the code.
+  Separately, a standalone script reproducing the Phase-1 logic (`_resolve_row_identity` +
+  `normalize_id` + `normalize_timepoint`, no database) found the sheet-level
+  Duration-vs-`-t`-token disagreement count was **118 of 169 comparable rows** — this is
+  **not** the number the upload will actually emit.
   The script (a Phase-1-only reproduction with no DB) counts every row where a comparison
   was *possible*; commit `800926c` moved the real tally to Phase 2, after the write, so the
   live upload's warning counts and names only rows that were actually written — a strictly
