@@ -128,9 +128,12 @@ this backfill cannot reach them; they resolve once rock characterization data is
 uploaded for those samples.
 
 No view recreation is needed for this backfill — views cache no data and no schema
-changed. (`database/event_listeners.py` drops and recreates them at import time anyway;
-the `create_reporting_views()` function named in `.claude/rules/schema-checklist.md:88`
-does not exist.)
+changed. `database/event_listeners.py` drops and recreates them at import time anyway,
+in a module-level block; there is no callable entry point. A `create_reporting_views()`
+function that never existed was named in `.claude/rules/schema-checklist.md` Phase 4 and
+in `issue-rollup-replicate-count-and-null-timepoint-buckets.md`; both were corrected in
+commit `5f73966`, which replaced the command with the verified
+`python -c "import database.event_listeners"`.
 
 ### Lab PC runbook
 
