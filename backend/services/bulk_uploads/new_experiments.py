@@ -82,6 +82,52 @@ def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment
     return parent
 
 
+def _recalculate_touched_conditions(
+    db: Session, conditions_ids: set[int]
+) -> Tuple[int, List[str]]:
+    """Recompute stored derived fields on every conditions row this upload touched.
+
+    `water_to_rock_ratio` and `total_ferrous_iron_g` are STORED derived fields,
+    written by `recalculate_conditions()` in the calculation registry. Every other
+    write path calls `recalculate()` itself — `backend/api/routers/conditions.py:103`
+    and `:125`, `backend/api/routers/experiments.py:1329`,
+    `database/lineage_utils.py:603`. This uploader never did, so bulk-created
+    experiments landed with both fields NULL. That in turn made
+    `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` NULL on every one of
+    their scalar results, because `calculate_ferrous_iron_yield_h2()` returns None
+    when `total_ferrous_iron_g` is None — 157 production scalar rows as of
+    2026-08-10, `SERUM_Catalyst_001a-t3` among them.
+
+    Deliberately keyed on primary keys rather than ORM instances: `db.expire_all()`
+    runs after the experiments-sheet loop (issue #68) and a per-row savepoint can be
+    rolled back after a row is recorded, so an int is the only handle that stays
+    valid. A row whose id no longer resolves is skipped silently — its savepoint was
+    rolled back and there is nothing left to recalculate.
+
+    One try/except per row, mirroring `recalculate_conditions_for_samples()`
+    (`backend/services/elemental_composition_service.py:56-73`): one unusable row
+    must not cost the rest of the upload its derived fields. No flush — the caller
+    commits, as at every other `recalculate()` site in this module.
+
+    Returns (rows_recalculated, warnings).
+    """
+    recalculated = 0
+    warnings: List[str] = []
+    for conditions_id in sorted(conditions_ids):
+        conditions = db.get(ExperimentalConditions, conditions_id)
+        if conditions is None:
+            continue
+        try:
+            recalculate(conditions, db)
+            recalculated += 1
+        except Exception as e:
+            warnings.append(
+                f"[conditions] Could not recalculate derived fields for "
+                f"'{conditions.experiment_id}': {e}"
+            )
+    return recalculated, warnings
+
+
 @dataclass
 class PlanCreate:
     """A row that will create a brand-new Experiment (issue #100 item 2)."""
