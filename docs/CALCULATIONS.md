@@ -251,7 +251,25 @@ total_ferrous_iron_g = fe_mass_fraction × rock_mass_g
 - No `ElementalAnalysis` row exists for `Analyte.analyte_symbol = 'FeO'`
 - `analyte_composition` is NULL
 
-**Trigger:** Fires via `registry.recalculate()` on `POST /conditions` and `PATCH /conditions`.
+**Trigger:** Fires via `registry.recalculate()`. This field is **stored, not computed on
+read**, so a conditions row is only correct if `recalculate()` ran after its last
+mutation — and `calculate_ferrous_iron_yield_h2` returns NULL whenever this is NULL,
+taking `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` down with it. Every
+path that recalculates:
+
+- `POST /api/conditions`, `PUT /api/conditions/{id}` — `backend/api/routers/conditions.py:103`, `:125`
+- `PATCH /api/experiments/{id}` — `backend/api/routers/experiments.py:1329`
+- Replicate creation — `database/lineage_utils.py:603`
+- Any elemental upload, via `recalculate_conditions_for_samples()` (`backend/services/elemental_composition_service.py:34`) — this is what covers experiments created *before* their rock's FeO data arrived
+- The New Experiments bulk upload, as of 2026-08-10 — records every conditions row it touches and recalculates them in one pass before returning, reporting the count in `info_messages`
+
+Before 2026-08-10 the bulk uploader recalculated only `ChemicalAdditive`, so
+bulk-created experiments landed with `total_ferrous_iron_g` **and**
+`water_to_rock_ratio` NULL and therefore no Fe²⁺ yield percentages on any of their
+scalar results — 845 of 1125 production conditions rows and 157 scalar rows. A NULL
+`water_to_rock_ratio` on a row with positive rock mass and water volume is the
+diagnostic for "recalculate never ran here". See
+`docs/issues/issue-bulk-upload-never-recalculates-conditions.md`.
 
 **Extensibility:** `get_analyte_wt_pct(sample_id, db, analyte_symbol='FeO')` accepts any
 `analyte_symbol` — future oxides (MgO, SiO2, Al2O3) reuse the same traversal.

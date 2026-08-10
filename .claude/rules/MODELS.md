@@ -203,7 +203,7 @@ Defines the parameters and setup for an experiment.
   - `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`.
 - **Derived Fields**:
   - `water_to_rock_ratio` (hybrid/property: `formatted_additives` from chemical_additives).
-  - `total_ferrous_iron_g` (Float, nullable): mass of ferrous iron (Fe²⁺) in grams, derived from rock characterization FeO wt% × `FE_IN_FEO_FRACTION` × `rock_mass_g`; see `docs/CALCULATIONS.md` for full formula.
+  - `total_ferrous_iron_g` (Float, nullable): mass of ferrous iron (Fe²⁺) in grams, derived from rock characterization FeO wt% × `FE_IN_FEO_FRACTION` × `rock_mass_g`; see `docs/CALCULATIONS.md` for full formula. **Stored, so it is only correct if `recalculate()` ran after the row's last mutation** — and `calculate_ferrous_iron_yield_h2` returns NULL whenever it is NULL, taking `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` down with it. The New Experiments bulk upload did not recalculate conditions until 2026-08-10, so 845 of 1125 production conditions rows held NULL and 157 scalar rows had no Fe²⁺ %H₂ despite a computed `h2_micromoles`; both are fixed by `database/data_migrations/backfill_total_ferrous_iron_017.py`. A NULL `water_to_rock_ratio` on a row with positive rock mass and water volume is the diagnostic for "recalculate never ran here". See `docs/issues/issue-bulk-upload-never-recalculates-conditions.md`.
 - **Relationships**: `chemical_additives` → One-to-Many with `ChemicalAdditive`.
 - **Note**: Legacy fields like `catalyst`, `buffer_system`, `surfactant` are deprecated in favor of `ChemicalAdditive`.
 - **Identity (issue #109 follow-up):** `experiment_fk` is the **only** authoritative
