@@ -2034,3 +2034,25 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
 - **Tests added:** yes - `tests/test_icp_handling.py::TestICPLabelTimepointToken`
   (25 cases) and `::TestICPTimepointTokenPersistence` (2), plus 2 endpoint tests.
 - **Docs updated:** yes.
+
+## 2026-08-10 | inline - ICP label timepoint token (`/complete-task` record)
+- **Files changed:** `backend/services/icp_service.py`,
+  `backend/api/routers/bulk_uploads.py`, `tests/test_icp_handling.py`,
+  `tests/api/test_bulk_uploads.py`, `docs/upload_templates/icp_oes_upload.md`,
+  `docs/LOCKED_COMPONENTS.md`, `.claude/rules/MODELS.md`, `docs/working/decisions.md`
+- **Tests added:** yes - 30 new cases: `TestICPLabelTimepointToken` (25),
+  `TestICPTimepointTokenPersistence` (3, incl. the rejected-row wording guard),
+  and 2 endpoint tests in `tests/api/test_bulk_uploads.py`
+- **Decision logged:** yes - `docs/working/decisions.md`, 2026-08-10
+- **Pre-merge finding (fixed before merge):** the disagreement warning was worded as a
+  claim about persisted data ("each reading was recorded at the day its ID encodes"),
+  copied from the post-write sibling in `master_bulk_upload.py`. The ICP tally runs at
+  parse time, so a row that disagrees and is then rejected was named in a warning
+  contradicting its own error - reproduced on a real request with
+  `ZZZNOPE_999a-t5_Day12_21x`. This is the 2026-08-07 decision recurring in a second
+  parser. Reworded to a label-level claim and pinned by a test; recorded as footnote 3
+  property (f) in `docs/LOCKED_COMPONENTS.md`.
+- **Lint:** no new findings; strictly cleaner than `develop` on the touched files
+  (E302, one 126-char line and an unused `e` removed; W293 172 -> 141, W291 8 -> 6).
+- **Full suite:** 1420 passed, 4 skipped, 3 failed - the 3 being the pre-existing
+  `tests/test_pg_backup_restore.py` failures, confirmed identical on `develop`.

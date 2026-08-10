@@ -34,7 +34,9 @@ The `Label` column is parsed right-to-left:
 **The experiment ID's trailing `-t<days>` token wins.** A destructively-sampled
 vial encodes its own day in its ID (`SERUM_Cation_005c-t5`), and that day is
 canonical. When the ID carries the token, any `Day<n>` in the label is ignored —
-the upload reports the disagreement in its warnings but writes every row.
+the upload reports the disagreement in its warnings and never rejects a row for
+it. (A named row can still fail to load for an unrelated reason, such as an
+experiment ID that does not exist; those appear under `errors`.)
 
 | Label | Experiment | Day | Dilution |
 |---|---|---|---|

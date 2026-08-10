@@ -502,8 +502,17 @@ class ICPService:
 
         # One line per file, not one per row -- mirrors master_bulk_upload.py:755-780,
         # including its <=10 list cap. The ID wins either way so no row is
-        # rejected, which is exactly why this must stay visible without drowning
-        # the other warnings.
+        # rejected here, which is exactly why this must stay visible without
+        # drowning the other warnings.
+        #
+        # Wording is deliberately a claim about the LABEL, not about the database.
+        # This tally runs at parse time, before bulk_create_icp_results decides
+        # whether each row lands, so a row that disagrees AND is then rejected
+        # (unknown experiment, no elemental data) would be named here too. Saying
+        # "each reading was recorded at the day its ID encodes" -- as the
+        # post-write sibling in master_bulk_upload.py may -- would contradict that
+        # row's own error in the same response. See docs/working/decisions.md,
+        # 2026-08-07 and 2026-08-10.
         if disagreement_labels:
             n = len(disagreement_labels)
             noun = "label" if comparable_labels == 1 else "labels"
@@ -512,9 +521,10 @@ class ICPService:
             )
             warnings.append(
                 f"Day token disagrees with the ID's -t token on {n} of "
-                f"{comparable_labels} {noun}{where}. The ID is canonical, so each "
-                "reading was recorded at the day its ID encodes and the Day value "
-                "was not used."
+                f"{comparable_labels} {noun}{where}. The ID is canonical, so the "
+                "timepoint was read from the -t token and the label's Day value "
+                "ignored. This reports the label mismatch only -- check errors for "
+                "any of these rows that were not written."
             )
 
         if skipped_labels:

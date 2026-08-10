@@ -430,6 +430,35 @@ class TestICPTimepointTokenPersistence:
         assert rows[0].time_post_reaction_days == 3.0
         assert rows[0].icp_data is not None
 
+    def test_disagreement_warning_never_claims_a_rejected_row_was_written(self, test_db):
+        """The disagreement tally runs at parse time, before the write decides
+        anything, so its wording must be a claim about the LABEL only.
+
+        A row that disagrees AND is then rejected is named in the warning too. If
+        the warning asserted "each reading was recorded at the day its ID encodes"
+        it would contradict that row's own error in the same response — the failure
+        mode recorded in docs/working/decisions.md on 2026-08-07.
+        """
+        csv = (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            "ZZZNOPE_999a-t5_Day12_21x,Fe 238.204,10.0,1500,SAMP\n"
+        ).encode("utf-8")
+
+        data, _errors, warnings, _skipped = ICPService.parse_and_process_icp_file_ex(csv)
+        assert len(data) == 1
+        assert len(warnings) == 1
+
+        _created, _updated, ingest_errors = ICPService.bulk_create_icp_results(test_db, data)
+        # The experiment does not exist and this ID shape is not auto-creatable.
+        assert len(ingest_errors) == 1
+        assert "not found" in ingest_errors[0]
+
+        # ...so nothing was written, and the warning must not say otherwise.
+        assert "ZZZNOPE_999a-t5_Day12_21x" in warnings[0]
+        assert "was recorded" not in warnings[0]
+        assert "label mismatch only" in warnings[0]
+
 
 class TestICPServiceProcessing:
     """Test ICP data processing workflows."""

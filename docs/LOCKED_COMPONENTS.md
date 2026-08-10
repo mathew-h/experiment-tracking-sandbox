@@ -103,7 +103,15 @@ in the `all_elements` JSONB as a fake element; (d) `process_icp_dataframe` and
 `parse_and_process_icp_file` must keep their 2-tuple arity — `legacy/streamlit_frontend/bulk_uploads.py:1558,1599`
 still calls the latter; (e) the router's early "ICP parse failed" return must pass
 `warnings=`, since the all-labels-skipped case is exactly where that warning is the
-only explanation available. See
+only explanation available; (f) the disagreement warning's wording must stay a claim
+about the **label**, never about persisted data. That tally runs at parse time,
+before `bulk_create_icp_results` decides whether each row lands, so a row that
+disagrees and is then rejected is named in it too — the post-write phrasing this
+warning originally copied from `master_bulk_upload.py` ("each reading was recorded
+at the day its ID encodes") contradicted such a row's own error in the same
+response. See `docs/working/decisions.md` (2026-08-07, 2026-08-10) and
+`tests/test_icp_handling.py::TestICPTimepointTokenPersistence::test_disagreement_warning_never_claims_a_rejected_row_was_written`.
+See
 `docs/superpowers/specs/2026-08-07-icp-label-timepoint-token-design.md` and
 `tests/test_icp_handling.py::TestICPLabelTimepointToken`.
 
