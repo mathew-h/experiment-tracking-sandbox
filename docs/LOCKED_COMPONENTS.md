@@ -47,7 +47,7 @@ These parsers handle real instrument output formats with edge cases accumulated 
 
 | Parser | Handles |
 |---|---|
-| `new_experiments.py` | Multi-sheet Excel, experiment lineage parsing |¹
+| `new_experiments.py` | Multi-sheet Excel, experiment lineage parsing |¹ ⁴
 | `scalar_results.py` | Solution chemistry Excel, partial updates |
 | `icp_service.py` | Raw ICP-OES CSV, delimiter detection, dilution correction |³
 | `actlabs_titration_data.py` | External titration lab reports |
@@ -114,6 +114,36 @@ response. See `docs/working/decisions.md` (2026-08-07, 2026-08-10) and
 See
 `docs/superpowers/specs/2026-08-07-icp-label-timepoint-token-design.md` and
 `tests/test_icp_handling.py::TestICPLabelTimepointToken`.
+
+⁴ **Conditions recalculation contract (changed 2026-08-10 with explicit sign-off).**
+`water_to_rock_ratio` and `total_ferrous_iron_g` are **stored** derived fields on
+`ExperimentalConditions`, written only by `recalculate()`. This parser never called it,
+so bulk-created experiments landed with both NULL — and because
+`calculate_ferrous_iron_yield_h2` returns NULL when `total_ferrous_iron_g` is NULL, every
+Fe²⁺ yield on their scalar results was NULL too (157 production scalar rows, 845 of 1125
+conditions rows). The parser now accumulates the primary key of every conditions row it
+creates or mutates in `touched_conditions_ids`, and `_recalculate_touched_conditions`
+recalculates them in a single pass **once, immediately before the return**, after all
+three sheets have finished mutating conditions — deferred so a row reached by both the
+conditions and additives sheets is recalculated once, from its final state.
+
+**The load-bearing rule: any new code path in this file that creates or mutates an
+`ExperimentalConditions` row must add that row's primary key to
+`touched_conditions_ids`.** Omit it and the row's stored derived fields silently stay
+NULL, taking every Fe²⁺ yield on its scalar results down with them — with no error, no
+warning, and nothing in the response to show it happened. There are three record sites
+today (conditions sheet — outside its `if not conditions:` block, so an overwritten
+pre-existing row is recorded too; parent auto-copy and additives sheet — inside theirs,
+because on those paths a pre-existing row is never mutated). Also preserve: each row is
+recalculated inside its own `db.begin_nested()` SAVEPOINT with the `db.get()` inside the
+protected region (per ¹ above — a DBAPI failure otherwise raises `PendingRollbackError`
+on the next row and discards an otherwise-good upload, and a mid-recalculation failure
+otherwise leaves half-applied mutations for the caller to commit while the warning claims
+the row was skipped); the helper flushes and commits nothing of its own; and
+`bulk_upsert_from_excel` keeps its 6-value return with `_bulk_upsert_from_excel_impl` at
+7. See `docs/issues/issue-bulk-upload-never-recalculates-conditions.md`,
+`docs/CALCULATIONS.md` (`total_ferrous_iron_g`) and
+`tests/services/bulk_uploads/test_new_experiments_conditions_recalc.py`.
 
 ## Alembic Migration History
 

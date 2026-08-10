@@ -82,6 +82,89 @@ def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment
     return parent
 
 
+def _recalculate_touched_conditions(
+    db: Session, conditions_ids: set[int]
+) -> Tuple[int, List[str]]:
+    """Recompute stored derived fields on every conditions row this upload touched.
+
+    `water_to_rock_ratio` and `total_ferrous_iron_g` are STORED derived fields,
+    written by `recalculate_conditions()` in the calculation registry. Every other
+    write path calls `recalculate()` itself — `backend/api/routers/conditions.py:103`
+    and `:125`, `backend/api/routers/experiments.py:1329`,
+    `database/lineage_utils.py:603`. This uploader never did, so bulk-created
+    experiments landed with both fields NULL. That in turn made
+    `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` NULL on every one of
+    their scalar results, because `calculate_ferrous_iron_yield_h2()` returns None
+    when `total_ferrous_iron_g` is None — 157 production scalar rows as of
+    2026-08-10, `SERUM_Catalyst_001a-t3` among them.
+
+    Keyed on primary keys rather than ORM instances for two plain reasons: a set of
+    ints deduplicates a row reached by more than one sheet (the conditions sheet and
+    the additives sheet resolve the same row for the same experiment), so it is
+    recalculated once from its final state; and an int is the cheapest handle to
+    carry through the parse. Nothing in the uploader can invalidate a recorded id —
+    `db.expire_all()` runs at `:790`, BEFORE all three record sites, and site 3's
+    `db.add` sits outside the additives savepoint — so the `if conditions is None`
+    skip below is defensive only and is not reachable through the uploader today.
+
+    One `db.begin_nested()` SAVEPOINT per row, the idiom this file already uses at
+    `:381` and `:1136` and a standing contract for this file (footnote ¹ of
+    `docs/LOCKED_COMPONENTS.md`). Both the load and the recalculation sit inside it:
+    a DBAPI error inside `recalculate()` aborts the transaction, so a `db.get()`
+    outside the protected region would raise `PendingRollbackError` on the NEXT
+    iteration and escape into the router's blanket handler, discarding an otherwise
+    good upload; and a non-DB exception part-way through `recalculate()` would
+    otherwise leave half-applied mutations (`water_to_rock_ratio` written,
+    `total_ferrous_iron_g` not, the ScalarResults cascade part-done) dirty on the
+    session for the caller to commit, while the warning here claimed the row was not
+    recalculated. One unusable row must still not cost the rest of the upload its
+    derived fields. No flush and no commit of our own — the caller commits, as at
+    every other `recalculate()` site in this module.
+
+    Returns (rows_recalculated, warnings).
+    """
+    recalculated = 0
+    warnings: List[str] = []
+    for conditions_id in sorted(conditions_ids):
+        savepoint = db.begin_nested()
+        row_ok = False
+        label: Optional[str] = None
+        try:
+            conditions = db.get(ExperimentalConditions, conditions_id)
+            if conditions is None:
+                continue
+            label = conditions.experiment_id
+            recalculate(conditions, db)
+            row_ok = True
+        except Exception as e:
+            warnings.append(
+                f"[conditions] Could not recalculate derived fields for "
+                f"'{label if label is not None else conditions_id}': {e}"
+            )
+        finally:
+            # RELEASE SAVEPOINT flushes the session first, so a dirty instance left
+            # by recalculate() can still fail here even though row_ok is True. That
+            # raise must not escape the finally (same reasoning as the additives loop
+            # at :1240) or it would unwind the whole pass and take the upload with
+            # it: roll the row back and record the row-scoped warning instead.
+            if row_ok:
+                try:
+                    savepoint.commit()
+                    recalculated += 1
+                except Exception as commit_error:
+                    savepoint.rollback()
+                    warnings.append(
+                        f"[conditions] Could not recalculate derived fields for "
+                        f"'{label if label is not None else conditions_id}': "
+                        f"{commit_error}"
+                    )
+            else:
+                # Also the required recovery after a failed flush inside the
+                # savepoint, and a harmless no-op for the `conditions is None` skip.
+                savepoint.rollback()
+    return recalculated, warnings
+
+
 @dataclass
 class PlanCreate:
     """A row that will create a brand-new Experiment (issue #100 item 2)."""
@@ -222,6 +305,11 @@ class NewExperimentsUploadService:
         # Keyed by (current) experiment_id — merges field changes discovered across the
         # experiments sheet and the conditions sheet into one PlanOverwrite per experiment.
         overwrite_plan_by_exp_id: Dict[str, PlanOverwrite] = {}
+
+        # Primary keys of every ExperimentalConditions row this upload creates or
+        # modifies. Recalculated in one pass just before returning, after all three
+        # sheets have finished mutating them — see _recalculate_touched_conditions.
+        touched_conditions_ids: set[int] = set()
 
         try:
             sheets: Dict[str, pd.DataFrame] = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
@@ -780,6 +868,8 @@ class NewExperimentsUploadService:
                             db.add(conditions)
                             db.flush()
 
+                        touched_conditions_ids.add(conditions.id)
+
                         # Auto-copy from parent if experiment is flagged for copying
                         parent = parent_for_copy.get(exp_id)
                         if parent and parent.conditions:
@@ -910,6 +1000,7 @@ class NewExperimentsUploadService:
                 )
                 db.add(conditions)
                 db.flush()
+                touched_conditions_ids.add(conditions.id)
                 
                 # Copy all fields from parent
                 reserved = {'id', 'experiment_id', 'experiment_fk', 'created_at', 'updated_at'}
@@ -1016,6 +1107,8 @@ class NewExperimentsUploadService:
                         )
                         db.add(conditions)
                         db.flush()
+
+                        touched_conditions_ids.add(conditions.id)
 
                     replace_all = bool(overwrite_by_exp_id.get(exp_id, False))
                     _prior_additives_summary = None
@@ -1183,6 +1276,20 @@ class NewExperimentsUploadService:
         # Merge all overwrite entries discovered across the experiments/conditions/additives
         # sheets into the plan (issue #100 item 2) — one entry per experiment_id.
         plan.overwrites.extend(overwrite_plan_by_exp_id.values())
+
+        # One pass over every conditions row this upload touched, now that all three
+        # sheets have finished mutating them. Deferred rather than inline at each
+        # write site so a row reached by both the conditions and additives sheets is
+        # recalculated once, from its final state.
+        _cond_recalculated, _cond_recalc_warnings = _recalculate_touched_conditions(
+            db, touched_conditions_ids
+        )
+        warnings.extend(_cond_recalc_warnings)
+        if _cond_recalculated:
+            info_messages.append(
+                f"Recalculated derived fields (water_to_rock_ratio, "
+                f"total_ferrous_iron_g) on {_cond_recalculated} conditions row(s)"
+            )
 
         return created_exp, updated_exp, skipped, errors, warnings, info_messages, plan
 

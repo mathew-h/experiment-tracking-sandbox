@@ -227,8 +227,9 @@ scalar rollup. Adding `n_letters` alongside `n_replicates` makes the
 letter-vs-vial distinction visible in Power BI for the first time and exposes
 root cause D directly (`SERUM_pH_001` day 7 shows 5 vials / 3 letters).
 
-*View-only change — no migration, no model change. Recreated at startup by
-`create_reporting_views()`.*
+*View-only change — no migration, no model change. Recreated at startup by the
+module-level block in `database/event_listeners.py` (there is no
+`create_reporting_views()` function; that name was never real).*
 
 ### Fix 2 — make the uniqueness constraint fire on NULL buckets
 
