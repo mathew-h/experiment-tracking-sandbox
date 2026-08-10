@@ -479,3 +479,52 @@ row landed.
 **Related:** `docs/working/decisions.md` 2026-08-07 (the original, `master_bulk_upload.py`);
 footnote 3 property (f) in `docs/LOCKED_COMPONENTS.md`; pinned by
 `tests/test_icp_handling.py::TestICPTimepointTokenPersistence::test_disagreement_warning_never_claims_a_rejected_row_was_written`.
+
+## 2026-08-10 — A stored derived field is only correct if every write path recalculates it
+
+**Decision:** the New Experiments bulk upload now records the primary key of every
+`ExperimentalConditions` row it creates or mutates and recalculates them in ONE pass
+before returning, rather than calling `recalculate()` inline at each of the three write
+sites. The contract is recorded as footnote 4 in `docs/LOCKED_COMPONENTS.md`.
+
+**Why:** `water_to_rock_ratio` and `total_ferrous_iron_g` are stored, not computed on
+read. Every other write path already called `recalculate()`; this uploader called it only
+for `ChemicalAdditive`. Because `calculate_ferrous_iron_yield_h2` returns None when
+`total_ferrous_iron_g` is None, the omission silently removed BOTH Fe2+ yield percentages
+from every scalar result under a bulk-created experiment - 845 of 1125 production
+conditions rows, 157 affected scalar rows. Nothing failed, nothing logged; the numbers
+were simply absent from Power BI.
+
+**Why one deferred pass and not three inline calls:** the three write sites sit in three
+different error contexts (a per-row `try`/`except` in the conditions loop, no handler at
+all in the parent auto-copy pass, and a savepoint-wrapped body in the additives loop), so
+inline calls would need three separate correctness arguments. A single pass after all
+three sheets have finished mutating has one, runs against each row's FINAL state, and
+recalculates a row reached by two sheets only once.
+
+**Keyed on primary keys, not ORM instances,** because it deduplicates cheaply. Note the
+two rationales that sound plausible and are FALSE: `db.expire_all()` runs *before* all
+three record sites, and site 3's record is *outside* the additives savepoint - so neither
+can invalidate a recorded handle. The `conditions is None` skip is defensive only.
+
+**Each row gets its own SAVEPOINT.** A bare `try`/`except` around `recalculate()` is not
+enough: a DBAPI error aborts the transaction, so the *next* iteration's `db.get()` raises
+`PendingRollbackError` and escapes into the router's blanket handler, discarding an
+upload that was otherwise fine. Worse, on a non-DB exception the half-applied mutations
+stay dirty and get committed while the warning claims the row failed. `savepoint.commit()`
+is RELEASE SAVEPOINT, which flushes and can itself raise, so that is contained too. This
+is the same lesson as footnote 1 on this file and the additives loop.
+
+**How to apply:** when you add a field that the calculation registry writes, enumerate
+every path that mutates its parent row and confirm each one recalculates - the API
+routers are easy to find, the bulk parsers are not. The cheap diagnostic for "did this
+ever run here?" is a second derived field on the same row: if both are NULL where both
+are computable, the recalculation never happened, and no amount of checking the inputs
+will tell you that. Deploying the code does not repair existing rows; a backfill is a
+separate, explicit step.
+
+**Related:** `docs/issues/issue-bulk-upload-never-recalculates-conditions.md` (root
+cause, production measurements, Lab PC runbook); footnote 4 in
+`docs/LOCKED_COMPONENTS.md`; `docs/CALCULATIONS.md` (the full list of paths that
+recalculate); pinned by
+`tests/services/bulk_uploads/test_new_experiments_conditions_recalc.py`.

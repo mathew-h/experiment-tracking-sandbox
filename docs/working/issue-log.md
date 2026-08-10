@@ -2056,3 +2056,68 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   (E302, one 126-char line and an unused `e` removed; W293 172 -> 141, W291 8 -> 6).
 - **Full suite:** 1420 passed, 4 skipped, 3 failed - the 3 being the pre-existing
   `tests/test_pg_backup_restore.py` failures, confirmed identical on `develop`.
+
+## 2026-08-10 | inline Bulk upload never recalculated conditions derived fields
+- **Files changed:** `backend/services/bulk_uploads/new_experiments.py`,
+  `tests/services/bulk_uploads/test_new_experiments_conditions_recalc.py`,
+  `docs/CALCULATIONS.md`, `docs/LOCKED_COMPONENTS.md`, `.claude/rules/MODELS.md`,
+  `.claude/rules/schema-checklist.md`,
+  `docs/issues/issue-bulk-upload-never-recalculates-conditions.md`,
+  `docs/issues/issue-rollup-replicate-count-and-null-timepoint-buckets.md`,
+  `docs/superpowers/plans/2026-08-10-bulk-upload-conditions-recalculate.md`,
+  `docs/working/decisions.md`
+- **Tests added:** yes - 6 new cases in one new file: 3 unit tests for the helper
+  (both fields set; unknown id skipped silently; one failing row does not cost the
+  others) and 3 integration tests through `bulk_upsert_from_excel` (conditions sheet,
+  parent auto-copy, additives-only), plus 2 added during review - an overwrite that
+  changes `rock_mass_g`, and the end-to-end `SERUM_Catalyst_001a-t3` reproduction
+  (353.88 ppm / 30 mL / 14.7 psi -> Fe2+ %H2 = 0.100%)
+- **Decision logged:** yes - `docs/working/decisions.md`, 2026-08-10
+- **Root cause:** `water_to_rock_ratio` and `total_ferrous_iron_g` are STORED derived
+  fields. Every write path called `recalculate()` after mutating a conditions row -
+  `conditions.py:103`/`:125`, `experiments.py:1329`, `lineage_utils.py:603`, and the
+  elemental-upload propagation - except this uploader, which recalculated only
+  `ChemicalAdditive`. `calculate_ferrous_iron_yield_h2` returns None when
+  `total_ferrous_iron_g` is None, so every scalar result under a bulk-created
+  experiment silently lost BOTH Fe2+ yield percentages. Reported as a GC
+  direct-injection bug; DI was a coincidence (the DI-era runs were all bulk-created).
+  `SERUM_Cation_001a-t5`, same sample and same 30 mL / 14.7 psi geometry, HAS its
+  Fe2+ %H2 because a later elemental upload recalculated its conditions.
+- **The diagnostic:** a NULL `water_to_rock_ratio` on a row with positive rock mass
+  and water volume. Two computable derived fields both empty means `recalculate()`
+  never ran - not that an input was missing.
+- **Production scope (backup 2026-08-10 01:00):** 845 of 1125 conditions rows had
+  `total_ferrous_iron_g` NULL; 249 of 577 scalar rows with a computed `h2_micromoles`
+  had no Fe2+ %H2 (157 recoverable, 77 blocked on missing FeO, 15 stale scalar rows).
+  **Production is NOT yet backfilled** - see the Lab PC runbook in the issue doc.
+- **Dev DB backfilled:** `total_ferrous_iron_g` NULL 732 -> 454; both-derived-NULL-
+  with-inputs 137 -> 0; scalar rows missing Fe2+ %H2 158 -> 87, and all 87 remaining
+  are the sample-has-no-FeO bucket, so zero fixable rows remain.
+- **Pre-merge findings (all fixed before merge):** (1) the helper's `db.get()` sat
+  OUTSIDE its per-row `try`, so one DBAPI error aborted the transaction and the next
+  iteration raised `PendingRollbackError` into the router's blanket handler, discarding
+  an otherwise-good upload - and half-applied mutations were committed while the warning
+  said the row failed. Now `db.begin_nested()` per row, matching this file's existing
+  idiom, with a raising `savepoint.commit()` also contained. (2) The cascade into
+  pre-existing `ScalarResults` - the mechanism the whole backfill relies on - had no
+  test; added, and proven by ablation to fail when only the cascade is disabled.
+  (3) The docstring's PK-keying rationale was false in both halves (`db.expire_all()`
+  precedes all three record sites; site 3 is outside the additives savepoint).
+  (4) Docs claimed the count is reported in `info_messages`, which the router
+  destructures as `_info` and discards.
+- **Known gap (deliberate, out of scope):** the recalculation count is computed but
+  never surfaced - wiring it needs an `UploadResponse` field and frontend rendering.
+- **Also fixed:** `.claude/rules/schema-checklist.md` Phase 4 told engineers to run
+  `create_reporting_views()`, a function that has never existed; views are recreated by
+  a module-level block in `database/event_listeners.py`. Replacement verified by
+  dropping a view and watching `python -c "import database.event_listeners"` restore it.
+- **Lint:** no new findings. The single flake8 F-code on the touched file (F401,
+  `ChemicalInventoryService` unused, line 22) is pre-existing and identical on
+  `develop`; zero import lines were changed. `black --check` is not enforced in this
+  repo - untouched files fail it too - so no reformatting was done (the file is locked).
+- **Not satisfiable:** the pre-merge checklist's "calculation events appear in
+  `logs/calculations.log`" - the calculation engine contains no logging at all and
+  `logs/` is gitignored. Stale checklist item, same class as the phantom function above.
+- **Full suite:** 1430 passed, 4 skipped, 3 failed - the 3 being the pre-existing
+  `tests/test_pg_backup_restore.py` failures, confirmed identical by running that file
+  on `develop`.
