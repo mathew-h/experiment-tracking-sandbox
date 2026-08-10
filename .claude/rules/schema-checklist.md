@@ -84,8 +84,12 @@ alembic upgrade head
 # Test ORM models
 pytest tests/models/test_integrity.py -v
 
-# If views depend on your change, recreate them:
-python3 -c "from database.event_listeners import create_reporting_views; create_reporting_views()"
+# If views depend on your change, recreate them. There is NO create_reporting_views()
+# function — earlier revisions of this checklist named one and it never existed. The
+# views are dropped and recreated by a module-level block in database/event_listeners.py
+# (see its `try:` around the _VIEWS loop), so importing the module in a fresh process
+# re-runs it. Verified 2026-08-10 by dropping a view and watching this restore it:
+python -c "import database.event_listeners"
 
 # Verify sample data still loads (Milestone 1 concern)
 python3 scripts/migrate-sqlite-to-postgres.py
