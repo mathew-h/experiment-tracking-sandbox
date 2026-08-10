@@ -847,13 +847,42 @@ db.close()
 "
 ```
 
-- [ ] **Step 5: Recreate the reporting views**
+- [ ] **Step 5: Verify the reporting layer sees the backfilled values**
 
-`v_results_scalar` and `v_results_scalar_rollup` read the columns just backfilled. Recreate them so Power BI sees a definition matching the current schema:
+**Do not try to "recreate the views."** An earlier draft of this plan told you to run
+`from database.event_listeners import create_reporting_views; create_reporting_views()`.
+**That function does not exist** — the name is a stale instruction in
+`.claude/rules/schema-checklist.md:88` that this plan inherited. `database/event_listeners.py`
+drops and recreates every view in a module-level `try` block at **import time**
+(`event_listeners.py:672-689`), so there is no callable entry point, and any process that
+imports the app has already done it.
 
-Run: `.venv/Scripts/python -c "from database.event_listeners import create_reporting_views; create_reporting_views()"`
+Recreation would be a no-op here regardless: a view is a stored `SELECT`, it caches no
+data, and this task changes only column *values* — no schema changed, so no view
+definition changed. What actually needs proving is that the reporting layer surfaces the
+backfilled numbers, since Power BI is where a researcher reads them.
 
-Expected: no output and no exception.
+Run:
+
+```bash
+.venv/Scripts/python -c "
+from database.database import SessionLocal
+from sqlalchemy import text
+db = SessionLocal()
+q = lambda s: db.execute(text(s)).scalar()
+print('v_results_scalar_rollup rows                :', q('SELECT count(*) FROM v_results_scalar_rollup'))
+print('  with non-null mean_fe_yield_h2_pct        :', q('SELECT count(*) FROM v_results_scalar_rollup WHERE mean_fe_yield_h2_pct IS NOT NULL'))
+print('v_results_scalar rows                       :', q('SELECT count(*) FROM v_results_scalar'))
+print('  with non-null ferrous_iron_yield_h2_pct   :', q('SELECT count(*) FROM v_results_scalar WHERE ferrous_iron_yield_h2_pct IS NOT NULL'))
+db.close()
+"
+```
+
+Expected: all four queries succeed (proving the views are intact and readable), and both
+non-null counts are greater than zero. Record the two non-null counts — they are the
+reporting-layer evidence that the backfill reached Power BI's surface. If a query raises
+`UndefinedColumn`, stop and report: that means a view definition genuinely disagrees with
+the schema, which is a separate problem from this backfill.
 
 - [ ] **Step 6: Verify the dev DB after**
 
@@ -897,7 +926,14 @@ Dev DB, <date>:
 `backfill_total_ferrous_iron_017.py` updated <n> conditions rows and cascaded to
 <n> scalar rows; `recalculate_all_registry_012.py::_backfill_scalars` then
 recalculated <n> scalar rows, catching the ones whose conditions already had a
-value. Reporting views recreated afterwards via `create_reporting_views()`.
+value. Reporting-layer check afterwards: `v_results_scalar_rollup` had <n> rows with a
+non-null `mean_fe_yield_h2_pct` and `v_results_scalar` <n> with a non-null
+`ferrous_iron_yield_h2_pct`.
+
+No view recreation is needed for this backfill — views cache no data and no schema
+changed. (`database/event_listeners.py` drops and recreates them at import time anyway;
+the `create_reporting_views()` function named in `.claude/rules/schema-checklist.md:88`
+does not exist.)
 
 ### Lab PC runbook
 
@@ -906,8 +942,11 @@ Run **after** deploying this branch, from the repo root on the lab PC, in this o
 1. `.venv/Scripts/python database/data_migrations/backfill_total_ferrous_iron_017.py --dry-run` — confirm `Errors: 0`
 2. `.venv/Scripts/python database/data_migrations/backfill_total_ferrous_iron_017.py`
 3. `.venv/Scripts/python -c "from database import SessionLocal; from database.data_migrations.recalculate_all_registry_012 import _backfill_scalars; db = SessionLocal(); _backfill_scalars(db, dry_run=False); db.close()"`
-4. `.venv/Scripts/python -c "from database.event_listeners import create_reporting_views; create_reporting_views()"`
-5. Refresh the Power BI dataset.
+4. Refresh the Power BI dataset.
+
+Step 3 commits per chunk, so an interruption leaves the chunks it finished already
+committed — re-running it is safe and idempotent (`recalculate` is a pure recomputation
+from current inputs).
 
 The 77 rows whose sample has no FeO on record stay NULL. They resolve on their own
 once that rock's elemental data is uploaded — `recalculate_conditions_for_samples`
