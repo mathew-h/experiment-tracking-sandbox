@@ -176,6 +176,290 @@ class TestICPServiceBasicFunctionality:
         assert mg_row['Element Label'] == 'Mg 285.213'   # higher intensity Mg line
 
 
+class TestICPLabelTimepointToken:
+    """The ID's '-t<days>' token is canonical for a vial's day (spec 2026-08-07)."""
+
+    def test_id_token_wins_over_disagreeing_day(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Cation_005c-t5_Day12_21x")
+        assert info is not None
+        assert info.experiment_id == "SERUM_Cation_005c-t5"
+        assert info.time_post_reaction == 5.0
+        assert info.dilution_factor == 21.0
+        assert info.time_source == "id_token"
+        assert info.label_day_days == 12.0
+        assert info.day_disagrees is True
+
+    def test_day_token_may_be_omitted_entirely(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Cation_005c-t5_21x")
+        assert info is not None
+        assert info.experiment_id == "SERUM_Cation_005c-t5"
+        assert info.time_post_reaction == 5.0
+        assert info.dilution_factor == 21.0
+        assert info.time_source == "id_token"
+        assert info.label_day_days is None
+        assert info.day_disagrees is False
+
+    def test_agreeing_day_is_not_a_disagreement(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Catalyst_001a-t7_Day7_21x")
+        assert info is not None
+        assert info.time_post_reaction == 7.0
+        assert info.day_disagrees is False
+
+    def test_fractional_token_agrees_within_tolerance(self):
+        info = ICPService.extract_sample_info_ex("SERUM_Cation_005c-t0.5_Day0.5_21x")
+        assert info is not None
+        assert info.experiment_id == "SERUM_Cation_005c-t0.5"
+        assert info.time_post_reaction == 0.5
+        assert info.day_disagrees is False
+
+    def test_day_still_supplies_time_when_id_has_no_token(self):
+        info = ICPService.extract_sample_info_ex("HPHT_231_Day6_21x")
+        assert info is not None
+        assert info.experiment_id == "HPHT_231"
+        assert info.time_post_reaction == 6.0
+        assert info.dilution_factor == 21.0
+        assert info.time_source == "day_label"
+        assert info.label_day_days == 6.0
+        assert info.day_disagrees is False
+
+    @pytest.mark.parametrize("label,exp_id,day,dil", [
+        ("Serum_MH_011_Day5_5x", "Serum_MH_011", 5.0, 5.0),
+        ("Serum-MH-025_Time3_10x", "Serum-MH-025", 3.0, 10.0),
+        ("Serum_MH_011_Day5_5", "Serum_MH_011", 5.0, 5.0),   # trailing 'x' optional
+        ("HPHT_MH_004_Day7.5_15x", "HPHT_MH_004", 7.5, 15.0),
+    ])
+    def test_legacy_labels_are_unchanged(self, label, exp_id, day, dil):
+        info = ICPService.extract_sample_info_ex(label)
+        assert info is not None
+        assert info.experiment_id == exp_id
+        assert info.time_post_reaction == day
+        assert info.dilution_factor == dil
+        assert info.time_source == "day_label"
+
+    @pytest.mark.parametrize("label", [
+        "HPHT_231_21x",                 # dilution but no timepoint anywhere
+        "SERUM_Cation_005c-T5_21x",     # uppercase T is not the canonical token
+        "SERUM_Cation_005c_t5_21x",     # underscore spelling is not the canonical token
+        "Standard 1",
+        "Blank",
+        "Standard_1",
+        "HPHT_231",
+        "",
+    ])
+    def test_labels_with_no_timepoint_return_none(self, label):
+        assert ICPService.extract_sample_info_ex(label) is None
+
+    def test_wrapper_returns_exactly_three_keys(self):
+        """Guards the all_elements trap: create_icp_result splats this dict and
+        icp_service.py:520 stores any unknown key as a fake element."""
+        result = ICPService.extract_sample_info("SERUM_Cation_005c-t5_Day12_21x")
+        assert set(result.keys()) == {
+            "experiment_id", "time_post_reaction", "dilution_factor"
+        }
+        assert result["time_post_reaction"] == 5.0
+
+    @staticmethod
+    def _csv(labels):
+        """Minimal 2-header-row ICP export with one Fe row per label."""
+        rows = "\n".join(
+            f"{label},Fe 238.204,10.0,1500,SAMP" for label in labels
+        )
+        return (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            f"{rows}\n"
+        ).encode("utf-8")
+
+    def test_disagreement_emits_one_file_level_warning(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "SERUM_Cation_005c-t5_Day12_21x",
+            "SERUM_Cation_005d-t5_Day12_21x",
+            "SERUM_Catalyst_001a-t7_Day7_21x",   # agrees: comparable, not counted
+        ]))
+        data, errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 3
+        assert skipped == 0
+        assert len(warnings) == 1
+        w = warnings[0]
+        assert "2 of 3 labels" in w
+        assert "SERUM_Cation_005c-t5_Day12_21x" in w
+        assert "SERUM_Cation_005d-t5_Day12_21x" in w
+        assert "SERUM_Catalyst_001a-t7_Day7_21x" not in w
+        # every row still written, at the ID's day
+        assert sorted(d["time_post_reaction"] for d in data) == [5.0, 5.0, 7.0]
+
+    def test_disagreement_warning_omits_label_list_above_ten(self):
+        labels = [f"SERUM_Cation_{i:03d}a-t5_Day12_21x" for i in range(11)]
+        df = ICPService.parse_csv_file(self._csv(labels))
+        _data, _errors, warnings, _skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(warnings) == 1
+        assert "11 of 11 labels" in warnings[0]
+        assert "SERUM_Cation_000a-t5_Day12_21x" not in warnings[0]
+
+    def test_labels_with_no_timepoint_are_counted_and_named(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "HPHT_231_Day6_21x",              # fine
+            "HPHT_232_21x",                   # no timepoint -> reported
+            "SERUM_Cation_005c-T5_21x",       # typo'd token -> reported
+        ]))
+        data, _errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 1
+        assert skipped == 2
+        assert len(warnings) == 1
+        assert "HPHT_232_21x" in warnings[0]
+        assert "SERUM_Cation_005c-T5_21x" in warnings[0]
+        assert "lowercase" in warnings[0]
+
+    def test_standards_and_blanks_are_never_reported(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "HPHT_231_Day6_21x", "Standard 1", "Standard_1", "HPHT_231",
+        ]))
+        data, _errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 1
+        assert skipped == 0
+        assert warnings == []
+
+    def test_clean_file_emits_no_warnings(self):
+        df = ICPService.parse_csv_file(self._csv([
+            "SERUM_Cation_005c-t5_21x", "HPHT_231_Day6_21x",
+        ]))
+        data, errors, warnings, skipped = ICPService.process_icp_dataframe_ex(df)
+
+        assert len(data) == 2
+        assert errors == []
+        assert warnings == []
+        assert skipped == 0
+
+    def test_parse_and_process_ex_threads_warnings_through(self):
+        content = self._csv(["SERUM_Cation_005c-t5_Day12_21x"])
+        data, _errors, warnings, skipped = ICPService.parse_and_process_icp_file_ex(content)
+
+        assert len(data) == 1
+        assert data[0]["time_post_reaction"] == 5.0
+        assert len(warnings) == 1
+        assert skipped == 0
+
+    def test_two_tuple_wrappers_keep_their_arity(self):
+        content = self._csv(["SERUM_Cation_005c-t5_Day12_21x"])
+        df = ICPService.parse_csv_file(content)
+
+        data, errors = ICPService.process_icp_dataframe(df)
+        assert len(data) == 1 and errors == []
+
+        data2, errors2 = ICPService.parse_and_process_icp_file(content)
+        assert len(data2) == 1 and errors2 == []
+
+
+class TestICPTimepointTokenPersistence:
+    """The ICP row must land on the ExperimentalResults for the ID's day."""
+
+    def test_icp_row_is_written_at_the_id_token_day(self, test_db):
+        exp = Experiment(
+            experiment_id="SERUM_Cation_005c-t5",
+            experiment_number=2,
+            researcher="Test Researcher",
+            date=datetime.now(),
+            status="ONGOING",
+        )
+        test_db.add(exp)
+        test_db.commit()
+
+        csv = (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            "SERUM_Cation_005c-t5_Day12_21x,Fe 238.204,10.0,1500,SAMP\n"
+            "SERUM_Cation_005c-t5_Day12_21x,Ni 231.604,2.0,600,SAMP\n"
+        ).encode("utf-8")
+
+        data, errors, warnings, skipped = ICPService.parse_and_process_icp_file_ex(csv)
+        assert errors == [], errors
+        assert skipped == 0
+        assert len(warnings) == 1
+
+        created, updated, ingest_errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert ingest_errors == [], ingest_errors
+        test_db.commit()
+
+        rows = (
+            test_db.query(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == exp.id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].time_post_reaction_days == 5.0      # the ID's day, not 12
+        assert rows[0].icp_data is not None
+        assert rows[0].icp_data.dilution_factor == 21.0
+        # dilution applied: 10.0 ppm * 21x
+        assert rows[0].icp_data.fe == pytest.approx(210.0)
+
+    def test_label_without_day_lands_on_the_same_day(self, test_db):
+        exp = Experiment(
+            experiment_id="SERUM_Cation_006a-t3",
+            experiment_number=3,
+            researcher="Test Researcher",
+            date=datetime.now(),
+            status="ONGOING",
+        )
+        test_db.add(exp)
+        test_db.commit()
+
+        csv = (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            "SERUM_Cation_006a-t3_21x,Fe 238.204,10.0,1500,SAMP\n"
+        ).encode("utf-8")
+
+        data, errors, warnings, skipped = ICPService.parse_and_process_icp_file_ex(csv)
+        assert errors == [], errors
+        assert warnings == []       # no Day token, so nothing to disagree with
+
+        _created, _updated, ingest_errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert ingest_errors == [], ingest_errors
+        test_db.commit()
+
+        rows = (
+            test_db.query(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == exp.id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].time_post_reaction_days == 3.0
+        assert rows[0].icp_data is not None
+
+    def test_disagreement_warning_never_claims_a_rejected_row_was_written(self, test_db):
+        """The disagreement tally runs at parse time, before the write decides
+        anything, so its wording must be a claim about the LABEL only.
+
+        A row that disagrees AND is then rejected is named in the warning too. If
+        the warning asserted "each reading was recorded at the day its ID encodes"
+        it would contradict that row's own error in the same response — the failure
+        mode recorded in docs/working/decisions.md on 2026-08-07.
+        """
+        csv = (
+            "Header Row 1\nHeader Row 2\n"
+            "Label,Element Label,Concentration,Intensity,Type\n"
+            "ZZZNOPE_999a-t5_Day12_21x,Fe 238.204,10.0,1500,SAMP\n"
+        ).encode("utf-8")
+
+        data, _errors, warnings, _skipped = ICPService.parse_and_process_icp_file_ex(csv)
+        assert len(data) == 1
+        assert len(warnings) == 1
+
+        _created, _updated, ingest_errors = ICPService.bulk_create_icp_results(test_db, data)
+        # The experiment does not exist and this ID shape is not auto-creatable.
+        assert len(ingest_errors) == 1
+        assert "not found" in ingest_errors[0]
+
+        # ...so nothing was written, and the warning must not say otherwise.
+        assert "ZZZNOPE_999a-t5_Day12_21x" in warnings[0]
+        assert "was recorded" not in warnings[0]
+        assert "label mismatch only" in warnings[0]
+
+
 class TestICPServiceProcessing:
     """Test ICP data processing workflows."""
     
@@ -738,9 +1022,12 @@ class TestICPRouterOverwrite:
             'backend.services.icp_service.ICPService.bulk_create_icp_results',
             fake_bulk_create,
         )
+        # Must patch the _ex name the router actually calls: the 2-tuple wrapper
+        # is no longer on the request path (2026-08-07). Returning empty errors
+        # keeps the "ICP parse failed" gate shut so bulk_create is still reached.
         monkeypatch.setattr(
-            'backend.services.icp_service.ICPService.parse_and_process_icp_file',
-            lambda _: ([], []),
+            'backend.services.icp_service.ICPService.parse_and_process_icp_file_ex',
+            lambda _: ([], [], [], 0),
         )
 
         try:

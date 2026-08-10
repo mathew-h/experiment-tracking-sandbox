@@ -410,11 +410,55 @@ def test_master_results_config_endpoints_removed():
     assert config_paths == []
 
 
+def _icp_csv(*labels: str) -> bytes:
+    """Minimal 2-header-row ICP export with one Fe row per label."""
+    rows = "\n".join(f"{label},Fe 238.204,10.0,1500,SAMP" for label in labels)
+    return (
+        "Header Row 1\nHeader Row 2\n"
+        "Label,Element Label,Concentration,Intensity,Type\n"
+        f"{rows}\n"
+    ).encode("utf-8")
+
+
+def test_icp_oes_returns_day_disagreement_warning(client):
+    """A Day/-t disagreement is reported in warnings without rejecting the row."""
+    resp = client.post(
+        "/api/bulk-uploads/icp-oes",
+        files={"file": ("icp.csv", io.BytesIO(_icp_csv(
+            "SERUM_Cation_005c-t5_Day12_21x",
+        )), "text/csv")},
+        data={"dry_run": "true"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["warnings"]) == 1
+    assert "-t token" in body["warnings"][0]
+    assert "SERUM_Cation_005c-t5_Day12_21x" in body["warnings"][0]
+
+
+def test_icp_oes_reports_skips_when_nothing_parses(client):
+    """The early "ICP parse failed" return must carry warnings too. This is the
+    whole-file labelling mistake, where the warning is the ONLY explanation for
+    why nothing uploaded."""
+    resp = client.post(
+        "/api/bulk-uploads/icp-oes",
+        files={"file": ("icp.csv", io.BytesIO(_icp_csv("HPHT_232_21x")), "text/csv")},
+        data={"dry_run": "true"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["created"] == 0
+    assert body["message"] == "ICP parse failed"
+    assert body["skipped"] == 1
+    assert len(body["warnings"]) == 1
+    assert "HPHT_232_21x" in body["warnings"][0]
+
+
 def test_icp_oes_returns_upload_response_shape(client):
     stub_vc = MagicMock()
     stub_vc.ICP_FIXED_ELEMENT_FIELDS = ["fe", "si", "mg"]
     mock_icp = MagicMock()
-    mock_icp.parse_and_process_icp_file.return_value = ([{"experiment_fk": 1}], [])
+    mock_icp.parse_and_process_icp_file_ex.return_value = ([{"experiment_fk": 1}], [], [], 0)
     mock_icp.bulk_create_icp_results.return_value = ([MagicMock()], [])
     fake_mod = MagicMock()
     fake_mod.ICPService = mock_icp
@@ -443,7 +487,7 @@ def test_icp_oes_dry_run_rolls_back(client, db_session):
     stub_vc = MagicMock()
     stub_vc.ICP_FIXED_ELEMENT_FIELDS = ["fe", "si", "mg"]
     mock_icp = MagicMock()
-    mock_icp.parse_and_process_icp_file.return_value = ([{"experiment_fk": 1}], [])
+    mock_icp.parse_and_process_icp_file_ex.return_value = ([{"experiment_fk": 1}], [], [], 0)
     mock_icp.bulk_create_icp_results.return_value = ([MagicMock()], 0, [])
     fake_mod = MagicMock()
     fake_mod.ICPService = mock_icp
@@ -463,6 +507,11 @@ def test_icp_oes_dry_run_rolls_back(client, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert body["dry_run"] is True
+    # Pins the REAL success path: if the router's call name and the mocked
+    # attribute ever drift apart, the unpack raises, and the except branch also
+    # satisfies the rollback/commit assertions below -- so this test would
+    # silently stop proving dry-run behavior.
+    assert body["message"].startswith("[DRY RUN] ICP-OES:")
     mock_rollback.assert_called_once()
     mock_commit.assert_not_called()
 

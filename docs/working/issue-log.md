@@ -1988,3 +1988,71 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
   rather than the raw string, accepting the converse risk above — recorded as the footnote
   in `docs/LOCKED_COMPONENTS.md`.
 - **Docs updated:** yes.
+
+## 2026-08-07 - ICP label timepoint: `-t<days>` wins over `_Day<n>`
+
+- **Audit finding:** the ID does **not** fail to parse. `extract_sample_info`'s regex
+  is end-anchored, so `SERUM_Cation_005c-t5_Day12_21x` correctly yielded
+  `SERUM_Cation_005c-t5`. What broke is the timepoint: `Day12` became the result's
+  day while the vial ID declared day 5, and `icp_service.py` is the one write path
+  that never called `apply_id_timepoint`, so nothing raised.
+- **Measured before the change (dev DB, 2026-08-07):** 969 `icp_results` rows, of
+  which **0** carry a `-t` token in `raw_label` and 969 carry `_Day`/`_Time`;
+  167 of 1009 experiments are `-t` vials across 82 distinct stems, **0** of which
+  have a bare experiment row; **0** ICP results were attached to any `-t` vial. The
+  failure was entirely prospective - no backfill was needed.
+- **Decisions (user, 2026-08-07):** the ID wins on the row (never rejected); `Day`
+  becomes optional when `-t` is present; labels with no timepoint are reported as
+  warnings; and the disagreement gets **one file-level warning**, aligning with
+  `master_bulk_upload.py:766` after that precedent was surfaced.
+- **Locked component:** `icp_service.py` (`docs/LOCKED_COMPONENTS.md`) - explicit
+  sign-off given; recorded as footnote 3.
+- **Three mocks had to be re-pointed at the `_ex` name**, in
+  `tests/api/test_bulk_uploads.py` (x2) and `tests/test_icp_handling.py`
+  (`TestICPRouterOverwrite`). All three referenced `parse_and_process_icp_file` by
+  attribute name, so after the router switched to `_ex` the mock returned a bare
+  `MagicMock`, the 4-way unpack raised, and the router except branch swallowed it.
+  `test_icp_oes_dry_run_rolls_back` would still have PASSED - the except branch also
+  satisfies its rollback-called/commit-not-called assertions - so it would have
+  silently stopped proving dry-run. It now asserts the `[DRY RUN] ICP-OES:` message
+  to pin the real success path.
+- **Scope notes - deliberately not fixed:**
+  1. `_find_experiment` still uses its own naive strip-and-concatenate key plus
+     `.first()` rather than `_id_match.normalize_id` / `find_experiment_matches`. It
+     is *stricter* on zero padding than the canonical key, so `SERUM_Catalyst_1a-t7`
+     will not match stored `SERUM_Catalyst_001a-t7`. Measured 0 collisions across all
+     1009 experiments.
+  2. `-T5` / `_t5` spellings remain unaccepted - widening them changes the repo-wide
+     ID grammar, already scoped to its own task. They now land in the *reported* skip
+     bucket rather than vanishing.
+  3. `tests/test_icp_parsing.py` and `tests/test_icp_service.py` are print-only
+     scripts (the former re-implements the parser locally and asserts nothing). Left
+     untouched; real coverage went into `tests/test_icp_handling.py`.
+  4. The 2-tuple wrappers are retained because
+     `legacy/streamlit_frontend/bulk_uploads.py:1558,1599` still calls
+     `parse_and_process_icp_file`.
+- **Tests added:** yes - `tests/test_icp_handling.py::TestICPLabelTimepointToken`
+  (25 cases) and `::TestICPTimepointTokenPersistence` (2), plus 2 endpoint tests.
+- **Docs updated:** yes.
+
+## 2026-08-10 | inline - ICP label timepoint token (`/complete-task` record)
+- **Files changed:** `backend/services/icp_service.py`,
+  `backend/api/routers/bulk_uploads.py`, `tests/test_icp_handling.py`,
+  `tests/api/test_bulk_uploads.py`, `docs/upload_templates/icp_oes_upload.md`,
+  `docs/LOCKED_COMPONENTS.md`, `.claude/rules/MODELS.md`, `docs/working/decisions.md`
+- **Tests added:** yes - 30 new cases: `TestICPLabelTimepointToken` (25),
+  `TestICPTimepointTokenPersistence` (3, incl. the rejected-row wording guard),
+  and 2 endpoint tests in `tests/api/test_bulk_uploads.py`
+- **Decision logged:** yes - `docs/working/decisions.md`, 2026-08-10
+- **Pre-merge finding (fixed before merge):** the disagreement warning was worded as a
+  claim about persisted data ("each reading was recorded at the day its ID encodes"),
+  copied from the post-write sibling in `master_bulk_upload.py`. The ICP tally runs at
+  parse time, so a row that disagrees and is then rejected was named in a warning
+  contradicting its own error - reproduced on a real request with
+  `ZZZNOPE_999a-t5_Day12_21x`. This is the 2026-08-07 decision recurring in a second
+  parser. Reworded to a label-level claim and pinned by a test; recorded as footnote 3
+  property (f) in `docs/LOCKED_COMPONENTS.md`.
+- **Lint:** no new findings; strictly cleaner than `develop` on the touched files
+  (E302, one 126-char line and an unused `e` removed; W293 172 -> 141, W291 8 -> 6).
+- **Full suite:** 1420 passed, 4 skipped, 3 failed - the 3 being the pre-existing
+  `tests/test_pg_backup_restore.py` failures, confirmed identical on `develop`.

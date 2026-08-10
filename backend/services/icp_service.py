@@ -1,19 +1,53 @@
 import pandas as pd
 import re
 import datetime as dt
-from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List, Literal, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import Experiment, ExperimentalResults, ICPResults, ModificationsLog
+from database.experiment_id_parser import split_timepoint_token
 from io import StringIO
 from frontend.config.variable_config import ICP_FIXED_ELEMENT_FIELDS
 from backend.services.result_merge_utils import (
+    TIMEPOINT_TOLERANCE_DAYS,
     create_experimental_result_row,
     ensure_primary_result_for_timepoint,
     find_timepoint_candidates,
     choose_parent_candidate,
     update_cumulative_times_for_chain,
 )
+
+# Label grammar, peeled right-to-left (spec 2026-08-07 §3). Dilution is split out
+# of the old welded '_(Day|Time)N_Nx$' pattern so that a label MAY omit Day: the
+# ID's '-t<days>' token supplies the day instead.
+_DILUTION_RE = re.compile(r'_(\d+(?:\.\d+)?)x?$', re.IGNORECASE)
+_DAY_RE = re.compile(r'_(?:Day|Time)(\d+(?:\.\d+)?)$', re.IGNORECASE)
+
+# Whether an unparseable label is worth telling the researcher about. Standards
+# and blanks ("Standard 1", "Blank", "Standard_1") match none of these and stay
+# silently skipped, as they always have. A bare ID ("HPHT_231") also stays silent
+# even though _DILUTION_RE matches its trailing '_231' — the required 'x' is what
+# distinguishes a real dilution token from an ID's numeric segment here. This
+# stricter test governs REPORTING only; it never affects whether a label parses.
+_LOOKS_LIKE_SAMPLE_RE = re.compile(r'_\d+(?:\.\d+)?x$|_(?:Day|Time)\d|-[tT]\d')
+
+
+@dataclass(frozen=True)
+class LabelInfo:
+    """Everything an ICP `Label` encodes, including provenance that is discarded.
+
+    `time_post_reaction` is the EFFECTIVE day. `label_day_days` retains what the
+    label's Day/Time token said even when it was not used, so the caller can
+    report a disagreement without re-parsing.
+    """
+    experiment_id: str
+    time_post_reaction: float
+    dilution_factor: float
+    time_source: Literal['id_token', 'day_label']
+    label_day_days: Optional[float]
+    day_disagrees: bool
+
 
 class ICPService:
     """Service for handling ICP elemental analysis data operations."""
@@ -133,60 +167,106 @@ class ICPService:
             raise ValueError(error_msg)
     
     @staticmethod
-    def extract_sample_info(label: str) -> Dict[str, Any]:
+    def extract_sample_info_ex(label: str) -> Optional[LabelInfo]:
         """
-        Extract experiment ID, time point, and dilution factor from label column.
-        
-        Expected format: 'Serum_MH_011_Day5_5x' or 'Serum-MH-011_Day5_5x'
-        Supports dashes and underscores in experiment IDs.
-        
-        Args:
-            label: Sample label string
-            
-        Returns:
-            Dictionary with experiment_id, time_post_reaction, and dilution_factor
-            Returns None if label doesn't match expected pattern (e.g., "Standard 1", "Blank")
+        Parse an ICP `Label` into experiment ID, effective timepoint and dilution.
+
+        Grammar, peeled right-to-left:
+          1. `_<N>x` dilution token (required; the trailing 'x' is optional)
+          2. optional `_Day<N>` / `_Time<N>` token
+          3. whatever remains is the experiment ID
+
+        The experiment ID's trailing '-t<days>' token is canonical for that vial's
+        day (Mat, 2026-07-30), so when present it WINS outright and the label's Day
+        value is discarded — reported by the caller, never rejected. This matches
+        `master_bulk_upload.py:383` and deliberately differs from
+        `POST /api/results`, which still 400s on a conflict via `apply_id_timepoint`:
+        a hand-entered result has one author to correct, whereas an ICP label is
+        machine-written by the worklist.
+
+        Returns None when no timepoint can be determined — no '-t' token in the ID
+        and no Day/Time token in the label — or when there is no dilution token.
+        Standards and blanks ("Standard 1", "Blank") fall out here.
+
+        Examples:
+            'SERUM_Cation_005c-t5_Day12_21x' -> day 5.0,  day_disagrees=True
+            'SERUM_Cation_005c-t5_21x'       -> day 5.0,  label_day_days=None
+            'HPHT_231_Day6_21x'              -> day 6.0,  time_source='day_label'
+            'HPHT_231_21x'                   -> None
         """
-        try:
-            # Pattern to match: ExpID_(Day|Time)Number_DilutionFactorx
-            # More robust approach to handle dashes/underscores in experiment IDs
-            # Examples: Serum_MH_011_Day5_5x, Serum-MH-025_Time3_10x, Test_Sample_A_Day1_2x
-            
-            # Use search from the end to find the last occurrence of the time pattern
-            time_pattern = r'_(Day|Time)(\d+(?:\.\d+)?)_(\d+(?:\.\d+)?)x?$'
-            time_match = re.search(time_pattern, label, re.IGNORECASE)
-            
-            if not time_match:
-                # Return None for non-matching labels (Standards, Blanks, etc.)
-                return None
-            
-            # Extract the experiment ID by removing the time pattern from the end
-            experiment_id = label[:time_match.start()]
-            time_unit = time_match.group(1).lower()
-            time_value = float(time_match.group(2))
-            dilution_factor = float(time_match.group(3))
-            
-            # Clean up trailing underscore/hyphen if present after stripping time
-            if experiment_id and experiment_id[-1] in ['_', '-']:
-                experiment_id = experiment_id[:-1]
-            
-            # Convert time to days if needed
-            if time_unit == 'time':
-                # Assume 'Time' units are in days (adjust if different)
-                time_post_reaction = time_value
-            else:  # 'day'
-                time_post_reaction = time_value
-            
-            return {
-                'experiment_id': experiment_id,
-                'time_post_reaction': time_post_reaction,
-                'dilution_factor': dilution_factor
-            }
-            
-        except Exception as e:
-            # Return None for any parsing errors instead of raising
+        if not label or not isinstance(label, str):
             return None
-    
+
+        remainder = label.strip()
+
+        dilution_match = _DILUTION_RE.search(remainder)
+        if not dilution_match:
+            return None
+        dilution_factor = float(dilution_match.group(1))
+        remainder = remainder[:dilution_match.start()]
+
+        label_day_days: Optional[float] = None
+        day_match = _DAY_RE.search(remainder)
+        if day_match:
+            label_day_days = float(day_match.group(1))
+            remainder = remainder[:day_match.start()]
+
+        experiment_id = remainder.rstrip('_-')
+        if not experiment_id:
+            return None
+
+        # Never re-implement the token grammar here: delegate to the canonical
+        # parser so ICP cannot drift from lineage. The '_t5' / '-T5' spellings are
+        # deliberately NOT accepted -- widening them changes the repo-wide ID
+        # grammar and has its own task (docs/working/issue-log.md, 2026-08-07).
+        _stem, id_timepoint_days = split_timepoint_token(experiment_id)
+
+        if id_timepoint_days is not None:
+            disagrees = (
+                label_day_days is not None
+                and abs(label_day_days - id_timepoint_days) > TIMEPOINT_TOLERANCE_DAYS
+            )
+            return LabelInfo(
+                experiment_id=experiment_id,
+                time_post_reaction=id_timepoint_days,
+                dilution_factor=dilution_factor,
+                time_source='id_token',
+                label_day_days=label_day_days,
+                day_disagrees=disagrees,
+            )
+
+        if label_day_days is None:
+            return None
+
+        return LabelInfo(
+            experiment_id=experiment_id,
+            time_post_reaction=label_day_days,
+            dilution_factor=dilution_factor,
+            time_source='day_label',
+            label_day_days=label_day_days,
+            day_disagrees=False,
+        )
+
+    @staticmethod
+    def extract_sample_info(label: str) -> Optional[Dict[str, Any]]:
+        """
+        Backward-compatible three-key view of `extract_sample_info_ex`.
+
+        The key set is deliberately FROZEN at experiment_id / time_post_reaction /
+        dilution_factor. `create_icp_result` splats this dict into `result_data`
+        and then stores every key not listed in `NON_ELEMENT_FIELDS` into the
+        `all_elements` JSONB, so a fourth key here would be persisted as a fake
+        element. Diagnostics live on `LabelInfo` instead.
+        """
+        info = ICPService.extract_sample_info_ex(label)
+        if info is None:
+            return None
+        return {
+            'experiment_id': info.experiment_id,
+            'time_post_reaction': info.time_post_reaction,
+            'dilution_factor': info.dilution_factor,
+        }
+
     @staticmethod
     def apply_dilution_correction(df: pd.DataFrame, dilution_factor: float) -> pd.DataFrame:
         """
@@ -302,37 +382,45 @@ class ICPService:
         return result_df, warnings
     
     @staticmethod
-    def process_icp_dataframe(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def process_icp_dataframe_ex(
+        df: pd.DataFrame,
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str], int]:
         """
         Process the entire ICP DataFrame from long-format to sample-based data for upload.
-        
+
         Expected DataFrame structure:
-        - Label: Sample identifiers (e.g., 'Serum_MH_011_Day5_5x')  
+        - Label: Sample identifiers (e.g., 'Serum_MH_011_Day5_5x')
         - Element Label: Element with wavelength (e.g., 'Al 394.401', 'Fe 238.204')
         - Concentration: Raw concentration values
         - Intensity: Measurement values (for quality assessment)
         - Type: Sample type (filter out 'BLK' blanks)
-        
+
         Args:
             df: Raw ICP DataFrame in long format
-            
+
         Returns:
-            Tuple of (processed_data_list, error_messages)
+            Tuple of (processed_data_list, error_messages, warnings, skipped_count).
+            `warnings` holds at most two file-level lines: one for Day-vs-'-t'
+            disagreements and one naming labels skipped for having no timepoint.
         """
         processed_data = []
         errors = []
-        
+        warnings: List[str] = []
+        disagreement_labels: List[str] = []
+        skipped_labels: List[str] = []
+        comparable_labels = 0
+
         if df.empty:
             errors.append("DataFrame is empty")
-            return processed_data, errors
-        
+            return processed_data, errors, warnings, 0
+
         # Validate required columns
         required_columns = ['Label', 'Element Label', 'Concentration', 'Intensity']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             errors.append(f"Missing required columns: {missing_columns}")
-            return processed_data, errors
-        
+            return processed_data, errors, warnings, 0
+
         try:
             # Filter out blank samples (Type = 'BLK' or Label contains 'Blank')
             if 'Type' in df.columns:
@@ -342,20 +430,35 @@ class ICPService:
             
             if df_samples.empty:
                 errors.append("No non-blank samples found in data")
-                return processed_data, errors
-            
+                return processed_data, errors, warnings, 0
+
             # Get unique sample labels
             unique_labels = df_samples['Label'].unique()
             
             for label in unique_labels:
                 try:
-                    # Extract sample information (experiment_id, time, dilution)
-                    sample_info = ICPService.extract_sample_info(label)
-                    
-                    # Skip rows that don't match expected pattern (Standards, Blanks, etc.)
-                    if sample_info is None:
+                    info = ICPService.extract_sample_info_ex(label)
+
+                    # Skip standards, blanks and anything with no timepoint. A
+                    # label that LOOKS like a sample is named in a warning so a
+                    # whole-file labelling mistake is diagnosable instead of
+                    # reporting "0 created" with no reason.
+                    if info is None:
+                        if _LOOKS_LIKE_SAMPLE_RE.search(str(label)):
+                            skipped_labels.append(str(label))
                         continue
-                    
+
+                    if info.time_source == 'id_token' and info.label_day_days is not None:
+                        comparable_labels += 1
+                        if info.day_disagrees:
+                            disagreement_labels.append(str(label))
+
+                    sample_info = {
+                        'experiment_id': info.experiment_id,
+                        'time_post_reaction': info.time_post_reaction,
+                        'dilution_factor': info.dilution_factor,
+                    }
+
                     # Get all data for this sample
                     sample_data = df_samples[df_samples['Label'] == label].copy()
                     measurement_date = ICPService.extract_measurement_date(sample_data)
@@ -396,9 +499,58 @@ class ICPService:
         
         except Exception as e:
             errors.append(f"Error processing DataFrame: {str(e)}")
-        
+
+        # One line per file, not one per row -- mirrors master_bulk_upload.py:755-780,
+        # including its <=10 list cap. The ID wins either way so no row is
+        # rejected here, which is exactly why this must stay visible without
+        # drowning the other warnings.
+        #
+        # Wording is deliberately a claim about the LABEL, not about the database.
+        # This tally runs at parse time, before bulk_create_icp_results decides
+        # whether each row lands, so a row that disagrees AND is then rejected
+        # (unknown experiment, no elemental data) would be named here too. Saying
+        # "each reading was recorded at the day its ID encodes" -- as the
+        # post-write sibling in master_bulk_upload.py may -- would contradict that
+        # row's own error in the same response. See docs/working/decisions.md,
+        # 2026-08-07 and 2026-08-10.
+        if disagreement_labels:
+            n = len(disagreement_labels)
+            noun = "label" if comparable_labels == 1 else "labels"
+            where = (
+                " (" + ", ".join(disagreement_labels) + ")" if n <= 10 else ""
+            )
+            warnings.append(
+                f"Day token disagrees with the ID's -t token on {n} of "
+                f"{comparable_labels} {noun}{where}. The ID is canonical, so the "
+                "timepoint was read from the -t token and the label's Day value "
+                "ignored. This reports the label mismatch only -- check errors for "
+                "any of these rows that were not written."
+            )
+
+        if skipped_labels:
+            n = len(skipped_labels)
+            noun = "label" if n == 1 else "labels"
+            where = (
+                " (" + ", ".join(skipped_labels) + ")" if n <= 10 else ""
+            )
+            warnings.append(
+                f"{n} {noun} skipped -- no timepoint could be determined{where}. "
+                "Neither a '-t<days>' token in the experiment ID nor a Day/Time "
+                "token in the label was found. Note the timepoint token is "
+                "lowercase '-t' only."
+            )
+
+        return processed_data, errors, warnings, len(skipped_labels)
+
+    @staticmethod
+    def process_icp_dataframe(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Two-tuple view of `process_icp_dataframe_ex`, dropping warnings.
+
+        Arity is frozen: existing callers and tests unpack exactly two values.
+        """
+        processed_data, errors, _warnings, _skipped = ICPService.process_icp_dataframe_ex(df)
         return processed_data, errors
-    
+
     @staticmethod
     def _standardize_element_name(element_symbol: str) -> str:
         """
@@ -913,42 +1065,58 @@ class ICPService:
             return {'error': f"Error diagnosing CSV structure: {str(e)}"}
     
     @staticmethod
-    def parse_and_process_icp_file(file_content: bytes, manual_header_row: int = 0) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def parse_and_process_icp_file_ex(
+        file_content: bytes,
+        manual_header_row: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str], int]:
         """
         Complete workflow to parse and process ICP CSV file.
-        
+
         This function orchestrates the entire ICP data processing pipeline:
         1. Parse CSV file (skip header rows 0-2)
-        2. Filter out blank samples  
+        2. Filter out blank samples
         3. Extract experiment info from sample labels
         4. Apply dilution corrections
         5. Select best lines for each element
         6. Convert from long to wide format
         7. Validate processed data
-        
+
         Args:
             file_content: Raw bytes content of the CSV file
-            
+
         Returns:
-            Tuple of (processed_data_list, error_messages)
+            Tuple of (processed_data, errors, warnings, skipped_count).
         """
         try:
             # Step 1: Parse CSV file (skip header rows)
             df = ICPService.parse_csv_file(file_content, manual_header_row)
-            
+
             if df.empty:
-                return [], ["Parsed CSV file is empty"]
-            
+                return [], ["Parsed CSV file is empty"], [], 0
+
             # Step 2: Process the DataFrame
-            processed_data, processing_errors = ICPService.process_icp_dataframe(df)
-            
+            processed_data, processing_errors, warnings, skipped = (
+                ICPService.process_icp_dataframe_ex(df)
+            )
+
             # Step 3: Validate the processed data
             validation_errors = ICPService.validate_icp_data(processed_data)
-            
-            # Combine all errors
-            all_errors = processing_errors + validation_errors
-            
-            return processed_data, all_errors
-            
+
+            return processed_data, processing_errors + validation_errors, warnings, skipped
+
         except Exception as e:
-            return [], [f"Error in ICP file processing workflow: {str(e)}"]
+            return [], [f"Error in ICP file processing workflow: {str(e)}"], [], 0
+
+    @staticmethod
+    def parse_and_process_icp_file(
+        file_content: bytes,
+        manual_header_row: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Two-tuple view of `parse_and_process_icp_file_ex`, dropping warnings.
+
+        Arity is frozen: existing callers and tests unpack exactly two values.
+        """
+        processed_data, errors, _warnings, _skipped = (
+            ICPService.parse_and_process_icp_file_ex(file_content, manual_header_row)
+        )
+        return processed_data, errors

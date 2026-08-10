@@ -450,3 +450,32 @@ sentence out and check whether it is still true of a row that was rejected.
 **Related:** found by the Task 3 code review as a plan-mandated finding; the plan had
 specified the Phase-1 placement and the human overruled it. The warning's wording was
 deliberately left unchanged — the fix was to make the count true, not the claim vaguer.
+
+## 2026-08-10 - A detection-time tally must word its warning as a claim about the source, not the database
+
+**Decision:** When a warning's counter is incremented in the parse phase, the sentence it
+produces must assert something about the *input* (a label, a cell, a column), never about
+what was persisted. If the sentence needs to assert persistence, the counter moves to the
+write phase instead. The ICP-OES `Day`-vs-`-t` disagreement warning takes the first option:
+it reports the label mismatch and points at `errors` for anything that failed to load.
+
+**Why:** this is the 2026-08-07 decision applied to a second parser, and it caught a live
+defect during the pre-merge pass. `icp_service.py`'s disagreement warning was written by
+copying the wording of its post-write sibling in `master_bulk_upload.py` - "each reading was
+recorded at the day its ID encodes". But the ICP tally lives in
+`process_icp_dataframe_ex`, at parse time, and `bulk_create_icp_results` runs afterward and
+can reject any of those rows. Measured on a real request: a label
+`ZZZNOPE_999a-t5_Day12_21x` produced `errors: ["Sample 1: Experiment with ID
+'ZZZNOPE_999a-t5' not found and could not be auto-created."]` alongside a warning claiming
+its reading had been recorded. Nothing was written.
+
+**How to apply:** copying a warning's wording between parsers is not safe, because the
+wording encodes which phase the counter lives in. Before reusing a sentence, check where the
+new tally is incremented relative to the write. Rewording to a source-level claim is
+usually cheaper and more honest than restructuring the phase - and for ICP it is also more
+useful, since the researcher's actual problem is the label, which is true whether or not the
+row landed.
+
+**Related:** `docs/working/decisions.md` 2026-08-07 (the original, `master_bulk_upload.py`);
+footnote 3 property (f) in `docs/LOCKED_COMPONENTS.md`; pinned by
+`tests/test_icp_handling.py::TestICPTimepointTokenPersistence::test_disagreement_warning_never_claims_a_rejected_row_was_written`.
