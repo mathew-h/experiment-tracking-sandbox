@@ -269,6 +269,11 @@ class NewExperimentsUploadService:
         # experiments sheet and the conditions sheet into one PlanOverwrite per experiment.
         overwrite_plan_by_exp_id: Dict[str, PlanOverwrite] = {}
 
+        # Primary keys of every ExperimentalConditions row this upload creates or
+        # modifies. Recalculated in one pass just before returning, after all three
+        # sheets have finished mutating them — see _recalculate_touched_conditions.
+        touched_conditions_ids: set[int] = set()
+
         try:
             sheets: Dict[str, pd.DataFrame] = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
         except Exception as e:
@@ -826,6 +831,8 @@ class NewExperimentsUploadService:
                             db.add(conditions)
                             db.flush()
 
+                        touched_conditions_ids.add(conditions.id)
+
                         # Auto-copy from parent if experiment is flagged for copying
                         parent = parent_for_copy.get(exp_id)
                         if parent and parent.conditions:
@@ -956,6 +963,7 @@ class NewExperimentsUploadService:
                 )
                 db.add(conditions)
                 db.flush()
+                touched_conditions_ids.add(conditions.id)
                 
                 # Copy all fields from parent
                 reserved = {'id', 'experiment_id', 'experiment_fk', 'created_at', 'updated_at'}
@@ -1062,6 +1070,8 @@ class NewExperimentsUploadService:
                         )
                         db.add(conditions)
                         db.flush()
+
+                        touched_conditions_ids.add(conditions.id)
 
                     replace_all = bool(overwrite_by_exp_id.get(exp_id, False))
                     _prior_additives_summary = None
@@ -1229,6 +1239,20 @@ class NewExperimentsUploadService:
         # Merge all overwrite entries discovered across the experiments/conditions/additives
         # sheets into the plan (issue #100 item 2) — one entry per experiment_id.
         plan.overwrites.extend(overwrite_plan_by_exp_id.values())
+
+        # One pass over every conditions row this upload touched, now that all three
+        # sheets have finished mutating them. Deferred rather than inline at each
+        # write site so a row reached by both the conditions and additives sheets is
+        # recalculated once, from its final state.
+        _cond_recalculated, _cond_recalc_warnings = _recalculate_touched_conditions(
+            db, touched_conditions_ids
+        )
+        warnings.extend(_cond_recalc_warnings)
+        if _cond_recalculated:
+            info_messages.append(
+                f"Recalculated derived fields (water_to_rock_ratio, "
+                f"total_ferrous_iron_g) on {_cond_recalculated} conditions row(s)"
+            )
 
         return created_exp, updated_exp, skipped, errors, warnings, info_messages, plan
 
