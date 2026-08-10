@@ -76,4 +76,47 @@ derived fields. The count appears in the upload's `info_messages`.
 
 ## Backfill
 
-Filled in by Task 4.
+Dev DB, 2026-08-10:
+
+| Measure | Before | After |
+|---|---|---|
+| conditions rows with `total_ferrous_iron_g` NULL | 732 | 454 |
+| conditions rows with both derived fields NULL and inputs present | 137 | 0 |
+| scalar rows with `h2_micromoles` but no Fe²⁺ %H₂ | 158 | 87 |
+
+`backfill_total_ferrous_iron_017.py` updated 278 conditions rows and cascaded to
+211 scalar rows; `recalculate_all_registry_012.py::_backfill_scalars` then
+recalculated 1465 scalar rows (its full run, not a targeted subset), catching the
+ones whose conditions already had a value. Both passes reported `Errors: 0` /
+`err=0` on both the dry run and the apply. Reporting-layer check afterwards:
+`v_results_scalar_rollup` had 301 of 1076 rows with a non-null `mean_fe_yield_h2_pct`
+and `v_results_scalar` had 352 of 1953 rows with a non-null
+`ferrous_iron_yield_h2_pct`.
+
+The 87 scalar rows still missing `ferrous_iron_yield_h2_pct` are the rows whose
+sample has no FeO on record (see "Not a DI problem" / acceptance criteria above) —
+this backfill cannot reach them; they resolve once rock characterization data is
+uploaded for those samples.
+
+No view recreation is needed for this backfill — views cache no data and no schema
+changed. (`database/event_listeners.py` drops and recreates them at import time anyway;
+the `create_reporting_views()` function named in `.claude/rules/schema-checklist.md:88`
+does not exist.)
+
+### Lab PC runbook
+
+Run **after** deploying this branch, from the repo root on the lab PC, in this order:
+
+1. `.venv/Scripts/python database/data_migrations/backfill_total_ferrous_iron_017.py --dry-run` — confirm `Errors: 0`
+2. `.venv/Scripts/python database/data_migrations/backfill_total_ferrous_iron_017.py`
+3. `.venv/Scripts/python -c "from database import SessionLocal; from database.data_migrations.recalculate_all_registry_012 import _backfill_scalars; db = SessionLocal(); _backfill_scalars(db, dry_run=False); db.close()"`
+4. Refresh the Power BI dataset.
+
+Step 3 commits per chunk, so an interruption leaves the chunks it finished already
+committed — re-running it is safe and idempotent (`recalculate` is a pure recomputation
+from current inputs).
+
+The rows whose sample has no FeO on record stay NULL. They resolve on their own
+once that rock's elemental data is uploaded — `recalculate_conditions_for_samples`
+fires on every elemental upload and covers experiments created before the rock data
+arrived.
