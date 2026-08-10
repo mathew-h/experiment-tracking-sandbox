@@ -257,11 +257,20 @@ mutation — and `calculate_ferrous_iron_yield_h2` returns NULL whenever this is
 taking `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` down with it. Every
 path that recalculates:
 
-- `POST /api/conditions`, `PUT /api/conditions/{id}` — `backend/api/routers/conditions.py:103`, `:125`
+- `POST /api/conditions`, `PATCH /api/conditions/{id}` — `backend/api/routers/conditions.py:103`, `:125`
 - `PATCH /api/experiments/{id}` — `backend/api/routers/experiments.py:1329`
 - Replicate creation — `database/lineage_utils.py:603`
 - Any elemental upload, via `recalculate_conditions_for_samples()` (`backend/services/elemental_composition_service.py:34`) — this is what covers experiments created *before* their rock's FeO data arrived
-- The New Experiments bulk upload, as of 2026-08-10 — records every conditions row it touches and recalculates them in one pass before returning, reporting the count in `info_messages`
+- The New Experiments bulk upload, as of 2026-08-10 — records every conditions row it touches and recalculates them in one pass before returning
+
+**Known gap — the recalculation is not surfaced in the UI.** The bulk uploader appends
+the recalculated-row count to the parser's `info_messages`, but
+`backend/api/routers/bulk_uploads.py:180` destructures that value as `_info` and
+discards it; nothing in `backend/api` or `frontend/src` reads it. So a researcher sees
+no indication that derived fields were recomputed. Failures still surface — they go into
+`warnings`, which the bulk-upload panel renders. Wiring `info_messages` through would
+need a new response field and frontend rendering; it was deliberately left out of the
+2026-08-10 fix.
 
 Before 2026-08-10 the bulk uploader recalculated only `ChemicalAdditive`, so
 bulk-created experiments landed with `total_ferrous_iron_g` **and**

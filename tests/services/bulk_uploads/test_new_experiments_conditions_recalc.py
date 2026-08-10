@@ -245,13 +245,46 @@ def test_parent_autocopy_path_recalculates(db_session: Session):
 
 def test_additives_only_path_recalculates(db_session: Session):
     """An experiment reaching conditions creation only through the additives sheet
-    gets its derived fields computed (NULL here — that row carries no rock mass)."""
+    gets its derived fields computed (NULL here — that row carries no rock mass).
+
+    The additives sheet creates a bare conditions row with no rock_mass_g, so both
+    derived fields are None either way and cannot themselves gate on the fix. What
+    does gate is the cascade: recalculate_conditions() recomputes every linked
+    ScalarResults row (conditions_calcs.py:48-57), so a stored yield left over from a
+    state that no longer holds is rewritten. Without the recalculation pass the stale
+    values survive the upload untouched. (An earlier version of this test asserted on
+    info_messages instead — a message the router discards, so no user ever sees it;
+    see docs/issues/issue-bulk-upload-never-recalculates-conditions.md.)
+    """
+    from backend.services.scalar_results_service import ScalarResultsService
+
     _seed_sample_with_feo(db_session, "ROCK-RC-013", 9.5)
+    exp = Experiment(experiment_id="SERUM_RC_130", experiment_number=990130,
+                     sample_id="ROCK-RC-013")
+    db_session.add(exp)
+    db_session.flush()
+
+    # A real H2 chain, but with the two rock-mass-dependent stored fields holding
+    # stale values that no longer follow from this experiment's inputs.
+    upsert = ScalarResultsService.create_scalar_result_ex(
+        db_session, "SERUM_RC_130",
+        {
+            "time_post_reaction": 3.0,
+            "description": "DI, GC-A",
+            "h2_concentration": 353.8808110781404,
+            "gas_sampling_volume_ml": 30.0,
+            "gas_sampling_pressure_MPa": 0.10135297199999999,
+        },
+    )
+    scalar = upsert.experimental_result.scalar_data
+    scalar.ferrous_iron_yield_h2_pct = 0.5
+    scalar.h2_grams_per_ton_yield = 42.0
+    db_session.flush()
 
     xlsx = make_excel_multisheet({
         "experiments": (
             _EXP_HEADERS,
-            [["SERUM_RC_130", None, "ROCK-RC-013", "MH", None, "ONGOING", None, None]],
+            [["SERUM_RC_130", None, None, None, None, None, None, True]],
         ),
         "additives": (
             ["experiment_id", "compound", "amount", "unit"],
@@ -263,14 +296,106 @@ def test_additives_only_path_recalculates(db_session: Session):
     )
 
     assert errors == [], f"Unexpected errors: {errors}"
-    exp = db_session.query(Experiment).filter_by(experiment_id="SERUM_RC_130").one()
     cond = db_session.query(ExperimentalConditions).filter_by(experiment_fk=exp.id).one()
     # No rock_mass_g on this row, so both stay None — but explicitly computed as
     # None rather than left uncomputed, matching backfill_total_ferrous_iron_017's
     # stated philosophy.
     assert cond.total_ferrous_iron_g is None
     assert cond.water_to_rock_ratio is None
-    assert any("Recalculated derived fields" in m for m in info)
+
+    db_session.refresh(scalar)
+    assert scalar.h2_micromoles is not None, "the H2 chain itself must survive"
+    assert scalar.ferrous_iron_yield_h2_pct is None, (
+        "stale stored Fe2+ %H2 survived the upload — the additives-path conditions "
+        "row was not recorded or the recalculation pass did not run"
+    )
+    assert scalar.h2_grams_per_ton_yield is None, (
+        "stale stored h2_grams_per_ton_yield survived the upload"
+    )
+
+
+def test_overwrite_repairs_stored_yield_on_pre_existing_scalar_row(db_session: Session):
+    """The mechanism the whole production backfill rests on.
+
+    An `overwrite=TRUE` conditions row must push the corrected `total_ferrous_iron_g`
+    through `recalculate_conditions()`'s ScalarResults cascade
+    (`backend/services/calculations/conditions_calcs.py:48-57`) into the **stored**
+    `ferrous_iron_yield_h2_pct` of a scalar row that already existed before the
+    upload. `test_conditions_sheet_overwrite_of_existing_row_recalculates` seeds no
+    results, and `test_bulk_created_experiment_gets_fe_yield_h2_on_scalar_result`
+    creates its scalar row *after* the upload, so that value comes from
+    `ScalarResultsService` rather than from the cascade. Only this test covers it.
+    """
+    from backend.services.scalar_results_service import ScalarResultsService
+
+    feo_wt_pct = 10.0
+    old_rock_mass_g = 1.0
+    new_rock_mass_g = 4.0
+    _seed_sample_with_feo(db_session, "ROCK-RC-014", feo_wt_pct)
+
+    exp = Experiment(experiment_id="SERUM_RC_140", experiment_number=990140,
+                     sample_id="ROCK-RC-014")
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_id="SERUM_RC_140", experiment_fk=exp.id,
+        rock_mass_g=old_rock_mass_g, water_volume_mL=20.0,
+        total_ferrous_iron_g=(feo_wt_pct / 100.0) * FE_IN_FEO_FRACTION * old_rock_mass_g,
+        water_to_rock_ratio=20.0,
+    )
+    db_session.add(cond)
+    db_session.flush()
+
+    # A pre-existing scalar row whose stored yield describes the OLD rock mass.
+    upsert = ScalarResultsService.create_scalar_result_ex(
+        db_session, "SERUM_RC_140",
+        {
+            "time_post_reaction": 3.0,
+            "description": "DI, GC-A",
+            "h2_concentration": 353.8808110781404,
+            "gas_sampling_volume_ml": 30.0,
+            "gas_sampling_pressure_MPa": 0.10135297199999999,
+        },
+    )
+    scalar = upsert.experimental_result.scalar_data
+    db_session.flush()
+    h2_micromoles = scalar.h2_micromoles
+    yield_before = scalar.ferrous_iron_yield_h2_pct
+    assert h2_micromoles is not None
+    assert yield_before is not None, (
+        "fixture is not exercising the cascade — the pre-existing scalar row must "
+        "start with a non-NULL stored yield"
+    )
+
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [["SERUM_RC_140", None, None, None, None, None, None, True]],
+        ),
+        "conditions": (
+            ["experiment_id", "rock_mass_g"],
+            [["SERUM_RC_140", new_rock_mass_g]],
+        ),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+
+    # 3 mol Fe2+ per mol H2; umol -> mol; x 55.845 g/mol (scalar_calcs.py:26).
+    fe_consumed_g = (h2_micromoles * 3 / 1e6) * 55.845
+    new_total_fe_g = (feo_wt_pct / 100.0) * FE_IN_FEO_FRACTION * new_rock_mass_g
+    expected_yield_pct = fe_consumed_g / new_total_fe_g * 100.0
+
+    db_session.refresh(cond)
+    db_session.refresh(scalar)
+    assert cond.total_ferrous_iron_g == pytest.approx(new_total_fe_g, rel=1e-4)
+    assert scalar.ferrous_iron_yield_h2_pct == pytest.approx(expected_yield_pct, rel=1e-4), (
+        "stored Fe2+ %H2 on the pre-existing scalar row still describes the old rock "
+        "mass — the recalculate_conditions -> recalculate_scalar cascade did not run"
+    )
+    # 4x the rock mass, so a quarter of the yield: the value must actually have moved.
+    assert scalar.ferrous_iron_yield_h2_pct == pytest.approx(yield_before / 4.0, rel=1e-4)
 
 
 # ---------------------------------------------------------------------------

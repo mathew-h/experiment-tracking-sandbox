@@ -98,33 +98,70 @@ def _recalculate_touched_conditions(
     when `total_ferrous_iron_g` is None — 157 production scalar rows as of
     2026-08-10, `SERUM_Catalyst_001a-t3` among them.
 
-    Deliberately keyed on primary keys rather than ORM instances: `db.expire_all()`
-    runs after the experiments-sheet loop (issue #68) and a per-row savepoint can be
-    rolled back after a row is recorded, so an int is the only handle that stays
-    valid. A row whose id no longer resolves is skipped silently — its savepoint was
-    rolled back and there is nothing left to recalculate.
+    Keyed on primary keys rather than ORM instances for two plain reasons: a set of
+    ints deduplicates a row reached by more than one sheet (the conditions sheet and
+    the additives sheet resolve the same row for the same experiment), so it is
+    recalculated once from its final state; and an int is the cheapest handle to
+    carry through the parse. Nothing in the uploader can invalidate a recorded id —
+    `db.expire_all()` runs at `:790`, BEFORE all three record sites, and site 3's
+    `db.add` sits outside the additives savepoint — so the `if conditions is None`
+    skip below is defensive only and is not reachable through the uploader today.
 
-    One try/except per row, mirroring `recalculate_conditions_for_samples()`
-    (`backend/services/elemental_composition_service.py:56-73`): one unusable row
-    must not cost the rest of the upload its derived fields. No flush — the caller
-    commits, as at every other `recalculate()` site in this module.
+    One `db.begin_nested()` SAVEPOINT per row, the idiom this file already uses at
+    `:381` and `:1136` and a standing contract for this file (footnote ¹ of
+    `docs/LOCKED_COMPONENTS.md`). Both the load and the recalculation sit inside it:
+    a DBAPI error inside `recalculate()` aborts the transaction, so a `db.get()`
+    outside the protected region would raise `PendingRollbackError` on the NEXT
+    iteration and escape into the router's blanket handler, discarding an otherwise
+    good upload; and a non-DB exception part-way through `recalculate()` would
+    otherwise leave half-applied mutations (`water_to_rock_ratio` written,
+    `total_ferrous_iron_g` not, the ScalarResults cascade part-done) dirty on the
+    session for the caller to commit, while the warning here claimed the row was not
+    recalculated. One unusable row must still not cost the rest of the upload its
+    derived fields. No flush and no commit of our own — the caller commits, as at
+    every other `recalculate()` site in this module.
 
     Returns (rows_recalculated, warnings).
     """
     recalculated = 0
     warnings: List[str] = []
     for conditions_id in sorted(conditions_ids):
-        conditions = db.get(ExperimentalConditions, conditions_id)
-        if conditions is None:
-            continue
+        savepoint = db.begin_nested()
+        row_ok = False
+        label: Optional[str] = None
         try:
+            conditions = db.get(ExperimentalConditions, conditions_id)
+            if conditions is None:
+                continue
+            label = conditions.experiment_id
             recalculate(conditions, db)
-            recalculated += 1
+            row_ok = True
         except Exception as e:
             warnings.append(
                 f"[conditions] Could not recalculate derived fields for "
-                f"'{conditions.experiment_id}': {e}"
+                f"'{label if label is not None else conditions_id}': {e}"
             )
+        finally:
+            # RELEASE SAVEPOINT flushes the session first, so a dirty instance left
+            # by recalculate() can still fail here even though row_ok is True. That
+            # raise must not escape the finally (same reasoning as the additives loop
+            # at :1240) or it would unwind the whole pass and take the upload with
+            # it: roll the row back and record the row-scoped warning instead.
+            if row_ok:
+                try:
+                    savepoint.commit()
+                    recalculated += 1
+                except Exception as commit_error:
+                    savepoint.rollback()
+                    warnings.append(
+                        f"[conditions] Could not recalculate derived fields for "
+                        f"'{label if label is not None else conditions_id}': "
+                        f"{commit_error}"
+                    )
+            else:
+                # Also the required recovery after a failed flush inside the
+                # savepoint, and a harmless no-op for the `conditions is None` skip.
+                savepoint.rollback()
     return recalculated, warnings
 
 

@@ -59,22 +59,51 @@ derived fields NULL with positive rock mass and water volume.
 `_recalculate_touched_conditions(db, conditions_ids)` in `new_experiments.py` records
 the primary key of every conditions row the upload touches — at all three write sites
 — and recalculates them in one pass before returning, after every sheet has finished
-mutating them. Keyed on primary keys because `db.expire_all()` runs after the
-experiments-sheet loop and per-row savepoints can be rolled back after recording.
-One try/except per row, so an unusable row does not cost the rest of the upload its
-derived fields. The count appears in the upload's `info_messages`.
+mutating them. Keyed on primary keys for two plain reasons: a set of ints deduplicates
+a row reached by more than one sheet (the conditions and additives sheets resolve the
+same row for the same experiment), so it is recalculated once from its final state; and
+an int is the cheapest handle to carry through the parse. Nothing in the uploader can
+invalidate a recorded id — `db.expire_all()` runs *before* all three record sites, and
+the additives site's `db.add` sits outside that loop's savepoint — so the helper's
+"row no longer resolves" skip is defensive only, not reachable through the uploader
+today. Each row is recalculated inside its own `db.begin_nested()` SAVEPOINT (the
+idiom already used elsewhere in this file), so a failing row rolls back only itself and
+neither poisons the next row's `db.get()` with `PendingRollbackError` nor leaves
+half-applied mutations for the caller to commit.
+
+The recalculated-row count is appended to the parser's `info_messages`, but
+`backend/api/routers/bulk_uploads.py:180` discards that value (`_info`) and nothing in
+`backend/api` or `frontend/src` reads it — **so the recalculation is not surfaced in the
+UI today.** Known gap, deliberately not fixed here: wiring it through needs a new
+response field and frontend rendering. Failures are surfaced, since they go into
+`warnings`, which the bulk-upload panel renders.
+
+## Forward-only at the additives path
+
+The fix repairs a legacy NULL row only where the upload actually *mutates* that row.
+The conditions sheet does (a pre-existing row being overwritten is recorded), but the
+additives path records a conditions row **only when it creates one** — correctly, since
+on that path a pre-existing row is never mutated and there would be nothing to
+recalculate. The consequence is that an additives-only upload against an experiment
+that already has a conditions row will **not** heal one of the legacy NULL rows. Only
+the backfill below does that. Do not read this fix as "the uploader repairs whatever it
+touches".
 
 ## Acceptance criteria
 
-- [ ] A conditions-sheet row gets both derived fields computed by the upload.
-- [ ] An `overwrite=TRUE` row that changes `rock_mass_g` recomputes both fields rather than keeping the stale values.
-- [ ] A parent auto-copy row (no conditions sheet entry) gets its own derived fields.
-- [ ] An experiment reaching conditions creation only via the additives sheet is recalculated.
-- [ ] A bulk-created vial with a DI H2 reading ends up with a non-NULL `ferrous_iron_yield_h2_pct`.
-- [ ] The 157 recoverable production rows have Fe²⁺ %H₂ after the backfill.
+- [x] A conditions-sheet row gets both derived fields computed by the upload. (`test_conditions_sheet_path_recalculates`)
+- [x] An `overwrite=TRUE` row that changes `rock_mass_g` recomputes both fields rather than keeping the stale values. (`test_conditions_sheet_overwrite_of_existing_row_recalculates`)
+- [x] A parent auto-copy row (no conditions sheet entry) gets its own derived fields. (`test_parent_autocopy_path_recalculates`)
+- [x] An experiment reaching conditions creation only via the additives sheet is recalculated. (`test_additives_only_path_recalculates`)
+- [x] A bulk-created vial with a DI H2 reading ends up with a non-NULL `ferrous_iron_yield_h2_pct`. (`test_bulk_created_experiment_gets_fe_yield_h2_on_scalar_result`)
+- [x] An `overwrite=TRUE` conditions row repairs the **stored** yield on a scalar row that already existed, via the `recalculate_conditions` → `recalculate_scalar` cascade. (`test_overwrite_repairs_stored_yield_on_pre_existing_scalar_row`)
+- [ ] The 157 recoverable production rows have Fe²⁺ %H₂ after the backfill. **Not met — only the dev DB has been backfilled**; production runs the runbook below post-deploy.
 - [~] The 77 rows whose sample has no FeO on record cannot be fixed here — they need rock characterization uploaded first, which then triggers `recalculate_conditions_for_samples` automatically.
 
 ## Backfill
+
+**Dev DB only so far. Production has not been backfilled** — that happens post-deploy,
+via the lab PC runbook at the end of this section.
 
 Dev DB, 2026-08-10:
 

@@ -248,11 +248,9 @@ def _recalculate_touched_conditions(
     when `total_ferrous_iron_g` is None — 157 production scalar rows as of
     2026-08-10, `SERUM_Catalyst_001a-t3` among them.
 
-    Deliberately keyed on primary keys rather than ORM instances: `db.expire_all()`
-    runs after the experiments-sheet loop (issue #68) and a per-row savepoint can be
-    rolled back after a row is recorded, so an int is the only handle that stays
-    valid. A row whose id no longer resolves is skipped silently — its savepoint was
-    rolled back and there is nothing left to recalculate.
+    Keyed on primary keys rather than ORM instances because a set of ints deduplicates
+    a row reached by more than one sheet, and because an int is the cheapest handle to
+    carry through the parse. A row whose id no longer resolves is skipped silently.
 
     One try/except per row, mirroring `recalculate_conditions_for_samples()`
     (`backend/services/elemental_composition_service.py:56-73`): one unusable row
@@ -279,6 +277,23 @@ def _recalculate_touched_conditions(
 
 
 ```
+
+> **Amended after the whole-branch review (2026-08-10).** The shipped helper differs
+> from the block above in one respect: each row is recalculated inside its own
+> `db.begin_nested()` SAVEPOINT with the `db.get()` **inside** the protected region.
+> With the `db.get()` outside, a DBAPI error inside `recalculate()` aborted the
+> transaction and the next iteration's `db.get()` raised `PendingRollbackError` out of
+> the parser into the router's blanket handler, discarding an otherwise-good upload;
+> and a non-DB failure part-way through left half-applied mutations dirty on the
+> session for the caller to commit while the warning claimed the row was skipped.
+> `backend/services/bulk_uploads/new_experiments.py` is authoritative, not this block.
+> Two other claims made in this plan and its doc snippets were also corrected on the
+> branch: the recalculated-row count is appended to `info_messages` but the router
+> discards it, so it is **not** surfaced in the UI; and migration 017 alone does not
+> fix the production data (it cannot reach the ~15 stale scalar rows whose conditions
+> row already held a value, and production has not been backfilled yet). See
+> `docs/issues/issue-bulk-upload-never-recalculates-conditions.md` and footnote ⁴ of
+> `docs/LOCKED_COMPONENTS.md`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
