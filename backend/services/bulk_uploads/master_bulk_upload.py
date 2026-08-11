@@ -2,18 +2,26 @@
 Master Results bulk upload — parses an uploaded Dashboard workbook.
 
 Dashboard sheet column spec (v3, issue #111, 2026-07-30):
-  Experiment ID | Description | Sample Date | Duration (Days) | NH4 (mM) |
+  Experiment ID | Description | Sample Collection Date | Duration (Days) |
+  NH4 (mM) |
   FL H2 (ppm)   | FL Gas Volume (mL) | FL Gas Pressure (psi) | Sample pH |
   Sample Conductivity (mS/cm) | Modification | NMR Run Date |
   Sampled Solution Volume (mL) | ICP Run Date | GC Run Date | XRD Run Date |
   OVERWRITE | DI H2 (ppm) | DI gas volume (mL) | DI gas pressure (psi)
 
-One row per unique experiment ID. Replicate letters are separate vials, so
-SERUM_001a/b/c at days 1 and 3 is six rows (SERUM_001a-t1, SERUM_001b-t1, ...),
-not two rows with per-letter columns. Two rows sharing an ID and timepoint are
-both rejected, matched on _id_match.normalize_id so spellings differing only
-by case or zero padding count as the same ID. Cross-replicate mean and SD are
-computed by v_results_scalar_rollup, not carried on the sheet.
+Several rows may describe one vial-day. Gas is drawn and run on one date and the
+liquid/solid fraction is collected later, so each fraction gets its own row;
+Phase 1.5 collapses rows sharing a (normalize_id, timepoint) key into one merged
+cell view. Only a field two rows fill with DIFFERENT values is a conflict, and
+that vial-day is then rejected whole. Grouping matches the exact timepoint --
+identical Durations are the researcher's request to merge; rows a day apart stay
+separate vial-days. Replicate letters remain separate vials with their own IDs.
+Cross-replicate mean and SD are computed by v_results_scalar_rollup, not carried
+on the sheet.
+
+The sample collection date column is 'Sample Collection Date'; 'Sample Date',
+'Liquid/Solid Sample Date' and 'HPHT + Liquid/Solid Date Sampled' are accepted
+aliases. See _COLLECTION_DATE and _HEADER_ALIASES.
 
 Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
 blank, and gas volume/pressure come from the same block. A value of 0 is a real

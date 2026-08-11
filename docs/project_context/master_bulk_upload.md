@@ -16,7 +16,9 @@ Processes comprehensive Master Bulk Upload files containing consolidated scalar 
 - `Duration (Days)`: Must be a numeric value representing the time point.
 
 ### Optional Columns
-Description, Sample Date, NMR Run Date, ICP Run Date, GC Run Date, NH4 (mM), H2 (ppm), Gas Volume (mL), Gas Pressure (psi), Sample pH, Sample Conductivity (mS/cm), Modification, Overwrite.
+Description, Sample Collection Date, NMR Run Date, ICP Run Date, GC Run Date, XRD Run Date, NH4 (mM), H2 (ppm), Gas Volume (mL), Gas Pressure (psi), Sample pH, Sample Conductivity (mS/cm), Sampled Solution Volume (mL), Modification, Overwrite.
+
+- `Sample Collection Date` is the date the sample was **collected**, and is stored as `measurement_date`. It is a different event from `GC Run Date` (when the instrument ran) — the two disagree on 116 of the 270 workbook rows carrying both, so neither substitutes for the other. Accepted aliases, for archived workbooks: `Sample Date`, `Liquid/Solid Sample Date`, `HPHT + Liquid/Solid Date Sampled`. A sheet with none of these spellings uploads normally but emits a warning saying no measurement date was ingested.
 
 - `Replicate` (optional, issue #70 P3): single letter `a`–`z` routing the row to the lettered sibling of the base Experiment ID (`0`/blank = the base itself). Malformed or conflicting values skip that row with a per-row error.
 
@@ -31,8 +33,19 @@ Description, Sample Date, NMR Run Date, ICP Run Date, GC Run Date, NH4 (mM), H2 
 - If the resolved Experiment ID carries a `-t<days>` token (e.g. `SERUM_001a-t7`), a blank `Duration (Days)` cell is filled from the ID; a different `Duration (Days)` value errors the row rather than being silently overwritten. This is the one case where `Duration (Days)` may be omitted and the row still processes.
 - Checked at the string level in `master_bulk_upload.py` (`split_timepoint_token`, `apply_id_timepoint`) before the row reaches `ScalarResultsService`, which applies the same rule again as a second layer of defense.
 
+## Several Rows Per Vial-Day (row merge, 2026-08-11)
+
+Gas is drawn and run on one date; the liquid/solid fraction is collected later. Each fraction gets its own sheet row, and both name the same vial and the same day — so rows sharing a `(normalized ID, timepoint)` key are **merged field by field** into one stored result rather than rejected as duplicates.
+
+- **Complementary rows merge.** A gas row supplying H2 and geometry, and a later liquid row supplying pH and conductivity, become one result.
+- **A genuine disagreement rejects that vial-day whole.** If two rows fill the same field with different values, nothing is written for that vial-day and one error names every row, the field, and both values. Other vial-days in the file still land.
+- **A `0` in the pH, conductivity or gas volume/pressure columns is a blank,** not a measurement — the template writes 0 into them on a row that did no such sampling. A `0` in an `H2 (ppm)` column IS a real reading.
+- **Grouping matches the exact timepoint.** Two rows with the same Duration are a request to merge; rows a day apart stay separate vial-days.
+- **`OVERWRITE` is honoured only when every row of the vial-day is TRUE,** since clearing is destructive and a merged vial-day is one write. A mixed setting is reported and not applied.
+- **`created + updated` no longer equals the sheet row count.** A file-level warning states the merge count (e.g. "Merged 72 rows into 36 vial-days").
+
 ## Data Model and Flow
-Calls `ScalarResultsService.create_scalar_result_ex` once per row, each inside its own SAVEPOINT so one bad row does not discard the rows already written. Validates that the experiment exists in the database before attempting to insert or update results.
+Calls `ScalarResultsService.create_scalar_result_ex` once per **merged vial-day**, each inside its own SAVEPOINT so one bad row does not discard the rows already written. Validates that the experiment exists in the database before attempting to insert or update results.
 
 ## Warnings
 
