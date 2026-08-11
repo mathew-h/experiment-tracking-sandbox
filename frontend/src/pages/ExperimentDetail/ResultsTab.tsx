@@ -149,7 +149,24 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
     queryKey: ['replicate-group', experimentId],
     queryFn: () => experimentsApi.getReplicateGroup(experimentId),
   })
-  const hasGroup = (replicateGroup?.members.length ?? 0) > 0
+  const baseId = replicateGroup?.base_experiment_id ?? experimentId
+
+  // Issue #101: `replicateGroup` comes from the letter-only /{id}/replicate-group
+  // wrapper (deliberately pinned), so it reports zero members for a letterless
+  // '-t<days>' vial and the grouped view was unreachable for those sets. The
+  // group endpoint counts vials as well as letters, so gate on it too. Same
+  // query key GroupedResultsView uses, so this is one request per page.
+  const { data: groupDetail } = useQuery({
+    queryKey: ['replicate-group-detail', baseId],
+    queryFn: () => experimentsApi.getGroup(baseId),
+    // A 404 is a legitimate answer (see the same query in ExperimentDetail/index).
+    retry: false,
+  })
+  const vialCount = groupDetail?.member_count ?? 0
+  // ">1" for vials: one vial has nothing to aggregate across. Lettered sets keep
+  // their original ">0 members" test so a single-letter group still offers it.
+  const hasGroup = (replicateGroup?.members.length ?? 0) > 0 || vialCount > 1
+  const groupedCount = Math.max(replicateGroup?.members.length ?? 0, vialCount)
 
   const { data: results, isLoading } = useQuery({
     queryKey: ['experiment-results', experimentId],
@@ -182,7 +199,7 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
                 className={`px-2.5 py-1 ${mode === 'grouped' ? 'bg-surface-raised text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'}`}
                 onClick={() => setMode('grouped')}
               >
-                Grouped (n={replicateGroup!.members.length})
+                Grouped (n={groupedCount})
               </button>
             </div>
           )}
@@ -194,7 +211,7 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
 
       {mode === 'grouped' && hasGroup ? (
         <div className="p-4">
-          <GroupedResultsView baseExperimentId={replicateGroup?.base_experiment_id ?? experimentId} />
+          <GroupedResultsView baseExperimentId={baseId} />
         </div>
       ) : (
         <>

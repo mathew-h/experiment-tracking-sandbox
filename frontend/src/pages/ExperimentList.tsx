@@ -208,6 +208,7 @@ export function ExperimentListPage() {
               ) : (
                 data.items.map((exp) => {
                   const hasReplicates = !!exp.replicates?.length
+                  const vialCount = exp.vial_count ?? 1
                   const expanded = expandedGroups.has(exp.id)
                   return (
                     <Fragment key={exp.id}>
@@ -235,6 +236,17 @@ export function ExperimentListPage() {
                                 ?? exp.replicates!.map((r) => r.replicate_label)
                               ).join(', ')}
                             </button>
+                          ) : vialCount > 1 ? (
+                            // Issue #101: a row collapsing several '-t<days>' vials with
+                            // no replicate letters had no expander and no count, so it was
+                            // indistinguishable from a standalone experiment -- and its
+                            // status silently went read-only with nothing to explain why.
+                            // There is nothing to expand here (every vial carries the same
+                            // label once the token is stripped); the per-vial breakdown is
+                            // the group page this row now links to.
+                            <span className="ml-2 inline-flex items-center rounded bg-surface-raised px-1.5 py-0.5 text-2xs text-ink-secondary">
+                              {vialCount} vials
+                            </span>
                           ) : null
                         }
                       />
@@ -296,7 +308,7 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
   // Issue #98: a row that stands for more than one experiment must not offer an
   // inline status edit -- the PATCH would silently hit only the representative
   // vial (D3). Grouped rows carry `replicates`.
-  const isGroupRow = !!exp.replicates?.length
+  const isLetterGroupRow = !!exp.replicates?.length
   // AC1: the '-t<days>' token is an internal encoding and never reaches this page.
   const displayId = exp.group_display_id ?? exp.experiment_id
   // Issue #98: the inline PATCH targets `exp.experiment_id`. Offer it only when
@@ -307,6 +319,22 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
   // SERUM_001a) and a flat collapsed row (label SERUM_001a, representative
   // SERUM_001a-t1) do not.
   const statusReadOnly = displayId !== exp.experiment_id
+  // Issue #101: a row standing for several letterless '-t<days>' vials IS a group
+  // even though it has no replicate letters, and its label is the stem -- which is
+  // exactly what /experiments/groups/{base_id} is addressed by. Without this the
+  // row navigated to its representative vial, so the other vials and the
+  // cross-timepoint rollup were unreachable from the list.
+  //
+  // The `replicate_label === null` and `statusReadOnly` guards keep a LETTERED
+  // collapsed row out: in flat mode SERUM_001a-t1/-t3 collapse to the label
+  // "SERUM_001a", which names a vial, not a base ID -- routing that to the group
+  // page would ask for a group that does not exist.
+  const isVialSetRow =
+    !isLetterGroupRow &&
+    (exp.vial_count ?? 1) > 1 &&
+    statusReadOnly &&
+    exp.replicate_label === null
+  const isGroupRow = isLetterGroupRow || isVialSetRow
   const target = isGroupRow
     ? `/experiments/groups/${encodeURIComponent(displayId)}`
     : `/experiments/${encodeURIComponent(exp.experiment_id)}`

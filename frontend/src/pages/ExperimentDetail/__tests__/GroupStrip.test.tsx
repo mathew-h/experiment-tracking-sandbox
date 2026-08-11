@@ -11,6 +11,8 @@ vi.mock('@/api/experiments', () => ({
     getReplicateGroup: vi.fn(),
     getResults: vi.fn(),
     getRollup: vi.fn(),
+    getGroup: vi.fn(),
+    getGroupRollup: vi.fn(),
   },
 }))
 vi.mock('@/api/conditions', () => ({
@@ -152,5 +154,80 @@ describe('detail header group strip', () => {
     // Sibling (id 22) shares the same label text but renders as its own link, keyed by id
     const siblingChip = screen.getByRole('link', { name: 'a' })
     expect(siblingChip).toHaveAttribute('href', '/experiments/SERUM_001a-t7')
+  })
+})
+
+describe('detail header group strip — issue #101: letterless timepoint vials', () => {
+  it('links to the group for a letterless vial whose stem has several vials', async () => {
+    vi.mocked(experimentsApi.get).mockResolvedValue({
+      ...BASE_DETAIL,
+      id: 30,
+      experiment_id: 'SERUM_pH_002-t1',
+      base_experiment_id: 'SERUM_pH_002',
+      replicate_label: null,
+      id_timepoint_days: 1,
+    })
+    // The letter-only wrapper reports this vial as its own parent with no members.
+    vi.mocked(experimentsApi.getReplicateGroup).mockResolvedValue({
+      base_experiment_id: 'SERUM_pH_002',
+      parent: {
+        id: 30, experiment_id: 'SERUM_pH_002-t1', replicate_label: null,
+        status: 'ONGOING', is_outlier: false,
+      },
+      members: [],
+    })
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      base_experiment_id: 'SERUM_pH_002', parent: null,
+      members: [1, 3, 7].map((day, i) => ({
+        id: 30 + i, experiment_id: `SERUM_pH_002-t${day}`, replicate_label: null,
+        status: 'ONGOING' as const, is_outlier: false, id_timepoint_days: day,
+        researcher: null, date: null, result_count: 1, conditions: {},
+      })),
+      member_count: 3, replicates: [], replicate_count: 0,
+      shared_conditions: {}, divergent_fields: [],
+      additives_summary: null, additive_names: null, additives_diverge: false,
+    })
+
+    renderPage('SERUM_pH_002-t1')
+
+    const groupLink = await screen.findByRole('link', { name: 'SERUM_pH_002' })
+    expect(groupLink).toHaveAttribute('href', '/experiments/groups/SERUM_pH_002')
+    // It is not a replicate, so no "Replicate x" label may appear.
+    expect(screen.queryByText(/^Replicate /)).not.toBeInTheDocument()
+  })
+
+  it('renders no group link for a lone letterless vial', async () => {
+    vi.mocked(experimentsApi.get).mockResolvedValue({
+      ...BASE_DETAIL,
+      id: 40,
+      experiment_id: 'SERUM_pH_050-t5',
+      base_experiment_id: 'SERUM_pH_050',
+      replicate_label: null,
+      id_timepoint_days: 5,
+    })
+    vi.mocked(experimentsApi.getReplicateGroup).mockResolvedValue({
+      base_experiment_id: 'SERUM_pH_050',
+      parent: {
+        id: 40, experiment_id: 'SERUM_pH_050-t5', replicate_label: null,
+        status: 'ONGOING', is_outlier: false,
+      },
+      members: [],
+    })
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      base_experiment_id: 'SERUM_pH_050', parent: null,
+      members: [{
+        id: 40, experiment_id: 'SERUM_pH_050-t5', replicate_label: null,
+        status: 'ONGOING', is_outlier: false, id_timepoint_days: 5,
+        researcher: null, date: null, result_count: 0, conditions: {},
+      }],
+      member_count: 1, replicates: [], replicate_count: 0,
+      shared_conditions: {}, divergent_fields: [],
+      additives_summary: null, additive_names: null, additives_diverge: false,
+    })
+
+    renderPage('SERUM_pH_050-t5')
+
+    await screen.findByRole('heading', { name: 'SERUM_pH_050-t5' })
+    expect(screen.queryByRole('link', { name: 'SERUM_pH_050' })).not.toBeInTheDocument()
   })
 })

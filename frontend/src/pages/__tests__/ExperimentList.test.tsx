@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui'
 
 vi.mock('@/api/experiments', () => ({
@@ -492,3 +492,115 @@ describe('ExperimentList — inline status 409 (issue #97)', () => {
     )
   })
 })
+
+describe('ExperimentListPage — issue #101: letterless timepoint vial rows', () => {
+  const base = {
+    status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
+    created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
+    additives_summary: null, condition_note: null,
+    base_experiment_id: 'SERUM_pH_002' as string | null,
+    parent_experiment_fk: null as number | null,
+    replicate_label: null as string | null, is_outlier: false,
+    id_timepoint_days: 1 as number | null,
+  }
+
+  /** What the grouped list returns for SERUM_pH_002-t1/-t3/-t7/-t20: one row
+   *  standing for four vials, with NO replicate letters and so no `replicates`. */
+  function letterlessRow(): ExperimentListItem {
+    return {
+      ...base, id: 1, experiment_id: 'SERUM_pH_002-t1', experiment_number: 100,
+      group_display_id: 'SERUM_pH_002', vial_count: 4,
+    }
+  }
+
+  function renderWithRoutes() {
+    return render(
+      <MemoryRouter initialEntries={['/experiments']}>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/experiments" element={<ExperimentListPage />} />
+              <Route path="/experiments/groups/:baseId" element={<GroupRouteProbe />} />
+              <Route path="/experiments/:id" element={<DetailRouteProbe />} />
+            </Routes>
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  afterEach(() => { vi.clearAllMocks() })
+
+  it('navigates to the group page, not to the first vial', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [letterlessRow()], total: 1, skip: 0, limit: 25,
+    })
+    const user = userEvent.setup()
+    renderWithRoutes()
+
+    await waitFor(() => expect(screen.getByText('SERUM_pH_002')).toBeInTheDocument())
+    await user.click(screen.getByText('SERUM_pH_002'))
+
+    expect(await screen.findByTestId('group-route')).toHaveTextContent('SERUM_pH_002')
+    expect(screen.queryByTestId('detail-route')).not.toBeInTheDocument()
+  })
+
+  it('says how many vials the row stands for', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [letterlessRow()], total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+
+    await waitFor(() => expect(screen.getByText('SERUM_pH_002')).toBeInTheDocument())
+    expect(screen.getByText('4 vials')).toBeInTheDocument()
+    // No letters exist, so it must not claim replicates.
+    expect(screen.queryByText(/replicates:/)).not.toBeInTheDocument()
+  })
+
+  it('still navigates a single-vial row to its own detail page', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{ ...base, id: 2, experiment_id: 'SERUM_pH_009', experiment_number: 109,
+                base_experiment_id: null, id_timepoint_days: null,
+                group_display_id: 'SERUM_pH_009', vial_count: 1 }],
+      total: 1, skip: 0, limit: 25,
+    })
+    const user = userEvent.setup()
+    renderWithRoutes()
+
+    await waitFor(() => expect(screen.getByText('SERUM_pH_009')).toBeInTheDocument())
+    await user.click(screen.getByText('SERUM_pH_009'))
+
+    expect(await screen.findByTestId('detail-route')).toHaveTextContent('SERUM_pH_009')
+  })
+
+  it('still navigates a lettered group row to the group page', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{ ...base, id: 3, experiment_id: 'SERUM_001a-t1', experiment_number: 120,
+                base_experiment_id: 'SERUM_001', replicate_label: 'a',
+                group_display_id: 'SERUM_001', vial_count: 4,
+                replicate_letters: ['a', 'b'],
+                replicates: [
+                  { ...base, id: 4, experiment_id: 'SERUM_001a-t1', experiment_number: 120,
+                    replicate_label: 'a', group_display_id: 'SERUM_001a', vial_count: 2 },
+                ] }],
+      total: 1, skip: 0, limit: 25,
+    })
+    const user = userEvent.setup()
+    renderWithRoutes()
+
+    await waitFor(() => expect(screen.getByText('SERUM_001')).toBeInTheDocument())
+    await user.click(screen.getByText('SERUM_001'))
+
+    expect(await screen.findByTestId('group-route')).toHaveTextContent('SERUM_001')
+  })
+})
+
+function GroupRouteProbe() {
+  const { baseId } = useParams()
+  return <div data-testid="group-route">{baseId}</div>
+}
+
+function DetailRouteProbe() {
+  const { id } = useParams()
+  return <div data-testid="detail-route">{id}</div>
+}

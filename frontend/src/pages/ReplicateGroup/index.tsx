@@ -151,6 +151,9 @@ interface ReplicateGroupContentProps {
 function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
   const experimentType = group.shared_conditions['experiment_type']
   const [expandedLetters, setExpandedLetters] = useState<Set<string>>(new Set())
+  // Issue #101: a group can have members but no letters -- SERUM_pH_002-t1/-t3/-t7
+  // is one experiment sampled three times, not three replicates of each other.
+  const letterlessVials = group.members.filter((m) => m.replicate_label === null)
 
   return (
     <div className="space-y-4">
@@ -164,7 +167,11 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold text-ink-primary font-mono-data">{baseId}</h1>
           <span className="text-xs text-ink-muted">
-            {group.replicate_count} {group.replicate_count === 1 ? 'replicate' : 'replicates'}
+            {group.replicate_count > 0
+              ? `${group.replicate_count} ${group.replicate_count === 1 ? 'replicate' : 'replicates'}`
+              // A letterless vial set has no replicates to count; reporting
+              // "0 replicates" read as an empty group (issue #101).
+              : `${group.member_count} ${group.member_count === 1 ? 'vial' : 'vials'}`}
           </span>
           {typeof experimentType === 'string' && experimentType && (
             <span className="text-xs text-ink-muted">· {experimentType}</span>
@@ -197,6 +204,18 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
               divergentFields={group.divergent_fields}
             />
           )}
+          {/* Issue #101: members with no replicate letter are the stem's own
+              timepoint vials. They belong to the group -- v_results_scalar_rollup
+              counts them -- but they carry no letter to nest under, so they are
+              listed first, above the lettered replicates. */}
+          {letterlessVials.map((vial) => (
+            <MemberRow
+              key={vial.id}
+              member={vial}
+              isParent={false}
+              divergentFields={group.divergent_fields}
+            />
+          ))}
           {group.replicates.map((letter) => (
             <LetterRows
               key={letter.replicate_label}

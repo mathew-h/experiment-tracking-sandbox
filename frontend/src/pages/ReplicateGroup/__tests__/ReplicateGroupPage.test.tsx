@@ -313,3 +313,50 @@ describe('ReplicateGroupPage — issue #98 letter nesting', () => {
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 })
+
+describe('ReplicateGroupPage — issue #101: a group with no replicate letters', () => {
+  const VIALS: ReplicateGroupMemberDetail[] = [1, 3, 7, 20].map((day, i) => ({
+    id: 30 + i, experiment_id: `SERUM_pH_002-t${day}`, replicate_label: null,
+    status: 'COMPLETED', is_outlier: false, id_timepoint_days: day,
+    researcher: 'MH', date: null, result_count: day === 20 ? 0 : 1, conditions: {},
+  }))
+
+  const VIAL_SET: ReplicateGroupDetail = {
+    base_experiment_id: 'SERUM_pH_002', parent: null,
+    members: VIALS, member_count: 4,
+    replicates: [], replicate_count: 0,
+    shared_conditions: { experiment_type: 'Serum' }, divergent_fields: [],
+    additives_summary: null, additive_names: null, additives_diverge: false,
+  }
+
+  it('counts vials in the header rather than claiming 0 replicates', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(VIAL_SET)
+    renderAtBase('SERUM_pH_002')
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'SERUM_pH_002' })).toBeInTheDocument()
+    )
+    expect(screen.getByText('4 vials')).toBeInTheDocument()
+    expect(screen.queryByText(/0 replicates/)).not.toBeInTheDocument()
+  })
+
+  it('lists every vial with its timepoint and result count', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(VIAL_SET)
+    renderAtBase('SERUM_pH_002')
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'SERUM_pH_002-t1' })).toBeInTheDocument()
+    )
+    expect(screen.getByRole('link', { name: 'SERUM_pH_002-t20' })).toHaveAttribute(
+      'href', '/experiments/SERUM_pH_002-t20',
+    )
+    expect(screen.getByText('T+20')).toBeInTheDocument()
+  })
+
+  it('still reports the letter count for a lettered set', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(ORPHAN_GROUP)
+    renderAtBase('SERUM_001')
+    await waitFor(() => expect(screen.getByText('3 replicates')).toBeInTheDocument())
+    expect(screen.queryByText(/vials/)).not.toBeInTheDocument()
+  })
+})

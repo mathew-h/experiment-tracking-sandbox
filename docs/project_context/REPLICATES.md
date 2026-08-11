@@ -69,6 +69,9 @@ It shows:
 - A **members table** — one row per replicate (the parent, if one exists, plus every
   lettered member), with status, outlier flag, and result count per row. Any condition
   that differs from the rest of the group (e.g. actual rock mass) is called out per row.
+  A set sampled per timepoint with **no letters at all** (`SERUM_pH_002-t1`, `-t3`,
+  `-t7`, `-t20`) lists one row per vial here — see "Timepoint vials with no letters"
+  below.
 - **Shared conditions** — the fields identical across every member, shown once instead
   of repeated per row.
 - An **additive summary** — a single summary line if every member's additives agree, or
@@ -82,6 +85,27 @@ own experiment page.
 
 This replaces the old header link to `/experiments/{base}`, which 404'd whenever the
 base ID had no parent row — the common case for lettered-only replicate sets.
+
+### Timepoint vials with no letters
+
+An experiment sampled destructively at several timepoints but **not** replicated —
+`SERUM_pH_002-t1`, `-t3`, `-t7`, `-t20`, with no `a`/`b`/`c` anywhere — is one
+experiment, four vials. It gets a group page like any set:
+
+- On `/experiments` the four vials appear as **one row labelled `SERUM_pH_002`** with a
+  **4 vials** chip. Clicking it opens the group page (not the first vial). The status
+  dropdown is read-only on that row, because an inline change would reach only one vial.
+- The group page header reads **4 vials** rather than "0 replicates", lists every vial
+  with its `T+N` timepoint and result count, and links each one to its own page.
+- The chart is a **time course**: one point per day, no error bars. Each day comes from a
+  single vial, so there is no standard deviation to draw — the table shows the value
+  alone rather than "± 0.0". A vial with no results yet (`-t20` above) is listed with a
+  result count of 0 and contributes no point.
+- The same view is reachable from any vial's Results tab via **Grouped (n=4)**.
+
+Before this, such a set had no group page at all: `/experiments` collapsed the four
+vials into one row that opened only the earliest one, and the rollup reported "No
+primary results to aggregate yet." even though the data was there (issue #101).
 
 ---
 

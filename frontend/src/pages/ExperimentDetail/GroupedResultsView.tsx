@@ -33,6 +33,13 @@ const METRICS: MetricDef[] = [
 const fmt = (v: number | null | undefined, digits = 2) =>
   v == null ? '—' : v.toFixed(digits)
 
+/** `mean ± sd`, or the mean alone when the bucket held one vial. A NULL sd used
+ *  to be coerced to 0 and rendered as "± 0.0", which claims a measured spread of
+ *  zero where none was computed at all (issue #101). */
+const fmtMeanSd = (
+  mean: number | null | undefined, sd: number | null | undefined, digits = 2,
+) => (mean == null ? '—' : sd == null ? fmt(mean, digits) : `${fmt(mean, digits)} ± ${fmt(sd, digits)}`)
+
 interface GroupedResultsViewProps {
   baseExperimentId: string
 }
@@ -48,11 +55,11 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
   // which return a differently-shaped response than the existing
   // ['replicate-group', ...] / ['rollup', ...] keys used by the wrapper endpoints
   // elsewhere on the detail page. Do not reuse those keys here.
-  const { data: group } = useQuery({
+  const { data: group, isError: groupFailed } = useQuery({
     queryKey: ['replicate-group-detail', baseExperimentId],
     queryFn: () => experimentsApi.getGroup(baseExperimentId),
   })
-  const { data: rollup, isLoading } = useQuery({
+  const { data: rollup, isLoading, isError: rollupFailed } = useQuery({
     queryKey: ['group-rollup', baseExperimentId],
     queryFn: () => experimentsApi.getGroupRollup(baseExperimentId),
   })
@@ -85,6 +92,28 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
   const allVials = useMemo(
     () => seriesLetters.flatMap((l) => l.vials.map((v) => ({ letterKey: l.key, vial: v }))),
     [seriesLetters],
+  )
+
+  // Issue #101: members carrying NO replicate letter are vials of the stem
+  // itself (SERUM_pH_002-t1/-t3/-t7 is one experiment sampled three times).
+  // They deliberately form no individual series -- with one vial per bucket the
+  // series would be the mean line redrawn on top of itself -- but they must
+  // still be reachable, so they join the drill-in links.
+  const letterlessVials = useMemo(
+    () => (group?.members ?? []).filter((m) => m.replicate_label === null),
+    [group],
+  )
+  const drillInVials = useMemo(
+    () => [...allVials.map(({ vial }) => vial), ...letterlessVials],
+    [allVials, letterlessVials],
+  )
+
+  // Whether the selected metric has any cross-vial spread to report. A bucket
+  // holding one vial has a NULL sd, and `fmt(sd ?? 0)` used to render that as
+  // "10.0 ± 0.0" -- a fabricated zero standard deviation on a single reading.
+  const metricHasSpread = useMemo(
+    () => metric.sd != null && (rollup ?? []).some((r) => r[metric.sd!] != null),
+    [rollup, metric],
   )
 
   const vialResults = useQueries({
@@ -124,6 +153,17 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
   }, [rollup, metric, seriesLetters, allVials, vialResults])
 
   if (isLoading) return <Spinner />
+  // A failed fetch is not an empty result. Both queries used to fall through to
+  // the empty-state copy below, so a 404 from /groups/{base_id} read as "this
+  // group has no data" -- which is what disguised issue #101 as a data problem.
+  if (rollupFailed || groupFailed) {
+    return (
+      <p className="text-sm text-red-400 py-4">
+        Could not load grouped results. Try reloading; if it persists the group may no
+        longer exist.
+      </p>
+    )
+  }
   if (!rollup?.length) {
     return <p className="text-sm text-ink-muted py-4">No primary results to aggregate yet.</p>
   }
@@ -151,7 +191,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           Show individual replicates
         </label>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-ink-secondary pb-2">
-          {allVials.map(({ vial }) => (
+          {drillInVials.map((vial) => (
             <Link
               key={vial.id}
               to={`/experiments/${vial.experiment_id}`}
@@ -192,11 +232,14 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
                 />
               ))}
             <Line
-              dataKey="mean" name={`mean ± sd (${metric.label})`}
+              dataKey="mean"
+              name={metricHasSpread ? `mean ± sd (${metric.label})` : metric.label}
               stroke={chartColors.mean} strokeWidth={2}
               dot={{ r: 5, fill: chartColors.mean }} connectNulls
             >
-              <ErrorBar dataKey="sd" stroke={chartColors.mean} strokeWidth={1.5} width={6} />
+              {metricHasSpread && (
+                <ErrorBar dataKey="sd" stroke={chartColors.mean} strokeWidth={1.5} width={6} />
+              )}
             </Line>
           </ComposedChart>
         </ResponsiveContainer>
@@ -221,24 +264,16 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
               <Td className="font-mono-data">{fmt(r.time_post_reaction_bucket_days, 1)}</Td>
               <Td className="font-mono-data text-ink-muted">n = {r.n_vials}</Td>
               <Td className="font-mono-data">
-                {r.mean_h2_ppm == null
-                  ? '—'
-                  : `${fmt(r.mean_h2_ppm, 1)} ± ${fmt(r.sd_h2_ppm ?? 0, 1)}`}
+                {fmtMeanSd(r.mean_h2_ppm, r.sd_h2_ppm, 1)}
               </Td>
               <Td className="font-mono-data">
-                {r.mean_h2_micromoles == null
-                  ? '—'
-                  : `${fmt(r.mean_h2_micromoles, 1)} ± ${fmt(r.sd_h2_micromoles ?? 0, 1)}`}
+                {fmtMeanSd(r.mean_h2_micromoles, r.sd_h2_micromoles, 1)}
               </Td>
               <Td className="font-mono-data">
-                {r.mean_h2_grams_per_ton == null
-                  ? '—'
-                  : `${fmt(r.mean_h2_grams_per_ton, 1)} ± ${fmt(r.sd_h2_grams_per_ton ?? 0, 1)}`}
+                {fmtMeanSd(r.mean_h2_grams_per_ton, r.sd_h2_grams_per_ton, 1)}
               </Td>
               <Td className="font-mono-data">
-                {r.mean_fe_yield_h2_pct == null
-                  ? '—'
-                  : `${fmt(r.mean_fe_yield_h2_pct)} ± ${fmt(r.sd_fe_yield_h2_pct ?? 0)}`}
+                {fmtMeanSd(r.mean_fe_yield_h2_pct, r.sd_fe_yield_h2_pct)}
               </Td>
               <Td className="font-mono-data">{fmt(r.mean_final_ph)}</Td>
             </TableRow>

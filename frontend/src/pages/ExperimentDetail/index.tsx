@@ -76,6 +76,20 @@ export function ExperimentDetailPage() {
     enabled: Boolean(id),
   })
 
+  // Issue #101: `replicateGroup` is letter-only, so a letterless '-t<days>' vial
+  // looked like a standalone experiment and got no Group link — leaving the
+  // stem's other vials reachable only by typing their raw IDs. The group
+  // endpoint counts vials too. Shares its key with ResultsTab/GroupedResultsView.
+  const groupBaseId = replicateGroup?.base_experiment_id ?? experiment?.base_experiment_id ?? id
+  const { data: groupDetail } = useQuery({
+    queryKey: ['replicate-group-detail', groupBaseId],
+    queryFn: () => experimentsApi.getGroup(groupBaseId!),
+    enabled: Boolean(groupBaseId),
+    // A 404 is a legitimate answer here — a sequential re-run whose stem row was
+    // never created (SERUM_001-2 with no SERUM_001) has no group. Don't retry it.
+    retry: false,
+  })
+
   const renameValidation = useExperimentIdValidation(idDraft, experiment?.experiment_id)
 
   const renameMutation = useMutation({
@@ -176,7 +190,11 @@ export function ExperimentDetailPage() {
   if (error || !experiment) return <p className="text-red-400 text-sm p-6">Experiment not found</p>
 
   const inReplicateSet =
-    experiment.replicate_label !== null || (replicateGroup?.members.length ?? 0) > 0
+    experiment.replicate_label !== null ||
+    (replicateGroup?.members.length ?? 0) > 0 ||
+    // Issue #101: a letterless vial belongs to a group as soon as its stem holds
+    // more than one vial. ">1" so a lone '-t' vial does not link to a group of one.
+    (groupDetail?.member_count ?? 0) > 1
 
   const idRightElement =
     renameValidation.status === 'checking' ? (

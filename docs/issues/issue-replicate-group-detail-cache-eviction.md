@@ -31,6 +31,21 @@ Two live queries use that key:
 - `pages/ReplicateGroup/index.tsx:275` — `['replicate-group-detail', baseId]`
 - `pages/ExperimentDetail/GroupedResultsView.tsx:52` — `['replicate-group-detail', baseExperimentId]`
 
+**Amended 2026-08-11 (issue #101): four consumers now, and the exposure is worse.**
+Two more queries were added on that key, both of which run on an ordinary
+experiment detail page rather than only after navigating to a group:
+
+- `pages/ExperimentDetail/index.tsx` — gates the header **Group** link
+- `pages/ExperimentDetail/ResultsTab.tsx` — gates the **Grouped (n=N)** toggle
+
+Before #101 a stale entry was only visible if the researcher navigated to the
+group page. Now it is read on **every** detail page load, so after deleting a
+vial the surviving siblings' pages can show a stale `member_count` in the
+Grouped toggle — and, for a letterless vial set that drops to one vial, offer a
+Group link and a grouped view that should no longer be there. That makes the
+"evict the whole `['replicate-group-detail']` prefix" option in the Fix section
+the clear choice over trying to reconstruct a base ID.
+
 ## Impact
 
 Delete a vial from a replicate set, then open that set's group page. The members table,

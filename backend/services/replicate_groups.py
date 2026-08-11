@@ -10,16 +10,19 @@ routes and the existing `/{experiment_id}/replicate-group` +
 Label non-uniqueness: `replicate_label` is NOT unique within a group — a
 `-t<days>` timepoint vial carries the same letter as its parent vial
 (`SERUM_001a` and `SERUM_001a-t7` are both label `a`). Members are always
-identified by `id`, never by `replicate_label`.
+identified by `id`, never by `replicate_label`. A member may also have NO
+label: a letterless `-t<days>` vial of the stem is a member (issue #101), so
+`replicates` (the per-letter grouping) can be empty while `members` is not.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
-from sqlalchemy import bindparam, func, select, text
+from sqlalchemy import ColumnElement, and_, bindparam, func, or_, select, text
 from sqlalchemy.orm import Session
 
+from backend.services.replicate_collapse import timepoint_stem_expr
 from database.lineage_utils import find_replicate_group_parent
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
@@ -90,19 +93,50 @@ class GroupData:
     parent_result_count: int = 0
 
 
+def _member_clause(base_id: str) -> ColumnElement[bool]:
+    """Group membership for `base_id`: a lettered replicate, OR a letterless
+    '-t<days>' timepoint vial of this stem (issue #101).
+
+    A letterless `-t` vial is one destructively-sampled instance of the stem
+    itself, not a replicate of a sibling — `SERUM_001-t1/-t3/-t7` is one
+    experiment sampled three times. It carries `replicate_label = NULL` and
+    `base_experiment_id = stem`, and `v_results_scalar_rollup` already groups
+    it on that stem, so excluding it here made the members table and the
+    rollup disagree about who belonged to the group.
+
+    The second clause is keyed on the timepoint-stripped `experiment_id`, NOT
+    on `id_timepoint_days IS NOT NULL` alone, because `base_experiment_id` is
+    the stem for derivations too: `SERUM_001-2-t0` (a vial of the *re-run*)
+    and `SERUM_001_Desorption-t5` both carry base `SERUM_001` and would
+    otherwise be adopted. Reducing the ID instead admits only vials whose ID
+    IS the stem plus a token. Equality on that expression — rather than a
+    `LIKE base_id || '-t%'` — also avoids treating the `_` in a stem such as
+    `SERUM_pH_002` as a single-character wildcard.
+    """
+    return or_(
+        Experiment.replicate_label.isnot(None),
+        and_(
+            Experiment.replicate_label.is_(None),
+            Experiment.id_timepoint_days.isnot(None),
+            timepoint_stem_expr(Experiment) == base_id,
+        ),
+    )
+
+
 def _fetch_members(db: Session, base_id: str) -> list[Experiment]:
-    """All lettered replicate members for a base ID, in display order:
-    replicate_label ASC, then id_timepoint_days ASC (NULLS FIRST), then
-    experiment_number ASC. A '-t<days>' vial shares its letter with its
-    parent vial, so ordering never assumes one row per letter."""
+    """All replicate-group members for a base ID (see `_member_clause`), in
+    display order: replicate_label ASC (NULLS FIRST, so the stem's own
+    letterless timepoint vials lead), then id_timepoint_days ASC (NULLS
+    FIRST), then experiment_number ASC. A '-t<days>' vial shares its letter
+    with its parent vial, so ordering never assumes one row per letter."""
     return db.execute(
         select(Experiment)
         .where(
             Experiment.base_experiment_id == base_id,
-            Experiment.replicate_label.isnot(None),
+            _member_clause(base_id),
         )
         .order_by(
-            Experiment.replicate_label.asc(),
+            Experiment.replicate_label.asc().nulls_first(),
             Experiment.id_timepoint_days.asc().nulls_first(),
             Experiment.experiment_number.asc(),
         )
@@ -233,8 +267,11 @@ def resolve_group(db: Session, base_id: str) -> GroupData:
     Parent resolution keeps `-0`/`-1` spellings working (see
     `find_replicate_group_parent`) and may return None (the common case:
     lettered members exist but no parent row does). Members are all
-    experiments with `base_experiment_id == base_id` and a non-null
-    `replicate_label`, regardless of whether a parent row exists.
+    experiments with `base_experiment_id == base_id` that satisfy
+    `_member_clause` — the stem's lettered replicates plus its own letterless
+    `-t<days>` timepoint vials — regardless of whether a parent row exists.
+    A bare-stem parent row carries no timepoint token, so it is the `parent`
+    and never also a member.
 
     Does not raise on an unknown base_id — returns a GroupData with
     `parent=None` and `members=[]`. Callers (the `/groups/{base_id}` routes)
@@ -275,14 +312,14 @@ def resolve_group(db: Session, base_id: str) -> GroupData:
 
 def group_exists(db: Session, base_id: str) -> bool:
     """True if `base_id` names an experiment row (any parent spelling) or is
-    the base_experiment_id of at least one lettered member."""
+    the base_experiment_id of at least one member (`_member_clause`)."""
     if find_replicate_group_parent(db, base_id) is not None:
         return True
     return db.execute(
         select(Experiment.id)
         .where(
             Experiment.base_experiment_id == base_id,
-            Experiment.replicate_label.isnot(None),
+            _member_clause(base_id),
         )
         .limit(1)
     ).first() is not None
