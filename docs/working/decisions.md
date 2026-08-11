@@ -603,3 +603,45 @@ so any repair must set the derived flag explicitly.
 production runbook in `docs/working/issue-log.md`);
 `database/data_migrations/zero_ph_conductivity_016.py` (same bug class, earlier
 instance â€” an Excel template blank stored as a value).
+
+---
+
+## 2026-08-11 — A letterless `-t` vial is an instance of the stem, not a replicate
+
+**Decision:** an experiment ID that is a bare stem plus a timepoint token
+(`SERUM_pH_002-t1`, no `a`/`b`/`c`) denotes **one destructively-sampled instance of that
+stem**. A set of them is a replicate group whose members are those vials, with
+`replicate_count = 0` and `replicates = []`. Membership therefore no longer requires a
+replicate letter (`backend/services/replicate_groups.py::_member_clause`).
+
+**Why:** this was issue #101's blocking open question — parent, unlettered replicate, or
+something else — and it had to be answered because issue #98's list-page collapsing had
+already committed to treating these vials as one row. That row's only link was its
+representative vial, and both `/groups/{base_id}` routes 404'd on a letterless set, so
+there was no page anywhere that showed the other vials or the cross-timepoint rollup —
+which `v_results_scalar_rollup` had been computing correctly all along, since it groups
+on `COALESCE(base_experiment_id, experiment_id)` and never looked at the letter. The
+collapsing and the group gate disagreed, and the researcher lost data visibility in the
+gap: 13 stems in the dev DB, 8 with more than one vial.
+
+**How to apply:** two consequences that are easy to get wrong.
+
+1. **`replicate_count == 0` does not mean "empty group".** Read `member_count`. Any UI
+   that says "N replicates" needs a vial-count branch, and any consumer treating a zero
+   letter count as absence will silently hide real data.
+2. **Per-bucket stats over such a set are a time course, not replicate statistics.** One
+   vial per bucket means `n_vials = 1` and every `sd_*` NULL. Rendering `sd ?? 0` prints
+   "± 0.0", which asserts a measured spread of zero on a single reading — show the mean
+   alone, and draw no error bars and no individual overlay series (with one value per
+   bucket the series is the mean line redrawn on itself).
+
+Membership is keyed on the **timepoint-stripped `experiment_id`**, not on
+`id_timepoint_days IS NOT NULL`: `SERUM_001-2-t0` (a vial of a sequential re-run) and
+`SERUM_001_Desorption-t5` both carry the stem as their `base_experiment_id` and would
+otherwise be adopted into the wrong group. Compare that expression by **equality**, never
+`LIKE base_id || '-t%'` — `_` is a single-character LIKE wildcard, and stems here contain
+underscores (`SERUM_pH_002`).
+
+**Related:** issue #101, split from #98; `docs/working/issues/06-letterless-t-vial-group-membership.md`;
+`.claude/rules/MODELS.md` (`id_timepoint_days`, `v_results_scalar_rollup`);
+issue #105, whose stale-cache exposure this widened from two query consumers to four.

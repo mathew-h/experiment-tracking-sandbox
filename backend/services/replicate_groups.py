@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
-from sqlalchemy import and_, bindparam, func, or_, select, text
+from sqlalchemy import ColumnElement, and_, bindparam, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from backend.services.replicate_collapse import timepoint_stem_expr
@@ -93,7 +93,7 @@ class GroupData:
     parent_result_count: int = 0
 
 
-def _member_clause(base_id: str):
+def _member_clause(base_id: str) -> ColumnElement[bool]:
     """Group membership for `base_id`: a lettered replicate, OR a letterless
     '-t<days>' timepoint vial of this stem (issue #101).
 

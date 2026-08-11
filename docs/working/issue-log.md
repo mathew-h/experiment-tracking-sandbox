@@ -2307,3 +2307,80 @@ narrowing `normalize_id`, and rejecting the row, and `split_timepoint_token` has
 call sites including a second locked parser and a SQL pattern a test pins against
 divergence). Production backfill for the `'nan'` rows is written and dry-run tested but
 **not applied to production** â€” runbook above.
+
+## 2026-08-11 | issue #101 — Letterless `-t` vials had no reachable group (`fix/issue-101-letterless-t-vial-groups`)
+
+- **Files changed:**
+  - `backend/services/replicate_groups.py` — new `_member_clause()`; `_fetch_members`
+    and `group_exists` widened to it; members ordered `replicate_label NULLS FIRST`;
+    module/`resolve_group` docstrings corrected
+  - `frontend/src/pages/ExperimentList.tsx` — `isVialSetRow` routes a letterless
+    multi-vial row to its group page; "N vials" chip
+  - `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx` — error state distinct
+    from empty; `fmtMeanSd()`; letterless members added to the drill-in links;
+    `metricHasSpread` gates the error bars and the "mean ± sd" legend
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx`,
+    `frontend/src/pages/ExperimentDetail/index.tsx` — group-detail query (`retry: false`)
+    gates the Grouped toggle and the header Group link
+  - `frontend/src/pages/ReplicateGroup/index.tsx` — vial-count header; letterless vials
+    rendered in the members table
+  - Tests: `tests/api/test_experiment_rollup.py` (+9),
+    `frontend/src/pages/ExperimentDetail/__tests__/ResultsTab.groupToggle.test.tsx` (new, 5),
+    `.../GroupStrip.test.tsx` (+2), `.../GroupedResultsView.test.tsx` (+6),
+    `frontend/src/pages/__tests__/ExperimentList.test.tsx` (+4),
+    `frontend/src/pages/ReplicateGroup/__tests__/ReplicateGroupPage.test.tsx` (+3)
+  - Docs: `.claude/rules/MODELS.md`, `docs/api/API_REFERENCE.md`,
+    `docs/user_guide/REPLICATES.md`, `docs/working/issues/06-letterless-t-vial-group-membership.md`,
+    `docs/issues/issue-replicate-group-detail-cache-eviction.md` (amended — see below),
+    plus the hook's `docs/project_context/` copies
+- **Tests added:** yes — 9 backend (membership; both `/groups` 404s; bare-stem parent not
+  double-counted as a member; lettered + letterless coexistence; and four exclusion cases:
+  `-2`, `-2-t0`, `_Desorption-t5`, and an underscore-stem LIKE-wildcard guard), 20 frontend
+- **Decision logged:** yes — `docs/working/decisions.md`, "A letterless `-t` vial is an
+  instance of the stem, not a replicate"
+
+**How it presented, vs. how it was filed.** #101 was filed as a members-table/rollup
+*disagreement* — accurate but understated. Because #98's list collapsing already merged
+these vials into one row whose only link was its representative, and `group_exists`
+required a letter, a letterless set had **no reachable group page at all**: both
+`/groups/{base_id}` routes 404'd and `GroupedResultsView` rendered that 404 as "No primary
+results to aggregate yet." So the researcher saw one experiment where there were four and
+was told there was no data when the rollup had been computing it correctly all along. The
+mixed case #101 was actually written around (letterless vials *plus* lettered members under
+one stem) has **zero** instances in the dev DB; the all-letterless set is what bites.
+
+Measured in dev: 13 stems with a letterless `-t` vial and no lettered member, 8 with more
+than one vial (`SERUM_pH_002/004/006`, `SERUM_Catalyst_002/004/006/008/010`). Verified
+post-fix on real data: `SERUM_pH_002` resolves to 4 members and its 3 rollup buckets,
+while `SERUM_pH_001`/`_003` (lettered, 12 members / 3 letters each) are unchanged.
+
+**Do not key membership on `id_timepoint_days IS NOT NULL`.** It reads as the obvious
+filter and is wrong: `SERUM_001-2-t0` and `SERUM_001_Desorption-t5` both carry the stem as
+their `base_experiment_id`, so both would be adopted into the wrong group. `_member_clause`
+compares the timepoint-stripped `experiment_id` instead, by **equality** — `LIKE base_id ||
+'-t%'` would treat the `_` in `SERUM_pH_002` as a wildcard. Both traps have a test.
+
+**Left deliberately unfixed:**
+- **Issue #105 is now worse, not fixed here.** The two new queries put
+  `['replicate-group-detail', baseId]` on every experiment detail page instead of only on
+  group navigation, so a stale entry after a delete can leave a Grouped toggle showing the
+  wrong `n` — or a Group link on a set that has dropped to one vial. #105 has its own five
+  acceptance criteria (including auditing `group-rollup` and a `DeleteExperiment.test.tsx`
+  regression), and its eviction list is keyed by *experiment* ID while this key is keyed by
+  *base* ID, so it is not a one-line addition. Its doc is amended with the new consumers.
+- The six `-t3` vials carrying a T+7/T+6 result (`SERUM_pH_001a/001c/002/003a/004/006-t3`).
+  Already demoted to non-primary by `demote_stale_t3_prefix_rows_017.py`, so the rollup is
+  clean, but `get_experiment_results` returns non-primary rows — those vials' pages show
+  both T+3 and T+7.
+- `SERUM_Catalyst_010`'s four vials have no results at all, so its chart is legitimately
+  empty after the fix. Use `SERUM_pH_002` to eyeball it.
+- Repo-wide `npm run lint` still reports 6 errors in four untouched files, and
+  `tsc --noEmit` 3 in `ResultsTab.columns.test.tsx` — all pre-existing, tracked as #106,
+  and not gates (`npm run build` is `vite build`, no typecheck). Every file changed here is
+  eslint-clean with zero flake8 F-codes.
+
+Verification: 1492 pass / 4 skipped / 3 failed on full `pytest -q` — the 3 being the
+pre-existing `test_pg_backup_restore.py` failures also present on `develop` (pass count
+1483 → 1492). 227 vitest pass across 33 files. Every test watched fail first. No schema
+change, no migration; `v_results_scalar_rollup`, the list router, and the deliberately
+pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
