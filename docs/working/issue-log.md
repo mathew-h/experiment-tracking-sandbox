@@ -2222,3 +2222,56 @@ report it. The same gap is recorded on the ICP side in footnote Â³ of
 Since the row merge landed, two such rows would also present as a merge candidate that
 inexplicably did **not** merge â€” they key to different timepoints â€” which is the most
 likely way a researcher would notice it.
+
+### Backfill for the `'nan'` text defect â€” `fix_nan_text_fields_019.py`
+
+Written 2026-08-11, same session as the parser fix, so it deploys alongside it.
+Modelled on `zero_ph_conductivity_016.py` (same bug class: an Excel template blank
+stored as a value, parser fixed going forward, historical rows corrected by script).
+
+**Production impact, measured directly from `docs/sample_data/experiments_20260810_010002.sql`**
+(read via `pg_restore --data-only --table experimental_results -f -`; no database was
+created and nothing was written):
+
+| Metric | Production 2026-08-10 | Dev |
+|---|---|---|
+| `experimental_results` rows | 2094 | 1961 |
+| `brine_modification_description = 'nan'` | 12 | 12 |
+| ...of those flagged `has_brine_modification` | 12 (all) | 12 (all) |
+| `has_brine_modification = true` total | 141 | 140 |
+| **False-positive share of the flag** | **8.5%** | 8.6% |
+| `description = 'nan'` | **0** | 0 |
+
+`description` is clean in both because researchers always fill that column; only the
+usually-blank `Modification` cell ever tripped the bug. 120 distinct real modification
+values are present in production and must survive the cleanup.
+
+**Status: applied to DEV only.** Dev went 140 flagged -> 128, with 0 `'nan'` values
+remaining and all 128 real values preserved (128 non-null = 128 flagged, self-consistent).
+**Production has NOT been backfilled** â€” that runs on the lab PC after deploy.
+
+**Runbook (lab PC, after the parser fix is deployed):**
+
+```bash
+# 1. Dry run. Prints the counts above; writes nothing.
+python database/data_migrations/fix_nan_text_fields_019.py
+
+# 2. Confirm the numbers look like the production column above (~12 rows, all flagged),
+#    then apply.
+python database/data_migrations/fix_nan_text_fields_019.py --apply
+```
+
+Expect "Rows updated: 12", "Remaining 'nan' values: 0", and the flagged total to drop by
+exactly the updated count. If `description = 'nan'` is non-zero the script REPORTS those
+row ids and does not touch them â€” `description` is `NOT NULL`, so there is no correct
+null, and the script deliberately refuses to invent free text a researcher will read.
+Those rows need a human decision.
+
+**Two design points worth preserving if this script is ever edited:**
+
+1. The `UPDATE` sets `has_brine_modification = false` **explicitly**. `sync_brine_flag`
+   is an ORM `@validates` hook on the attribute and does NOT fire for raw SQL, so
+   relying on it would null the text and leave all 12 flags true â€” the worse half of
+   the bug.
+2. Matching is `lower(btrim(...)) = 'nan'`, so `'NaN'` and `' nan '` are caught. Zero
+   such variants exist today; the cost is one `lower()`.
