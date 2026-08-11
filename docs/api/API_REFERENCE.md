@@ -211,6 +211,22 @@ Replicate group detail addressed by the base-ID **string** — `base_id` need no
   comparison rather than counting as all-null, so conditions shared across the
   vials that do have rows stay in `shared_conditions`.
 
+**Membership (issue #101).** A member is either a **lettered replicate** of the
+stem, or one of the stem's **own letterless `-t<days>` timepoint vials**. So
+`SERUM_pH_002-t1/-t3/-t7/-t20` — one experiment sampled four times, no letters
+anywhere — is a group with `member_count = 4`, `replicate_count = 0` and
+`replicates = []`. Consumers must not treat `replicate_count == 0` as "empty
+group": check `member_count`. Before this, membership required a replicate
+letter, so both `/groups/` routes returned `404` for such a set even though
+`v_results_scalar_rollup` grouped its vials under the same stem.
+
+Membership is decided on the timepoint-stripped `experiment_id`, not on
+`base_experiment_id` alone, so these stay **out** even though they carry the
+stem as their base: `SERUM_001-2` (sequential re-run), `SERUM_001-2-t0` (a vial
+of that re-run, whose ID reduces to `SERUM_001-2`), and
+`SERUM_001_Desorption-t5` (treatment variant). A bare-stem row carries no
+token, so it remains the `parent` and is never also a member.
+
 **Errors:**
 - `404 Not Found` — `base_id` matches neither an experiment row nor any `base_experiment_id` value.
 

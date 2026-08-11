@@ -246,3 +246,92 @@ describe('GroupedResultsView — issue #98 per-letter series', () => {
     expect(screen.queryByText(/^replicate a \(outlier\)$/)).not.toBeInTheDocument()
   })
 })
+
+describe('GroupedResultsView — issue #101: letterless timepoint vial set', () => {
+  /** SERUM_pH_002-t1/-t3/-t7: members with NO replicate letters, so `replicates`
+   *  is empty and every bucket holds exactly one vial (sd is NULL throughout). */
+  const VIALS: ReplicateGroupMemberDetail[] = [1, 3, 7].map((day, i) => ({
+    id: 30 + i, experiment_id: `SERUM_pH_002-t${day}`, replicate_label: null,
+    status: 'ONGOING', is_outlier: false, id_timepoint_days: day,
+    researcher: null, date: null, result_count: 1, conditions: {},
+  }))
+
+  const LETTERLESS_GROUP: ReplicateGroupDetail = {
+    base_experiment_id: 'SERUM_pH_002', parent: null,
+    members: VIALS, member_count: 3,
+    replicates: [], replicate_count: 0,
+    shared_conditions: {}, divergent_fields: [],
+    additives_summary: null, additive_names: null, additives_diverge: false,
+  }
+
+  const LETTERLESS_ROLLUP: RollupTimepoint[] = [1, 3, 7].map((day, i) => ({
+    ...ROLLUP[0],
+    base_experiment_id: 'SERUM_pH_002', time_post_reaction_bucket_days: day,
+    n_vials: 1, n_replicate_letters: 0, n_values: 1,
+    mean_h2_ppm: (i + 1) * 10, sd_h2_ppm: null,
+    sd_gross_ammonium_mM: null, sd_h2_micromoles: null,
+    sd_h2_grams_per_ton: null, sd_fe_yield_h2_pct: null,
+  }))
+
+  beforeEach(() => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(LETTERLESS_GROUP)
+    vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue(LETTERLESS_ROLLUP)
+  })
+
+  it('renders a row per timepoint for a set with no replicate letters', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_pH_002" />, { wrapper })
+    await waitFor(() => expect(screen.getAllByText(/n = 1/)).toHaveLength(3))
+    expect(screen.getByText('10.0')).toBeInTheDocument()
+    expect(screen.getByText('30.0')).toBeInTheDocument()
+  })
+
+  it('keeps every vial reachable by a drill-in link', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_pH_002" />, { wrapper })
+    await waitFor(() => expect(screen.getAllByText(/n = 1/)).toHaveLength(3))
+    expect(screen.getByRole('link', { name: 'SERUM_pH_002-t1' })).toHaveAttribute(
+      'href', '/experiments/SERUM_pH_002-t1',
+    )
+    expect(screen.getByRole('link', { name: 'SERUM_pH_002-t7' })).toBeInTheDocument()
+  })
+
+  it('does not present a single value per bucket as a mean ± sd', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_pH_002" />, { wrapper })
+    await waitFor(() => expect(screen.getAllByText(/n = 1/)).toHaveLength(3))
+    // No spread exists to report, so neither the legend nor any cell may imply one.
+    expect(screen.queryByText(/mean ± sd/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/± 0\.0/)).not.toBeInTheDocument()
+  })
+
+  it('still labels the series mean ± sd when replicate letters exist', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_001', [
+        { replicate_label: 'a', vials: [detailVial(2, 'SERUM_001a', null, false)] },
+      ]),
+    )
+    vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue(ROLLUP)
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByText(/mean ± sd/)).toBeInTheDocument()
+  })
+})
+
+describe('GroupedResultsView — a failed fetch is not an empty result', () => {
+  it('reports an error instead of claiming there is nothing to aggregate', async () => {
+    vi.mocked(experimentsApi.getGroupRollup).mockRejectedValue(new Error('Request failed with status code 404'))
+    render(<GroupedResultsView baseExperimentId="SERUM_pH_002" />, { wrapper })
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not load grouped results/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/no primary results to aggregate yet/i)).not.toBeInTheDocument()
+  })
+
+  it('still reports an empty rollup as empty', async () => {
+    vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue([])
+    render(<GroupedResultsView baseExperimentId="SERUM_pH_002" />, { wrapper })
+
+    await waitFor(() =>
+      expect(screen.getByText(/no primary results to aggregate yet/i)).toBeInTheDocument(),
+    )
+  })
+})

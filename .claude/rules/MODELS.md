@@ -134,6 +134,21 @@ The central hub for all experimental data.
     (13 real pairs). The finders return **all** matches; nothing resolves an
     ambiguous key. See `docs/issues/issue-fuzzy-experiment-id-conflation.md`.
   - `id_timepoint_days` (Float, nullable, indexed): day value parsed from a trailing `-t<days>` ID token (e.g. `SERUM_001a-t7` → 7.0; decimals allowed). NULL = not encoded. The ID is canonical for the vial's timepoint: result creation fills a blank time from it and rejects a conflicting one (guards in `create_scalar_result_ex` and `POST /api/results`; string-level checks in the scalar/master bulk parsers). Set by `update_experiment_lineage` via `split_timepoint_token`; the token is stripped before lineage grouping, so `SERUM_001a-t7` groups under base `SERUM_001` with `replicate_label = a` and rolls up per day bucket with no view changes. A letterless `-t` vial (`SERUM_001-t7`) stays a parent-like row (base = stem, parent NULL).
+    - **A letterless `-t` vial is one destructively-sampled instance of the stem
+      itself — not a replicate (issue #101, decided 2026-08-11).** `SERUM_pH_002-t1/-t3/-t7`
+      is ONE experiment sampled three times, so the set forms a group whose
+      members are those vials: `member_count = 3`, `replicate_count = 0`,
+      `replicates = []`. `replicate_count == 0` therefore does NOT mean "empty
+      group" anywhere — read `member_count`. The letter remains the scientific
+      unit *when there is one* (issue #98); this only says a set can have vials
+      and no letters, and that per-bucket stats over such a set are a **time
+      course**, not replicate statistics (one vial per bucket → `n_vials = 1`,
+      `sd` NULL). `backend/services/replicate_groups.py::_member_clause` is the
+      single definition, keyed on the timepoint-stripped `experiment_id` (via
+      `timepoint_stem_expr`) — NOT on `id_timepoint_days IS NOT NULL`, which
+      would also adopt `SERUM_001-2-t0` and `SERUM_001_Desorption-t5`, both of
+      which carry the stem as their `base_experiment_id`. A bare-stem row has no
+      token, so it stays the `parent` and is never also a member.
     - **ICP-OES upload honors the token but REPORTS rather than rejects (2026-08-07).**
       `extract_sample_info_ex` (`backend/services/icp_service.py`) takes the day from
       the ID's `-t` token and emits one file-level warning when the label's `_Day<n>`
@@ -477,8 +492,11 @@ One row per `(base_experiment_id, time_post_reaction_bucket_days)`: cross-replic
   bucket) — which happens to match the letter count. The group page's
   individual-replicate overlay draws one series per letter and excludes
   `is_outlier` vials, so the overlay and this view's mean agree on membership.
-  **Known gap:** a *letterless* `-t` vial (`SERUM_001-t7`) is counted here but
-  is absent from the group page's members table, which requires
-  `replicate_label IS NOT NULL`. Tracked separately.
+  A *letterless* `-t` vial (`SERUM_001-t7`) is counted here **and** appears in
+  the group page's members table as of issue #101 — the two agree. Such a set
+  has `n_replicate_letters = 0` and one vial per bucket, so every `sd_*` is
+  NULL; the group page renders the mean alone (no error bars, no "± 0.0") and
+  draws no individual overlay series, because with one value per bucket the
+  series would be the mean line redrawn on itself.
 
 **Where views are created:** `database/event_listeners.py` runs `DROP VIEW IF EXISTS` then `CREATE VIEW` for each view in a `try` block on module import (using the shared `engine`). Failures are ignored so startup is not blocked if the DB is unavailable; views are also recreated in Alembic migrations when dependent tables change (e.g. new ICP columns), so the canonical definitions stay aligned with the schema documented here.

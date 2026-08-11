@@ -412,3 +412,160 @@ class TestReplicateGroupWrapperOrdering:
         assert [m["experiment_id"] for m in data["members"]] == [
             "G98ORD_001a-t1", "G98ORD_001a-t3",
         ]
+
+
+class TestLetterlessTimepointVialGroup:
+    """Issue #101: a letterless '-t<days>' vial set is ONE experiment sampled at
+    several timepoints, and it forms a group.
+
+    Membership is the stem's lettered replicates PLUS any vial whose ID reduces
+    to the stem once the '-t' token is peeled. Before this, `_fetch_members` and
+    `group_exists` required `replicate_label IS NOT NULL`, so a set with no
+    letters 404'd on both /groups routes even though v_results_scalar_rollup
+    grouped its vials on the same stem — the rollup table and the members table
+    disagreed about who belonged to the group.
+    """
+
+    def _make_vials(self, db, stem: str, days, start: int):
+        """One letterless vial per day: `{stem}-t{day}`, no bare-stem row."""
+        for i, day in enumerate(days):
+            db.add(Experiment(
+                experiment_id=f"{stem}-t{day}", experiment_number=start + i,
+                status=ExperimentStatus.ONGOING,
+            ))
+        db.commit()
+
+    def test_group_resolves_for_a_letterless_vial_set(self, client, db_session, reporting_views):
+        self._make_vials(db_session, "L101A_001", (1, 3, 7, 20), 9980)
+
+        resp = client.get("/api/experiments/groups/L101A_001")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["member_count"] == 4
+        assert [m["experiment_id"] for m in data["members"]] == [
+            "L101A_001-t1", "L101A_001-t3", "L101A_001-t7", "L101A_001-t20",
+        ]
+        assert [m["id_timepoint_days"] for m in data["members"]] == [1.0, 3.0, 7.0, 20.0]
+        # Zero letters is the truth for this set: the vials are timepoints of one
+        # experiment, not replicates of each other.
+        assert data["replicate_count"] == 0
+        assert data["replicates"] == []
+        assert data["parent"] is None
+
+    def test_rollup_returns_one_row_per_timepoint_for_a_letterless_set(
+        self, client, db_session, reporting_views,
+    ):
+        self._make_vials(db_session, "L101B_001", (1, 3, 7), 9990)
+        for day, h2 in ((1.0, 10.0), (3.0, 20.0), (7.0, 30.0)):
+            vial = db_session.execute(
+                select(Experiment).where(Experiment.experiment_id == f"L101B_001-t{int(day)}")
+            ).scalar_one()
+            _add_primary_scalar(db_session, vial, day, 1.0, h2_ppm=h2)
+        db_session.commit()
+
+        resp = client.get("/api/experiments/groups/L101B_001/rollup")
+
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert [r["time_post_reaction_bucket_days"] for r in rows] == [1.0, 3.0, 7.0]
+        assert [r["mean_h2_ppm"] for r in rows] == [10.0, 20.0, 30.0]
+        # One vial per bucket, so no cross-replicate spread exists to report.
+        assert all(r["n_vials"] == 1 for r in rows)
+        assert all(r["n_replicate_letters"] == 0 for r in rows)
+        assert all(r["sd_h2_ppm"] is None for r in rows)
+
+    def test_a_lone_letterless_vial_is_a_group_of_one(self, client, db_session, reporting_views):
+        self._make_vials(db_session, "L101C_001", (5,), 9995)
+
+        data = client.get("/api/experiments/groups/L101C_001").json()
+
+        assert data["member_count"] == 1
+        assert data["replicate_count"] == 0
+
+    def test_bare_stem_row_stays_the_parent_and_is_not_also_a_member(self, client, db_session, reporting_views):
+        db_session.add(Experiment(experiment_id="L101D_001", experiment_number=9996,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+        self._make_vials(db_session, "L101D_001", (1, 3), 9997)
+
+        data = client.get("/api/experiments/groups/L101D_001").json()
+
+        assert data["parent"]["experiment_id"] == "L101D_001"
+        assert data["member_count"] == 2
+        assert "L101D_001" not in [m["experiment_id"] for m in data["members"]]
+
+    def test_lettered_and_letterless_vials_coexist_in_one_group(self, client, db_session, reporting_views):
+        """The disagreement #101 was filed for: the letterless vial is counted by
+        v_results_scalar_rollup, so it must appear in the members table too —
+        without being adopted into any letter's vial list."""
+        for i, eid in enumerate(("L101E_001a-t1", "L101E_001b-t1", "L101E_001-t7")):
+            db_session.add(Experiment(experiment_id=eid, experiment_number=9800 + i,
+                                      status=ExperimentStatus.ONGOING))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/L101E_001").json()
+
+        assert data["member_count"] == 3
+        assert "L101E_001-t7" in [m["experiment_id"] for m in data["members"]]
+        assert data["replicate_count"] == 2
+        assert [r["replicate_label"] for r in data["replicates"]] == ["a", "b"]
+        nested = [v["experiment_id"] for r in data["replicates"] for v in r["vials"]]
+        assert "L101E_001-t7" not in nested
+
+    def test_sequential_rerun_is_not_a_group_member(self, client, db_session, reporting_views):
+        """#101 AC3: `-N` re-runs carry no '-t' token and must stay out."""
+        db_session.add(Experiment(experiment_id="L101F_001", experiment_number=9810,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.add(Experiment(experiment_id="L101F_001-2", experiment_number=9811,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/L101F_001").json()
+
+        assert "L101F_001-2" not in [m["experiment_id"] for m in data["members"]]
+        assert data["member_count"] == 0
+
+    def test_sequential_rerun_carrying_a_timepoint_token_is_not_a_group_member(
+        self, client, db_session, reporting_views,
+    ):
+        """`L101G_001-2-t0` is a vial of the RE-RUN, not of the stem: its ID
+        reduces to `L101G_001-2`, so a filter keyed on `id_timepoint_days IS NOT
+        NULL` alone would wrongly adopt it (its base_experiment_id is the stem)."""
+        self._make_vials(db_session, "L101G_001", (1, 3), 9820)
+        db_session.add(Experiment(experiment_id="L101G_001-2-t0", experiment_number=9822,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/L101G_001").json()
+
+        assert [m["experiment_id"] for m in data["members"]] == [
+            "L101G_001-t1", "L101G_001-t3",
+        ]
+
+    def test_treatment_variant_carrying_a_timepoint_token_is_not_a_group_member(
+        self, client, db_session, reporting_views,
+    ):
+        """#101 AC3, treatment half: `_Desorption-t5` reduces to
+        `L101H_001_Desorption`, not to the stem."""
+        self._make_vials(db_session, "L101H_001", (1, 3), 9830)
+        db_session.add(Experiment(experiment_id="L101H_001_Desorption-t5",
+                                  experiment_number=9832,
+                                  status=ExperimentStatus.ONGOING))
+        db_session.commit()
+
+        data = client.get("/api/experiments/groups/L101H_001").json()
+
+        assert [m["experiment_id"] for m in data["members"]] == [
+            "L101H_001-t1", "L101H_001-t3",
+        ]
+
+    def test_underscores_in_the_stem_are_not_wildcards(self, client, db_session, reporting_views):
+        """A LIKE-based membership filter would match `_` as any character, so
+        `L101J_XpH_001` would be pulled into group `L101J_ApH_001`."""
+        self._make_vials(db_session, "L101J_ApH_001", (1,), 9840)
+        self._make_vials(db_session, "L101J_XpH_001", (1,), 9841)
+
+        data = client.get("/api/experiments/groups/L101J_ApH_001").json()
+
+        assert [m["experiment_id"] for m in data["members"]] == ["L101J_ApH_001-t1"]
