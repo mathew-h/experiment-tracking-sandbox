@@ -3001,3 +3001,79 @@ def test_duration_disagreement_warning_counts_vial_days(db_session: Session):
     assert "vial-day" in disagreement[0], (
         f"the denominator counts vial-days, not rows: {disagreement[0]}"
     )
+
+
+def test_merge_group_zero_gas_geometry_counts_as_blank():
+    """The template writes 0 for blank gas volume/pressure on a liquid row.
+
+    Measured on docs/sample_data/Master_Results_Tracker_v3.xlsx (2026-08-11):
+    35 of the 39 conflicts the merge first reported were
+    'DI gas volume (mL): 30 vs 0' and 'DI gas pressure (psi): 14.7 vs 0'
+    between a gas row and its liquid partner, rejecting 35 legitimate
+    vial-days. A 0 mL sampling volume or 0 psi pressure is not a physical
+    measurement, so it is a blank -- the same rule pH and conductivity use.
+    """
+    gas = _cells(**{"DI H2 (ppm)": 87.12, "DI gas volume (mL)": 30.0,
+                    "DI gas pressure (psi)": 14.7})
+    liquid = _cells(**{"Sample pH": 7.24, "DI gas volume (mL)": 0.0,
+                       "DI gas pressure (psi)": 0.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "SERUM_M18a-t1", gas), (185, "SERUM_M18a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"a template-blank 0 is not a conflict: {conflicts}"
+    assert merged.cells["DI gas volume (mL)"] == 30.0
+    assert merged.cells["DI gas pressure (psi)"] == 14.7
+
+
+def test_merge_group_zero_full_loop_geometry_counts_as_blank():
+    """The Full Loop block gets the same treatment as direct injection."""
+    gas = _cells(**{"FL H2 (ppm)": 115.0, "FL Gas Volume (mL)": 3935.0,
+                    "FL Gas Pressure (psi)": 90.0})
+    liquid = _cells(**{"Sample pH": 7.24, "FL Gas Volume (mL)": 0.0,
+                       "FL Gas Pressure (psi)": 0.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "SERUM_M20a-t1", gas), (185, "SERUM_M20a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"a template-blank 0 is not a conflict: {conflicts}"
+    assert merged.cells["FL Gas Volume (mL)"] == 3935.0
+    assert merged.cells["FL Gas Pressure (psi)"] == 90.0
+
+
+def test_merge_group_zero_h2_ppm_is_still_a_real_reading():
+    """0 ppm H2 is a measurement, so it must still fight a different value.
+
+    The boundary of the rule above: the concentration columns are deliberately
+    NOT zero-blank. The module docstring has said since #111 that 'a value of 0
+    is a real reading, not a blank' -- a GC that measured no hydrogen is a
+    result, whereas a 0 mL injection never happened.
+    """
+    a = _cells(**{"FL H2 (ppm)": 0.0})
+    b = _cells(**{"FL H2 (ppm)": 12.5})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "HPHT_M19", a), (3, "HPHT_M19", b),
+    ])
+
+    assert merged is None, "0 ppm vs 12.5 ppm is a real disagreement"
+    assert len(conflicts) == 1 and "FL H2 (ppm)" in conflicts[0], conflicts
+
+
+def test_merge_group_genuine_geometry_disagreement_still_conflicts():
+    """Two non-zero volumes are a real conflict, not a template blank.
+
+    Rows 222/272 of the team's workbook ('GC_B_500ppm_1mL', 30 mL vs 1 mL) are
+    this case and must survive the zero-blank rule as a conflict.
+    """
+    a = _cells(**{"DI H2 (ppm)": 500.0, "DI gas volume (mL)": 30.0})
+    b = _cells(**{"DI H2 (ppm)": 500.0, "DI gas volume (mL)": 1.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (222, "GC_B_500ppm_1mL", a), (272, "GC_B_500ppm_1mL", b),
+    ])
+
+    assert merged is None
+    assert len(conflicts) == 1 and "DI gas volume (mL)" in conflicts[0], conflicts

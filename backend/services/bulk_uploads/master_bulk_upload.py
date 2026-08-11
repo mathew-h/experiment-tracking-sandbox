@@ -141,7 +141,23 @@ _MEASUREMENT_COLUMNS = (
 # as absent -- the same rule _parse_measurement_float applies on a single row.
 # Using the wrong helper here would make a template-blank 0 look like a
 # disagreement with the liquid row's real reading.
-_ZERO_BLANK_COLUMNS = frozenset({"Sample pH", "Sample Conductivity (mS/cm)"})
+#
+# The gas geometry columns are here on measured evidence, not by analogy: on the
+# first run of the real workbook (Master_Results_Tracker_v3.xlsx, 2026-08-11)
+# 35 of 39 reported conflicts were 'DI gas volume (mL): 30 vs 0' and 'DI gas
+# pressure (psi): 14.7 vs 0' between a gas row and its liquid partner, which
+# rejected 35 legitimate vial-days. A 0 mL injection or 0 psi sample never
+# happened; it is the template's empty cell.
+#
+# The H2 CONCENTRATION columns are deliberately absent: 0 ppm is a real reading
+# (module docstring, issue #111) -- a GC that measured no hydrogen produced a
+# result, whereas a 0 mL injection did not. Two non-zero volumes still conflict
+# normally (rows 222/272, 30 mL vs 1 mL).
+_ZERO_BLANK_COLUMNS = frozenset({
+    "Sample pH", "Sample Conductivity (mS/cm)",
+    "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
+    "DI gas volume (mL)", "DI gas pressure (psi)",
+})
 
 # A row carrying any of these analysed the liquid/solid fraction, so its
 # collection date is the authoritative one for the merged vial-day.
