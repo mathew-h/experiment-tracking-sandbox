@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-Gas and liquid/solid sampling for one vial happen on different dates. Researchers
+Gas and liquid/solid sampling for one vial can happen on different dates. Researchers
 record them as two Dashboard rows sharing an experiment ID and a timepoint —
 one carrying the GC reading, the other carrying pH, conductivity and the
 liquid/solid sampling date. The Phase-1 duplicate guard (issue #111, footnote ²
@@ -24,7 +24,7 @@ analyses* of one vial-day are complementary, not competing.
 ### 1.1 Measured against the team's workbook
 
 `docs/sample_data/Master_Results_Tracker_v3.xlsx`, Dashboard sheet, as of
-2026-08-11 11:37 (the revision carrying the final `Sample Collection Date` header):
+2026-08-11 11:45 (the revision carrying the final `Sample Collection Date` header):
 
 | Measurement | Value |
 |---|---|
@@ -66,10 +66,7 @@ classification problem**, not a merge algorithm problem.
 
 ### 1.3 The sheet rename does not fix the date, and breaks something else
 
-The date column was renamed **three times on 2026-08-11**: `Sample Date` →
-`Liquid/Solid Sample Date` → `HPHT + Liquid/Solid Date Sampled` →
-**`Sample Collection Date`** (the source column on the `Sampling` sheet became
-`Liquid/Solid Date Sampled`). `Sample Collection Date` is the canonical name going
+`Sample Collection Date` is the canonical name going
 forward, per the recommendation below, which Mat adopted on 2026-08-11.
 
 Every spelling must be accepted (§4.1) so archived workbooks keep parsing. Two
@@ -97,14 +94,6 @@ populated on gas-only rows: row 7 above carries a date of 2026-07-22 with no pH,
 no conductivity and no NH4 — that is the *gas* day. Read naively, 37 of 40 groups
 still conflict on this column.
 
-**Column naming — resolved.** `HPHT + Liquid/Solid Date Sampled` was mechanically
-safe (alias keys are plain lowercased strings; `+` and `/` are not special, no
-regex touches the header, and it does not trip the `\bh2\b` detector at `:79`), but
-objectionable operationally: it enumerated experiment types, so Serum / Autoclave /
-Core Flood rows read as out of scope when they are not, and it asserted the column
-carried two different meanings — precisely the ambiguity §3.2 has to resolve per
-row.
-
 Adopted: **`Sample Collection Date`** — names the value rather than the row types,
 stays true whatever the row carries, and is unambiguous beside `GC Run Date` /
 `ICP Run Date` / `NMR Run Date` / `XRD Run Date`, all of which are *run* dates.
@@ -112,8 +101,7 @@ stays true whatever the row carries, and is unambiguous beside `GC Run Date` /
 `_HEADER_ALIASES` accepts every spelling regardless, so a future rename needs no
 code change. The durable protection is the new warning in §4.1: when **no**
 recognised date column is present, say so, mirroring the existing "no recognized
-H2 column" warning at `:490`. Three renames in one day each silently dropped every
-date on the sheet; a fourth will produce a visible message instead of silence.
+H2 column" warning at `:490`
 
 ### 1.4 There is no gas sampling date anywhere in the workbook
 
@@ -128,6 +116,8 @@ pair, so it never conflicts.
 Decision (Mat, 2026-08-11): `gc_run_date` plus the ID's `-t` day is sufficient gas
 provenance. A true gas-collection date would need a new sheet column **and** an
 additive `ScalarResults` column with a schema-checklist run. **Out of scope.**
+
+GC Run Date can serve the user as the gas sampling date, gas is almost always sampled and run in the same step.
 
 ### 1.5 `Duration (Days)` is unchanged, but it bounds what the merge can reach
 
@@ -167,21 +157,6 @@ is a better contract than a window — no threshold to tune, no risk of collapsi
 distinct timepoints — and it means HPHT and other non-`-t` work is unaffected by
 this change unless a researcher explicitly asks for it.
 
-### 1.6 Pre-existing defect found while measuring — not in scope
-
-Row 95 is `SERUM_Catalyst_005a_t1` (underscore); row 214 is
-`SERUM_Catalyst_005a-t1` (hyphen). `_id_match.normalize_id` treats `_t1` and `-t1`
-as one key, so both resolve to the same stored experiment — but
-`split_timepoint_token` accepts lowercase `-t` only, so row 95's token is not
-recognised and its Duration of **7.0** is used instead of the day **1** its ID
-declares. A gas reading is being filed at the wrong timepoint on a real vial right
-now.
-
-This is the `_t1`-vs-`-t1` grammar gap already logged in
-`docs/working/issue-log.md` as needing its own `/start-task`, because it changes
-the canonical ID grammar used by lineage repo-wide. **Not fixed here.** Recorded
-so the measurement is not lost, and because after this change those two rows would
-otherwise look like a merge candidate that inexplicably did not merge.
 
 ---
 
@@ -255,12 +230,7 @@ so this path is defined rather than exercised by real data.
 
 A gas-only row's date is therefore never *discarded*, only outranked. This is
 preference rather than exclusion because the column legitimately holds the vessel's
-own sampling date on a gas-only row — the reason the label briefly read `HPHT +
-Liquid/Solid Date Sampled` — and **185 rows carry a date with no liquid/solid
-measurement, 143 of them standalone**. Exclusion would have destroyed real dates on
-every one of those and, worse, would have made a standalone row and a merged row
-treat the same cell differently.
-
+own sampling date on a gas-only row
 Measured over the 40 groups:
 
 | Outcome | Groups |
@@ -468,9 +438,6 @@ sampling days and stay two vial-days. A tolerance window would touch timepoint
 bucketing — the basis of `uq_primary_result_per_experiment_bucket` and
 `v_results_scalar_rollup` — and would collapse genuinely distinct timepoints.
 
-**The `_t1` vs `-t1` grammar gap.** §1.6. Actively mis-filing data, already logged
-as needing its own task because it changes the canonical ID grammar used by lineage
-repo-wide. Not fixed here.
 
 **The other two callers of the overwrite branch.** `scalar_results.py` and
 `quick_upload.py` reach `create_scalar_result_ex`'s overwrite path declaring no
