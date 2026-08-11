@@ -2707,3 +2707,148 @@ def test_rows_one_duration_apart_stay_two_vial_days(db_session: Session):
     assert result.errors == []
     assert result.created == 2, "two Durations are two vial-days"
     assert not any("Merged" in w for w in result.warnings), result.warnings
+
+
+# ---------------------------------------------------------------------------
+# Group-level warnings
+# ---------------------------------------------------------------------------
+
+def test_mixed_overwrite_warns_and_clears_nothing(db_session: Session):
+    """A destructive directive needs unanimity, and the refusal is reported.
+
+    Rows 154/204 of the team's workbook are exactly this: a DI reading marked
+    OVERWRITE beside an untouched liquid row.
+    """
+    _seed_experiment(db_session, "SERUM_MW01c-t5", 8941)
+
+    first = _master_excel_v3([
+        _v3_row("SERUM_MW01c-t5", 5.0, ph=7.0, nh4=1.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("SERUM_MW01c-t5", 5.0, ph=None, di_h2=404.19, overwrite="TRUE"),
+        _v3_row("SERUM_MW01c-t5", 5.0, ph=9.03, cond=0.204, overwrite="FALSE"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"mixed OVERWRITE is not an error: {result.errors}"
+    assert any("overwrite" in w.lower() for w in result.warnings), (
+        f"the ignored directive must be reported: {result.warnings}"
+    )
+
+    scalar = _scalar_for(db_session, "SERUM_MW01c-t5")
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(1.0), (
+        "no clearing: the NH4 value this sheet left blank must survive"
+    )
+
+
+def test_unanimous_overwrite_clears_a_declared_blank(db_session: Session):
+    """When every row says TRUE, the overwrite happens as before."""
+    _seed_experiment(db_session, "SERUM_MW02c-t5", 8942)
+
+    first = _master_excel_v3([
+        _v3_row("SERUM_MW02c-t5", 5.0, ph=7.0, nh4=1.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("SERUM_MW02c-t5", 5.0, ph=None, di_h2=404.19, overwrite="TRUE"),
+        _v3_row("SERUM_MW02c-t5", 5.0, ph=9.03, overwrite="TRUE"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "SERUM_MW02c-t5")
+    assert scalar.gross_ammonium_concentration_mM is None, (
+        "a declared-but-blank column clears under a unanimous overwrite"
+    )
+
+
+def test_run_date_disagreement_warns_and_still_writes(db_session: Session):
+    _seed_experiment(db_session, "SERUM_MW03a-t1", 8943)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MW03a-t1", 1.0, ph=None, di_h2=50.0,
+                gc_date="2026-07-22"),
+        _v3_row("SERUM_MW03a-t1", 1.0, ph=7.24, gc_date="2026-07-28"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a run date is provenance: {result.errors}"
+    assert result.created == 1
+    assert any("GC Run Date" in w for w in result.warnings), result.warnings
+
+
+def test_variant_spellings_merge_and_are_named(db_session: Session):
+    """A case typo is not a distinct experiment; merge and name the spellings."""
+    _seed_experiment(db_session, "SERUM_MW04c-t5", 8944)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_mw04c-t5", 5.0, ph=None, di_h2=50.0),
+        _v3_row("SERUM_MW04C-t5", 5.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"variant spellings must merge: {result.errors}"
+    assert result.created == 1
+    assert any("SERUM_mw04c-t5" in w and "SERUM_MW04C-t5" in w
+               for w in result.warnings), (
+        f"both spellings must be named: {result.warnings}"
+    )
+
+
+def test_disagreeing_fallback_dates_warn(db_session: Session):
+    """No liquid row in the group: first date wins and the clash is reported."""
+    _seed_experiment(db_session, "GC_MW05-t0", 8945)
+
+    xlsx = _master_excel_v3([
+        _v3_row("GC_MW05-t0", 0.0, ph=None, di_h2=50.0,
+                collection_date="2026-08-06"),
+        _v3_row("GC_MW05-t0", 0.0, ph=None, fl_vol=30.0,
+                collection_date="2026-08-10"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a fallback date must not reject: {result.errors}"
+    assert result.created == 1
+    assert any("collection date" in w.lower() for w in result.warnings), (
+        f"the disagreement must be reported: {result.warnings}"
+    )
+
+    scalar = _scalar_for(db_session, "GC_MW05-t0")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 6), "first in sheet order"
+
+
+def test_conflicted_group_emits_no_merge_note_warnings(db_session: Session):
+    """A rejected vial-day must never be described as merged.
+
+    Every merge-note warning is worded for a vial-day that LANDED: "merged
+    without clearing anything", "the first value in sheet order was stored",
+    "the rows were merged normally". A conflicted group writes nothing, so
+    emitting any of them states the opposite of what happened. Nothing is lost
+    by staying quiet â€” the conflict error already names every row and every
+    spelling. This group trips all three note kinds at once (variant spellings,
+    mixed OVERWRITE, clashing GC Run Date) and still conflicts on FL H2.
+    """
+    _seed_experiment(db_session, "SERUM_MW06c-t5", 8946)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_mw06c-t5", 5.0, ph=None, fl_h2=10.0,
+                gc_date="2026-07-22", overwrite="TRUE"),
+        _v3_row("SERUM_MW06C-t5", 5.0, ph=None, fl_h2=20.0,
+                gc_date="2026-07-28", overwrite="FALSE"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.errors) == 1, f"the conflict must be reported: {result.errors}"
+    assert result.created == 0
+    assert not any("spell their experiment ID" in w for w in result.warnings), (
+        f"a rejected vial-day was described as merged: {result.warnings}"
+    )
+    assert not any("OVERWRITE" in w for w in result.warnings), (
+        f"nothing was written, so nothing was left unclear: {result.warnings}"
+    )
+    assert not any("GC Run Date" in w for w in result.warnings), (
+        f"no value was stored, first-in-sheet-order or otherwise: {result.warnings}"
+    )

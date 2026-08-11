@@ -844,7 +844,6 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         merged, conflicts, notes = _merge_group(
             [(row_num, exp_id, row) for row_num, exp_id, row, _c in members]
         )
-        group_notes.append((anchor_row, rows, notes))
 
         if conflicts:
             rows_text = ", ".join(str(row_num) for row_num in rows)
@@ -857,6 +856,14 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                 f"values. Nothing was written for this vial-day."
             )))
             continue
+
+        # Recorded only for a group that actually merged. Every note renders as
+        # a warning worded for a vial-day that LANDED ("merged without clearing
+        # anything", "the first value in sheet order was stored", "no row was
+        # rejected"), so emitting them for a conflicted group would state the
+        # opposite of what happened. Nothing is lost: the conflict error above
+        # already names every row and every spelling.
+        group_notes.append((anchor_row, rows, notes))
 
         # A merged group's timepoint check is the union of its rows': any row
         # that could be compared makes the group comparable, and any
@@ -999,6 +1006,75 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             f"{day_label}. Gas and liquid/solid readings for one vial are often "
             "recorded on separate rows because they were collected on different "
             "dates; those rows are combined field by field."
+        )
+
+    # MergeNotes are things a researcher should know about a vial-day that DID
+    # land, so they are warnings, never errors. One file-level line per kind,
+    # with the row list only at <=10 groups -- the threshold the supersede,
+    # GC-date and Duration warnings below already share.
+    def _rows_clause(anchors: List[str]) -> str:
+        return " (" + ", ".join(anchors) + ")" if len(anchors) <= 10 else ""
+
+    mixed_overwrite = [
+        rows for _anchor, rows, notes in group_notes if notes.overwrite_mixed
+    ]
+    if mixed_overwrite:
+        shown = [" and ".join(str(r) for r in rows) for rows in mixed_overwrite]
+        warnings.append(
+            f"'OVERWRITE' was set on some but not all rows of "
+            f"{len(mixed_overwrite)} merged vial-day(s)"
+            + _rows_clause(shown)
+            + ". Overwrite clears the sheet's own columns that are left blank, "
+              "so it was NOT applied: those vial-days were merged without "
+              "clearing anything. Tick the box on every row of the vial-day, or "
+              "on none."
+        )
+
+    date_clashes = [
+        rows for _anchor, rows, notes in group_notes
+        if notes.fallback_date_disagreement
+    ]
+    if date_clashes:
+        shown = [" and ".join(str(r) for r in rows) for rows in date_clashes]
+        warnings.append(
+            f"{len(date_clashes)} merged vial-day(s) disagree on "
+            f"'{_COLLECTION_DATE}'" + _rows_clause(shown)
+            + ", and no row carries a liquid/solid measurement to settle which "
+              "date is authoritative. The first date in sheet order was stored."
+        )
+
+    run_date_clashes: Dict[str, List[str]] = {}
+    for _anchor, rows, notes in group_notes:
+        for column in notes.run_date_disagreements:
+            run_date_clashes.setdefault(column, []).append(
+                " and ".join(str(r) for r in rows)
+            )
+    for column in _RUN_DATE_COLUMNS:      # stable order, not dict insertion
+        clashing = run_date_clashes.get(column)
+        if not clashing:
+            continue
+        warnings.append(
+            f"'{column}' differs between the rows of {len(clashing)} merged "
+            f"vial-day(s)" + _rows_clause(clashing)
+            + ". It is provenance, not a measurement, so the first value in "
+              "sheet order was stored and no row was rejected."
+        )
+
+    variant_spellings = [
+        (rows, notes.spellings)
+        for _anchor, rows, notes in group_notes if len(notes.spellings) > 1
+    ]
+    if variant_spellings:
+        shown = [
+            " and ".join(str(r) for r in rows) + ": " + ", ".join(spellings)
+            for rows, spellings in variant_spellings
+        ]
+        warnings.append(
+            f"{len(variant_spellings)} merged vial-day(s) spell their "
+            f"experiment ID more than one way" + _rows_clause(shown)
+            + ". The spellings resolve to one stored experiment, so the rows "
+              "were merged normally — but the difference is a typo worth fixing "
+              "in the sheet."
         )
 
     # The per-row h2_di_superseded flag above reaches the client in `feedbacks`
