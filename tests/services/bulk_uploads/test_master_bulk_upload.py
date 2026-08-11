@@ -2505,3 +2505,205 @@ def test_merge_group_reports_every_conflicting_field():
     assert len(conflicts) == 2, f"one clause per bad field: {conflicts}"
     assert any("Sample pH" in c for c in conflicts)
     assert any("Sample Conductivity (mS/cm)" in c for c in conflicts)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.5 â€” merged vial-days end to end
+# ---------------------------------------------------------------------------
+
+def test_gas_and_liquid_rows_merge_into_one_result(db_session: Session):
+    """The motivating case, end to end.
+
+    Gas sampled 2026-07-22 and run the same day; the liquid/solid fraction
+    collected 2026-08-05. Both rows name the same -t1 vial, so the ID pins the
+    day and they are one vial-day.
+    """
+    _seed_experiment(db_session, "SERUM_MG01a-t1", 8921)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG01a-t1", 1.0, description="", ph=None,
+                di_h2=87.12, di_vol=30.0, di_psi=14.7,
+                collection_date="2026-07-22", gc_date="2026-07-22"),
+        _v3_row("SERUM_MG01a-t1", 1.0, description="Highest H2 liquid, solids",
+                ph=7.24, cond=1.541, collection_date="2026-08-05"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"complementary rows must merge: {result.errors}"
+    assert result.created == 1, "one vial-day is one write"
+    assert result.updated == 0
+
+    scalar = _scalar_for(db_session, "SERUM_MG01a-t1")
+    assert scalar.h2_concentration == pytest.approx(87.12)
+    assert scalar.gas_sampling_volume_ml == pytest.approx(30.0)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(14.7 * _PSI_TO_MPA)
+    assert scalar.final_ph == pytest.approx(7.24)
+    assert scalar.final_conductivity_mS_cm == pytest.approx(1.541)
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        "the liquid row's collection date wins"
+    )
+
+
+def test_merged_group_reports_every_row_in_feedbacks(db_session: Session):
+    """One feedback per vial-day, naming every sheet row behind it."""
+    _seed_experiment(db_session, "SERUM_MG02a-t1", 8922)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG02a-t1", 1.0, ph=None, di_h2=87.12),
+        _v3_row("SERUM_MG02a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.feedbacks) == 1, f"one write, one feedback: {result.feedbacks}"
+    assert result.feedbacks[0]["row"] == 2, "anchored at the group's first row"
+    assert result.feedbacks[0]["rows"] == [2, 3]
+
+
+def test_merge_summary_warning_explains_the_count_gap(db_session: Session):
+    """created + updated no longer equals the sheet row count; say why."""
+    _seed_experiment(db_session, "SERUM_MG03a-t1", 8923)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG03a-t1", 1.0, ph=None, di_h2=87.12),
+        _v3_row("SERUM_MG03a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert any("Merged 2 rows into 1 vial-day" in w for w in result.warnings), (
+        f"expected a merge summary, got: {result.warnings}"
+    )
+
+
+def test_no_merge_summary_when_nothing_merged(db_session: Session):
+    """A sheet with no duplicate keys behaves exactly as before."""
+    _seed_experiment(db_session, "HPHT_MG04", 8924)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_MG04", 7.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.created == 1
+    assert not any("Merged" in w for w in result.warnings), (
+        f"a warning that fires on ordinary sheets is one people ignore: "
+        f"{result.warnings}"
+    )
+
+
+def test_conflicted_vial_day_leaves_a_stored_row_untouched(db_session: Session):
+    """A conflict must not partially update what is already stored."""
+    _seed_experiment(db_session, "SERUM_MG05a-t1", 8925)
+
+    first = _master_excel_v3([
+        _v3_row("SERUM_MG05a-t1", 1.0, ph=7.0, di_h2=10.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("SERUM_MG05a-t1", 1.0, ph=None, di_h2=33.89),
+        _v3_row("SERUM_MG05a-t1", 1.0, ph=None, di_h2=39.01),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.created == 0
+    assert result.updated == 0
+    assert len(result.errors) == 1, f"one error for the group: {result.errors}"
+
+    scalar = _scalar_for(db_session, "SERUM_MG05a-t1")
+    assert scalar.h2_concentration == pytest.approx(10.0), (
+        "the stored reading must survive a conflicted re-upload"
+    )
+
+
+def test_conflict_error_names_rows_field_and_both_values(db_session: Session):
+    _seed_experiment(db_session, "SERUM_MG06a-t1", 8926)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG06a-t1", 1.0, ph=None, di_h2=33.89),
+        _v3_row("SERUM_MG06a-t1", 1.0, ph=None, di_h2=39.01),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    (message,) = result.errors
+    assert "Rows 2, 3" in message, message
+    assert "SERUM_MG06a-t1" in message, message
+    assert "day 1" in message, message
+    assert "DI H2 (ppm)" in message, message
+    assert "33.89" in message and "39.01" in message, message
+    assert "Nothing was written" in message, message
+
+
+def test_three_row_group_merges_end_to_end(db_session: Session):
+    _seed_experiment(db_session, "HPHT_MG07-t2", 8927)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MG07-t2", 2.0, ph=None, di_h2=50.0),
+        _v3_row("HPHT_MG07-t2", 2.0, ph=7.24),
+        _v3_row("HPHT_MG07-t2", 2.0, ph=None, nh4=3.5, solvol=2.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    assert result.created == 1
+
+    scalar = _scalar_for(db_session, "HPHT_MG07-t2")
+    assert scalar.h2_concentration == pytest.approx(50.0)
+    assert scalar.final_ph == pytest.approx(7.24)
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(3.5)
+    assert scalar.sampling_volume_mL == pytest.approx(2.0)
+
+
+def test_full_loop_on_one_row_beats_di_on_another(db_session: Session):
+    """_resolve_h2 runs once over the merged view, so precedence is unchanged."""
+    _seed_experiment(db_session, "HPHT_MG08-t2", 8928)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MG08-t2", 2.0, ph=None, fl_h2=100.0, fl_vol=20.0,
+                fl_psi=14.7),
+        _v3_row("HPHT_MG08-t2", 2.0, ph=None, di_h2=50.0, di_vol=30.0,
+                di_psi=14.7),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"different GC blocks are not a conflict: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_MG08-t2")
+    assert scalar.h2_concentration == pytest.approx(100.0), "Full Loop wins"
+    assert scalar.gas_sampling_volume_ml == pytest.approx(20.0), (
+        "geometry must come from the winning block"
+    )
+    assert any("Full Loop reading used instead of direct injection" in w
+               for w in result.warnings), result.warnings
+
+
+def test_duration_still_drives_non_token_ids(db_session: Session):
+    """Regression for spec Â§1.5: no -t token means Duration supplies the day."""
+    _seed_experiment(db_session, "HPHT_MG09", 8929)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_MG09", 11.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    row = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_MG09")
+        .one()
+    )
+    assert row.time_post_reaction_days == pytest.approx(11.0)
+
+
+def test_rows_one_duration_apart_stay_two_vial_days(db_session: Session):
+    """Spec D-g: grouping matches the exact timepoint, with no tolerance window.
+
+    HPHT_217 (day 11 gas, day 12 liquid) and six other IDs in the team's
+    workbook look like this and genuinely record different sampling days.
+    """
+    _seed_experiment(db_session, "HPHT_MG10", 8930)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MG10", 11.0, ph=None, di_h2=50.0),
+        _v3_row("HPHT_MG10", 12.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 2, "two Durations are two vial-days"
+    assert not any("Merged" in w for w in result.warnings), result.warnings

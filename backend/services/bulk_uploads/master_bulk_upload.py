@@ -799,39 +799,78 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # normalization only rounds to 4 decimals, so two values on opposite sides
     # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
     # even though they fall within the ±1e-4 tolerance of each other.
-    dup_groups: Dict[Tuple[str, float], List[Tuple[int, str]]] = {}
-    for row_num, exp_id, time_post_reaction, _row, _check in resolved:
+    dup_groups: Dict[Tuple[str, float], List[Tuple[int, str, Any, TimepointCheck]]] = {}
+    group_times: Dict[Tuple[str, float], float] = {}
+    for row_num, exp_id, time_post_reaction, row, check in resolved:
         key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
-        dup_groups.setdefault(key, []).append((row_num, exp_id))
+        dup_groups.setdefault(key, []).append((row_num, exp_id, row, check))
+        # The timepoint travels with the group rather than widening the member
+        # tuple. Every member of a group shares the same NORMALIZED timepoint by
+        # construction, so which member's raw value is kept is immaterial.
+        group_times[key] = time_post_reaction
 
-    # One error per collision, not per row. Each names every row in the group,
-    # so a researcher reading this list against the sheet is told where the
-    # partner reading is instead of having to search for it — the same reason
-    # an ambiguous ID names both candidates. Anchored at the group's first row
-    # so the sort at the end of this function keeps the list in sheet order.
-    duplicate_rows: set[int] = set()
-    for (_norm_id, day), members in dup_groups.items():
-        if len(members) < 2:
+    # Phase 1.5 -- collapse each vial-day's rows into one merged cell view.
+    #
+    # Gas is drawn and run on one date; the liquid/solid fraction is collected
+    # later and gets its own row. Both name the same vial and the same day, so
+    # before this they were rejected as duplicates and NOTHING was written --
+    # 80 of 268 real rows in the team's workbook, 2026-08-11. They are
+    # complementary, not competing: only a field two rows both fill with
+    # DIFFERENT values is a real conflict, and that vial-day is then rejected
+    # whole (spec D-a) rather than partially merged.
+    #
+    # Grouping matches the EXACT timepoint -- no tolerance window (spec D-g).
+    # Setting two rows to the same Duration is the researcher's deliberate
+    # request to merge them; adjacent days stay separate vial-days.
+    merged_entries: List[
+        Tuple[int, List[int], str, float, Any, TimepointCheck, bool]
+    ] = []
+    group_notes: List[Tuple[int, List[int], MergeNotes]] = []
+    merged_row_count = 0
+    merged_group_count = 0
+
+    for key, members in dup_groups.items():
+        anchor_row, anchor_id = members[0][0], members[0][1]
+        rows = [row_num for row_num, _e, _r, _c in members]
+
+        if len(members) == 1:
+            row_num, exp_id, row, check = members[0]
+            merged_entries.append((
+                row_num, [row_num], exp_id, group_times[key], row,
+                check, _parse_bool(row.get("Overwrite")),
+            ))
             continue
-        duplicate_rows.update(row_num for row_num, _ in members)
-        rows_text = ", ".join(str(row_num) for row_num, _ in members)
-        # dict.fromkeys keeps sheet order while dropping repeats.
-        spellings = list(dict.fromkeys(exp_id for _, exp_id in members))
-        # Differing spellings collided on the normalized key, which is not
-        # visible from the cells themselves — say so, or the researcher
-        # searches the sheet for a string only one of the rows contains.
-        variant_clause = (
-            " These spellings differ but resolve to one experiment, so one "
-            "reading would have silently overwritten the other."
-            if len(spellings) > 1 else ""
+
+        merged, conflicts, notes = _merge_group(
+            [(row_num, exp_id, row) for row_num, exp_id, row, _c in members]
         )
-        row_errors.append((members[0][0], (
-            f"Rows {rows_text} ({', '.join(spellings)}): duplicate experiment "
-            f"ID and timepoint (day {day:g}).{variant_clause} Each vial gets "
-            f"one row per timepoint — give each vial its own ID (e.g. "
-            f"SERUM_001a-t7, SERUM_001b-t7). No row for this vial-day was "
-            f"written."
-        )))
+        group_notes.append((anchor_row, rows, notes))
+
+        if conflicts:
+            rows_text = ", ".join(str(row_num) for row_num in rows)
+            spellings = ", ".join(notes.spellings)
+            day = group_times[key]
+            row_errors.append((anchor_row, (
+                f"Rows {rows_text} ({spellings}): conflicting values for the "
+                f"same vial-day (day {day:g}) — {'; '.join(conflicts)}. Rows "
+                f"for one vial-day are merged, but a field cannot hold two "
+                f"values. Nothing was written for this vial-day."
+            )))
+            continue
+
+        # A merged group's timepoint check is the union of its rows': any row
+        # that could be compared makes the group comparable, and any
+        # disagreement is worth reporting.
+        check = TimepointCheck(
+            compared=any(c.compared for _r, _e, _row, c in members),
+            disagrees=any(c.disagrees for _r, _e, _row, c in members),
+        )
+        merged_entries.append((
+            anchor_row, rows, anchor_id, group_times[key],
+            merged.cells, check, merged.overwrite,
+        ))
+        merged_row_count += len(rows)
+        merged_group_count += 1
 
     # Phase 2 — upsert what is left.
     # Rows where Full Loop overrode a populated direct-injection cell. Reported
@@ -851,11 +890,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # and the upsert can honestly be counted or named.
     comparable_rows = 0
     disagreement_rows: List[int] = []
-    for row_num, exp_id, time_post_reaction, row, check in resolved:
-        # The error was already emitted once for the whole group above.
-        if row_num in duplicate_rows:
-            continue
-
+    for row_num, rows, exp_id, time_post_reaction, row, check, overwrite in merged_entries:
         description = str(row.get("Description") or "").strip() or None
         sample_date = _parse_date(row.get(_COLLECTION_DATE))
         nmr_run_date = _parse_date(row.get("NMR Run Date"))
@@ -870,7 +905,6 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
         sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
         modification = str(row.get("Modification") or "").strip() or None
-        overwrite = _parse_bool(row.get("Overwrite"))
 
         result_data: Dict[str, Any] = {
             "time_post_reaction": time_post_reaction,
@@ -940,6 +974,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                     disagreement_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
+                "rows": rows,
                 "experiment_id": exp_id,
                 "action": action,
                 "h2_source": h2_source,
@@ -952,6 +987,19 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         except Exception as exc:
             savepoint.rollback()
             row_errors.append((row_num, f"Row {row_num} ({exp_id}): unexpected error — {exc}"))
+
+    # created + updated no longer equals the sheet row count once rows merge,
+    # so say so plainly rather than leaving the numbers unexplained. Silent
+    # when nothing merged: a warning that fires on ordinary sheets is one
+    # researchers learn to ignore.
+    if merged_group_count:
+        day_label = "vial-day" if merged_group_count == 1 else "vial-days"
+        warnings.append(
+            f"Merged {merged_row_count} rows into {merged_group_count} "
+            f"{day_label}. Gas and liquid/solid readings for one vial are often "
+            "recorded on separate rows because they were collected on different "
+            "dates; those rows are combined field by field."
+        )
 
     # The per-row h2_di_superseded flag above reaches the client in `feedbacks`
     # and nothing renders it, so a researcher could not learn from the app why a
