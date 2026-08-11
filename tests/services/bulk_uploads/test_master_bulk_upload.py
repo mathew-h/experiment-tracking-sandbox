@@ -2852,3 +2852,79 @@ def test_conflicted_group_emits_no_merge_note_warnings(db_session: Session):
     assert not any("GC Run Date" in w for w in result.warnings), (
         f"no value was stored, first-in-sheet-order or otherwise: {result.warnings}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Blank text cells on the single-row path (pandas NaN is truthy)
+# ---------------------------------------------------------------------------
+
+def _result_for(db: Session, experiment_id: str) -> ExperimentalResults:
+    """The single ExperimentalResults row belonging to `experiment_id`."""
+    return (
+        db.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == experiment_id)
+        .one()
+    )
+
+
+def test_blank_description_is_not_stored_as_the_string_nan(db_session: Session):
+    """A blank Description must not be stored as the literal text 'nan'.
+
+    pandas reads an empty cell as float('nan'), which is TRUTHY, so
+    `str(cell or "").strip()` yields 'nan' instead of ''. That made the
+    generated "Master upload â€” day N" fallback unreachable: every blank
+    Description landed as 'nan'. A merged group already routes through
+    _parse_text, so this covers the single-row path.
+    """
+    _seed_experiment(db_session, "HPHT_NAN01", 8951)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_NAN01", 7.0, description="", nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_NAN01")
+    assert row.description != "nan", "the NaN cell leaked into the stored text"
+    assert row.description.startswith("Master upload"), (
+        f"the generated fallback must be reachable, got: {row.description!r}"
+    )
+
+
+def test_blank_modification_does_not_flag_a_brine_modification(db_session: Session):
+    """A blank Modification must not set has_brine_modification.
+
+    ExperimentalResults.sync_brine_flag (database/models/results.py:37-41) sets
+    the flag from `bool(value and str(value).strip())`, so storing 'nan' also
+    marked the timepoint as brine-modified. 12 of the 140 flagged rows in the
+    dev DB are false positives from exactly this, and the column is indexed and
+    reported on.
+    """
+    _seed_experiment(db_session, "HPHT_NAN02", 8952)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_NAN02", 7.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_NAN02")
+    assert row.brine_modification_description is None, (
+        f"a blank cell must store nothing, got: "
+        f"{row.brine_modification_description!r}"
+    )
+    assert row.has_brine_modification is False, (
+        "no modification was recorded, so the flag must stay false"
+    )
+
+
+def test_a_real_modification_still_flags_and_stores(db_session: Session):
+    """The fix must not silence a genuine Modification entry."""
+    _seed_experiment(db_session, "HPHT_NAN03", 8953)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_NAN03", 7.0, nh4=1.0, modification="+200ul 1M HCl"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_NAN03")
+    assert row.brine_modification_description == "+200ul 1M HCl"
+    assert row.has_brine_modification is True

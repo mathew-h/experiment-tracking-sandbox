@@ -898,7 +898,13 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     comparable_rows = 0
     disagreement_rows: List[int] = []
     for row_num, rows, exp_id, time_post_reaction, row, check, overwrite in merged_entries:
-        description = str(row.get("Description") or "").strip() or None
+        # _parse_text, not `str(cell or "")`: pandas reads a blank cell as
+        # float('nan'), which is TRUTHY, so the latter stored the literal text
+        # 'nan'. That made the generated description below unreachable and --
+        # via ExperimentalResults.sync_brine_flag -- marked every row with a
+        # blank Modification as brine-modified (12 of 140 flagged rows in the
+        # dev DB). A merged group's cells are already _parse_text'd.
+        description = _parse_text(row.get("Description"))
         sample_date = _parse_date(row.get(_COLLECTION_DATE))
         nmr_run_date = _parse_date(row.get("NMR Run Date"))
         icp_run_date = _parse_date(row.get("ICP Run Date"))
@@ -911,7 +917,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
         sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
-        modification = str(row.get("Modification") or "").strip() or None
+        modification = _parse_text(row.get("Modification"))
 
         result_data: Dict[str, Any] = {
             "time_post_reaction": time_post_reaction,
