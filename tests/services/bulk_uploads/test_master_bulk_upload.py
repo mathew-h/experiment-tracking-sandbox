@@ -1397,33 +1397,59 @@ def test_no_supersede_warning_when_precedence_is_uncontested(db_session: Session
 # Duplicate vial-timepoint rejection (issue #111)
 # ---------------------------------------------------------------------------
 
-def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
-    """Two rows for the same vial at the same day are both rejected.
+def test_repeated_vial_and_timepoint_merges_when_complementary(db_session: Session):
+    """Two rows for one vial-day are merged, not rejected.
 
-    v3 is one row per unique experiment ID. A repeated (ID, duration) pair is
-    the old wide-format habit leaking through, and silently letting the second
-    row win would destroy the first reading.
+    Before this, v3 was read as strictly one row per vial-day and a repeat was
+    the old wide-format habit leaking through. It is not: gas is drawn and run
+    on one date and the liquid/solid fraction is collected later, so the two
+    fractions legitimately arrive as two rows.
     """
     _seed_experiment(db_session, "SERUM_DUP01a", 8831)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP01a", 7.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP01a", 7.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_DUP01a", 7.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP01a", 7.0, description="liquid", ph=7.4, cond=1.2),
     ])
-    created, updated, skipped, errors, _ = _upload(
-        db_session, xlsx
-    )
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
-    assert created == 0, "neither row may be written"
+    assert errors == [], f"complementary rows must merge: {errors}"
+    assert created == 1, "one vial-day is one write"
     assert updated == 0
-    assert len(errors) == 1, f"one error for the group, got: {errors}"
-    assert "SERUM_DUP01a" in errors[0]
-    assert "Rows 2, 3" in errors[0], f"both rows must be named: {errors[0]}"
 
     assert (
         db_session.query(ExperimentalResults)
         .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
         .filter(Experiment.experiment_id == "SERUM_DUP01a")
+        .count()
+    ) == 1
+
+
+def test_repeated_vial_and_timepoint_errors_when_conflicting(db_session: Session):
+    """Two rows filling the same field with different values reject the vial-day.
+
+    Letting the later row win would destroy the earlier reading silently, which
+    is the failure the old duplicate guard existed to prevent. The guard is kept
+    for exactly this case and dropped for the complementary one.
+    """
+    _seed_experiment(db_session, "SERUM_DUP01b", 8872)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP01b", 7.0, description="first", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP01b", 7.0, description="second", ph=None, fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0, "neither row may be written"
+    assert updated == 0
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "SERUM_DUP01b" in errors[0]
+    assert "Rows 2, 3" in errors[0], f"both rows must be named: {errors[0]}"
+
+    assert (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_DUP01b")
         .count()
     ) == 0
 
@@ -1500,11 +1526,17 @@ def test_replicate_letters_are_distinct_vials(db_session: Session):
     assert created == 3
 
 
-def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session):
-    """'SERUM_X-t7' with a blank Duration collides with 'SERUM_X' at day 7.
+def test_grouping_happens_after_timepoint_token_resolution(db_session: Session):
+    """A blank Duration filled from '-t7' groups with an explicit day 7.
 
-    Duplicate detection runs on the RESOLVED (id, time) pair, not on the raw
-    cells — the -t token fills a blank Duration, so these are the same vial-day.
+    Grouping runs on the RESOLVED (id, time) pair, not on the raw cells — the
+    -t token fills a blank Duration, so these two rows are the same vial-day.
+    That is what this test pins, and it is unaffected by the merge.
+
+    These particular rows also both fill 'FL H2 (ppm)', with different values,
+    so the vial-day is rejected as a conflict. The single group error naming
+    both rows is what proves they were grouped: had the token not been resolved
+    first, they would have keyed to different timepoints and each been written.
     """
     _seed_experiment(db_session, "SERUM_DUP04-t7", 8851)
 
@@ -1519,71 +1551,69 @@ def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session
     assert created == 0
     assert len(errors) == 1, f"one error for the group, got: {errors}"
     assert "Rows 2, 3" in errors[0]
+    assert "FL H2 (ppm)" in errors[0], f"the bad field must be named: {errors[0]}"
 
 
-def test_case_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
-    """Two spellings that resolve to ONE experiment are a duplicate, not two rows.
+def test_case_variant_ids_at_one_timepoint_are_one_vial_day(db_session: Session):
+    """Two spellings resolving to ONE experiment are ONE vial-day.
 
-    The pre-pass used to key on the raw ID string while the DB lookup keys on
-    _id_match.normalize_id, so 'SERUM_cation_001c-t5' and 'SERUM_Cation_001c-t5'
-    produced two different keys, both passed the guard, and both upserted onto
-    the single stored experiment — the second reading silently overwriting the
-    first with no error and no warning. Three such pairs are live in
-    Master_Results_Tracker_v3.xlsx (sheet rows 29/194, 32/195, 35/196).
+    The pre-pass keys on _id_match.normalize_id, the same key the DB lookup
+    uses, so 'SERUM_cation_001c-t5' and 'SERUM_Cation_001c-t5' are one vial and
+    their rows merge. Keying on the raw string instead let both rows upsert onto
+    the one stored experiment, the second silently overwriting the first. Three
+    such pairs are live in Master_Results_Tracker_v3.xlsx (rows 29/194, 32/195,
+    35/196). A capital letter is a typo, not a distinct experiment.
     """
     _seed_experiment(db_session, "SERUM_DUP06c-t5", 8866)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_dup06c-t5", 5.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP06C-t5", 5.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_dup06c-t5", 5.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP06C-t5", 5.0, description="liquid", ph=7.4),
     ])
     created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
-    assert created == 0, "neither row may be written"
-    assert updated == 0
-    assert errors, "the collision must be reported"
+    assert errors == [], f"variant spellings must merge: {errors}"
+    assert created == 1
 
     assert (
         db_session.query(ExperimentalResults)
         .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
         .filter(Experiment.experiment_id == "SERUM_DUP06c-t5")
         .count()
-    ) == 0
+    ) == 1
 
 
-def test_padding_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
+def test_padding_variant_ids_at_one_timepoint_are_one_vial_day(db_session: Session):
     """Zero-padding differences collapse the same way case differences do.
 
     normalize_id strips leading zeros per digit run, so 'HPHT_007' and 'HPHT_7'
-    are one experiment to the finder and must be one row to the guard.
+    are one experiment to the finder and one vial-day to the merge.
     """
     _seed_experiment(db_session, "HPHT_DUP07", 8867)
 
     xlsx = _master_excel_v3([
-        _v3_row("HPHT_DUP07", 7.0, description="unpadded", fl_h2=10.0),
-        _v3_row("HPHT_DUP0007", 7.0, description="padded", fl_h2=20.0),
+        _v3_row("HPHT_DUP07", 7.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("HPHT_DUP0007", 7.0, description="liquid", ph=7.4),
     ])
     created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
-    assert created == 0
-    assert errors, "the collision must be reported"
+    assert errors == [], f"padding variants must merge: {errors}"
+    assert created == 1
 
 
-def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
-    """One collision produces one error listing all its rows, not one per row.
+def test_conflict_group_is_one_error_naming_every_row(db_session: Session):
+    """One conflicted vial-day produces one error listing all its rows.
 
-    A researcher reads this list against the sheet: 'row 2 is a duplicate' with
-    no sibling row number means opening the file and searching for the partner
-    by hand. As measured on the team's v3 workbook on 2026-08-07, the
-    normalized-ID key this guard now uses collapsed 37 collisions into 74
-    rows. Same shape as the ambiguous-ID fix in commit de379a1.
+    A researcher reads this list against the sheet: 'row 2 conflicts' with no
+    sibling row number means opening the file and searching for the partner by
+    hand. Same shape as the ambiguous-ID fix in commit de379a1.
     """
     _seed_experiment(db_session, "SERUM_DUP08a", 8868)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP08a", 7.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP08a", 7.0, description="second", fl_h2=20.0),
-        _v3_row("SERUM_DUP08a", 7.0, description="third", fl_h2=30.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="first", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="second", ph=None, fl_h2=20.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="third", ph=None, fl_h2=30.0),
     ])
     created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
@@ -1592,33 +1622,34 @@ def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
     assert "Rows 2, 3, 4" in errors[0], f"every row must be named: {errors[0]}"
     assert "SERUM_DUP08a" in errors[0]
     assert "day 7" in errors[0]
+    assert "FL H2 (ppm)" in errors[0], f"the bad field must be named: {errors[0]}"
 
 
-def test_duplicate_group_names_both_spellings(db_session: Session):
-    """When the colliding rows are spelled differently, the message says so.
+def test_variant_spellings_are_named_in_a_warning(db_session: Session):
+    """When merged rows are spelled differently, the warning says so.
 
-    'Rows 29, 194 (SERUM_pH_001a-t1)' would look like a plain repeat; the
-    researcher needs to see that the two cells do not read the same, or they
-    will search the sheet for a string that is only in one of them.
+    The rows merge (a capital letter is a typo, not a distinct experiment), but
+    the researcher still needs to see that the two cells do not read the same,
+    or the sheet keeps drifting. Reported as a warning, not an error, so it
+    never blocks an upload.
     """
     _seed_experiment(db_session, "SERUM_DUP09c-t5", 8869)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_dup09c-t5", 5.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP09C-t5", 5.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_dup09c-t5", 5.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP09C-t5", 5.0, description="liquid", ph=7.4),
     ])
-    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
-    assert len(errors) == 1, f"one error for the group, got: {errors}"
-    assert "SERUM_dup09c-t5" in errors[0], f"first spelling missing: {errors[0]}"
-    assert "SERUM_DUP09C-t5" in errors[0], f"second spelling missing: {errors[0]}"
-    assert "resolve to one experiment" in errors[0], (
-        f"the message must explain why differing spellings collided: {errors[0]}"
-    )
+    assert result.errors == [], f"a spelling variant is not an error: {result.errors}"
+    assert result.created == 1
+    variant = [w for w in result.warnings if "SERUM_dup09c-t5" in w]
+    assert variant, f"first spelling missing: {result.warnings}"
+    assert "SERUM_DUP09C-t5" in variant[0], f"second spelling missing: {variant[0]}"
 
 
-def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
-    """The group error sits where its earliest row sits in the sheet order.
+def test_conflict_group_error_sorts_at_its_first_row(db_session: Session):
+    """The group error sits where its earliest row sits in sheet order.
 
     Errors are sorted by row number so the list reads top-down against the
     spreadsheet (issue #114 item 3). A group spanning rows 2 and 4 must appear
@@ -1627,9 +1658,9 @@ def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
     _seed_experiment(db_session, "SERUM_DUP10a", 8870)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP10a", 7.0, description="dup one", fl_h2=10.0),
+        _v3_row("SERUM_DUP10a", 7.0, description="dup one", ph=None, fl_h2=10.0),
         _v3_row("HPHT_DUP10_MISSING", 7.0, description="no such experiment"),
-        _v3_row("SERUM_DUP10a", 7.0, description="dup two", fl_h2=20.0),
+        _v3_row("SERUM_DUP10a", 7.0, description="dup two", ph=None, fl_h2=20.0),
     ])
     result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
@@ -1642,19 +1673,17 @@ def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
     )
 
 
-def test_duplicate_does_not_block_other_rows(db_session: Session):
-    """A duplicate pair is rejected; unrelated rows in the same file still land."""
+def test_conflict_does_not_block_other_vial_days(db_session: Session):
+    """A conflicted vial-day is rejected; unrelated rows still land."""
     _seed_experiment(db_session, "SERUM_DUP05a", 8861)
     _seed_experiment(db_session, "SERUM_DUP05b", 8862)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP05a", 7.0, description="dup one", fl_h2=10.0),
-        _v3_row("SERUM_DUP05a", 7.0, description="dup two", fl_h2=20.0),
-        _v3_row("SERUM_DUP05b", 7.0, description="fine", fl_h2=30.0),
+        _v3_row("SERUM_DUP05a", 7.0, description="dup one", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP05a", 7.0, description="dup two", ph=None, fl_h2=20.0),
+        _v3_row("SERUM_DUP05b", 7.0, description="fine", ph=None, fl_h2=30.0),
     ])
-    created, updated, skipped, errors, feedbacks = _upload(
-        db_session, xlsx
-    )
+    created, updated, skipped, errors, feedbacks = _upload(db_session, xlsx)
 
     assert created == 1
     assert len(errors) == 1, f"one error for the group, got: {errors}"
@@ -2877,13 +2906,13 @@ def test_blank_description_is_not_stored_as_the_string_nan(db_session: Session):
     Description landed as 'nan'. A merged group already routes through
     _parse_text, so this covers the single-row path.
     """
-    _seed_experiment(db_session, "HPHT_NAN01", 8951)
+    _seed_experiment(db_session, "HPHT_BLANKTEXT01", 8951)
 
-    xlsx = _master_excel_v3([_v3_row("HPHT_NAN01", 7.0, description="", nh4=1.0)])
+    xlsx = _master_excel_v3([_v3_row("HPHT_BLANKTEXT01", 7.0, description="", nh4=1.0)])
     result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
-    row = _result_for(db_session, "HPHT_NAN01")
+    row = _result_for(db_session, "HPHT_BLANKTEXT01")
     assert row.description != "nan", "the NaN cell leaked into the stored text"
     assert row.description.startswith("Master upload"), (
         f"the generated fallback must be reachable, got: {row.description!r}"
@@ -2899,13 +2928,13 @@ def test_blank_modification_does_not_flag_a_brine_modification(db_session: Sessi
     dev DB are false positives from exactly this, and the column is indexed and
     reported on.
     """
-    _seed_experiment(db_session, "HPHT_NAN02", 8952)
+    _seed_experiment(db_session, "HPHT_BLANKTEXT02", 8952)
 
-    xlsx = _master_excel_v3([_v3_row("HPHT_NAN02", 7.0, nh4=1.0)])
+    xlsx = _master_excel_v3([_v3_row("HPHT_BLANKTEXT02", 7.0, nh4=1.0)])
     result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
-    row = _result_for(db_session, "HPHT_NAN02")
+    row = _result_for(db_session, "HPHT_BLANKTEXT02")
     assert row.brine_modification_description is None, (
         f"a blank cell must store nothing, got: "
         f"{row.brine_modification_description!r}"
@@ -2917,14 +2946,14 @@ def test_blank_modification_does_not_flag_a_brine_modification(db_session: Sessi
 
 def test_a_real_modification_still_flags_and_stores(db_session: Session):
     """The fix must not silence a genuine Modification entry."""
-    _seed_experiment(db_session, "HPHT_NAN03", 8953)
+    _seed_experiment(db_session, "HPHT_BLANKTEXT03", 8953)
 
     xlsx = _master_excel_v3([
-        _v3_row("HPHT_NAN03", 7.0, nh4=1.0, modification="+200ul 1M HCl"),
+        _v3_row("HPHT_BLANKTEXT03", 7.0, nh4=1.0, modification="+200ul 1M HCl"),
     ])
     result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
-    row = _result_for(db_session, "HPHT_NAN03")
+    row = _result_for(db_session, "HPHT_BLANKTEXT03")
     assert row.brine_modification_description == "+200ul 1M HCl"
     assert row.has_brine_modification is True
