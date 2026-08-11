@@ -890,11 +890,18 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     h2_reading_rows = 0
     # Denominators for the Duration-vs-ID disagreement warning further below.
     # Counted here, after the write succeeds — not in Phase 1 where the check
-    # was computed — for the same reason h2_reading_rows is: a row that
-    # disagrees and is then rejected (a duplicate, or no matching experiment)
-    # was never written, so it cannot be described as "recorded at the day
-    # its ID encodes". Only a row that made it past both the duplicate guard
+    # was computed — for the same reason h2_reading_rows is: a vial-day that
+    # disagrees and is then rejected (conflicting rows, or no matching
+    # experiment) was never written, so it cannot be described as "recorded at
+    # the day its ID encodes". Only a vial-day that made it past both Phase 1.5
     # and the upsert can honestly be counted or named.
+    #
+    # Phase 2 now iterates MERGED vial-days, so every tally in this loop counts
+    # vial-days, not sheet rows — the two coverage warnings below say so. A
+    # conflicted group never reaches this loop and so enters neither numerator
+    # nor denominator. The row numbers named in these warnings are each group's
+    # ANCHOR row; the merge-summary warning is what tells the researcher a
+    # vial-day spanned more than one row.
     comparable_rows = 0
     disagreement_rows: List[int] = []
     for row_num, rows, exp_id, time_post_reaction, row, check, overwrite in merged_entries:
@@ -1132,7 +1139,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             where = " (" + ", ".join(str(r) for r in missing_gc_date_rows) + ")"
         else:
             where = ""
-        label = "row" if total == 1 else "rows"
+        label = "vial-day" if total == 1 else "vial-days"
         stored_clause = (
             "The reading was stored, but this upload supplied no run date for it."
             if n == 1
@@ -1160,7 +1167,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # warnings above.
     if disagreement_rows:
         n = len(disagreement_rows)
-        label = "row" if comparable_rows == 1 else "rows"
+        label = "vial-day" if comparable_rows == 1 else "vial-days"
         where = (
             " (" + ", ".join(str(r) for r in disagreement_rows) + ")"
             if n <= 10 else ""

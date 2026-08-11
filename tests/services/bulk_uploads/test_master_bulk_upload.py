@@ -1773,8 +1773,8 @@ def test_warns_when_h2_reading_has_no_gc_run_date(db_session: Session):
     assert len(missing) == 1, (
         f"exactly one file-level warning, not one per row, got: {result.warnings}"
     )
-    assert "1 of 2 rows" in missing[0], (
-        f"the denominator must count only H2-bearing rows, got: {missing[0]}"
+    assert "1 of 2 vial-days" in missing[0], (
+        f"the denominator must count only H2-bearing vial-days, got: {missing[0]}"
     )
     assert "The reading was stored" in missing[0], (
         f"singular clause must be used at n=1, got: {missing[0]}"
@@ -1829,7 +1829,7 @@ def test_warns_with_coverage_form_above_the_row_list_threshold(db_session: Sessi
     assert len(missing) == 1, (
         f"exactly one file-level warning, not one per row, got: {result.warnings}"
     )
-    assert "11 of 11 rows" in missing[0], missing[0]
+    assert "11 of 11 vial-days" in missing[0], missing[0]
     assert "H2 reading (" not in missing[0], (
         f"above the threshold no row-number list should follow the phrase, got: {missing[0]}"
     )
@@ -2957,3 +2957,47 @@ def test_a_real_modification_still_flags_and_stores(db_session: Session):
     row = _result_for(db_session, "HPHT_BLANKTEXT03")
     assert row.brine_modification_description == "+200ul 1M HCl"
     assert row.has_brine_modification is True
+
+
+def test_gc_date_coverage_warning_counts_vial_days(db_session: Session):
+    """Phase 2 iterates vial-days, so the denominator is vial-days, not rows.
+
+    Two sheet rows merge into one vial-day carrying an H2 reading and no GC Run
+    Date. Reporting '1 of 1 rows' would be a lie about what the parser counted.
+    """
+    _seed_experiment(db_session, "SERUM_MV01a-t1", 8961)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MV01a-t1", 1.0, ph=None, di_h2=50.0),
+        _v3_row("SERUM_MV01a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    gc_warning = [w for w in result.warnings if "GC Run Date" in w]
+    assert gc_warning, f"expected the GC-date coverage warning: {result.warnings}"
+    assert "vial-day" in gc_warning[0], (
+        f"the denominator counts vial-days, not rows: {gc_warning[0]}"
+    )
+
+
+def test_duration_disagreement_warning_counts_vial_days(db_session: Session):
+    """The Duration-vs-token denominator counts vial-days for the same reason.
+
+    Both rows of this vial-day carry a Duration of 3 while the ID encodes day 1,
+    so the merged group is one comparable vial-day that disagrees.
+    """
+    _seed_experiment(db_session, "SERUM_MV02a-t1", 8962)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MV02a-t1", 3.0, ph=None, di_h2=50.0),
+        _v3_row("SERUM_MV02a-t1", 3.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    disagreement = [w for w in result.warnings if "disagrees with the ID" in w]
+    assert disagreement, f"expected the disagreement warning: {result.warnings}"
+    assert "vial-day" in disagreement[0], (
+        f"the denominator counts vial-days, not rows: {disagreement[0]}"
+    )
