@@ -3077,3 +3077,33 @@ def test_merge_group_genuine_geometry_disagreement_still_conflicts():
 
     assert merged is None
     assert len(conflicts) == 1 and "DI gas volume (mL)" in conflicts[0], conflicts
+
+
+def test_merged_group_with_no_h2_reading_stores_no_gas_geometry(db_session: Session):
+    """Issue #114 over a merged view: geometry needs a concentration.
+
+    The sheet's gas columns carry the previous run's values (207 of 499 rows on
+    the v3 Dashboard, 2026-07-30), so a vial-day with no reading in either GC
+    block must store neither volume nor pressure -- persisted, they are
+    indistinguishable from a real measurement. _resolve_h2 enforces this once,
+    over the MERGED cells, which is the half of spec acceptance criterion 16
+    that precedence alone does not cover.
+    """
+    _seed_experiment(db_session, "SERUM_MV03a-t1", 8963)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MV03a-t1", 1.0, ph=None, fl_vol=4235.0, fl_psi=90.0),
+        _v3_row("SERUM_MV03a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    assert result.created == 1
+
+    scalar = _scalar_for(db_session, "SERUM_MV03a-t1")
+    assert scalar.h2_concentration is None, "no reading in either block"
+    assert scalar.gas_sampling_volume_ml is None, (
+        "carryover geometry must not be stored without a concentration"
+    )
+    assert scalar.gas_sampling_pressure_MPa is None
+    assert scalar.final_ph == pytest.approx(7.24), "the liquid row still lands"
