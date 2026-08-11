@@ -2275,3 +2275,35 @@ Those rows need a human decision.
    the bug.
 2. Matching is `lower(btrim(...)) = 'nan'`, so `'NaN'` and `' nan '` are caught. Zero
    such variants exist today; the cost is one `lower()`.
+
+## 2026-08-11 | inline â€” Master Results row merge (`feat/master-results-row-merge`)
+
+- **Files changed:** `backend/services/bulk_uploads/master_bulk_upload.py`,
+  `tests/services/bulk_uploads/test_master_bulk_upload.py`,
+  `database/data_migrations/fix_nan_text_fields_019.py` (new),
+  `docs/LOCKED_COMPONENTS.md`, `.claude/rules/MODELS.md`,
+  `docs/upload_templates/master_bulk_upload.md`, `docs/working/issue-log.md`,
+  `docs/working/decisions.md`, plus the hook's `docs/project_context/` copies
+- **Tests added:** yes â€” 46 new (18 pure `_merge_group` unit tests over plain dicts,
+  22 end-to-end upload tests, 3 blank-text/brine-flag tests, 3 collection-date
+  spelling/warning tests); 9 duplicate-guard tests re-pointed from the rejection
+  policy to the merge policy, none deleted
+- **Decision logged:** yes â€” two entries in `docs/working/decisions.md`
+  ("A vial-day is the write unit, not a spreadsheet row"; "A truthy NaN is a
+  data-integrity bug, not a formatting one")
+
+Verification: 381 pass in `tests/services/bulk_uploads/`, 221 across the four suites
+the spec names, 1483 pass / 4 skipped / 3 failed on the full suite â€” the 3 being the
+pre-existing `test_pg_backup_restore.py` failures from an empty `experiments_test`
+schema, unrelated to a branch touching three files. flake8: zero F-codes on all
+changed files (E501 is repo-wide convention â€” no flake8 config exists and `develop`'s
+copy of the same file already had 41). Real-workbook dry run matches the spec's
+acceptance criterion exactly: "Merged 72 rows into 36 vial-days", four conflicts on
+rows 2/185, 14/57, 222/272, 264/268, dev DB unchanged.
+
+Deferred deliberately: the `_t1` vs `-t1` grammar gap (own entry above, needs its own
+`/start-task` â€” the fix direction is genuinely ambiguous between widening the parser,
+narrowing `normalize_id`, and rejecting the row, and `split_timepoint_token` has ten
+call sites including a second locked parser and a SQL pattern a test pins against
+divergence). Production backfill for the `'nan'` rows is written and dry-run tested but
+**not applied to production** â€” runbook above.

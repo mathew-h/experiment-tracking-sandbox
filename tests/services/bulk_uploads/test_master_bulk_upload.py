@@ -6,7 +6,7 @@ import datetime as _dt
 import pytest
 from sqlalchemy.orm import Session
 
-from database import Experiment, ExperimentalResults, ScalarResults
+from database import Experiment, ExperimentalResults
 from database.models.enums import ExperimentStatus
 from backend.services.bulk_uploads.master_bulk_upload import (
     MasterBulkUploadService,
@@ -2116,17 +2116,10 @@ def test_rejected_rows_are_not_counted_in_the_disagreement_warning(db_session: S
 # ---------------------------------------------------------------------------
 # Sample Collection Date (P0 — the 2026-08-11 renames broke ingestion)
 # ---------------------------------------------------------------------------
-
-def _scalar_for(db: Session, experiment_id: str) -> ScalarResults:
-    """The single ScalarResults row belonging to `experiment_id`."""
-    return (
-        db.query(ScalarResults)
-        .join(ExperimentalResults,
-              ExperimentalResults.id == ScalarResults.result_id)
-        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
-        .filter(Experiment.experiment_id == experiment_id)
-        .one()
-    )
+# Uses the `_scalar_for` helper defined further up this file — it already
+# returns the single scalar row of a one-result experiment, which is exactly
+# what these tests need. Defining a second one here shadowed it for every test
+# in the module (flake8 F811).
 
 
 @pytest.mark.parametrize("date_header", [
