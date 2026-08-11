@@ -24,16 +24,16 @@ analyses* of one vial-day are complementary, not competing.
 ### 1.1 Measured against the team's workbook
 
 `docs/sample_data/Master_Results_Tracker_v3.xlsx`, Dashboard sheet, as of
-2026-08-11 09:51:
+2026-08-11 11:37 (the revision carrying the final `Sample Collection Date` header):
 
 | Measurement | Value |
 |---|---|
 | Sheet rows | 499 |
 | …carrying a real experiment ID (not the stale `0.0` formula cache) | 268 |
-| Distinct `(normalize_id, normalized timepoint)` keys after Phase-1 resolution | 229 |
-| …keys holding more than one row | **39** |
+| Distinct `(normalize_id, normalized timepoint)` keys after Phase-1 resolution | 228 |
+| …keys holding more than one row | **40** |
 | Largest group | 2 rows (every group is a pair) |
-| Rows currently rejected by the duplicate guard | 78 |
+| Rows currently rejected by the duplicate guard | 80 |
 
 The dominant shape, `SERUM_pH_003b-t1`:
 
@@ -50,12 +50,12 @@ The dominant shape, `SERUM_pH_003b-t1`:
 ### 1.2 Why a naive conflict rule fails
 
 Under a rule of *"error when two rows both hold a non-null value for one field"*,
-**38 of the 39 groups error**. The fields responsible:
+**39 of the 40 groups error**. The fields responsible:
 
 | Field | Groups conflicting |
 |---|---|
-| sample collection date | 36 |
-| `Description` | 24 |
+| `Sample Collection Date` | 37 |
+| `Description` | 25 |
 | `FL`/`DI H2 (ppm)` | 2 |
 | `Sample pH`, `Sample Conductivity (mS/cm)` | 1 |
 | gas volume | 1 |
@@ -66,10 +66,14 @@ classification problem**, not a merge algorithm problem.
 
 ### 1.3 The sheet rename does not fix the date, and breaks something else
 
-The date column was renamed **twice on 2026-08-11**: `Sample Date` →
-`Liquid/Solid Sample Date` → `HPHT + Liquid/Solid Date Sampled` (the source column
-on the `Sampling` sheet became `Liquid/Solid Date Sampled`). Three spellings must
-now be accepted. Two consequences, both verified by running the parser:
+The date column was renamed **three times on 2026-08-11**: `Sample Date` →
+`Liquid/Solid Sample Date` → `HPHT + Liquid/Solid Date Sampled` →
+**`Sample Collection Date`** (the source column on the `Sampling` sheet became
+`Liquid/Solid Date Sampled`). `Sample Collection Date` is the canonical name going
+forward, per the recommendation below, which Mat adopted on 2026-08-11.
+
+Every spelling must be accepted (§4.1) so archived workbooks keep parsing. Two
+consequences, both verified by running the parser:
 
 **P0 — `measurement_date` ingestion is broken today, independent of this feature.**
 `master_bulk_upload.py:595` reads `row.get("Sample Date")` and `_HEADER_ALIASES`
@@ -77,8 +81,8 @@ now be accepted. Two consequences, both verified by running the parser:
 
 | Expression | Rows parsing to a date |
 |---|---|
-| `row.get("Sample Date")` | **0** |
-| `row.get("HPHT + Liquid/Solid Date Sampled")` | 274 |
+| `row.get("Sample Date")` — what the code reads | **0** |
+| `row.get("Sample Collection Date")` — what the sheet now carries | 275 |
 
 On the non-overwrite path `_parse_date` returns `None`, the None-stripping
 comprehension (`:642`) drops the key, and `measurement_date` is simply never
@@ -90,33 +94,33 @@ current workbook carry `OVERWRITE=TRUE`.
 
 **The rename alone does not resolve the date conflict.** The column is still
 populated on gas-only rows: row 7 above carries a date of 2026-07-22 with no pH,
-no conductivity and no NH4 — that is the *gas* day. Read naively, 36 of 39 groups
-still conflict.
+no conductivity and no NH4 — that is the *gas* day. Read naively, 37 of 40 groups
+still conflict on this column.
 
-**Column naming — recommendation.** `HPHT + Liquid/Solid Date Sampled` is
-mechanically safe: alias keys are plain lowercased strings, `+` and `/` are not
-special, no regex touches the header, and it does not trip the `\bh2\b` detector
-at `:79`. The objections are operational. It enumerates experiment types, so
-Serum / Autoclave / Core Flood rows read as out of scope when they are not; it
-asserts the column carries two different meanings, which is precisely the
-ambiguity §3.2 then has to resolve per row; and it is the second rename in two
-days, each of which silently dropped 274 dates until an alias existed.
+**Column naming — resolved.** `HPHT + Liquid/Solid Date Sampled` was mechanically
+safe (alias keys are plain lowercased strings; `+` and `/` are not special, no
+regex touches the header, and it does not trip the `\bh2\b` detector at `:79`), but
+objectionable operationally: it enumerated experiment types, so Serum / Autoclave /
+Core Flood rows read as out of scope when they are not, and it asserted the column
+carried two different meanings — precisely the ambiguity §3.2 has to resolve per
+row.
 
-Recommended: **`Sample Collection Date`** — names the value rather than the row
-types, stays true whatever the row carries, and is unambiguous beside `GC Run
-Date` / `ICP Run Date` / `NMR Run Date` / `XRD Run Date`, all of which are *run*
-dates. `_HEADER_ALIASES` accepts every spelling regardless, so renaming needs no
+Adopted: **`Sample Collection Date`** — names the value rather than the row types,
+stays true whatever the row carries, and is unambiguous beside `GC Run Date` /
+`ICP Run Date` / `NMR Run Date` / `XRD Run Date`, all of which are *run* dates.
+
+`_HEADER_ALIASES` accepts every spelling regardless, so a future rename needs no
 code change. The durable protection is the new warning in §4.1: when **no**
 recognised date column is present, say so, mirroring the existing "no recognized
-H2 column" warning at `:490`. A third rename then produces a visible message
-instead of silence.
+H2 column" warning at `:490`. Three renames in one day each silently dropped every
+date on the sheet; a fourth will produce a visible message instead of silence.
 
 ### 1.4 There is no gas sampling date anywhere in the workbook
 
 `GC Full Loop` and `GC DI` carry only `Date Run`; neither the `Sampling` nor the
 `Liquid Sampling` sheet has a gas-collection column. `GC Run Date` is the
-**instrument run date**, not the collection date — on the 252 rows where both are
-present it differs from the sample collection date on **102** (row 18: collection
+**instrument run date**, not the collection date — on the 254 rows where both are
+present it differs from `Sample Collection Date` on **104** (row 18: collection
 2026-07-24, GC run 2026-07-28). It is already ingested as
 `ScalarResults.gc_run_date` and is duplicated identically on both rows of every
 pair, so it never conflicts.
@@ -130,7 +134,7 @@ additive `ScalarResults` column with a schema-checklist run. **Out of scope.**
 `Duration (Days)` supplies the timepoint for every experiment whose ID carries no
 `-t<days>` token. Nothing in this design touches `_resolve_row_identity`
 (`:305-398`), so that resolution is byte-for-byte unchanged. Measured on the
-2026-08-11 sheet: **74 rows across 71 keys** take their timepoint from Duration,
+2026-08-11 sheet: **73 rows across 70 keys** take their timepoint from Duration,
 and every one resolves identically before and after.
 
 The limit is different, and worth stating plainly: **the merge only combines rows
@@ -149,11 +153,19 @@ IDs already show this shape:
 | `HPHT_233`, `HPHT_235`, `SERUM_Catalyst_005a(-/_)t1` | same pattern |
 
 This is not a regression — it is the reason the `-t` convention enables merging at
-all. Whether those adjacent Durations *should* collapse is **open question Q-1**
-(§9): grouping within a tolerance window would touch timepoint bucketing, which
-`uq_primary_result_per_experiment_bucket` and `v_results_scalar_rollup` both
-depend on, and would risk merging genuinely distinct timepoints. Out of scope
-until answered.
+all.
+
+**Resolved (Mat, 2026-08-11): grouping matches on the exact timepoint, and no
+tolerance window is wanted.** Those seven IDs genuinely record samples taken on
+different days, so collapsing them would be wrong, not helpful. Where a non-`-t`
+experiment does need two rows merged, the researcher sets both rows' Duration /
+sample date to match deliberately.
+
+That makes the merge **opt-in at the sheet level**: identical Durations are the act
+that requests a merge, rather than something the parser infers from proximity. It
+is a better contract than a window — no threshold to tune, no risk of collapsing
+distinct timepoints — and it means HPHT and other non-`-t` work is unaffected by
+this change unless a researcher explicitly asks for it.
 
 ### 1.6 Pre-existing defect found while measuring — not in scope
 
@@ -183,8 +195,9 @@ otherwise look like a merge candidate that inexplicably did not merge.
 | D-d | Group holds two spellings of one ID | **Merge**; fuzzy matching already resolves both spellings onto one stored experiment. Informational warning naming the spellings so the typo can be fixed in the sheet |
 | D-e | Sampling date on a gas-only row | **Deprioritised, not discarded** — a date from a liquid/solid-bearing row wins; with no such row the date on record is still used (§3.2) |
 | D-f | Float comparison for conflicts | **Exact equality** after the existing parse helpers; no tolerance |
+| D-g | Rows one Duration apart | **Not merged.** Grouping matches the exact timepoint; no tolerance window (§1.5). Identical Durations are the researcher's opt-in |
 
-D-f is safe by measurement, not by assumption: across all 39 groups there is no
+D-f is safe by measurement, not by assumption: across all 40 groups there is no
 numeric pair that is near-equal-but-unequal (nothing within 1% that is not
 identical). A tolerance would add a second, unexercised notion of "same value"
 beside `TIMEPOINT_TOLERANCE_DAYS`.
@@ -229,7 +242,7 @@ another therefore behaves exactly like one row carrying both — FL wins, the
 supersede warning fires. No such group exists in the current workbook (verified),
 so this path is defined rather than exercised by real data.
 
-**Sampling date, source-preferred** — the collection-date column →
+**Sampling date, source-preferred** — `Sample Collection Date` →
 `measurement_date`, resolved in two tiers:
 
 1. **Preferred tier** — dates on rows carrying at least one liquid/solid
@@ -241,22 +254,27 @@ so this path is defined rather than exercised by real data.
    **warning**, not an error (provenance-class).
 
 A gas-only row's date is therefore never *discarded*, only outranked. This is
-preference rather than exclusion because the column legitimately holds the HPHT
-vessel's own sampling date on a gas-only row (hence the sheet label `HPHT +
-Liquid/Solid Date Sampled`), and **185 rows carry a date with no liquid/solid
-measurement — 144 of them standalone**. Exclusion would have destroyed real dates
-on every one of those and, worse, would have made a standalone row and a merged
-row treat the same cell differently.
+preference rather than exclusion because the column legitimately holds the vessel's
+own sampling date on a gas-only row — the reason the label briefly read `HPHT +
+Liquid/Solid Date Sampled` — and **185 rows carry a date with no liquid/solid
+measurement, 143 of them standalone**. Exclusion would have destroyed real dates on
+every one of those and, worse, would have made a standalone row and a merged row
+treat the same cell differently.
 
-Measured over the 39 groups: 34 resolved by the preferred tier; 3 had no date
-disagreement at all; 3 have no liquid-bearing row and take the fallback (rows
-14/57 both 2026-07-24 and 264/268 both 2026-08-10, so silent; 222/272 disagree
-2026-08-06 vs 2026-08-10, so warned); and 1 disagrees within the preferred tier —
-rows 2/185, which errors regardless because it is also the only group with a
-genuine pH/conductivity conflict. **The date rule costs zero additional errors.**
-All three fallback groups happen to be conflicted groups anyway, so the fallback
-path writes nothing on the current workbook; it is specified for correctness, not
-because today's data exercises it.
+Measured over the 40 groups:
+
+| Outcome | Groups |
+|---|---|
+| Resolved by the preferred tier | 35 |
+| No date disagreement at all (includes 2 all-gas pairs whose dates match: 14/57 both 2026-07-24, 264/268 both 2026-08-10) | 3 |
+| Fallback tier with disagreeing dates → first wins, warned (222/272, 2026-08-06 vs 2026-08-10) | 1 |
+| Conflict within the preferred tier (2/185) | 1 |
+
+**The date rule costs zero additional errors**: rows 2/185 errors regardless, being
+the only group with a genuine pH/conductivity conflict. All three all-gas groups are
+conflicted on other fields anyway, so the fallback path writes nothing on the
+current workbook — it is specified for correctness, not because today's data
+exercises it.
 
 **Provenance** — `NMR Run Date`, `ICP Run Date`, `GC Run Date`, `XRD Run Date`:
 first non-null in sheet order wins; a disagreement is a warning, never an error.
@@ -280,11 +298,11 @@ duplicate keys.
 
 ### 3.4 Expected outcome on the current workbook
 
-**35 groups merge, 4 error:**
+**36 groups merge, 4 error:**
 
 | Rows | Experiment | Conflict |
 |---|---|---|
-| 2, 185 | `SERUM_pH_001a-t1` | pH 5.22 vs 7.27; conductivity 1.286 vs 1.705 |
+| 2, 185 | `SERUM_pH_001a-t1` | pH 5.22 vs 7.27; conductivity 1.286 vs 1.705; and the preferred-tier collection date (both rows carry liquid data) |
 | 14, 57 | `SERUM_pH_004-t3` | DI H2 33.89 vs 39.01 ppm |
 | 264, 268 | `A1 Flow Leak Test` | two H2 readings |
 | 222, 272 | `GC B 500 ppm 1 mL` | gas volume |
@@ -307,16 +325,19 @@ Add to `_HEADER_ALIASES` (`:58`), following the file's existing convention that 
 canonical name is the current spelling and older spellings alias onto it:
 
 ```python
+_COLLECTION_DATE = "Sample Collection Date"   # canonical, adopted 2026-08-11
+
+"sample collection date": _COLLECTION_DATE,           # canonical, casing-only
 "sample date": _COLLECTION_DATE,                      # archived workbooks
-"liquid/solid sample date": _COLLECTION_DATE,         # 2026-08-11, morning
-"hpht + liquid/solid date sampled": _COLLECTION_DATE, # 2026-08-11, current
-"sample collection date": _COLLECTION_DATE,           # §1.3 recommendation
+"liquid/solid sample date": _COLLECTION_DATE,         # 2026-08-11, superseded
+"hpht + liquid/solid date sampled": _COLLECTION_DATE, # 2026-08-11, superseded
 ```
 
-`_COLLECTION_DATE` is a module constant holding the canonical name, and `:595`
-reads it rather than a literal. Listing the recommended `Sample Collection Date`
-up front means adopting that label later is a spreadsheet-only change.
-`_normalize_headers`' rule 1 already prevents an alias from colliding when a
+`:595` reads `_COLLECTION_DATE` rather than a literal. The canonical spelling is
+itself a key so that a casing variant (`Sample collection date`) still normalises —
+the same reason `"overwrite": "Overwrite"` and `"sampled solution volume (ml)"`
+are already listed. `_normalize_headers`' rule 1 prevents an alias from colliding
+when a
 hand-merged workbook carries two spellings — the literal column wins and the
 aliased one keeps its raw header, so no duplicate-column Series can reach
 `_parse_date`.
@@ -329,9 +350,9 @@ Sheet 'Dashboard' has no recognized sample collection date column (expected one 
 parser's accepted names.
 ```
 
-This is the durable protection. Two renames on 2026-08-11 each silently dropped
-274 dates; a third will now say so. Gated on the column being absent entirely, so
-it never fires on a normal upload.
+This is the durable protection. Three renames on 2026-08-11 each silently dropped
+every date on the sheet (275 on the current revision); a fourth will now say so.
+Gated on the column being absent entirely, so it never fires on a normal upload.
 
 This subsection is independently correct and independently testable, and does not
 depend on any part of the merge. It should be the **first commit**, with its own
@@ -441,11 +462,11 @@ legitimately carries the HPHT vessel's own sampling date on a gas-only row, and
 185 rows are in that state. §3.2's two-tier preference is the correct treatment
 and needs no spreadsheet change.
 
-**Merging adjacent Durations.** Open question Q-1 (§9). Collapsing `HPHT_217`'s
-day-11 gas row with its day-12 liquid row would mean grouping within a tolerance
-window, which touches timepoint bucketing — the basis of
-`uq_primary_result_per_experiment_bucket` and `v_results_scalar_rollup` — and
-risks merging genuinely distinct timepoints. Not attempted until Q-1 is answered.
+**Merging adjacent Durations.** Ruled out, not deferred (§1.5). Grouping matches
+the exact timepoint; `HPHT_217`'s day-11 gas row and day-12 liquid row are two
+sampling days and stay two vial-days. A tolerance window would touch timepoint
+bucketing — the basis of `uq_primary_result_per_experiment_bucket` and
+`v_results_scalar_rollup` — and would collapse genuinely distinct timepoints.
 
 **The `_t1` vs `-t1` grammar gap.** §1.6. Actively mis-filing data, already logged
 as needing its own task because it changes the canonical ID grammar used by lineage
@@ -490,10 +511,11 @@ does not change and are confirmed unchanged rather than edited:
 
 **New:**
 
-- P0 date regression, one case per accepted spelling: `HPHT + Liquid/Solid Date
-  Sampled`, `Liquid/Solid Sample Date`, the legacy `Sample Date`, and the
-  recommended `Sample Collection Date` all populate `measurement_date`. An
-  `OVERWRITE=TRUE` row does not clear a stored date it supplied a value for.
+- P0 date regression, one case per accepted spelling: the canonical
+  `Sample Collection Date`, a casing variant of it, and the superseded
+  `HPHT + Liquid/Solid Date Sampled`, `Liquid/Solid Sample Date` and `Sample Date`
+  all populate `measurement_date`. An `OVERWRITE=TRUE` row does not clear a stored
+  date it supplied a value for.
 - A sheet with no recognised date column warns, and still uploads everything else.
 - A sheet carrying two date spellings at once does not produce a duplicate column
   (guards the `_normalize_headers` rule-1 path for the new aliases).
@@ -564,37 +586,17 @@ The `PostToolUse` hook syncs each written doc to `docs/project_context/`.
 - [ ] A group holding two spellings of one ID merges and is named in a warning
 - [ ] A merged group counts as exactly one `created` or `updated`, and the merge summary warning explains the gap against the sheet row count
 - [ ] `_resolve_h2` precedence, the #114 geometry rule and the supersede warning are unchanged for single rows and applied once to a merged view
-- [ ] Uploading the current `Master_Results_Tracker_v3.xlsx` merges 35 groups and errors exactly the 4 in §3.4
+- [ ] Adjacent Durations do NOT collapse — grouping matches the exact timepoint (§1.5)
+- [ ] Uploading the current `Master_Results_Tracker_v3.xlsx` merges 36 groups and errors exactly the 4 in §3.4
 - [ ] Footnote ² amended and footnote ⁴ added in `docs/LOCKED_COMPONENTS.md`
 - [ ] All four suites in §6 pass
 
 ---
 
-## 9. Open questions
+## 9. Effort estimate
 
-**Q-1 — should adjacent Durations collapse?** For a non-`-t` experiment, a gas row
-and a liquid row one day apart are two vial-days (§1.5): `HPHT_217` day 11 gas /
-day 12 liquid, `HPHT_220` day 8 / day 9, `HPHT_218` day 7.0 / day 7.2. Is each of
-those **one sampling event recorded across two days**, or **two genuine
-timepoints**?
-
-- *Two timepoints* → nothing to do. The merge simply does not apply to non-`-t`
-  rows, and the `-t` convention is what enables it. §1.5 stands as written.
-- *One event* → grouping needs a tolerance window rather than an exact timepoint
-  match. That is a materially larger and riskier change: it touches timepoint
-  bucketing, which `uq_primary_result_per_experiment_bucket` and
-  `v_results_scalar_rollup` both key on, and any window wide enough to catch a
-  1-day offset would also merge legitimately distinct daily timepoints. It would
-  need its own spec.
-
-Nothing in §3 or §4 depends on the answer, so implementation can start without it.
-
----
-
-## 10. Effort estimate
-
-Assumes Q-1 resolves as "two timepoints" (no window). Sequenced so each commit is
-independently reviewable and the P0 ships first.
+No open questions. Sequenced so each commit is independently reviewable and the P0
+ships first.
 
 | # | Commit | Estimate |
 |---|---|---|
@@ -606,9 +608,7 @@ independently reviewable and the P0 ships first.
 | 6 | Verification: full suite, real-workbook run against §3.4 | 0.5–0.75 h |
 | | **Total** | **5.25–7 h** |
 
-Two things that could move it. Commit 6 has to separate real regressions from the
+The likeliest overrun is commit 6: it has to separate real regressions from the
 three pre-existing `pg_backup_restore` failures that a full `pytest -q` produces
-from test-order interaction (`develop` shows them too) — budgeted, but it is the
-step most likely to overrun. And if Q-1 resolves as "one event", add **3–4 h** and
-a separate spec, because the blast radius moves from this one parser to timepoint
-bucketing.
+through test-order interaction (`develop` shows them too). Budgeted, but that is
+the step where the estimate is softest.
