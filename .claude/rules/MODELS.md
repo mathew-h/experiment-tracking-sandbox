@@ -288,16 +288,35 @@ Stores solution chemistry measurements.
     `feedbacks` are still not rendered anywhere. Neither the source nor the
     discarded value is persisted — making that a stored provenance field
     would be an additive `ScalarResults` column and a schema-checklist run.
-  - **One row per vial (issue #111):** the v3 Dashboard carries one row per
-    unique `experiment_id`; replicate letters are separate vials with their own
-    IDs, not columns. The upload rejects two rows sharing an ID and timepoint,
-    matched on the `_id_match.normalize_id` key rather than the raw string — so
-    `SERUM_cation_001c-t5` and `SERUM_Cation_001c-t5` are one vial-day and are
-    both rejected, where before 2026-08-07 both passed and the later row
-    silently overwrote the earlier. The rejection is reported once per
-    collision group, naming every sheet row and every distinct spelling.
-    Cross-replicate mean/SD therefore come from `v_results_scalar_rollup`
+  - **One row per vial-day, but not one SHEET row (issue #111; merge added
+    2026-08-11):** replicate letters are separate vials with their own IDs, not
+    columns. Several sheet rows may describe one vial-day, though — gas is drawn
+    and run on one date and the liquid/solid fraction is collected later, so each
+    fraction gets its own row. Rows sharing a `(normalize_id, timepoint)` key are
+    **merged field by field** into one stored result; matching on the
+    `_id_match.normalize_id` key rather than the raw string is what makes
+    `SERUM_cation_001c-t5` and `SERUM_Cation_001c-t5` one vial-day (before
+    2026-08-07 both passed and the later row silently overwrote the earlier).
+    Only a field two rows fill with **different** values is a conflict, and that
+    vial-day is then rejected **whole** — never partially — with every row,
+    field and value named in one error anchored at the group's first row. On the
+    team's workbook (2026-08-11) this merges 72 rows into 36 vial-days and leaves
+    four genuine conflicts. `created + updated` therefore no longer equals the
+    sheet row count; a file-level warning states the merge count.
+    Cross-replicate mean/SD still come from `v_results_scalar_rollup`
     (`mean_h2_ppm` / `sd_h2_ppm`), not from the spreadsheet.
+  - **`measurement_date` is the sample COLLECTION date, `gc_run_date` is the
+    instrument run date.** They are different events and disagree on 116 of the
+    270 workbook rows carrying both (measured 2026-08-11), so neither
+    substitutes for the other in reporting. The collection date comes from the
+    `Sample Collection Date` column (aliases: `Sample Date`,
+    `Liquid/Solid Sample Date`, `HPHT + Liquid/Solid Date Sampled`); when a
+    vial-day spans several rows, the date from a row that carried a liquid/solid
+    measurement wins, falling back to any dated row rather than discarding —
+    185 rows carry a date with no liquid measurement. A sheet with no
+    recognized date column now warns instead of silently storing none; three
+    renames on 2026-08-11 each dropped every date on the sheet, and on an
+    `OVERWRITE=TRUE` row a stored date was actively cleared.
   - **Overwrite is bounded by the source's own columns (issue #116):** on the
     `overwrite=True` branch, `create_scalar_result_ex` clears only the fields
     named in the optional `_sheet_fields` key of `result_data`. Absent that key

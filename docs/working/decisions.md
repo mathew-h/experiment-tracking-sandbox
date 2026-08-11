@@ -528,3 +528,78 @@ cause, production measurements, Lab PC runbook); footnote 4 in
 `docs/LOCKED_COMPONENTS.md`; `docs/CALCULATIONS.md` (the full list of paths that
 recalculate); pinned by
 `tests/services/bulk_uploads/test_new_experiments_conditions_recalc.py`.
+
+
+---
+
+## 2026-08-11 â€” A vial-day is the write unit, not a spreadsheet row
+
+**Decision:** the Master Results Dashboard's unit of work is the **vial-day**
+(`normalize_id(experiment_id)`, exact normalized timepoint), not the sheet row. Several
+rows may describe one vial-day and are merged field by field into one `ScalarResults`
+write; only a field two rows fill with *different* values is a conflict, and that
+vial-day is then rejected **whole**. Sign-off: Mat, 2026-08-11 (locked parser).
+
+**Why:** gas is drawn and run on one date and the liquid/solid fraction is collected
+later, so the two fractions legitimately arrive as two rows naming the same vial and
+the same day. The previous rule â€” one row per vial-day, both rejected on collision â€”
+was a correct reading of the v3 sheet's *intent* and a wrong reading of how the lab
+actually records sampling. It silently wrote nothing for 72 of the workbook's rows.
+
+**How to apply:** every Dashboard column belongs to exactly one merge class
+(measurement / collection date / provenance / directive), declared as a module
+frozenset, so adding a column forces an explicit choice rather than defaulting into
+one. Classify on the RAW CELL, before `_resolve_h2`, so GC precedence and the #114
+geometry rule run once over the merged view and cannot drift between paths.
+
+**The lesson worth carrying, and it is not about merging:** the field-class sets encode
+a claim about what a blank cell looks like in a real workbook, and that claim cannot be
+validated by unit tests. Every `_merge_group` test passed while the merge was rejecting
+35 legitimate vial-days, because the Excel template writes **0** into the gas
+volume/pressure columns on a row that did no gas sampling â€” the same "0 means blank"
+trap already known for pH and conductivity, in columns nobody had thought to check. It
+surfaced only on the first run against the real file, where the count was 39 conflicts
+against a spec that predicted 4. **A parser change whose correctness depends on what the
+source file actually contains is not verified until it has been run against that file.**
+The spec's habit of publishing a measured expected outcome (72 rows, 36 vial-days, four
+named conflict groups) is what turned a silent 35-row data loss into a caught defect;
+keep doing that.
+
+Corollary, same session: 0 is not uniformly a blank. `H2 (ppm) = 0` is a real reading (a
+GC that measured no hydrogen produced a result); `gas volume = 0` never happened. The
+distinction is physical, not typographic, and belongs in a named constant with the
+measurement behind it.
+
+**Related:** footnote 5 in `docs/LOCKED_COMPONENTS.md`;
+`docs/superpowers/specs/2026-08-11-master-results-row-merge-design.md`;
+`docs/superpowers/plans/2026-08-11-master-results-row-merge.md` (Task 8 is the
+real-workbook verification); pinned by the `_merge_group` tests in
+`tests/services/bulk_uploads/test_master_bulk_upload.py`.
+
+---
+
+## 2026-08-11 â€” A truthy NaN is a data-integrity bug, not a formatting one
+
+**Decision:** text read from a pandas DataFrame goes through `_parse_text()`, never
+`str(cell or "").strip()`.
+
+**Why:** `pandas` reads an empty Excel cell as `float('nan')`, which is **truthy**, so
+the idiom yields the literal string `'nan'`. This is not cosmetic. It made the generated
+`"Master upload â€” day N"` description unreachable, and via
+`ExperimentalResults.sync_brine_flag` â€” a `@validates` hook that sets
+`has_brine_modification` from `bool(value and str(value).strip())` â€” it flagged
+timepoints as brine-modified that had no modification at all. 12 of the 141 flagged rows
+in the 2026-08-10 production backup (8.5%) are false positives, on an indexed column
+exposed in a reporting view and the Results tab.
+
+**How to apply:** the danger is a truthiness test on a value that can be NaN. Check
+`isinstance(val, float) and pd.isna(val)` first, as `_parse_float` already did â€” the
+numeric helpers in this file were always NaN-safe; only the text reads were not. When a
+string field feeds a `@validates` hook or a boolean flag, a garbage string does not stay
+in its own column: it propagates. And a raw-SQL backfill does **not** fire `@validates`,
+so any repair must set the derived flag explicitly.
+
+**Related:** `database/data_migrations/fix_nan_text_fields_019.py` (dry-run first;
+production runbook in `docs/working/issue-log.md`);
+`database/data_migrations/zero_ph_conductivity_016.py` (same bug class, earlier
+instance â€” an Excel template blank stored as a value).

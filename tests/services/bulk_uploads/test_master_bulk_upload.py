@@ -1,12 +1,18 @@
 """Tests for MasterBulkUploadService."""
 from __future__ import annotations
 
+import datetime as _dt
+
 import pytest
 from sqlalchemy.orm import Session
 
 from database import Experiment, ExperimentalResults
 from database.models.enums import ExperimentStatus
-from backend.services.bulk_uploads.master_bulk_upload import MasterBulkUploadService
+from backend.services.bulk_uploads.master_bulk_upload import (
+    MasterBulkUploadService,
+    _COLLECTION_DATE,
+    _merge_group,
+)
 
 from .excel_helpers import make_excel_multisheet, make_excel
 
@@ -748,7 +754,8 @@ def test_master_token_id_with_blank_replicate_uploads_fine(db_session: Session):
 # wide 'DI a/b/c' block collapsed to a single 'DI H2 (ppm)' because a/b/c were
 # replicate vials, and each vial now gets its own row.
 _V3_HEADERS = [
-    "Experiment ID", "Description", "Sample Date", "Duration (Days)", "NH4 (mM)",
+    "Experiment ID", "Description", "Sample Collection Date", "Duration (Days)",
+    "NH4 (mM)",
     "FL H2 (ppm)", "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
     "Sample pH", "Sample Conductivity (mS/cm)", "Modification", "NMR Run Date",
     "Sampled Solution Volume (mL)", "ICP Run Date", "GC Run Date", "XRD Run Date",
@@ -767,25 +774,46 @@ def _v3_row(
     fl_vol: float | None = None,
     fl_psi: float | None = None,
     ph: float | None = 7.0,
+    cond: float | None = None,
+    solvol: float | None = None,
     overwrite=None,
     di_h2: float | None = None,
     di_vol: float | None = None,
     di_psi: float | None = None,
+    collection_date: str | None = None,
+    nmr_date: str | None = None,
+    icp_date: str | None = None,
     gc_date: str | None = None,
+    xrd_date: str | None = None,
+    modification: str | None = None,
 ) -> list:
-    """Build one Dashboard row in _V3_HEADERS order."""
+    """Build one Dashboard row in _V3_HEADERS order.
+
+    `ph` defaults to 7.0 because most existing tests rely on it. A row meant to
+    stand for a gas-only sampling MUST pass ph=None, or the merge will treat it
+    as carrying a liquid measurement.
+    """
     return [
-        experiment_id, description, None, duration, nh4,
+        experiment_id, description, collection_date, duration, nh4,
         fl_h2, fl_vol, fl_psi,
-        ph, None, None, None,
-        None, None, gc_date, None,
+        ph, cond, modification, nmr_date,
+        solvol, icp_date, gc_date, xrd_date,
         overwrite,
         di_h2, di_vol, di_psi,
     ]
 
 
-def _master_excel_v3(rows: list[list]) -> bytes:
-    return make_excel_multisheet({"Dashboard": (_V3_HEADERS, rows)})
+def _master_excel_v3(
+    rows: list[list], date_header: str = "Sample Collection Date",
+) -> bytes:
+    """Build a v3 Dashboard sheet.
+
+    `date_header` lets a test exercise a superseded spelling of the collection
+    date column without duplicating the whole header list.
+    """
+    headers = list(_V3_HEADERS)
+    headers[headers.index("Sample Collection Date")] = date_header
+    return make_excel_multisheet({"Dashboard": (headers, rows)})
 
 
 def test_v3_fl_h2_columns_are_ingested(db_session: Session):
@@ -1369,33 +1397,59 @@ def test_no_supersede_warning_when_precedence_is_uncontested(db_session: Session
 # Duplicate vial-timepoint rejection (issue #111)
 # ---------------------------------------------------------------------------
 
-def test_duplicate_vial_and_timepoint_is_an_error(db_session: Session):
-    """Two rows for the same vial at the same day are both rejected.
+def test_repeated_vial_and_timepoint_merges_when_complementary(db_session: Session):
+    """Two rows for one vial-day are merged, not rejected.
 
-    v3 is one row per unique experiment ID. A repeated (ID, duration) pair is
-    the old wide-format habit leaking through, and silently letting the second
-    row win would destroy the first reading.
+    Before this, v3 was read as strictly one row per vial-day and a repeat was
+    the old wide-format habit leaking through. It is not: gas is drawn and run
+    on one date and the liquid/solid fraction is collected later, so the two
+    fractions legitimately arrive as two rows.
     """
     _seed_experiment(db_session, "SERUM_DUP01a", 8831)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP01a", 7.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP01a", 7.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_DUP01a", 7.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP01a", 7.0, description="liquid", ph=7.4, cond=1.2),
     ])
-    created, updated, skipped, errors, _ = _upload(
-        db_session, xlsx
-    )
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
-    assert created == 0, "neither row may be written"
+    assert errors == [], f"complementary rows must merge: {errors}"
+    assert created == 1, "one vial-day is one write"
     assert updated == 0
-    assert len(errors) == 1, f"one error for the group, got: {errors}"
-    assert "SERUM_DUP01a" in errors[0]
-    assert "Rows 2, 3" in errors[0], f"both rows must be named: {errors[0]}"
 
     assert (
         db_session.query(ExperimentalResults)
         .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
         .filter(Experiment.experiment_id == "SERUM_DUP01a")
+        .count()
+    ) == 1
+
+
+def test_repeated_vial_and_timepoint_errors_when_conflicting(db_session: Session):
+    """Two rows filling the same field with different values reject the vial-day.
+
+    Letting the later row win would destroy the earlier reading silently, which
+    is the failure the old duplicate guard existed to prevent. The guard is kept
+    for exactly this case and dropped for the complementary one.
+    """
+    _seed_experiment(db_session, "SERUM_DUP01b", 8872)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_DUP01b", 7.0, description="first", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP01b", 7.0, description="second", ph=None, fl_h2=20.0),
+    ])
+    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+
+    assert created == 0, "neither row may be written"
+    assert updated == 0
+    assert len(errors) == 1, f"one error for the group, got: {errors}"
+    assert "SERUM_DUP01b" in errors[0]
+    assert "Rows 2, 3" in errors[0], f"both rows must be named: {errors[0]}"
+
+    assert (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "SERUM_DUP01b")
         .count()
     ) == 0
 
@@ -1472,11 +1526,17 @@ def test_replicate_letters_are_distinct_vials(db_session: Session):
     assert created == 3
 
 
-def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session):
-    """'SERUM_X-t7' with a blank Duration collides with 'SERUM_X' at day 7.
+def test_grouping_happens_after_timepoint_token_resolution(db_session: Session):
+    """A blank Duration filled from '-t7' groups with an explicit day 7.
 
-    Duplicate detection runs on the RESOLVED (id, time) pair, not on the raw
-    cells — the -t token fills a blank Duration, so these are the same vial-day.
+    Grouping runs on the RESOLVED (id, time) pair, not on the raw cells — the
+    -t token fills a blank Duration, so these two rows are the same vial-day.
+    That is what this test pins, and it is unaffected by the merge.
+
+    These particular rows also both fill 'FL H2 (ppm)', with different values,
+    so the vial-day is rejected as a conflict. The single group error naming
+    both rows is what proves they were grouped: had the token not been resolved
+    first, they would have keyed to different timepoints and each been written.
     """
     _seed_experiment(db_session, "SERUM_DUP04-t7", 8851)
 
@@ -1491,71 +1551,69 @@ def test_duplicate_detected_after_timepoint_token_resolution(db_session: Session
     assert created == 0
     assert len(errors) == 1, f"one error for the group, got: {errors}"
     assert "Rows 2, 3" in errors[0]
+    assert "FL H2 (ppm)" in errors[0], f"the bad field must be named: {errors[0]}"
 
 
-def test_case_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
-    """Two spellings that resolve to ONE experiment are a duplicate, not two rows.
+def test_case_variant_ids_at_one_timepoint_are_one_vial_day(db_session: Session):
+    """Two spellings resolving to ONE experiment are ONE vial-day.
 
-    The pre-pass used to key on the raw ID string while the DB lookup keys on
-    _id_match.normalize_id, so 'SERUM_cation_001c-t5' and 'SERUM_Cation_001c-t5'
-    produced two different keys, both passed the guard, and both upserted onto
-    the single stored experiment — the second reading silently overwriting the
-    first with no error and no warning. Three such pairs are live in
-    Master_Results_Tracker_v3.xlsx (sheet rows 29/194, 32/195, 35/196).
+    The pre-pass keys on _id_match.normalize_id, the same key the DB lookup
+    uses, so 'SERUM_cation_001c-t5' and 'SERUM_Cation_001c-t5' are one vial and
+    their rows merge. Keying on the raw string instead let both rows upsert onto
+    the one stored experiment, the second silently overwriting the first. Three
+    such pairs are live in Master_Results_Tracker_v3.xlsx (rows 29/194, 32/195,
+    35/196). A capital letter is a typo, not a distinct experiment.
     """
     _seed_experiment(db_session, "SERUM_DUP06c-t5", 8866)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_dup06c-t5", 5.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP06C-t5", 5.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_dup06c-t5", 5.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP06C-t5", 5.0, description="liquid", ph=7.4),
     ])
     created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
-    assert created == 0, "neither row may be written"
-    assert updated == 0
-    assert errors, "the collision must be reported"
+    assert errors == [], f"variant spellings must merge: {errors}"
+    assert created == 1
 
     assert (
         db_session.query(ExperimentalResults)
         .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
         .filter(Experiment.experiment_id == "SERUM_DUP06c-t5")
         .count()
-    ) == 0
+    ) == 1
 
 
-def test_padding_variant_ids_at_one_timepoint_are_a_duplicate(db_session: Session):
+def test_padding_variant_ids_at_one_timepoint_are_one_vial_day(db_session: Session):
     """Zero-padding differences collapse the same way case differences do.
 
     normalize_id strips leading zeros per digit run, so 'HPHT_007' and 'HPHT_7'
-    are one experiment to the finder and must be one row to the guard.
+    are one experiment to the finder and one vial-day to the merge.
     """
     _seed_experiment(db_session, "HPHT_DUP07", 8867)
 
     xlsx = _master_excel_v3([
-        _v3_row("HPHT_DUP07", 7.0, description="unpadded", fl_h2=10.0),
-        _v3_row("HPHT_DUP0007", 7.0, description="padded", fl_h2=20.0),
+        _v3_row("HPHT_DUP07", 7.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("HPHT_DUP0007", 7.0, description="liquid", ph=7.4),
     ])
     created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
-    assert created == 0
-    assert errors, "the collision must be reported"
+    assert errors == [], f"padding variants must merge: {errors}"
+    assert created == 1
 
 
-def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
-    """One collision produces one error listing all its rows, not one per row.
+def test_conflict_group_is_one_error_naming_every_row(db_session: Session):
+    """One conflicted vial-day produces one error listing all its rows.
 
-    A researcher reads this list against the sheet: 'row 2 is a duplicate' with
-    no sibling row number means opening the file and searching for the partner
-    by hand. As measured on the team's v3 workbook on 2026-08-07, the
-    normalized-ID key this guard now uses collapsed 37 collisions into 74
-    rows. Same shape as the ambiguous-ID fix in commit de379a1.
+    A researcher reads this list against the sheet: 'row 2 conflicts' with no
+    sibling row number means opening the file and searching for the partner by
+    hand. Same shape as the ambiguous-ID fix in commit de379a1.
     """
     _seed_experiment(db_session, "SERUM_DUP08a", 8868)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP08a", 7.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP08a", 7.0, description="second", fl_h2=20.0),
-        _v3_row("SERUM_DUP08a", 7.0, description="third", fl_h2=30.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="first", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="second", ph=None, fl_h2=20.0),
+        _v3_row("SERUM_DUP08a", 7.0, description="third", ph=None, fl_h2=30.0),
     ])
     created, updated, skipped, errors, _ = _upload(db_session, xlsx)
 
@@ -1564,33 +1622,34 @@ def test_duplicate_group_is_one_error_naming_every_row(db_session: Session):
     assert "Rows 2, 3, 4" in errors[0], f"every row must be named: {errors[0]}"
     assert "SERUM_DUP08a" in errors[0]
     assert "day 7" in errors[0]
+    assert "FL H2 (ppm)" in errors[0], f"the bad field must be named: {errors[0]}"
 
 
-def test_duplicate_group_names_both_spellings(db_session: Session):
-    """When the colliding rows are spelled differently, the message says so.
+def test_variant_spellings_are_named_in_a_warning(db_session: Session):
+    """When merged rows are spelled differently, the warning says so.
 
-    'Rows 29, 194 (SERUM_pH_001a-t1)' would look like a plain repeat; the
-    researcher needs to see that the two cells do not read the same, or they
-    will search the sheet for a string that is only in one of them.
+    The rows merge (a capital letter is a typo, not a distinct experiment), but
+    the researcher still needs to see that the two cells do not read the same,
+    or the sheet keeps drifting. Reported as a warning, not an error, so it
+    never blocks an upload.
     """
     _seed_experiment(db_session, "SERUM_DUP09c-t5", 8869)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_dup09c-t5", 5.0, description="first", fl_h2=10.0),
-        _v3_row("SERUM_DUP09C-t5", 5.0, description="second", fl_h2=20.0),
+        _v3_row("SERUM_dup09c-t5", 5.0, description="gas", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP09C-t5", 5.0, description="liquid", ph=7.4),
     ])
-    created, updated, skipped, errors, _ = _upload(db_session, xlsx)
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
-    assert len(errors) == 1, f"one error for the group, got: {errors}"
-    assert "SERUM_dup09c-t5" in errors[0], f"first spelling missing: {errors[0]}"
-    assert "SERUM_DUP09C-t5" in errors[0], f"second spelling missing: {errors[0]}"
-    assert "resolve to one experiment" in errors[0], (
-        f"the message must explain why differing spellings collided: {errors[0]}"
-    )
+    assert result.errors == [], f"a spelling variant is not an error: {result.errors}"
+    assert result.created == 1
+    variant = [w for w in result.warnings if "SERUM_dup09c-t5" in w]
+    assert variant, f"first spelling missing: {result.warnings}"
+    assert "SERUM_DUP09C-t5" in variant[0], f"second spelling missing: {variant[0]}"
 
 
-def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
-    """The group error sits where its earliest row sits in the sheet order.
+def test_conflict_group_error_sorts_at_its_first_row(db_session: Session):
+    """The group error sits where its earliest row sits in sheet order.
 
     Errors are sorted by row number so the list reads top-down against the
     spreadsheet (issue #114 item 3). A group spanning rows 2 and 4 must appear
@@ -1599,9 +1658,9 @@ def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
     _seed_experiment(db_session, "SERUM_DUP10a", 8870)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP10a", 7.0, description="dup one", fl_h2=10.0),
+        _v3_row("SERUM_DUP10a", 7.0, description="dup one", ph=None, fl_h2=10.0),
         _v3_row("HPHT_DUP10_MISSING", 7.0, description="no such experiment"),
-        _v3_row("SERUM_DUP10a", 7.0, description="dup two", fl_h2=20.0),
+        _v3_row("SERUM_DUP10a", 7.0, description="dup two", ph=None, fl_h2=20.0),
     ])
     result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
 
@@ -1614,19 +1673,17 @@ def test_duplicate_group_error_sorts_at_its_first_row(db_session: Session):
     )
 
 
-def test_duplicate_does_not_block_other_rows(db_session: Session):
-    """A duplicate pair is rejected; unrelated rows in the same file still land."""
+def test_conflict_does_not_block_other_vial_days(db_session: Session):
+    """A conflicted vial-day is rejected; unrelated rows still land."""
     _seed_experiment(db_session, "SERUM_DUP05a", 8861)
     _seed_experiment(db_session, "SERUM_DUP05b", 8862)
 
     xlsx = _master_excel_v3([
-        _v3_row("SERUM_DUP05a", 7.0, description="dup one", fl_h2=10.0),
-        _v3_row("SERUM_DUP05a", 7.0, description="dup two", fl_h2=20.0),
-        _v3_row("SERUM_DUP05b", 7.0, description="fine", fl_h2=30.0),
+        _v3_row("SERUM_DUP05a", 7.0, description="dup one", ph=None, fl_h2=10.0),
+        _v3_row("SERUM_DUP05a", 7.0, description="dup two", ph=None, fl_h2=20.0),
+        _v3_row("SERUM_DUP05b", 7.0, description="fine", ph=None, fl_h2=30.0),
     ])
-    created, updated, skipped, errors, feedbacks = _upload(
-        db_session, xlsx
-    )
+    created, updated, skipped, errors, feedbacks = _upload(db_session, xlsx)
 
     assert created == 1
     assert len(errors) == 1, f"one error for the group, got: {errors}"
@@ -1716,8 +1773,8 @@ def test_warns_when_h2_reading_has_no_gc_run_date(db_session: Session):
     assert len(missing) == 1, (
         f"exactly one file-level warning, not one per row, got: {result.warnings}"
     )
-    assert "1 of 2 rows" in missing[0], (
-        f"the denominator must count only H2-bearing rows, got: {missing[0]}"
+    assert "1 of 2 vial-days" in missing[0], (
+        f"the denominator must count only H2-bearing vial-days, got: {missing[0]}"
     )
     assert "The reading was stored" in missing[0], (
         f"singular clause must be used at n=1, got: {missing[0]}"
@@ -1772,7 +1829,7 @@ def test_warns_with_coverage_form_above_the_row_list_threshold(db_session: Sessi
     assert len(missing) == 1, (
         f"exactly one file-level warning, not one per row, got: {result.warnings}"
     )
-    assert "11 of 11 rows" in missing[0], missing[0]
+    assert "11 of 11 vial-days" in missing[0], missing[0]
     assert "H2 reading (" not in missing[0], (
         f"above the threshold no row-number list should follow the phrase, got: {missing[0]}"
     )
@@ -2054,3 +2111,992 @@ def test_rejected_rows_are_not_counted_in_the_disagreement_warning(db_session: S
     assert "5)" not in disagreements[0], (
         f"the failed-upsert row must not be named: {disagreements[0]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Sample Collection Date (P0 — the 2026-08-11 renames broke ingestion)
+# ---------------------------------------------------------------------------
+# Uses the `_scalar_for` helper defined further up this file — it already
+# returns the single scalar row of a one-result experiment, which is exactly
+# what these tests need. Defining a second one here shadowed it for every test
+# in the module (flake8 F811).
+
+
+@pytest.mark.parametrize("date_header", [
+    "Sample Collection Date",            # canonical
+    "Sample collection date",            # casing variant
+    "HPHT + Liquid/Solid Date Sampled",  # 2026-08-11, superseded
+    "Liquid/Solid Sample Date",          # 2026-08-11, superseded
+    "Sample Date",                       # archived workbooks
+])
+def test_collection_date_spellings_populate_measurement_date(
+    db_session: Session, date_header: str,
+):
+    """Every accepted spelling of the collection-date column is ingested.
+
+    The column was renamed three times on 2026-08-11 while the parser still read
+    a literal "Sample Date", so measurement_date was silently dropped on all 275
+    dated rows of the team's workbook. Each spelling gets a case so a future
+    rename cannot quietly un-fix this.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE01", 8901)
+
+    xlsx = _master_excel_v3(
+        [_v3_row("HPHT_CDATE01", 7.0, collection_date="2026-08-05", nh4=1.0)],
+        date_header=date_header,
+    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_CDATE01")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        f"'{date_header}' was not ingested as measurement_date"
+    )
+
+
+def test_no_recognized_collection_date_column_warns(db_session: Session):
+    """A sheet with no date column says so instead of silently ingesting none.
+
+    This is the durable guard against a fourth rename. Everything else on the
+    sheet must still upload — a missing date column is a warning, not an error.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE02", 8902)
+
+    xlsx = _master_excel_v3(
+        [_v3_row("HPHT_CDATE02", 7.0, nh4=1.0)],
+        date_header="Totally Renamed Date",
+    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a missing date column is not an error: {result.errors}"
+    assert result.created == 1, "the rest of the row must still upload"
+    assert any("collection date" in w.lower() for w in result.warnings), (
+        f"expected a missing-date-column warning, got: {result.warnings}"
+    )
+
+
+def test_two_date_spellings_do_not_collide(db_session: Session):
+    """A hand-merged workbook with two date spellings keeps one usable column.
+
+    _normalize_headers rule 1: an aliased column never takes a canonical name a
+    literal column already holds. Without that, both columns would be renamed to
+    the same label, row.get() would return a Series, and _parse_date's
+    `except Exception` would swallow the value — the exact silent loss issue #111
+    exists to prevent.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE03", 8903)
+
+    headers = list(_V3_HEADERS) + ["Sample Date"]
+    rows = [_v3_row("HPHT_CDATE03", 7.0, collection_date="2026-08-05", nh4=1.0)
+            + ["2026-01-01"]]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, rows)})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_CDATE03")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        "the canonical column must win over the aliased legacy one"
+    )
+
+
+def test_overwrite_row_does_not_clear_the_date_it_supplied(db_session: Session):
+    """An OVERWRITE row that carries a date stores it rather than nulling it.
+
+    measurement_date is a key in the result_data literal, so it is in the
+    _sheet_fields frozenset that create_scalar_result_ex's overwrite branch
+    clears. While the parser read a header that no longer existed, an
+    OVERWRITE=TRUE row actively destroyed a stored date. Six rows in the team's
+    workbook carry OVERWRITE=TRUE.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE04", 8904)
+
+    first = _master_excel_v3(
+        [_v3_row("HPHT_CDATE04", 7.0, collection_date="2026-07-01", nh4=1.0)]
+    )
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3(
+        [_v3_row("HPHT_CDATE04", 7.0, collection_date="2026-08-05", nh4=2.0,
+                 overwrite="TRUE")]
+    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_CDATE04")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        "the overwrite row's own date must be stored, not cleared"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _merge_group â€” pure merge rules, no database
+# ---------------------------------------------------------------------------
+
+def _cells(**overrides) -> dict:
+    """A Dashboard row as a plain dict, every column blank unless overridden."""
+    row = {header: None for header in _V3_HEADERS}
+    row["Overwrite"] = None   # canonical spelling after _normalize_headers
+    row.pop("OVERWRITE", None)
+    row.update(overrides)
+    return row
+
+
+def test_merge_group_combines_complementary_gas_and_liquid():
+    """The core case: a GC row and a later liquid row become one cell view."""
+    gas = _cells(**{"DI H2 (ppm)": 87.12, "DI gas volume (mL)": 30.0,
+                    "DI gas pressure (psi)": 14.7,
+                    "Sample Collection Date": "2026-07-22",
+                    "GC Run Date": "2026-07-22"})
+    liquid = _cells(**{"Sample pH": 7.24, "Sample Conductivity (mS/cm)": 1.541,
+                       "Sample Collection Date": "2026-08-05",
+                       "Description": "Highest H2 liquid, solids"})
+
+    merged, conflicts, notes = _merge_group([
+        (7, "SERUM_M01a-t1", gas), (188, "SERUM_M01a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"complementary rows must not conflict: {conflicts}"
+    assert merged is not None
+    assert merged.cells["DI H2 (ppm)"] == 87.12
+    assert merged.cells["DI gas volume (mL)"] == 30.0
+    assert merged.cells["Sample pH"] == 7.24
+    assert merged.cells["Sample Conductivity (mS/cm)"] == 1.541
+    assert merged.cells["Description"] == "Highest H2 liquid, solids"
+
+
+def test_merge_group_conflicting_measurement_yields_no_merged_row():
+    """Two different H2 readings for one vial-day is a conflict, not a merge."""
+    a = _cells(**{"DI H2 (ppm)": 33.89})
+    b = _cells(**{"DI H2 (ppm)": 39.01})
+
+    merged, conflicts, notes = _merge_group([
+        (14, "SERUM_M02-t3", a), (57, "SERUM_M02-t3", b),
+    ])
+
+    assert merged is None, "a conflicted vial-day writes nothing"
+    assert len(conflicts) == 1, f"one clause for the one bad field: {conflicts}"
+    assert "DI H2 (ppm)" in conflicts[0]
+    assert "33.89" in conflicts[0] and "39.01" in conflicts[0]
+    assert "row 14" in conflicts[0] and "row 57" in conflicts[0]
+
+
+def test_merge_group_equal_measurements_are_not_a_conflict():
+    """Two rows repeating the same value agree. HPHT_229 does exactly this."""
+    a = _cells(**{"FL H2 (ppm)": 0.0, "Sample pH": 7.56})
+    b = _cells(**{"FL H2 (ppm)": 0.0})
+
+    merged, conflicts, notes = _merge_group([
+        (36, "HPHT_M03", a), (43, "HPHT_M03", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["FL H2 (ppm)"] == 0.0, "0 is a real reading, not a blank"
+    assert merged.cells["Sample pH"] == 7.56
+
+
+def test_merge_group_zero_ph_counts_as_blank_not_a_conflict():
+    """The template writes 0 for a blank pH cell, so 0 must not fight a real value.
+
+    _parse_measurement_float treats 0 as None for pH and conductivity. The merge
+    has to use the same helper or a template-blank 0 would look like a
+    disagreement with the liquid row's real reading.
+    """
+    gas = _cells(**{"DI H2 (ppm)": 50.0, "Sample pH": 0.0,
+                    "Sample Conductivity (mS/cm)": 0.0})
+    liquid = _cells(**{"Sample pH": 7.24, "Sample Conductivity (mS/cm)": 1.541})
+
+    merged, conflicts, notes = _merge_group([
+        (7, "SERUM_M04a-t1", gas), (188, "SERUM_M04a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"a template-blank 0 is not a conflict: {conflicts}"
+    assert merged.cells["Sample pH"] == 7.24
+
+
+def test_merge_group_prefers_the_date_from_a_liquid_bearing_row():
+    """The liquid row's collection date outranks the gas row's."""
+    gas = _cells(**{"DI H2 (ppm)": 87.12,
+                    "Sample Collection Date": "2026-07-22"})
+    liquid = _cells(**{"Sample pH": 7.24,
+                       "Sample Collection Date": "2026-08-05"})
+
+    merged, conflicts, notes = _merge_group([
+        (7, "SERUM_M05a-t1", gas), (188, "SERUM_M05a-t1", liquid),
+    ])
+
+    assert conflicts == []
+    assert merged.cells[_COLLECTION_DATE] == "2026-08-05"
+
+
+def test_merge_group_falls_back_to_a_gas_only_date():
+    """With no liquid row, the date on record is still used, not discarded.
+
+    185 rows in the team's workbook carry a date with no liquid measurement â€”
+    an HPHT vessel's own sampling date. Excluding them would destroy real data.
+    """
+    a = _cells(**{"DI H2 (ppm)": 33.89, "Sample Collection Date": "2026-07-24"})
+    b = _cells(**{"FL Gas Volume (mL)": 30.0,
+                  "Sample Collection Date": "2026-07-24"})
+
+    merged, conflicts, notes = _merge_group([
+        (14, "SERUM_M06-t3", a), (57, "SERUM_M06-t3", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells[_COLLECTION_DATE] == "2026-07-24"
+    assert notes.fallback_date_disagreement is False
+
+
+def test_merge_group_disagreeing_fallback_dates_warn_rather_than_error():
+    """No liquid row and two different dates: first wins, reported not rejected."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "Sample Collection Date": "2026-08-06"})
+    b = _cells(**{"FL Gas Volume (mL)": 30.0,
+                  "Sample Collection Date": "2026-08-10"})
+
+    merged, conflicts, notes = _merge_group([
+        (222, "GC_M07", a), (272, "GC_M07", b),
+    ])
+
+    assert conflicts == [], "a fallback date is provenance, not a measurement"
+    assert merged.cells[_COLLECTION_DATE] == "2026-08-06", "first in sheet order"
+    assert notes.fallback_date_disagreement is True
+
+
+def test_merge_group_disagreeing_preferred_dates_are_a_conflict():
+    """Two liquid-bearing rows with different dates cannot both be right."""
+    a = _cells(**{"Sample pH": 5.22, "Sample Collection Date": "2026-07-22"})
+    b = _cells(**{"Sample Conductivity (mS/cm)": 1.705,
+                  "Sample Collection Date": "2026-08-05"})
+
+    merged, conflicts, notes = _merge_group([
+        (2, "SERUM_M08a-t1", a), (185, "SERUM_M08a-t1", b),
+    ])
+
+    assert merged is None
+    assert any(_COLLECTION_DATE in clause for clause in conflicts), conflicts
+
+
+def test_merge_group_joins_descriptions_and_modifications():
+    """Distinct text is joined with '; ' in sheet order; blanks contribute nothing."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "Description": "Gas, liquid",
+                  "Modification": "+200ul 1M HCl"})
+    b = _cells(**{"Sample pH": 7.24,
+                  "Description": "Highest H2 liquid, solids"})
+
+    merged, conflicts, notes = _merge_group([
+        (36, "HPHT_M09", a), (43, "HPHT_M09", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["Description"] == "Gas, liquid; Highest H2 liquid, solids"
+    assert merged.cells["Modification"] == "+200ul 1M HCl"
+
+
+def test_merge_group_repeated_description_is_not_duplicated():
+    """Identical text on both rows appears once."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "Description": "same"})
+    b = _cells(**{"Sample pH": 7.24, "Description": "same"})
+
+    merged, _conflicts, _notes = _merge_group([
+        (2, "HPHT_M10", a), (3, "HPHT_M10", b),
+    ])
+
+    assert merged.cells["Description"] == "same"
+
+
+def test_merge_group_blank_text_cell_does_not_join_as_nan():
+    """A blank text cell arrives from pandas as NaN, which is TRUTHY.
+
+    The naive `str(value or "")` idiom renders NaN as the string 'nan', which
+    would corrupt the partner row's real text into 'nan; Highest H2 liquid,
+    solids'. Verified against pd.read_excel: an empty Description cell reads as
+    float('nan'), not None. A column blank on every row must not appear in
+    `cells` at all, so Phase 2's None-stripping can fall back to its generated
+    description.
+    """
+    gas = _cells(**{"DI H2 (ppm)": 50.0, "Description": float("nan"),
+                    "Modification": float("nan")})
+    liquid = _cells(**{"Sample pH": 7.24,
+                       "Description": "Highest H2 liquid, solids"})
+
+    merged, conflicts, _notes = _merge_group([
+        (7, "SERUM_M17a-t1", gas), (188, "SERUM_M17a-t1", liquid),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["Description"] == "Highest H2 liquid, solids", (
+        "a blank cell must contribute nothing to the join"
+    )
+    assert "Modification" not in merged.cells, (
+        "a column blank on every row must not be written at all"
+    )
+
+
+def test_merge_group_run_date_disagreement_is_a_note_not_a_conflict():
+    """Run dates are provenance: first non-null wins and the clash is reported."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "GC Run Date": "2026-07-22"})
+    b = _cells(**{"Sample pH": 7.24, "GC Run Date": "2026-07-28"})
+
+    merged, conflicts, notes = _merge_group([
+        (2, "HPHT_M11", a), (3, "HPHT_M11", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["GC Run Date"] == "2026-07-22", "first in sheet order"
+    assert notes.run_date_disagreements == ["GC Run Date"]
+
+
+def test_merge_group_overwrite_requires_every_row():
+    """Mixed OVERWRITE degrades to a non-destructive merge and is reported."""
+    a = _cells(**{"DI H2 (ppm)": 404.19, "Overwrite": "TRUE"})
+    b = _cells(**{"Sample pH": 9.03, "Overwrite": "FALSE"})
+
+    merged, conflicts, notes = _merge_group([
+        (154, "SERUM_M12c-t5", a), (204, "SERUM_M12c-t5", b),
+    ])
+
+    assert conflicts == []
+    assert merged.overwrite is False, "a destructive directive needs unanimity"
+    assert notes.overwrite_mixed is True
+
+
+def test_merge_group_unanimous_overwrite_is_honoured():
+    a = _cells(**{"DI H2 (ppm)": 404.19, "Overwrite": "TRUE"})
+    b = _cells(**{"Sample pH": 9.03, "Overwrite": "TRUE"})
+
+    merged, _conflicts, notes = _merge_group([
+        (154, "SERUM_M13c-t5", a), (204, "SERUM_M13c-t5", b),
+    ])
+
+    assert merged.overwrite is True
+    assert notes.overwrite_mixed is False
+
+
+def test_merge_group_records_distinct_spellings():
+    """Two spellings of one ID merge; the note names them so the typo is fixable."""
+    a = _cells(**{"DI H2 (ppm)": 50.0})
+    b = _cells(**{"Sample pH": 7.24})
+
+    merged, conflicts, notes = _merge_group([
+        (29, "SERUM_cation_001c-t5", a), (194, "SERUM_Cation_001c-t5", b),
+    ])
+
+    assert conflicts == []
+    assert notes.spellings == ["SERUM_cation_001c-t5", "SERUM_Cation_001c-t5"]
+
+
+def test_merge_group_single_spelling_records_one_entry():
+    a = _cells(**{"DI H2 (ppm)": 50.0})
+    b = _cells(**{"Sample pH": 7.24})
+
+    _merged, _conflicts, notes = _merge_group([
+        (2, "HPHT_M14", a), (3, "HPHT_M14", b),
+    ])
+
+    assert notes.spellings == ["HPHT_M14"], "no variant to report"
+
+
+def test_merge_group_merges_three_rows():
+    """Nothing in the rules assumes a pair."""
+    a = _cells(**{"DI H2 (ppm)": 50.0})
+    b = _cells(**{"Sample pH": 7.24})
+    c = _cells(**{"NH4 (mM)": 3.5, "Sampled Solution Volume (mL)": 2.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "HPHT_M15", a), (3, "HPHT_M15", b), (4, "HPHT_M15", c),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["DI H2 (ppm)"] == 50.0
+    assert merged.cells["Sample pH"] == 7.24
+    assert merged.cells["NH4 (mM)"] == 3.5
+    assert merged.cells["Sampled Solution Volume (mL)"] == 2.0
+
+
+def test_merge_group_reports_every_conflicting_field():
+    """A group can disagree on more than one field; all are named."""
+    a = _cells(**{"Sample pH": 5.22, "Sample Conductivity (mS/cm)": 1.286})
+    b = _cells(**{"Sample pH": 7.27, "Sample Conductivity (mS/cm)": 1.705})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "SERUM_M16a-t1", a), (185, "SERUM_M16a-t1", b),
+    ])
+
+    assert merged is None
+    assert len(conflicts) == 2, f"one clause per bad field: {conflicts}"
+    assert any("Sample pH" in c for c in conflicts)
+    assert any("Sample Conductivity (mS/cm)" in c for c in conflicts)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.5 â€” merged vial-days end to end
+# ---------------------------------------------------------------------------
+
+def test_gas_and_liquid_rows_merge_into_one_result(db_session: Session):
+    """The motivating case, end to end.
+
+    Gas sampled 2026-07-22 and run the same day; the liquid/solid fraction
+    collected 2026-08-05. Both rows name the same -t1 vial, so the ID pins the
+    day and they are one vial-day.
+    """
+    _seed_experiment(db_session, "SERUM_MG01a-t1", 8921)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG01a-t1", 1.0, description="", ph=None,
+                di_h2=87.12, di_vol=30.0, di_psi=14.7,
+                collection_date="2026-07-22", gc_date="2026-07-22"),
+        _v3_row("SERUM_MG01a-t1", 1.0, description="Highest H2 liquid, solids",
+                ph=7.24, cond=1.541, collection_date="2026-08-05"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"complementary rows must merge: {result.errors}"
+    assert result.created == 1, "one vial-day is one write"
+    assert result.updated == 0
+
+    scalar = _scalar_for(db_session, "SERUM_MG01a-t1")
+    assert scalar.h2_concentration == pytest.approx(87.12)
+    assert scalar.gas_sampling_volume_ml == pytest.approx(30.0)
+    assert scalar.gas_sampling_pressure_MPa == pytest.approx(14.7 * _PSI_TO_MPA)
+    assert scalar.final_ph == pytest.approx(7.24)
+    assert scalar.final_conductivity_mS_cm == pytest.approx(1.541)
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        "the liquid row's collection date wins"
+    )
+
+
+def test_merged_group_reports_every_row_in_feedbacks(db_session: Session):
+    """One feedback per vial-day, naming every sheet row behind it."""
+    _seed_experiment(db_session, "SERUM_MG02a-t1", 8922)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG02a-t1", 1.0, ph=None, di_h2=87.12),
+        _v3_row("SERUM_MG02a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.feedbacks) == 1, f"one write, one feedback: {result.feedbacks}"
+    assert result.feedbacks[0]["row"] == 2, "anchored at the group's first row"
+    assert result.feedbacks[0]["rows"] == [2, 3]
+
+
+def test_merge_summary_warning_explains_the_count_gap(db_session: Session):
+    """created + updated no longer equals the sheet row count; say why."""
+    _seed_experiment(db_session, "SERUM_MG03a-t1", 8923)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG03a-t1", 1.0, ph=None, di_h2=87.12),
+        _v3_row("SERUM_MG03a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert any("Merged 2 rows into 1 vial-day" in w for w in result.warnings), (
+        f"expected a merge summary, got: {result.warnings}"
+    )
+
+
+def test_no_merge_summary_when_nothing_merged(db_session: Session):
+    """A sheet with no duplicate keys behaves exactly as before."""
+    _seed_experiment(db_session, "HPHT_MG04", 8924)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_MG04", 7.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.created == 1
+    assert not any("Merged" in w for w in result.warnings), (
+        f"a warning that fires on ordinary sheets is one people ignore: "
+        f"{result.warnings}"
+    )
+
+
+def test_conflicted_vial_day_leaves_a_stored_row_untouched(db_session: Session):
+    """A conflict must not partially update what is already stored."""
+    _seed_experiment(db_session, "SERUM_MG05a-t1", 8925)
+
+    first = _master_excel_v3([
+        _v3_row("SERUM_MG05a-t1", 1.0, ph=7.0, di_h2=10.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("SERUM_MG05a-t1", 1.0, ph=None, di_h2=33.89),
+        _v3_row("SERUM_MG05a-t1", 1.0, ph=None, di_h2=39.01),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.created == 0
+    assert result.updated == 0
+    assert len(result.errors) == 1, f"one error for the group: {result.errors}"
+
+    scalar = _scalar_for(db_session, "SERUM_MG05a-t1")
+    assert scalar.h2_concentration == pytest.approx(10.0), (
+        "the stored reading must survive a conflicted re-upload"
+    )
+
+
+def test_conflict_error_names_rows_field_and_both_values(db_session: Session):
+    _seed_experiment(db_session, "SERUM_MG06a-t1", 8926)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MG06a-t1", 1.0, ph=None, di_h2=33.89),
+        _v3_row("SERUM_MG06a-t1", 1.0, ph=None, di_h2=39.01),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    (message,) = result.errors
+    assert "Rows 2, 3" in message, message
+    assert "SERUM_MG06a-t1" in message, message
+    assert "day 1" in message, message
+    assert "DI H2 (ppm)" in message, message
+    assert "33.89" in message and "39.01" in message, message
+    assert "Nothing was written" in message, message
+
+
+def test_three_row_group_merges_end_to_end(db_session: Session):
+    _seed_experiment(db_session, "HPHT_MG07-t2", 8927)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MG07-t2", 2.0, ph=None, di_h2=50.0),
+        _v3_row("HPHT_MG07-t2", 2.0, ph=7.24),
+        _v3_row("HPHT_MG07-t2", 2.0, ph=None, nh4=3.5, solvol=2.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    assert result.created == 1
+
+    scalar = _scalar_for(db_session, "HPHT_MG07-t2")
+    assert scalar.h2_concentration == pytest.approx(50.0)
+    assert scalar.final_ph == pytest.approx(7.24)
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(3.5)
+    assert scalar.sampling_volume_mL == pytest.approx(2.0)
+
+
+def test_full_loop_on_one_row_beats_di_on_another(db_session: Session):
+    """_resolve_h2 runs once over the merged view, so precedence is unchanged."""
+    _seed_experiment(db_session, "HPHT_MG08-t2", 8928)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MG08-t2", 2.0, ph=None, fl_h2=100.0, fl_vol=20.0,
+                fl_psi=14.7),
+        _v3_row("HPHT_MG08-t2", 2.0, ph=None, di_h2=50.0, di_vol=30.0,
+                di_psi=14.7),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"different GC blocks are not a conflict: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_MG08-t2")
+    assert scalar.h2_concentration == pytest.approx(100.0), "Full Loop wins"
+    assert scalar.gas_sampling_volume_ml == pytest.approx(20.0), (
+        "geometry must come from the winning block"
+    )
+    assert any("Full Loop reading used instead of direct injection" in w
+               for w in result.warnings), result.warnings
+
+
+def test_duration_still_drives_non_token_ids(db_session: Session):
+    """Regression for spec Â§1.5: no -t token means Duration supplies the day."""
+    _seed_experiment(db_session, "HPHT_MG09", 8929)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_MG09", 11.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    row = (
+        db_session.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "HPHT_MG09")
+        .one()
+    )
+    assert row.time_post_reaction_days == pytest.approx(11.0)
+
+
+def test_rows_one_duration_apart_stay_two_vial_days(db_session: Session):
+    """Spec D-g: grouping matches the exact timepoint, with no tolerance window.
+
+    HPHT_217 (day 11 gas, day 12 liquid) and six other IDs in the team's
+    workbook look like this and genuinely record different sampling days.
+    """
+    _seed_experiment(db_session, "HPHT_MG10", 8930)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_MG10", 11.0, ph=None, di_h2=50.0),
+        _v3_row("HPHT_MG10", 12.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    assert result.created == 2, "two Durations are two vial-days"
+    assert not any("Merged" in w for w in result.warnings), result.warnings
+
+
+# ---------------------------------------------------------------------------
+# Group-level warnings
+# ---------------------------------------------------------------------------
+
+def test_mixed_overwrite_warns_and_clears_nothing(db_session: Session):
+    """A destructive directive needs unanimity, and the refusal is reported.
+
+    Rows 154/204 of the team's workbook are exactly this: a DI reading marked
+    OVERWRITE beside an untouched liquid row.
+    """
+    _seed_experiment(db_session, "SERUM_MW01c-t5", 8941)
+
+    first = _master_excel_v3([
+        _v3_row("SERUM_MW01c-t5", 5.0, ph=7.0, nh4=1.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("SERUM_MW01c-t5", 5.0, ph=None, di_h2=404.19, overwrite="TRUE"),
+        _v3_row("SERUM_MW01c-t5", 5.0, ph=9.03, cond=0.204, overwrite="FALSE"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"mixed OVERWRITE is not an error: {result.errors}"
+    assert any("overwrite" in w.lower() for w in result.warnings), (
+        f"the ignored directive must be reported: {result.warnings}"
+    )
+
+    scalar = _scalar_for(db_session, "SERUM_MW01c-t5")
+    assert scalar.gross_ammonium_concentration_mM == pytest.approx(1.0), (
+        "no clearing: the NH4 value this sheet left blank must survive"
+    )
+
+
+def test_unanimous_overwrite_clears_a_declared_blank(db_session: Session):
+    """When every row says TRUE, the overwrite happens as before."""
+    _seed_experiment(db_session, "SERUM_MW02c-t5", 8942)
+
+    first = _master_excel_v3([
+        _v3_row("SERUM_MW02c-t5", 5.0, ph=7.0, nh4=1.0),
+    ])
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3([
+        _v3_row("SERUM_MW02c-t5", 5.0, ph=None, di_h2=404.19, overwrite="TRUE"),
+        _v3_row("SERUM_MW02c-t5", 5.0, ph=9.03, overwrite="TRUE"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "SERUM_MW02c-t5")
+    assert scalar.gross_ammonium_concentration_mM is None, (
+        "a declared-but-blank column clears under a unanimous overwrite"
+    )
+
+
+def test_run_date_disagreement_warns_and_still_writes(db_session: Session):
+    _seed_experiment(db_session, "SERUM_MW03a-t1", 8943)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MW03a-t1", 1.0, ph=None, di_h2=50.0,
+                gc_date="2026-07-22"),
+        _v3_row("SERUM_MW03a-t1", 1.0, ph=7.24, gc_date="2026-07-28"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a run date is provenance: {result.errors}"
+    assert result.created == 1
+    assert any("GC Run Date" in w for w in result.warnings), result.warnings
+
+
+def test_variant_spellings_merge_and_are_named(db_session: Session):
+    """A case typo is not a distinct experiment; merge and name the spellings."""
+    _seed_experiment(db_session, "SERUM_MW04c-t5", 8944)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_mw04c-t5", 5.0, ph=None, di_h2=50.0),
+        _v3_row("SERUM_MW04C-t5", 5.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"variant spellings must merge: {result.errors}"
+    assert result.created == 1
+    assert any("SERUM_mw04c-t5" in w and "SERUM_MW04C-t5" in w
+               for w in result.warnings), (
+        f"both spellings must be named: {result.warnings}"
+    )
+
+
+def test_disagreeing_fallback_dates_warn(db_session: Session):
+    """No liquid row in the group: first date wins and the clash is reported."""
+    _seed_experiment(db_session, "GC_MW05-t0", 8945)
+
+    xlsx = _master_excel_v3([
+        _v3_row("GC_MW05-t0", 0.0, ph=None, di_h2=50.0,
+                collection_date="2026-08-06"),
+        _v3_row("GC_MW05-t0", 0.0, ph=None, fl_vol=30.0,
+                collection_date="2026-08-10"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a fallback date must not reject: {result.errors}"
+    assert result.created == 1
+    assert any("collection date" in w.lower() for w in result.warnings), (
+        f"the disagreement must be reported: {result.warnings}"
+    )
+
+    scalar = _scalar_for(db_session, "GC_MW05-t0")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 6), "first in sheet order"
+
+
+def test_conflicted_group_emits_no_merge_note_warnings(db_session: Session):
+    """A rejected vial-day must never be described as merged.
+
+    Every merge-note warning is worded for a vial-day that LANDED: "merged
+    without clearing anything", "the first value in sheet order was stored",
+    "the rows were merged normally". A conflicted group writes nothing, so
+    emitting any of them states the opposite of what happened. Nothing is lost
+    by staying quiet â€” the conflict error already names every row and every
+    spelling. This group trips all three note kinds at once (variant spellings,
+    mixed OVERWRITE, clashing GC Run Date) and still conflicts on FL H2.
+    """
+    _seed_experiment(db_session, "SERUM_MW06c-t5", 8946)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_mw06c-t5", 5.0, ph=None, fl_h2=10.0,
+                gc_date="2026-07-22", overwrite="TRUE"),
+        _v3_row("SERUM_MW06C-t5", 5.0, ph=None, fl_h2=20.0,
+                gc_date="2026-07-28", overwrite="FALSE"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert len(result.errors) == 1, f"the conflict must be reported: {result.errors}"
+    assert result.created == 0
+    assert not any("spell their experiment ID" in w for w in result.warnings), (
+        f"a rejected vial-day was described as merged: {result.warnings}"
+    )
+    assert not any("OVERWRITE" in w for w in result.warnings), (
+        f"nothing was written, so nothing was left unclear: {result.warnings}"
+    )
+    assert not any("GC Run Date" in w for w in result.warnings), (
+        f"no value was stored, first-in-sheet-order or otherwise: {result.warnings}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Blank text cells on the single-row path (pandas NaN is truthy)
+# ---------------------------------------------------------------------------
+
+def _result_for(db: Session, experiment_id: str) -> ExperimentalResults:
+    """The single ExperimentalResults row belonging to `experiment_id`."""
+    return (
+        db.query(ExperimentalResults)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == experiment_id)
+        .one()
+    )
+
+
+def test_blank_description_is_not_stored_as_the_string_nan(db_session: Session):
+    """A blank Description must not be stored as the literal text 'nan'.
+
+    pandas reads an empty cell as float('nan'), which is TRUTHY, so
+    `str(cell or "").strip()` yields 'nan' instead of ''. That made the
+    generated "Master upload â€” day N" fallback unreachable: every blank
+    Description landed as 'nan'. A merged group already routes through
+    _parse_text, so this covers the single-row path.
+    """
+    _seed_experiment(db_session, "HPHT_BLANKTEXT01", 8951)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_BLANKTEXT01", 7.0, description="", nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_BLANKTEXT01")
+    assert row.description != "nan", "the NaN cell leaked into the stored text"
+    assert row.description.startswith("Master upload"), (
+        f"the generated fallback must be reachable, got: {row.description!r}"
+    )
+
+
+def test_blank_modification_does_not_flag_a_brine_modification(db_session: Session):
+    """A blank Modification must not set has_brine_modification.
+
+    ExperimentalResults.sync_brine_flag (database/models/results.py:37-41) sets
+    the flag from `bool(value and str(value).strip())`, so storing 'nan' also
+    marked the timepoint as brine-modified. 12 of the 140 flagged rows in the
+    dev DB are false positives from exactly this, and the column is indexed and
+    reported on.
+    """
+    _seed_experiment(db_session, "HPHT_BLANKTEXT02", 8952)
+
+    xlsx = _master_excel_v3([_v3_row("HPHT_BLANKTEXT02", 7.0, nh4=1.0)])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_BLANKTEXT02")
+    assert row.brine_modification_description is None, (
+        f"a blank cell must store nothing, got: "
+        f"{row.brine_modification_description!r}"
+    )
+    assert row.has_brine_modification is False, (
+        "no modification was recorded, so the flag must stay false"
+    )
+
+
+def test_a_real_modification_still_flags_and_stores(db_session: Session):
+    """The fix must not silence a genuine Modification entry."""
+    _seed_experiment(db_session, "HPHT_BLANKTEXT03", 8953)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_BLANKTEXT03", 7.0, nh4=1.0, modification="+200ul 1M HCl"),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_BLANKTEXT03")
+    assert row.brine_modification_description == "+200ul 1M HCl"
+    assert row.has_brine_modification is True
+
+
+def test_gc_date_coverage_warning_counts_vial_days(db_session: Session):
+    """Phase 2 iterates vial-days, so the denominator is vial-days, not rows.
+
+    Two sheet rows merge into one vial-day carrying an H2 reading and no GC Run
+    Date. Reporting '1 of 1 rows' would be a lie about what the parser counted.
+    """
+    _seed_experiment(db_session, "SERUM_MV01a-t1", 8961)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MV01a-t1", 1.0, ph=None, di_h2=50.0),
+        _v3_row("SERUM_MV01a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    gc_warning = [w for w in result.warnings if "GC Run Date" in w]
+    assert gc_warning, f"expected the GC-date coverage warning: {result.warnings}"
+    assert "vial-day" in gc_warning[0], (
+        f"the denominator counts vial-days, not rows: {gc_warning[0]}"
+    )
+
+
+def test_duration_disagreement_warning_counts_vial_days(db_session: Session):
+    """The Duration-vs-token denominator counts vial-days for the same reason.
+
+    Both rows of this vial-day carry a Duration of 3 while the ID encodes day 1,
+    so the merged group is one comparable vial-day that disagrees.
+    """
+    _seed_experiment(db_session, "SERUM_MV02a-t1", 8962)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MV02a-t1", 3.0, ph=None, di_h2=50.0),
+        _v3_row("SERUM_MV02a-t1", 3.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == []
+    disagreement = [w for w in result.warnings if "disagrees with the ID" in w]
+    assert disagreement, f"expected the disagreement warning: {result.warnings}"
+    assert "vial-day" in disagreement[0], (
+        f"the denominator counts vial-days, not rows: {disagreement[0]}"
+    )
+
+
+def test_merge_group_zero_gas_geometry_counts_as_blank():
+    """The template writes 0 for blank gas volume/pressure on a liquid row.
+
+    Measured on docs/sample_data/Master_Results_Tracker_v3.xlsx (2026-08-11):
+    35 of the 39 conflicts the merge first reported were
+    'DI gas volume (mL): 30 vs 0' and 'DI gas pressure (psi): 14.7 vs 0'
+    between a gas row and its liquid partner, rejecting 35 legitimate
+    vial-days. A 0 mL sampling volume or 0 psi pressure is not a physical
+    measurement, so it is a blank -- the same rule pH and conductivity use.
+    """
+    gas = _cells(**{"DI H2 (ppm)": 87.12, "DI gas volume (mL)": 30.0,
+                    "DI gas pressure (psi)": 14.7})
+    liquid = _cells(**{"Sample pH": 7.24, "DI gas volume (mL)": 0.0,
+                       "DI gas pressure (psi)": 0.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "SERUM_M18a-t1", gas), (185, "SERUM_M18a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"a template-blank 0 is not a conflict: {conflicts}"
+    assert merged.cells["DI gas volume (mL)"] == 30.0
+    assert merged.cells["DI gas pressure (psi)"] == 14.7
+
+
+def test_merge_group_zero_full_loop_geometry_counts_as_blank():
+    """The Full Loop block gets the same treatment as direct injection."""
+    gas = _cells(**{"FL H2 (ppm)": 115.0, "FL Gas Volume (mL)": 3935.0,
+                    "FL Gas Pressure (psi)": 90.0})
+    liquid = _cells(**{"Sample pH": 7.24, "FL Gas Volume (mL)": 0.0,
+                       "FL Gas Pressure (psi)": 0.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "SERUM_M20a-t1", gas), (185, "SERUM_M20a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"a template-blank 0 is not a conflict: {conflicts}"
+    assert merged.cells["FL Gas Volume (mL)"] == 3935.0
+    assert merged.cells["FL Gas Pressure (psi)"] == 90.0
+
+
+def test_merge_group_zero_h2_ppm_is_still_a_real_reading():
+    """0 ppm H2 is a measurement, so it must still fight a different value.
+
+    The boundary of the rule above: the concentration columns are deliberately
+    NOT zero-blank. The module docstring has said since #111 that 'a value of 0
+    is a real reading, not a blank' -- a GC that measured no hydrogen is a
+    result, whereas a 0 mL injection never happened.
+    """
+    a = _cells(**{"FL H2 (ppm)": 0.0})
+    b = _cells(**{"FL H2 (ppm)": 12.5})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "HPHT_M19", a), (3, "HPHT_M19", b),
+    ])
+
+    assert merged is None, "0 ppm vs 12.5 ppm is a real disagreement"
+    assert len(conflicts) == 1 and "FL H2 (ppm)" in conflicts[0], conflicts
+
+
+def test_merge_group_genuine_geometry_disagreement_still_conflicts():
+    """Two non-zero volumes are a real conflict, not a template blank.
+
+    Rows 222/272 of the team's workbook ('GC_B_500ppm_1mL', 30 mL vs 1 mL) are
+    this case and must survive the zero-blank rule as a conflict.
+    """
+    a = _cells(**{"DI H2 (ppm)": 500.0, "DI gas volume (mL)": 30.0})
+    b = _cells(**{"DI H2 (ppm)": 500.0, "DI gas volume (mL)": 1.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (222, "GC_B_500ppm_1mL", a), (272, "GC_B_500ppm_1mL", b),
+    ])
+
+    assert merged is None
+    assert len(conflicts) == 1 and "DI gas volume (mL)" in conflicts[0], conflicts
+
+
+def test_merged_group_with_no_h2_reading_stores_no_gas_geometry(db_session: Session):
+    """Issue #114 over a merged view: geometry needs a concentration.
+
+    The sheet's gas columns carry the previous run's values (207 of 499 rows on
+    the v3 Dashboard, 2026-07-30), so a vial-day with no reading in either GC
+    block must store neither volume nor pressure -- persisted, they are
+    indistinguishable from a real measurement. _resolve_h2 enforces this once,
+    over the MERGED cells, which is the half of spec acceptance criterion 16
+    that precedence alone does not cover.
+    """
+    _seed_experiment(db_session, "SERUM_MV03a-t1", 8963)
+
+    xlsx = _master_excel_v3([
+        _v3_row("SERUM_MV03a-t1", 1.0, ph=None, fl_vol=4235.0, fl_psi=90.0),
+        _v3_row("SERUM_MV03a-t1", 1.0, ph=7.24),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    assert result.created == 1
+
+    scalar = _scalar_for(db_session, "SERUM_MV03a-t1")
+    assert scalar.h2_concentration is None, "no reading in either block"
+    assert scalar.gas_sampling_volume_ml is None, (
+        "carryover geometry must not be stored without a concentration"
+    )
+    assert scalar.gas_sampling_pressure_MPa is None
+    assert scalar.final_ph == pytest.approx(7.24), "the liquid row still lands"

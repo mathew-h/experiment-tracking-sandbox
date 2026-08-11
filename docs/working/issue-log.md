@@ -2121,3 +2121,189 @@ corruption in production (`CF_018`/`-2`/`-3` all went ONGOING through
 - **Full suite:** 1430 passed, 4 skipped, 3 failed - the 3 being the pre-existing
   `tests/test_pg_backup_restore.py` failures, confirmed identical by running that file
   on `develop`.
+
+
+---
+
+## 2026-08-11 â€” Master Results row merge (`feat/master-results-row-merge`)
+
+**Spec:** `docs/superpowers/specs/2026-08-11-master-results-row-merge-design.md`
+**Plan:** `docs/superpowers/plans/2026-08-11-master-results-row-merge.md`
+**Sign-off for touching the locked parser:** Mat, 2026-08-11.
+
+Several Dashboard rows can describe one vial-day: gas is drawn and run on one date,
+the liquid/solid fraction is collected later, and each gets its own row. The upload
+rejected both as duplicates, so nothing was written â€” 72 of the workbook's rows.
+Phase 1.5 now collapses rows sharing a `(normalize_id, timepoint)` key into one merged
+cell view before the upsert loop, and only a field two rows fill with **different**
+values rejects that vial-day (whole, never partially).
+
+**Verified against `docs/sample_data/Master_Results_Tracker_v3.xlsx`** (parse + rollback,
+dev DB unchanged): "Merged 72 rows into 36 vial-days" and exactly four conflicts â€”
+rows 2/185 (`SERUM_pH_001a-t1`: pH, conductivity, collection date), 14/57
+(`SERUM_pH_004-t3`: DI H2), 222/272 (`GC_B_500ppm_1mL`: gas volume 30 vs 1),
+264/268 (`A1 Flow Leak Test`: DI H2). Matches the spec's acceptance criterion exactly.
+The other 24 errors are experiment-not-found â€” the dev DB's real data stops around
+May 2026 and these are July/August experiments.
+
+**Four defects found and fixed beyond the merge itself:**
+
+1. **Collection date was never ingested (P0).** The column was renamed three times on
+   2026-08-11 while the parser read a literal `"Sample Date"`, so `measurement_date` was
+   dropped on all 275 dated rows â€” and *cleared* on `OVERWRITE=TRUE` rows, since it is a
+   declared `_sheet_fields` entry. Every spelling is now aliased onto a `_COLLECTION_DATE`
+   constant and a missing date column warns instead of failing silently.
+2. **A zero gas volume/pressure read as a measurement.** The first real-workbook run
+   reported 39 conflicts instead of 4; 35 were `DI gas volume (mL): 30 vs 0` between a
+   gas row and its liquid partner, because the template writes 0 into those columns on a
+   row that did no gas sampling. They joined pH and conductivity in `_ZERO_BLANK_COLUMNS`.
+   The H2 *concentration* columns are deliberately excluded â€” 0 ppm is a real reading.
+   **This is why the plan's Task 8 verification exists; the unit tests all passed while
+   35 legitimate vial-days were being rejected.**
+3. **Merge notes were emitted for rejected vial-days.** `group_notes` was appended before
+   the conflict check, so a group that was rejected outright was told "those vial-days
+   were merged without clearing anything" and "no row was rejected". Notes are now
+   recorded only for a group that actually merged.
+4. **Blank text cells were stored as the string `'nan'`** (pre-existing, not introduced
+   here). pandas reads an empty cell as `float('nan')`, which is truthy, so
+   `str(cell or "").strip()` yielded `'nan'`. This made the generated
+   "Master upload â€” day N" description unreachable and, via
+   `ExperimentalResults.sync_brine_flag`, set `has_brine_modification` from the `'nan'`
+   string â€” **12 of the 140 flagged rows in the dev DB are false positives**, on an
+   indexed and reported column. Fixed by a NaN-safe `_parse_text`.
+   **Production rows already written this way are NOT corrected** â€” no backfill was run.
+
+**Full suite:** 1482 passed, 4 skipped, 3 failed â€” the 3 being the pre-existing
+`tests/test_pg_backup_restore.py` failures. Confirmed unrelated: they fail because
+`experiments_test` currently has no tables (`relation "experiments" does not exist`),
+this branch changes only `master_bulk_upload.py` and its test file, and neither is
+referenced by that test module.
+
+**Plan defects worth noting for future plan authors:** four `-k` filters in the plan
+match no test names (they used experiment IDs that appear only in test bodies); the
+predicted "eight duplicate-guard tests now fail" was actually one, because those
+fixtures all used conflicting values and so still errored; and the plan's footnote â´
+was already taken by the conditions-recalculation contract, so the row-merge footnote
+is âµ.
+
+---
+
+## OPEN DEFECT â€” `_t1` vs `-t1` files a reading at the wrong timepoint
+
+**Not fixed by the row-merge work.** Needs its own `/start-task`: it changes the
+canonical experiment-ID grammar used by lineage repo-wide, so it is not a parser-local
+change.
+
+`_id_match.normalize_id` is run-delimited and treats `_t1`, `-T1` and `-t1` as the
+**same** match key, but `database/experiment_id_parser.py::split_timepoint_token`
+accepts a lowercase `-t` **only**. The two disagree. Verified in code, 2026-08-11:
+
+```
+normalize_id('SERUM_X_005a_t1') == normalize_id('SERUM_X_005a-t1')  # True
+split_timepoint_token('SERUM_X_005a_t1')  -> ('SERUM_X_005a_t1', None)   # no token
+split_timepoint_token('SERUM_X_005a-t1')  -> ('SERUM_X_005a', 1.0)
+```
+
+Consequence: a row spelled `_t1` (or `-T1`) resolves to the **same stored experiment**
+as its `-t1` sibling, but its timepoint token is unrecognised, so its
+`Duration (Days)` is used instead of the day its ID declares â€” a reading filed at the
+wrong timepoint on a real vial. It is also invisible: the row uploads without error.
+
+**Correction to the plan's evidence.** The plan cites rows 95/214 of
+`Master_Results_Tracker_v3.xlsx` as `SERUM_Catalyst_005a_t1` vs
+`SERUM_Catalyst_005a-t1`. That does **not** reproduce on the 2026-08-11 revision â€”
+both rows read `SERUM_Catalyst_005a-t1`, they merge normally, and the workbook contains
+**zero** IDs with an underscore `_t<n>` token and zero with a capital `-T<n>`. So this
+is currently a **latent** defect with no known live instance, not an active mis-filing.
+It stays open because nothing prevents the spelling from reappearing and nothing would
+report it. The same gap is recorded on the ICP side in footnote Â³ of
+`docs/LOCKED_COMPONENTS.md`.
+
+Since the row merge landed, two such rows would also present as a merge candidate that
+inexplicably did **not** merge â€” they key to different timepoints â€” which is the most
+likely way a researcher would notice it.
+
+### Backfill for the `'nan'` text defect â€” `fix_nan_text_fields_019.py`
+
+Written 2026-08-11, same session as the parser fix, so it deploys alongside it.
+Modelled on `zero_ph_conductivity_016.py` (same bug class: an Excel template blank
+stored as a value, parser fixed going forward, historical rows corrected by script).
+
+**Production impact, measured directly from `docs/sample_data/experiments_20260810_010002.sql`**
+(read via `pg_restore --data-only --table experimental_results -f -`; no database was
+created and nothing was written):
+
+| Metric | Production 2026-08-10 | Dev |
+|---|---|---|
+| `experimental_results` rows | 2094 | 1961 |
+| `brine_modification_description = 'nan'` | 12 | 12 |
+| ...of those flagged `has_brine_modification` | 12 (all) | 12 (all) |
+| `has_brine_modification = true` total | 141 | 140 |
+| **False-positive share of the flag** | **8.5%** | 8.6% |
+| `description = 'nan'` | **0** | 0 |
+
+`description` is clean in both because researchers always fill that column; only the
+usually-blank `Modification` cell ever tripped the bug. 120 distinct real modification
+values are present in production and must survive the cleanup.
+
+**Status: applied to DEV only.** Dev went 140 flagged -> 128, with 0 `'nan'` values
+remaining and all 128 real values preserved (128 non-null = 128 flagged, self-consistent).
+**Production has NOT been backfilled** â€” that runs on the lab PC after deploy.
+
+**Runbook (lab PC, after the parser fix is deployed):**
+
+```bash
+# 1. Dry run. Prints the counts above; writes nothing.
+python database/data_migrations/fix_nan_text_fields_019.py
+
+# 2. Confirm the numbers look like the production column above (~12 rows, all flagged),
+#    then apply.
+python database/data_migrations/fix_nan_text_fields_019.py --apply
+```
+
+Expect "Rows updated: 12", "Remaining 'nan' values: 0", and the flagged total to drop by
+exactly the updated count. If `description = 'nan'` is non-zero the script REPORTS those
+row ids and does not touch them â€” `description` is `NOT NULL`, so there is no correct
+null, and the script deliberately refuses to invent free text a researcher will read.
+Those rows need a human decision.
+
+**Two design points worth preserving if this script is ever edited:**
+
+1. The `UPDATE` sets `has_brine_modification = false` **explicitly**. `sync_brine_flag`
+   is an ORM `@validates` hook on the attribute and does NOT fire for raw SQL, so
+   relying on it would null the text and leave all 12 flags true â€” the worse half of
+   the bug.
+2. Matching is `lower(btrim(...)) = 'nan'`, so `'NaN'` and `' nan '` are caught. Zero
+   such variants exist today; the cost is one `lower()`.
+
+## 2026-08-11 | inline â€” Master Results row merge (`feat/master-results-row-merge`)
+
+- **Files changed:** `backend/services/bulk_uploads/master_bulk_upload.py`,
+  `tests/services/bulk_uploads/test_master_bulk_upload.py`,
+  `database/data_migrations/fix_nan_text_fields_019.py` (new),
+  `docs/LOCKED_COMPONENTS.md`, `.claude/rules/MODELS.md`,
+  `docs/upload_templates/master_bulk_upload.md`, `docs/working/issue-log.md`,
+  `docs/working/decisions.md`, plus the hook's `docs/project_context/` copies
+- **Tests added:** yes â€” 46 new (18 pure `_merge_group` unit tests over plain dicts,
+  22 end-to-end upload tests, 3 blank-text/brine-flag tests, 3 collection-date
+  spelling/warning tests); 9 duplicate-guard tests re-pointed from the rejection
+  policy to the merge policy, none deleted
+- **Decision logged:** yes â€” two entries in `docs/working/decisions.md`
+  ("A vial-day is the write unit, not a spreadsheet row"; "A truthy NaN is a
+  data-integrity bug, not a formatting one")
+
+Verification: 381 pass in `tests/services/bulk_uploads/`, 221 across the four suites
+the spec names, 1483 pass / 4 skipped / 3 failed on the full suite â€” the 3 being the
+pre-existing `test_pg_backup_restore.py` failures from an empty `experiments_test`
+schema, unrelated to a branch touching three files. flake8: zero F-codes on all
+changed files (E501 is repo-wide convention â€” no flake8 config exists and `develop`'s
+copy of the same file already had 41). Real-workbook dry run matches the spec's
+acceptance criterion exactly: "Merged 72 rows into 36 vial-days", four conflicts on
+rows 2/185, 14/57, 222/272, 264/268, dev DB unchanged.
+
+Deferred deliberately: the `_t1` vs `-t1` grammar gap (own entry above, needs its own
+`/start-task` â€” the fix direction is genuinely ambiguous between widening the parser,
+narrowing `normalize_id`, and rejecting the row, and `split_timepoint_token` has ten
+call sites including a second locked parser and a SQL pattern a test pins against
+divergence). Production backfill for the `'nan'` rows is written and dry-run tested but
+**not applied to production** â€” runbook above.

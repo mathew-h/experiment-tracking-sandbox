@@ -2,18 +2,26 @@
 Master Results bulk upload — parses an uploaded Dashboard workbook.
 
 Dashboard sheet column spec (v3, issue #111, 2026-07-30):
-  Experiment ID | Description | Sample Date | Duration (Days) | NH4 (mM) |
+  Experiment ID | Description | Sample Collection Date | Duration (Days) |
+  NH4 (mM) |
   FL H2 (ppm)   | FL Gas Volume (mL) | FL Gas Pressure (psi) | Sample pH |
   Sample Conductivity (mS/cm) | Modification | NMR Run Date |
   Sampled Solution Volume (mL) | ICP Run Date | GC Run Date | XRD Run Date |
   OVERWRITE | DI H2 (ppm) | DI gas volume (mL) | DI gas pressure (psi)
 
-One row per unique experiment ID. Replicate letters are separate vials, so
-SERUM_001a/b/c at days 1 and 3 is six rows (SERUM_001a-t1, SERUM_001b-t1, ...),
-not two rows with per-letter columns. Two rows sharing an ID and timepoint are
-both rejected, matched on _id_match.normalize_id so spellings differing only
-by case or zero padding count as the same ID. Cross-replicate mean and SD are
-computed by v_results_scalar_rollup, not carried on the sheet.
+Several rows may describe one vial-day. Gas is drawn and run on one date and the
+liquid/solid fraction is collected later, so each fraction gets its own row;
+Phase 1.5 collapses rows sharing a (normalize_id, timepoint) key into one merged
+cell view. Only a field two rows fill with DIFFERENT values is a conflict, and
+that vial-day is then rejected whole. Grouping matches the exact timepoint --
+identical Durations are the researcher's request to merge; rows a day apart stay
+separate vial-days. Replicate letters remain separate vials with their own IDs.
+Cross-replicate mean and SD are computed by v_results_scalar_rollup, not carried
+on the sheet.
+
+The sample collection date column is 'Sample Collection Date'; 'Sample Date',
+'Liquid/Solid Sample Date' and 'HPHT + Liquid/Solid Date Sampled' are accepted
+aliases. See _COLLECTION_DATE and _HEADER_ALIASES.
 
 Hydrogen: Full Loop wins; 'DI H2 (ppm)' is used only when the Full Loop cell is
 blank, and gas volume/pressure come from the same block. A value of 0 is a real
@@ -47,6 +55,23 @@ from database.experiment_id_parser import split_timepoint_token
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
 
+# The sample collection date column. Renamed three times on 2026-08-11
+# ('Sample Date' -> 'Liquid/Solid Sample Date' -> 'HPHT + Liquid/Solid Date
+# Sampled' -> this), and each rename silently dropped every date on the sheet
+# because the read below used a literal. The name is a constant and every
+# spelling is aliased, so a fourth rename is a one-line change here; the
+# "no recognized collection date column" warning further down makes it visible
+# rather than silent.
+_COLLECTION_DATE = "Sample Collection Date"
+
+# Every spelling the parser answers to, for the warning's message.
+_COLLECTION_DATE_SPELLINGS = (
+    "Sample Collection Date",
+    "Sample Date",
+    "Liquid/Solid Sample Date",
+    "HPHT + Liquid/Solid Date Sampled",
+)
+
 # Canonical Dashboard headers, keyed by the lowercased sheet header.
 #
 # Issue #111: the sheet was restructured twice. The single 'H2 (ppm)' block was
@@ -70,6 +95,12 @@ _HEADER_ALIASES: Dict[str, str] = {
     "di gas pressure (psi)": "DI gas pressure (psi)",
     # Casing-only normalisations (previously done inline)
     "overwrite": "Overwrite",
+    # Sample collection date — canonical spelling included so a casing variant
+    # ('Sample collection date') still normalises, same as 'overwrite' above.
+    "sample collection date": _COLLECTION_DATE,
+    "sample date": _COLLECTION_DATE,
+    "liquid/solid sample date": _COLLECTION_DATE,
+    "hpht + liquid/solid date sampled": _COLLECTION_DATE,
     "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
     "replicate": "Replicate",
 }
@@ -93,6 +124,63 @@ _WIDE_DI_COLUMNS = {
     "DI c H2 (ppm)",
     "DI SD (ppm)",
 }
+
+# ---------------------------------------------------------------------------
+# Merge field classes (spec §3.2)
+#
+# Several Dashboard rows can describe one vial-day: gas is drawn and run on one
+# date, the liquid/solid fraction is collected later, and each gets its own row.
+# Merging them needs every column assigned to exactly one class, so adding a
+# Dashboard column forces a choice instead of defaulting into one. Classified on
+# the RAW CELL, before _resolve_h2, so Full-Loop precedence and the #114
+# geometry rule run once over the merged view and cannot drift.
+# ---------------------------------------------------------------------------
+
+# Two rows holding different values here cannot both be right -> conflict.
+_MEASUREMENT_COLUMNS = (
+    "NH4 (mM)",
+    "FL H2 (ppm)", "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
+    "DI H2 (ppm)", "DI gas volume (mL)", "DI gas pressure (psi)",
+    "Sample pH", "Sample Conductivity (mS/cm)",
+    "Sampled Solution Volume (mL)",
+)
+
+# Columns where the Excel template writes 0 for a blank cell, so 0 must be read
+# as absent -- the same rule _parse_measurement_float applies on a single row.
+# Using the wrong helper here would make a template-blank 0 look like a
+# disagreement with the liquid row's real reading.
+#
+# The gas geometry columns are here on measured evidence, not by analogy: on the
+# first run of the real workbook (Master_Results_Tracker_v3.xlsx, 2026-08-11)
+# 35 of 39 reported conflicts were 'DI gas volume (mL): 30 vs 0' and 'DI gas
+# pressure (psi): 14.7 vs 0' between a gas row and its liquid partner, which
+# rejected 35 legitimate vial-days. A 0 mL injection or 0 psi sample never
+# happened; it is the template's empty cell.
+#
+# The H2 CONCENTRATION columns are deliberately absent: 0 ppm is a real reading
+# (module docstring, issue #111) -- a GC that measured no hydrogen produced a
+# result, whereas a 0 mL injection did not. Two non-zero volumes still conflict
+# normally (rows 222/272, 30 mL vs 1 mL).
+_ZERO_BLANK_COLUMNS = frozenset({
+    "Sample pH", "Sample Conductivity (mS/cm)",
+    "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
+    "DI gas volume (mL)", "DI gas pressure (psi)",
+})
+
+# A row carrying any of these analysed the liquid/solid fraction, so its
+# collection date is the authoritative one for the merged vial-day.
+_LIQUID_SOLID_COLUMNS = (
+    "NH4 (mM)", "Sample pH", "Sample Conductivity (mS/cm)",
+    "Sampled Solution Volume (mL)",
+)
+
+# Provenance: first non-null in sheet order wins, a clash is a warning. These
+# are instrument run dates, duplicated identically across both rows of every
+# pair in the team's workbook.
+_RUN_DATE_COLUMNS = ("NMR Run Date", "ICP Run Date", "GC Run Date", "XRD Run Date")
+
+# Free text: distinct values joined, nothing discarded, so no warning needed.
+_JOINED_TEXT_COLUMNS = ("Description", "Modification")
 
 
 @dataclass(frozen=True)
@@ -398,6 +486,193 @@ def _resolve_row_identity(
     return exp_id, time_post_reaction, None, False, check
 
 
+@dataclass
+class MergeNotes:
+    """Non-fatal observations about one merged group, for file-level warnings.
+
+    Kept separate from `conflicts` because these never stop a write: they are
+    things the researcher should know about a row that DID land.
+    """
+
+    run_date_disagreements: List[str] = field(default_factory=list)
+    overwrite_mixed: bool = False
+    spellings: List[str] = field(default_factory=list)
+    fallback_date_disagreement: bool = False
+
+
+@dataclass
+class MergedGroup:
+    """One vial-day's cells after collapsing N sheet rows.
+
+    `cells` is a plain dict, not a pandas Series: a dict cannot carry duplicate
+    labels, so the Series-instead-of-scalar hazard `_normalize_headers` exists to
+    prevent cannot be reintroduced downstream. Phase 2 reads it with .get(),
+    exactly as it reads a single sheet row.
+    """
+
+    cells: Dict[str, Any]
+    overwrite: bool
+
+
+def _cell_parser(column: str):
+    """The parse helper that owns `column`'s blank/value distinction."""
+    if column in _ZERO_BLANK_COLUMNS:
+        return _parse_measurement_float
+    return _parse_float
+
+
+def _parse_text(val: Any) -> Optional[str]:
+    """Trimmed cell text, or None when the cell is blank.
+
+    NaN needs its own check before any truthiness test: pandas reads an empty
+    Excel cell as float('nan'), which is TRUTHY, so the `str(val or "")` idiom
+    renders it as the literal string 'nan'. On a single row that only replaces a
+    blank description; in a merge it would be JOINED onto the partner row's real
+    text ('nan; Highest H2 liquid, solids'), corrupting a good value.
+    """
+    if val is None:
+        return None
+    if isinstance(val, float) and pd.isna(val):
+        return None
+    text = str(val).strip()
+    return text or None
+
+
+def _format_value(value: Any) -> str:
+    """Render a parsed measurement for an error message."""
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _merge_group(
+    members: List[Tuple[int, str, Any]],
+) -> Tuple[Optional[MergedGroup], List[str], MergeNotes]:
+    """Collapse N Dashboard rows for one vial-day into one merged cell view.
+
+    `members` is [(row_num, experiment_id, row_mapping)] in sheet order; the
+    mapping is anything supporting .get() (a pandas row or a dict).
+
+    Returns (merged, conflicts, notes). `merged` is None exactly when
+    `conflicts` is non-empty -- a vial-day whose rows disagree writes nothing
+    (spec D-a), because a partial merge would leave a stored row whose state
+    depends on which fields happened to clash.
+
+    Each conflict string is ONE field clause; the caller composes the sentence
+    around it so the row list and experiment ID are formatted in one place.
+
+    Pure: no database, no session, no I/O.
+    """
+    notes = MergeNotes()
+    conflicts: List[str] = []
+    cells: Dict[str, Any] = {}
+
+    # dict.fromkeys keeps sheet order while dropping repeats. One entry means
+    # every row spelled the ID the same way and there is nothing to report.
+    notes.spellings = list(dict.fromkeys(exp_id for _, exp_id, _ in members))
+
+    # --- Measurement class: one value, or a conflict ---------------------
+    for column in _MEASUREMENT_COLUMNS:
+        parse = _cell_parser(column)
+        seen: List[Tuple[int, Any]] = []
+        for row_num, _exp_id, row in members:
+            value = parse(row.get(column))
+            if value is not None:
+                seen.append((row_num, value))
+        if not seen:
+            continue
+        distinct = {value for _, value in seen}
+        if len(distinct) > 1:
+            conflicts.append(
+                f"{column}: "
+                + " vs ".join(
+                    f"{_format_value(value)} (row {row_num})"
+                    for row_num, value in seen
+                )
+            )
+            continue
+        # Store the RAW cell, not the parsed value: Phase 2 re-parses with the
+        # same helpers, and handing it a parsed float would double-convert.
+        for row_num, _exp_id, row in members:
+            if parse(row.get(column)) is not None:
+                cells[column] = row.get(column)
+                break
+
+    # --- Collection date: prefer a liquid/solid-bearing row --------------
+    # The column carries the vessel's own sampling date on a gas-only row (185
+    # such rows in the team's workbook, 143 of them standalone), so a gas date
+    # is outranked, never discarded.
+    def _has_liquid(row: Any) -> bool:
+        return any(
+            _cell_parser(column)(row.get(column)) is not None
+            for column in _LIQUID_SOLID_COLUMNS
+        )
+
+    preferred = [
+        (row_num, row.get(_COLLECTION_DATE))
+        for row_num, _exp_id, row in members
+        if _parse_date(row.get(_COLLECTION_DATE)) is not None and _has_liquid(row)
+    ]
+    fallback = [
+        (row_num, row.get(_COLLECTION_DATE))
+        for row_num, _exp_id, row in members
+        if _parse_date(row.get(_COLLECTION_DATE)) is not None
+    ]
+    candidates = preferred or fallback
+    if candidates:
+        distinct_dates = {_parse_date(raw) for _, raw in candidates}
+        if len(distinct_dates) > 1:
+            if preferred:
+                # Two rows both analysed liquid and dated it differently. That
+                # is a measurement disagreement, not provenance.
+                conflicts.append(
+                    f"{_COLLECTION_DATE}: "
+                    + " vs ".join(
+                        f"{_parse_date(raw).date().isoformat()} (row {row_num})"
+                        for row_num, raw in candidates
+                    )
+                )
+            else:
+                notes.fallback_date_disagreement = True
+        cells[_COLLECTION_DATE] = candidates[0][1]
+
+    # --- Provenance: first non-null wins, clash is a note ----------------
+    for column in _RUN_DATE_COLUMNS:
+        dated = [
+            (row_num, row.get(column))
+            for row_num, _exp_id, row in members
+            if _parse_date(row.get(column)) is not None
+        ]
+        if not dated:
+            continue
+        if len({_parse_date(raw) for _, raw in dated}) > 1:
+            notes.run_date_disagreements.append(column)
+        cells[column] = dated[0][1]
+
+    # --- Free text: join distinct values in sheet order ------------------
+    for column in _JOINED_TEXT_COLUMNS:
+        texts: List[str] = []
+        for _row_num, _exp_id, row in members:
+            text = _parse_text(row.get(column))
+            if text is not None:
+                texts.append(text)
+        if texts:
+            cells[column] = "; ".join(dict.fromkeys(texts))
+
+    # --- Directive: OVERWRITE needs unanimity ----------------------------
+    # Clearing is destructive and a merged vial-day is ONE write, so a single
+    # TRUE must not extend clearing to fields another row's author owns. The
+    # ignored directive is reported rather than silently dropped.
+    flags = [_parse_bool(row.get("Overwrite")) for _r, _e, row in members]
+    overwrite = all(flags)
+    if any(flags) and not overwrite:
+        notes.overwrite_mixed = True
+
+    if conflicts:
+        return None, conflicts, notes
+    return MergedGroup(cells=cells, overwrite=overwrite), conflicts, notes
+
+
 def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     """
     Parse the Master Results Excel and upsert scalar results.
@@ -493,6 +768,20 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "('FL H2 (ppm)' or 'DI H2 (ppm)') — no hydrogen data was ingested."
         )
 
+    # A renamed date column fails silently in both directions: on the normal
+    # path the None-stripping comprehension drops measurement_date, and on an
+    # OVERWRITE row it is CLEARED, because measurement_date is one of the
+    # declared _sheet_fields. Three renames on 2026-08-11 each dropped every
+    # date on the sheet with no message at all. Gated on the column being
+    # absent entirely, so it never fires on a normal upload.
+    if _COLLECTION_DATE not in df.columns:
+        warnings.append(
+            f"Sheet '{sheet_name}' has no recognized sample collection date "
+            "column, so no measurement date was ingested. Accepted names: "
+            + ", ".join(f"'{name}'" for name in _COLLECTION_DATE_SPELLINGS)
+            + ". Everything else on the sheet was uploaded normally."
+        )
+
     # Phase 1 — resolve every row's identity, then find collisions. v3 is one
     # row per unique experiment ID (issue #111): two rows claiming the same
     # vial at the same day are two readings fighting over one timepoint, and
@@ -534,39 +823,85 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # normalization only rounds to 4 decimals, so two values on opposite sides
     # of a rounding boundary (e.g. 7.00004 and 7.00006) still key differently
     # even though they fall within the ±1e-4 tolerance of each other.
-    dup_groups: Dict[Tuple[str, float], List[Tuple[int, str]]] = {}
-    for row_num, exp_id, time_post_reaction, _row, _check in resolved:
+    dup_groups: Dict[Tuple[str, float], List[Tuple[int, str, Any, TimepointCheck]]] = {}
+    group_times: Dict[Tuple[str, float], float] = {}
+    for row_num, exp_id, time_post_reaction, row, check in resolved:
         key = (normalize_id(exp_id), normalize_timepoint(time_post_reaction))
-        dup_groups.setdefault(key, []).append((row_num, exp_id))
+        dup_groups.setdefault(key, []).append((row_num, exp_id, row, check))
+        # The timepoint travels with the group rather than widening the member
+        # tuple. Every member of a group shares the same NORMALIZED timepoint by
+        # construction, so which member's raw value is kept is immaterial.
+        group_times[key] = time_post_reaction
 
-    # One error per collision, not per row. Each names every row in the group,
-    # so a researcher reading this list against the sheet is told where the
-    # partner reading is instead of having to search for it — the same reason
-    # an ambiguous ID names both candidates. Anchored at the group's first row
-    # so the sort at the end of this function keeps the list in sheet order.
-    duplicate_rows: set[int] = set()
-    for (_norm_id, day), members in dup_groups.items():
-        if len(members) < 2:
+    # Phase 1.5 -- collapse each vial-day's rows into one merged cell view.
+    #
+    # Gas is drawn and run on one date; the liquid/solid fraction is collected
+    # later and gets its own row. Both name the same vial and the same day, so
+    # before this they were rejected as duplicates and NOTHING was written --
+    # 80 of 268 real rows in the team's workbook, 2026-08-11. They are
+    # complementary, not competing: only a field two rows both fill with
+    # DIFFERENT values is a real conflict, and that vial-day is then rejected
+    # whole (spec D-a) rather than partially merged.
+    #
+    # Grouping matches the EXACT timepoint -- no tolerance window (spec D-g).
+    # Setting two rows to the same Duration is the researcher's deliberate
+    # request to merge them; adjacent days stay separate vial-days.
+    merged_entries: List[
+        Tuple[int, List[int], str, float, Any, TimepointCheck, bool]
+    ] = []
+    group_notes: List[Tuple[int, List[int], MergeNotes]] = []
+    merged_row_count = 0
+    merged_group_count = 0
+
+    for key, members in dup_groups.items():
+        anchor_row, anchor_id = members[0][0], members[0][1]
+        rows = [row_num for row_num, _e, _r, _c in members]
+
+        if len(members) == 1:
+            row_num, exp_id, row, check = members[0]
+            merged_entries.append((
+                row_num, [row_num], exp_id, group_times[key], row,
+                check, _parse_bool(row.get("Overwrite")),
+            ))
             continue
-        duplicate_rows.update(row_num for row_num, _ in members)
-        rows_text = ", ".join(str(row_num) for row_num, _ in members)
-        # dict.fromkeys keeps sheet order while dropping repeats.
-        spellings = list(dict.fromkeys(exp_id for _, exp_id in members))
-        # Differing spellings collided on the normalized key, which is not
-        # visible from the cells themselves — say so, or the researcher
-        # searches the sheet for a string only one of the rows contains.
-        variant_clause = (
-            " These spellings differ but resolve to one experiment, so one "
-            "reading would have silently overwritten the other."
-            if len(spellings) > 1 else ""
+
+        merged, conflicts, notes = _merge_group(
+            [(row_num, exp_id, row) for row_num, exp_id, row, _c in members]
         )
-        row_errors.append((members[0][0], (
-            f"Rows {rows_text} ({', '.join(spellings)}): duplicate experiment "
-            f"ID and timepoint (day {day:g}).{variant_clause} Each vial gets "
-            f"one row per timepoint — give each vial its own ID (e.g. "
-            f"SERUM_001a-t7, SERUM_001b-t7). No row for this vial-day was "
-            f"written."
-        )))
+
+        if conflicts:
+            rows_text = ", ".join(str(row_num) for row_num in rows)
+            spellings = ", ".join(notes.spellings)
+            day = group_times[key]
+            row_errors.append((anchor_row, (
+                f"Rows {rows_text} ({spellings}): conflicting values for the "
+                f"same vial-day (day {day:g}) — {'; '.join(conflicts)}. Rows "
+                f"for one vial-day are merged, but a field cannot hold two "
+                f"values. Nothing was written for this vial-day."
+            )))
+            continue
+
+        # Recorded only for a group that actually merged. Every note renders as
+        # a warning worded for a vial-day that LANDED ("merged without clearing
+        # anything", "the first value in sheet order was stored", "no row was
+        # rejected"), so emitting them for a conflicted group would state the
+        # opposite of what happened. Nothing is lost: the conflict error above
+        # already names every row and every spelling.
+        group_notes.append((anchor_row, rows, notes))
+
+        # A merged group's timepoint check is the union of its rows': any row
+        # that could be compared makes the group comparable, and any
+        # disagreement is worth reporting.
+        check = TimepointCheck(
+            compared=any(c.compared for _r, _e, _row, c in members),
+            disagrees=any(c.disagrees for _r, _e, _row, c in members),
+        )
+        merged_entries.append((
+            anchor_row, rows, anchor_id, group_times[key],
+            merged.cells, check, merged.overwrite,
+        ))
+        merged_row_count += len(rows)
+        merged_group_count += 1
 
     # Phase 2 — upsert what is left.
     # Rows where Full Loop overrode a populated direct-injection cell. Reported
@@ -579,20 +914,29 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     h2_reading_rows = 0
     # Denominators for the Duration-vs-ID disagreement warning further below.
     # Counted here, after the write succeeds — not in Phase 1 where the check
-    # was computed — for the same reason h2_reading_rows is: a row that
-    # disagrees and is then rejected (a duplicate, or no matching experiment)
-    # was never written, so it cannot be described as "recorded at the day
-    # its ID encodes". Only a row that made it past both the duplicate guard
+    # was computed — for the same reason h2_reading_rows is: a vial-day that
+    # disagrees and is then rejected (conflicting rows, or no matching
+    # experiment) was never written, so it cannot be described as "recorded at
+    # the day its ID encodes". Only a vial-day that made it past both Phase 1.5
     # and the upsert can honestly be counted or named.
+    #
+    # Phase 2 now iterates MERGED vial-days, so every tally in this loop counts
+    # vial-days, not sheet rows — the two coverage warnings below say so. A
+    # conflicted group never reaches this loop and so enters neither numerator
+    # nor denominator. The row numbers named in these warnings are each group's
+    # ANCHOR row; the merge-summary warning is what tells the researcher a
+    # vial-day spanned more than one row.
     comparable_rows = 0
     disagreement_rows: List[int] = []
-    for row_num, exp_id, time_post_reaction, row, check in resolved:
-        # The error was already emitted once for the whole group above.
-        if row_num in duplicate_rows:
-            continue
-
-        description = str(row.get("Description") or "").strip() or None
-        sample_date = _parse_date(row.get("Sample Date"))
+    for row_num, rows, exp_id, time_post_reaction, row, check, overwrite in merged_entries:
+        # _parse_text, not `str(cell or "")`: pandas reads a blank cell as
+        # float('nan'), which is TRUTHY, so the latter stored the literal text
+        # 'nan'. That made the generated description below unreachable and --
+        # via ExperimentalResults.sync_brine_flag -- marked every row with a
+        # blank Modification as brine-modified (12 of 140 flagged rows in the
+        # dev DB). A merged group's cells are already _parse_text'd.
+        description = _parse_text(row.get("Description"))
+        sample_date = _parse_date(row.get(_COLLECTION_DATE))
         nmr_run_date = _parse_date(row.get("NMR Run Date"))
         icp_run_date = _parse_date(row.get("ICP Run Date"))
         gc_run_date = _parse_date(row.get("GC Run Date"))
@@ -604,8 +948,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
         sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
-        modification = str(row.get("Modification") or "").strip() or None
-        overwrite = _parse_bool(row.get("Overwrite"))
+        modification = _parse_text(row.get("Modification"))
 
         result_data: Dict[str, Any] = {
             "time_post_reaction": time_post_reaction,
@@ -675,6 +1018,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                     disagreement_rows.append(row_num)
             feedbacks.append({
                 "row": row_num,
+                "rows": rows,
                 "experiment_id": exp_id,
                 "action": action,
                 "h2_source": h2_source,
@@ -687,6 +1031,88 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         except Exception as exc:
             savepoint.rollback()
             row_errors.append((row_num, f"Row {row_num} ({exp_id}): unexpected error — {exc}"))
+
+    # created + updated no longer equals the sheet row count once rows merge,
+    # so say so plainly rather than leaving the numbers unexplained. Silent
+    # when nothing merged: a warning that fires on ordinary sheets is one
+    # researchers learn to ignore.
+    if merged_group_count:
+        day_label = "vial-day" if merged_group_count == 1 else "vial-days"
+        warnings.append(
+            f"Merged {merged_row_count} rows into {merged_group_count} "
+            f"{day_label}. Gas and liquid/solid readings for one vial are often "
+            "recorded on separate rows because they were collected on different "
+            "dates; those rows are combined field by field."
+        )
+
+    # MergeNotes are things a researcher should know about a vial-day that DID
+    # land, so they are warnings, never errors. One file-level line per kind,
+    # with the row list only at <=10 groups -- the threshold the supersede,
+    # GC-date and Duration warnings below already share.
+    def _rows_clause(anchors: List[str]) -> str:
+        return " (" + ", ".join(anchors) + ")" if len(anchors) <= 10 else ""
+
+    mixed_overwrite = [
+        rows for _anchor, rows, notes in group_notes if notes.overwrite_mixed
+    ]
+    if mixed_overwrite:
+        shown = [" and ".join(str(r) for r in rows) for rows in mixed_overwrite]
+        warnings.append(
+            f"'OVERWRITE' was set on some but not all rows of "
+            f"{len(mixed_overwrite)} merged vial-day(s)"
+            + _rows_clause(shown)
+            + ". Overwrite clears the sheet's own columns that are left blank, "
+              "so it was NOT applied: those vial-days were merged without "
+              "clearing anything. Tick the box on every row of the vial-day, or "
+              "on none."
+        )
+
+    date_clashes = [
+        rows for _anchor, rows, notes in group_notes
+        if notes.fallback_date_disagreement
+    ]
+    if date_clashes:
+        shown = [" and ".join(str(r) for r in rows) for rows in date_clashes]
+        warnings.append(
+            f"{len(date_clashes)} merged vial-day(s) disagree on "
+            f"'{_COLLECTION_DATE}'" + _rows_clause(shown)
+            + ", and no row carries a liquid/solid measurement to settle which "
+              "date is authoritative. The first date in sheet order was stored."
+        )
+
+    run_date_clashes: Dict[str, List[str]] = {}
+    for _anchor, rows, notes in group_notes:
+        for column in notes.run_date_disagreements:
+            run_date_clashes.setdefault(column, []).append(
+                " and ".join(str(r) for r in rows)
+            )
+    for column in _RUN_DATE_COLUMNS:      # stable order, not dict insertion
+        clashing = run_date_clashes.get(column)
+        if not clashing:
+            continue
+        warnings.append(
+            f"'{column}' differs between the rows of {len(clashing)} merged "
+            f"vial-day(s)" + _rows_clause(clashing)
+            + ". It is provenance, not a measurement, so the first value in "
+              "sheet order was stored and no row was rejected."
+        )
+
+    variant_spellings = [
+        (rows, notes.spellings)
+        for _anchor, rows, notes in group_notes if len(notes.spellings) > 1
+    ]
+    if variant_spellings:
+        shown = [
+            " and ".join(str(r) for r in rows) + ": " + ", ".join(spellings)
+            for rows, spellings in variant_spellings
+        ]
+        warnings.append(
+            f"{len(variant_spellings)} merged vial-day(s) spell their "
+            f"experiment ID more than one way" + _rows_clause(shown)
+            + ". The spellings resolve to one stored experiment, so the rows "
+              "were merged normally — but the difference is a typo worth fixing "
+              "in the sheet."
+        )
 
     # The per-row h2_di_superseded flag above reaches the client in `feedbacks`
     # and nothing renders it, so a researcher could not learn from the app why a
@@ -737,7 +1163,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             where = " (" + ", ".join(str(r) for r in missing_gc_date_rows) + ")"
         else:
             where = ""
-        label = "row" if total == 1 else "rows"
+        label = "vial-day" if total == 1 else "vial-days"
         stored_clause = (
             "The reading was stored, but this upload supplied no run date for it."
             if n == 1
@@ -765,7 +1191,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # warnings above.
     if disagreement_rows:
         n = len(disagreement_rows)
-        label = "row" if comparable_rows == 1 else "rows"
+        label = "vial-day" if comparable_rows == 1 else "vial-days"
         where = (
             " (" + ", ".join(str(r) for r in disagreement_rows) + ")"
             if n <= 10 else ""
