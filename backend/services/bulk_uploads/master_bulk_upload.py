@@ -47,6 +47,23 @@ from database.experiment_id_parser import split_timepoint_token
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
 
+# The sample collection date column. Renamed three times on 2026-08-11
+# ('Sample Date' -> 'Liquid/Solid Sample Date' -> 'HPHT + Liquid/Solid Date
+# Sampled' -> this), and each rename silently dropped every date on the sheet
+# because the read below used a literal. The name is a constant and every
+# spelling is aliased, so a fourth rename is a one-line change here; the
+# "no recognized collection date column" warning further down makes it visible
+# rather than silent.
+_COLLECTION_DATE = "Sample Collection Date"
+
+# Every spelling the parser answers to, for the warning's message.
+_COLLECTION_DATE_SPELLINGS = (
+    "Sample Collection Date",
+    "Sample Date",
+    "Liquid/Solid Sample Date",
+    "HPHT + Liquid/Solid Date Sampled",
+)
+
 # Canonical Dashboard headers, keyed by the lowercased sheet header.
 #
 # Issue #111: the sheet was restructured twice. The single 'H2 (ppm)' block was
@@ -70,6 +87,12 @@ _HEADER_ALIASES: Dict[str, str] = {
     "di gas pressure (psi)": "DI gas pressure (psi)",
     # Casing-only normalisations (previously done inline)
     "overwrite": "Overwrite",
+    # Sample collection date — canonical spelling included so a casing variant
+    # ('Sample collection date') still normalises, same as 'overwrite' above.
+    "sample collection date": _COLLECTION_DATE,
+    "sample date": _COLLECTION_DATE,
+    "liquid/solid sample date": _COLLECTION_DATE,
+    "hpht + liquid/solid date sampled": _COLLECTION_DATE,
     "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
     "replicate": "Replicate",
 }
@@ -493,6 +516,20 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             "('FL H2 (ppm)' or 'DI H2 (ppm)') — no hydrogen data was ingested."
         )
 
+    # A renamed date column fails silently in both directions: on the normal
+    # path the None-stripping comprehension drops measurement_date, and on an
+    # OVERWRITE row it is CLEARED, because measurement_date is one of the
+    # declared _sheet_fields. Three renames on 2026-08-11 each dropped every
+    # date on the sheet with no message at all. Gated on the column being
+    # absent entirely, so it never fires on a normal upload.
+    if _COLLECTION_DATE not in df.columns:
+        warnings.append(
+            f"Sheet '{sheet_name}' has no recognized sample collection date "
+            "column, so no measurement date was ingested. Accepted names: "
+            + ", ".join(f"'{name}'" for name in _COLLECTION_DATE_SPELLINGS)
+            + ". Everything else on the sheet was uploaded normally."
+        )
+
     # Phase 1 — resolve every row's identity, then find collisions. v3 is one
     # row per unique experiment ID (issue #111): two rows claiming the same
     # vial at the same day are two readings fighting over one timepoint, and
@@ -592,7 +629,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             continue
 
         description = str(row.get("Description") or "").strip() or None
-        sample_date = _parse_date(row.get("Sample Date"))
+        sample_date = _parse_date(row.get(_COLLECTION_DATE))
         nmr_run_date = _parse_date(row.get("NMR Run Date"))
         icp_run_date = _parse_date(row.get("ICP Run Date"))
         gc_run_date = _parse_date(row.get("GC Run Date"))

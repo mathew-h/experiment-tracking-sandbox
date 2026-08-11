@@ -1,10 +1,12 @@
 """Tests for MasterBulkUploadService."""
 from __future__ import annotations
 
+import datetime as _dt
+
 import pytest
 from sqlalchemy.orm import Session
 
-from database import Experiment, ExperimentalResults
+from database import Experiment, ExperimentalResults, ScalarResults
 from database.models.enums import ExperimentStatus
 from backend.services.bulk_uploads.master_bulk_upload import MasterBulkUploadService
 
@@ -748,7 +750,8 @@ def test_master_token_id_with_blank_replicate_uploads_fine(db_session: Session):
 # wide 'DI a/b/c' block collapsed to a single 'DI H2 (ppm)' because a/b/c were
 # replicate vials, and each vial now gets its own row.
 _V3_HEADERS = [
-    "Experiment ID", "Description", "Sample Date", "Duration (Days)", "NH4 (mM)",
+    "Experiment ID", "Description", "Sample Collection Date", "Duration (Days)",
+    "NH4 (mM)",
     "FL H2 (ppm)", "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
     "Sample pH", "Sample Conductivity (mS/cm)", "Modification", "NMR Run Date",
     "Sampled Solution Volume (mL)", "ICP Run Date", "GC Run Date", "XRD Run Date",
@@ -767,25 +770,46 @@ def _v3_row(
     fl_vol: float | None = None,
     fl_psi: float | None = None,
     ph: float | None = 7.0,
+    cond: float | None = None,
+    solvol: float | None = None,
     overwrite=None,
     di_h2: float | None = None,
     di_vol: float | None = None,
     di_psi: float | None = None,
+    collection_date: str | None = None,
+    nmr_date: str | None = None,
+    icp_date: str | None = None,
     gc_date: str | None = None,
+    xrd_date: str | None = None,
+    modification: str | None = None,
 ) -> list:
-    """Build one Dashboard row in _V3_HEADERS order."""
+    """Build one Dashboard row in _V3_HEADERS order.
+
+    `ph` defaults to 7.0 because most existing tests rely on it. A row meant to
+    stand for a gas-only sampling MUST pass ph=None, or the merge will treat it
+    as carrying a liquid measurement.
+    """
     return [
-        experiment_id, description, None, duration, nh4,
+        experiment_id, description, collection_date, duration, nh4,
         fl_h2, fl_vol, fl_psi,
-        ph, None, None, None,
-        None, None, gc_date, None,
+        ph, cond, modification, nmr_date,
+        solvol, icp_date, gc_date, xrd_date,
         overwrite,
         di_h2, di_vol, di_psi,
     ]
 
 
-def _master_excel_v3(rows: list[list]) -> bytes:
-    return make_excel_multisheet({"Dashboard": (_V3_HEADERS, rows)})
+def _master_excel_v3(
+    rows: list[list], date_header: str = "Sample Collection Date",
+) -> bytes:
+    """Build a v3 Dashboard sheet.
+
+    `date_header` lets a test exercise a superseded spelling of the collection
+    date column without duplicating the whole header list.
+    """
+    headers = list(_V3_HEADERS)
+    headers[headers.index("Sample Collection Date")] = date_header
+    return make_excel_multisheet({"Dashboard": (headers, rows)})
 
 
 def test_v3_fl_h2_columns_are_ingested(db_session: Session):
@@ -2053,4 +2077,127 @@ def test_rejected_rows_are_not_counted_in_the_disagreement_warning(db_session: S
     )
     assert "5)" not in disagreements[0], (
         f"the failed-upsert row must not be named: {disagreements[0]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sample Collection Date (P0 — the 2026-08-11 renames broke ingestion)
+# ---------------------------------------------------------------------------
+
+def _scalar_for(db: Session, experiment_id: str) -> ScalarResults:
+    """The single ScalarResults row belonging to `experiment_id`."""
+    return (
+        db.query(ScalarResults)
+        .join(ExperimentalResults,
+              ExperimentalResults.id == ScalarResults.result_id)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == experiment_id)
+        .one()
+    )
+
+
+@pytest.mark.parametrize("date_header", [
+    "Sample Collection Date",            # canonical
+    "Sample collection date",            # casing variant
+    "HPHT + Liquid/Solid Date Sampled",  # 2026-08-11, superseded
+    "Liquid/Solid Sample Date",          # 2026-08-11, superseded
+    "Sample Date",                       # archived workbooks
+])
+def test_collection_date_spellings_populate_measurement_date(
+    db_session: Session, date_header: str,
+):
+    """Every accepted spelling of the collection-date column is ingested.
+
+    The column was renamed three times on 2026-08-11 while the parser still read
+    a literal "Sample Date", so measurement_date was silently dropped on all 275
+    dated rows of the team's workbook. Each spelling gets a case so a future
+    rename cannot quietly un-fix this.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE01", 8901)
+
+    xlsx = _master_excel_v3(
+        [_v3_row("HPHT_CDATE01", 7.0, collection_date="2026-08-05", nh4=1.0)],
+        date_header=date_header,
+    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_CDATE01")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        f"'{date_header}' was not ingested as measurement_date"
+    )
+
+
+def test_no_recognized_collection_date_column_warns(db_session: Session):
+    """A sheet with no date column says so instead of silently ingesting none.
+
+    This is the durable guard against a fourth rename. Everything else on the
+    sheet must still upload — a missing date column is a warning, not an error.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE02", 8902)
+
+    xlsx = _master_excel_v3(
+        [_v3_row("HPHT_CDATE02", 7.0, nh4=1.0)],
+        date_header="Totally Renamed Date",
+    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a missing date column is not an error: {result.errors}"
+    assert result.created == 1, "the rest of the row must still upload"
+    assert any("collection date" in w.lower() for w in result.warnings), (
+        f"expected a missing-date-column warning, got: {result.warnings}"
+    )
+
+
+def test_two_date_spellings_do_not_collide(db_session: Session):
+    """A hand-merged workbook with two date spellings keeps one usable column.
+
+    _normalize_headers rule 1: an aliased column never takes a canonical name a
+    literal column already holds. Without that, both columns would be renamed to
+    the same label, row.get() would return a Series, and _parse_date's
+    `except Exception` would swallow the value — the exact silent loss issue #111
+    exists to prevent.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE03", 8903)
+
+    headers = list(_V3_HEADERS) + ["Sample Date"]
+    rows = [_v3_row("HPHT_CDATE03", 7.0, collection_date="2026-08-05", nh4=1.0)
+            + ["2026-01-01"]]
+    xlsx = make_excel_multisheet({"Dashboard": (headers, rows)})
+
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_CDATE03")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        "the canonical column must win over the aliased legacy one"
+    )
+
+
+def test_overwrite_row_does_not_clear_the_date_it_supplied(db_session: Session):
+    """An OVERWRITE row that carries a date stores it rather than nulling it.
+
+    measurement_date is a key in the result_data literal, so it is in the
+    _sheet_fields frozenset that create_scalar_result_ex's overwrite branch
+    clears. While the parser read a header that no longer existed, an
+    OVERWRITE=TRUE row actively destroyed a stored date. Six rows in the team's
+    workbook carry OVERWRITE=TRUE.
+    """
+    _seed_experiment(db_session, "HPHT_CDATE04", 8904)
+
+    first = _master_excel_v3(
+        [_v3_row("HPHT_CDATE04", 7.0, collection_date="2026-07-01", nh4=1.0)]
+    )
+    MasterBulkUploadService.from_bytes_ex(db_session, first)
+
+    second = _master_excel_v3(
+        [_v3_row("HPHT_CDATE04", 7.0, collection_date="2026-08-05", nh4=2.0,
+                 overwrite="TRUE")]
+    )
+    result = MasterBulkUploadService.from_bytes_ex(db_session, second)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    scalar = _scalar_for(db_session, "HPHT_CDATE04")
+    assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
+        "the overwrite row's own date must be stored, not cleared"
     )
