@@ -117,6 +117,47 @@ _WIDE_DI_COLUMNS = {
     "DI SD (ppm)",
 }
 
+# ---------------------------------------------------------------------------
+# Merge field classes (spec §3.2)
+#
+# Several Dashboard rows can describe one vial-day: gas is drawn and run on one
+# date, the liquid/solid fraction is collected later, and each gets its own row.
+# Merging them needs every column assigned to exactly one class, so adding a
+# Dashboard column forces a choice instead of defaulting into one. Classified on
+# the RAW CELL, before _resolve_h2, so Full-Loop precedence and the #114
+# geometry rule run once over the merged view and cannot drift.
+# ---------------------------------------------------------------------------
+
+# Two rows holding different values here cannot both be right -> conflict.
+_MEASUREMENT_COLUMNS = (
+    "NH4 (mM)",
+    "FL H2 (ppm)", "FL Gas Volume (mL)", "FL Gas Pressure (psi)",
+    "DI H2 (ppm)", "DI gas volume (mL)", "DI gas pressure (psi)",
+    "Sample pH", "Sample Conductivity (mS/cm)",
+    "Sampled Solution Volume (mL)",
+)
+
+# Columns where the Excel template writes 0 for a blank cell, so 0 must be read
+# as absent -- the same rule _parse_measurement_float applies on a single row.
+# Using the wrong helper here would make a template-blank 0 look like a
+# disagreement with the liquid row's real reading.
+_ZERO_BLANK_COLUMNS = frozenset({"Sample pH", "Sample Conductivity (mS/cm)"})
+
+# A row carrying any of these analysed the liquid/solid fraction, so its
+# collection date is the authoritative one for the merged vial-day.
+_LIQUID_SOLID_COLUMNS = (
+    "NH4 (mM)", "Sample pH", "Sample Conductivity (mS/cm)",
+    "Sampled Solution Volume (mL)",
+)
+
+# Provenance: first non-null in sheet order wins, a clash is a warning. These
+# are instrument run dates, duplicated identically across both rows of every
+# pair in the team's workbook.
+_RUN_DATE_COLUMNS = ("NMR Run Date", "ICP Run Date", "GC Run Date", "XRD Run Date")
+
+# Free text: distinct values joined, nothing discarded, so no warning needed.
+_JOINED_TEXT_COLUMNS = ("Description", "Modification")
+
 
 @dataclass(frozen=True)
 class TimepointCheck:
@@ -419,6 +460,193 @@ def _resolve_row_identity(
         time_post_reaction = id_timepoint
 
     return exp_id, time_post_reaction, None, False, check
+
+
+@dataclass
+class MergeNotes:
+    """Non-fatal observations about one merged group, for file-level warnings.
+
+    Kept separate from `conflicts` because these never stop a write: they are
+    things the researcher should know about a row that DID land.
+    """
+
+    run_date_disagreements: List[str] = field(default_factory=list)
+    overwrite_mixed: bool = False
+    spellings: List[str] = field(default_factory=list)
+    fallback_date_disagreement: bool = False
+
+
+@dataclass
+class MergedGroup:
+    """One vial-day's cells after collapsing N sheet rows.
+
+    `cells` is a plain dict, not a pandas Series: a dict cannot carry duplicate
+    labels, so the Series-instead-of-scalar hazard `_normalize_headers` exists to
+    prevent cannot be reintroduced downstream. Phase 2 reads it with .get(),
+    exactly as it reads a single sheet row.
+    """
+
+    cells: Dict[str, Any]
+    overwrite: bool
+
+
+def _cell_parser(column: str):
+    """The parse helper that owns `column`'s blank/value distinction."""
+    if column in _ZERO_BLANK_COLUMNS:
+        return _parse_measurement_float
+    return _parse_float
+
+
+def _parse_text(val: Any) -> Optional[str]:
+    """Trimmed cell text, or None when the cell is blank.
+
+    NaN needs its own check before any truthiness test: pandas reads an empty
+    Excel cell as float('nan'), which is TRUTHY, so the `str(val or "")` idiom
+    renders it as the literal string 'nan'. On a single row that only replaces a
+    blank description; in a merge it would be JOINED onto the partner row's real
+    text ('nan; Highest H2 liquid, solids'), corrupting a good value.
+    """
+    if val is None:
+        return None
+    if isinstance(val, float) and pd.isna(val):
+        return None
+    text = str(val).strip()
+    return text or None
+
+
+def _format_value(value: Any) -> str:
+    """Render a parsed measurement for an error message."""
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _merge_group(
+    members: List[Tuple[int, str, Any]],
+) -> Tuple[Optional[MergedGroup], List[str], MergeNotes]:
+    """Collapse N Dashboard rows for one vial-day into one merged cell view.
+
+    `members` is [(row_num, experiment_id, row_mapping)] in sheet order; the
+    mapping is anything supporting .get() (a pandas row or a dict).
+
+    Returns (merged, conflicts, notes). `merged` is None exactly when
+    `conflicts` is non-empty -- a vial-day whose rows disagree writes nothing
+    (spec D-a), because a partial merge would leave a stored row whose state
+    depends on which fields happened to clash.
+
+    Each conflict string is ONE field clause; the caller composes the sentence
+    around it so the row list and experiment ID are formatted in one place.
+
+    Pure: no database, no session, no I/O.
+    """
+    notes = MergeNotes()
+    conflicts: List[str] = []
+    cells: Dict[str, Any] = {}
+
+    # dict.fromkeys keeps sheet order while dropping repeats. One entry means
+    # every row spelled the ID the same way and there is nothing to report.
+    notes.spellings = list(dict.fromkeys(exp_id for _, exp_id, _ in members))
+
+    # --- Measurement class: one value, or a conflict ---------------------
+    for column in _MEASUREMENT_COLUMNS:
+        parse = _cell_parser(column)
+        seen: List[Tuple[int, Any]] = []
+        for row_num, _exp_id, row in members:
+            value = parse(row.get(column))
+            if value is not None:
+                seen.append((row_num, value))
+        if not seen:
+            continue
+        distinct = {value for _, value in seen}
+        if len(distinct) > 1:
+            conflicts.append(
+                f"{column}: "
+                + " vs ".join(
+                    f"{_format_value(value)} (row {row_num})"
+                    for row_num, value in seen
+                )
+            )
+            continue
+        # Store the RAW cell, not the parsed value: Phase 2 re-parses with the
+        # same helpers, and handing it a parsed float would double-convert.
+        for row_num, _exp_id, row in members:
+            if parse(row.get(column)) is not None:
+                cells[column] = row.get(column)
+                break
+
+    # --- Collection date: prefer a liquid/solid-bearing row --------------
+    # The column carries the vessel's own sampling date on a gas-only row (185
+    # such rows in the team's workbook, 143 of them standalone), so a gas date
+    # is outranked, never discarded.
+    def _has_liquid(row: Any) -> bool:
+        return any(
+            _cell_parser(column)(row.get(column)) is not None
+            for column in _LIQUID_SOLID_COLUMNS
+        )
+
+    preferred = [
+        (row_num, row.get(_COLLECTION_DATE))
+        for row_num, _exp_id, row in members
+        if _parse_date(row.get(_COLLECTION_DATE)) is not None and _has_liquid(row)
+    ]
+    fallback = [
+        (row_num, row.get(_COLLECTION_DATE))
+        for row_num, _exp_id, row in members
+        if _parse_date(row.get(_COLLECTION_DATE)) is not None
+    ]
+    candidates = preferred or fallback
+    if candidates:
+        distinct_dates = {_parse_date(raw) for _, raw in candidates}
+        if len(distinct_dates) > 1:
+            if preferred:
+                # Two rows both analysed liquid and dated it differently. That
+                # is a measurement disagreement, not provenance.
+                conflicts.append(
+                    f"{_COLLECTION_DATE}: "
+                    + " vs ".join(
+                        f"{_parse_date(raw).date().isoformat()} (row {row_num})"
+                        for row_num, raw in candidates
+                    )
+                )
+            else:
+                notes.fallback_date_disagreement = True
+        cells[_COLLECTION_DATE] = candidates[0][1]
+
+    # --- Provenance: first non-null wins, clash is a note ----------------
+    for column in _RUN_DATE_COLUMNS:
+        dated = [
+            (row_num, row.get(column))
+            for row_num, _exp_id, row in members
+            if _parse_date(row.get(column)) is not None
+        ]
+        if not dated:
+            continue
+        if len({_parse_date(raw) for _, raw in dated}) > 1:
+            notes.run_date_disagreements.append(column)
+        cells[column] = dated[0][1]
+
+    # --- Free text: join distinct values in sheet order ------------------
+    for column in _JOINED_TEXT_COLUMNS:
+        texts: List[str] = []
+        for _row_num, _exp_id, row in members:
+            text = _parse_text(row.get(column))
+            if text is not None:
+                texts.append(text)
+        if texts:
+            cells[column] = "; ".join(dict.fromkeys(texts))
+
+    # --- Directive: OVERWRITE needs unanimity ----------------------------
+    # Clearing is destructive and a merged vial-day is ONE write, so a single
+    # TRUE must not extend clearing to fields another row's author owns. The
+    # ignored directive is reported rather than silently dropped.
+    flags = [_parse_bool(row.get("Overwrite")) for _r, _e, row in members]
+    overwrite = all(flags)
+    if any(flags) and not overwrite:
+        notes.overwrite_mixed = True
+
+    if conflicts:
+        return None, conflicts, notes
+    return MergedGroup(cells=cells, overwrite=overwrite), conflicts, notes
 
 
 def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:

@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from database import Experiment, ExperimentalResults, ScalarResults
 from database.models.enums import ExperimentStatus
-from backend.services.bulk_uploads.master_bulk_upload import MasterBulkUploadService
+from backend.services.bulk_uploads.master_bulk_upload import (
+    MasterBulkUploadService,
+    _COLLECTION_DATE,
+    _merge_group,
+)
 
 from .excel_helpers import make_excel_multisheet, make_excel
 
@@ -2201,3 +2205,303 @@ def test_overwrite_row_does_not_clear_the_date_it_supplied(db_session: Session):
     assert scalar.measurement_date == _dt.datetime(2026, 8, 5), (
         "the overwrite row's own date must be stored, not cleared"
     )
+
+
+# ---------------------------------------------------------------------------
+# _merge_group â€” pure merge rules, no database
+# ---------------------------------------------------------------------------
+
+def _cells(**overrides) -> dict:
+    """A Dashboard row as a plain dict, every column blank unless overridden."""
+    row = {header: None for header in _V3_HEADERS}
+    row["Overwrite"] = None   # canonical spelling after _normalize_headers
+    row.pop("OVERWRITE", None)
+    row.update(overrides)
+    return row
+
+
+def test_merge_group_combines_complementary_gas_and_liquid():
+    """The core case: a GC row and a later liquid row become one cell view."""
+    gas = _cells(**{"DI H2 (ppm)": 87.12, "DI gas volume (mL)": 30.0,
+                    "DI gas pressure (psi)": 14.7,
+                    "Sample Collection Date": "2026-07-22",
+                    "GC Run Date": "2026-07-22"})
+    liquid = _cells(**{"Sample pH": 7.24, "Sample Conductivity (mS/cm)": 1.541,
+                       "Sample Collection Date": "2026-08-05",
+                       "Description": "Highest H2 liquid, solids"})
+
+    merged, conflicts, notes = _merge_group([
+        (7, "SERUM_M01a-t1", gas), (188, "SERUM_M01a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"complementary rows must not conflict: {conflicts}"
+    assert merged is not None
+    assert merged.cells["DI H2 (ppm)"] == 87.12
+    assert merged.cells["DI gas volume (mL)"] == 30.0
+    assert merged.cells["Sample pH"] == 7.24
+    assert merged.cells["Sample Conductivity (mS/cm)"] == 1.541
+    assert merged.cells["Description"] == "Highest H2 liquid, solids"
+
+
+def test_merge_group_conflicting_measurement_yields_no_merged_row():
+    """Two different H2 readings for one vial-day is a conflict, not a merge."""
+    a = _cells(**{"DI H2 (ppm)": 33.89})
+    b = _cells(**{"DI H2 (ppm)": 39.01})
+
+    merged, conflicts, notes = _merge_group([
+        (14, "SERUM_M02-t3", a), (57, "SERUM_M02-t3", b),
+    ])
+
+    assert merged is None, "a conflicted vial-day writes nothing"
+    assert len(conflicts) == 1, f"one clause for the one bad field: {conflicts}"
+    assert "DI H2 (ppm)" in conflicts[0]
+    assert "33.89" in conflicts[0] and "39.01" in conflicts[0]
+    assert "row 14" in conflicts[0] and "row 57" in conflicts[0]
+
+
+def test_merge_group_equal_measurements_are_not_a_conflict():
+    """Two rows repeating the same value agree. HPHT_229 does exactly this."""
+    a = _cells(**{"FL H2 (ppm)": 0.0, "Sample pH": 7.56})
+    b = _cells(**{"FL H2 (ppm)": 0.0})
+
+    merged, conflicts, notes = _merge_group([
+        (36, "HPHT_M03", a), (43, "HPHT_M03", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["FL H2 (ppm)"] == 0.0, "0 is a real reading, not a blank"
+    assert merged.cells["Sample pH"] == 7.56
+
+
+def test_merge_group_zero_ph_counts_as_blank_not_a_conflict():
+    """The template writes 0 for a blank pH cell, so 0 must not fight a real value.
+
+    _parse_measurement_float treats 0 as None for pH and conductivity. The merge
+    has to use the same helper or a template-blank 0 would look like a
+    disagreement with the liquid row's real reading.
+    """
+    gas = _cells(**{"DI H2 (ppm)": 50.0, "Sample pH": 0.0,
+                    "Sample Conductivity (mS/cm)": 0.0})
+    liquid = _cells(**{"Sample pH": 7.24, "Sample Conductivity (mS/cm)": 1.541})
+
+    merged, conflicts, notes = _merge_group([
+        (7, "SERUM_M04a-t1", gas), (188, "SERUM_M04a-t1", liquid),
+    ])
+
+    assert conflicts == [], f"a template-blank 0 is not a conflict: {conflicts}"
+    assert merged.cells["Sample pH"] == 7.24
+
+
+def test_merge_group_prefers_the_date_from_a_liquid_bearing_row():
+    """The liquid row's collection date outranks the gas row's."""
+    gas = _cells(**{"DI H2 (ppm)": 87.12,
+                    "Sample Collection Date": "2026-07-22"})
+    liquid = _cells(**{"Sample pH": 7.24,
+                       "Sample Collection Date": "2026-08-05"})
+
+    merged, conflicts, notes = _merge_group([
+        (7, "SERUM_M05a-t1", gas), (188, "SERUM_M05a-t1", liquid),
+    ])
+
+    assert conflicts == []
+    assert merged.cells[_COLLECTION_DATE] == "2026-08-05"
+
+
+def test_merge_group_falls_back_to_a_gas_only_date():
+    """With no liquid row, the date on record is still used, not discarded.
+
+    185 rows in the team's workbook carry a date with no liquid measurement â€”
+    an HPHT vessel's own sampling date. Excluding them would destroy real data.
+    """
+    a = _cells(**{"DI H2 (ppm)": 33.89, "Sample Collection Date": "2026-07-24"})
+    b = _cells(**{"FL Gas Volume (mL)": 30.0,
+                  "Sample Collection Date": "2026-07-24"})
+
+    merged, conflicts, notes = _merge_group([
+        (14, "SERUM_M06-t3", a), (57, "SERUM_M06-t3", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells[_COLLECTION_DATE] == "2026-07-24"
+    assert notes.fallback_date_disagreement is False
+
+
+def test_merge_group_disagreeing_fallback_dates_warn_rather_than_error():
+    """No liquid row and two different dates: first wins, reported not rejected."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "Sample Collection Date": "2026-08-06"})
+    b = _cells(**{"FL Gas Volume (mL)": 30.0,
+                  "Sample Collection Date": "2026-08-10"})
+
+    merged, conflicts, notes = _merge_group([
+        (222, "GC_M07", a), (272, "GC_M07", b),
+    ])
+
+    assert conflicts == [], "a fallback date is provenance, not a measurement"
+    assert merged.cells[_COLLECTION_DATE] == "2026-08-06", "first in sheet order"
+    assert notes.fallback_date_disagreement is True
+
+
+def test_merge_group_disagreeing_preferred_dates_are_a_conflict():
+    """Two liquid-bearing rows with different dates cannot both be right."""
+    a = _cells(**{"Sample pH": 5.22, "Sample Collection Date": "2026-07-22"})
+    b = _cells(**{"Sample Conductivity (mS/cm)": 1.705,
+                  "Sample Collection Date": "2026-08-05"})
+
+    merged, conflicts, notes = _merge_group([
+        (2, "SERUM_M08a-t1", a), (185, "SERUM_M08a-t1", b),
+    ])
+
+    assert merged is None
+    assert any(_COLLECTION_DATE in clause for clause in conflicts), conflicts
+
+
+def test_merge_group_joins_descriptions_and_modifications():
+    """Distinct text is joined with '; ' in sheet order; blanks contribute nothing."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "Description": "Gas, liquid",
+                  "Modification": "+200ul 1M HCl"})
+    b = _cells(**{"Sample pH": 7.24,
+                  "Description": "Highest H2 liquid, solids"})
+
+    merged, conflicts, notes = _merge_group([
+        (36, "HPHT_M09", a), (43, "HPHT_M09", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["Description"] == "Gas, liquid; Highest H2 liquid, solids"
+    assert merged.cells["Modification"] == "+200ul 1M HCl"
+
+
+def test_merge_group_repeated_description_is_not_duplicated():
+    """Identical text on both rows appears once."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "Description": "same"})
+    b = _cells(**{"Sample pH": 7.24, "Description": "same"})
+
+    merged, _conflicts, _notes = _merge_group([
+        (2, "HPHT_M10", a), (3, "HPHT_M10", b),
+    ])
+
+    assert merged.cells["Description"] == "same"
+
+
+def test_merge_group_blank_text_cell_does_not_join_as_nan():
+    """A blank text cell arrives from pandas as NaN, which is TRUTHY.
+
+    The naive `str(value or "")` idiom renders NaN as the string 'nan', which
+    would corrupt the partner row's real text into 'nan; Highest H2 liquid,
+    solids'. Verified against pd.read_excel: an empty Description cell reads as
+    float('nan'), not None. A column blank on every row must not appear in
+    `cells` at all, so Phase 2's None-stripping can fall back to its generated
+    description.
+    """
+    gas = _cells(**{"DI H2 (ppm)": 50.0, "Description": float("nan"),
+                    "Modification": float("nan")})
+    liquid = _cells(**{"Sample pH": 7.24,
+                       "Description": "Highest H2 liquid, solids"})
+
+    merged, conflicts, _notes = _merge_group([
+        (7, "SERUM_M17a-t1", gas), (188, "SERUM_M17a-t1", liquid),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["Description"] == "Highest H2 liquid, solids", (
+        "a blank cell must contribute nothing to the join"
+    )
+    assert "Modification" not in merged.cells, (
+        "a column blank on every row must not be written at all"
+    )
+
+
+def test_merge_group_run_date_disagreement_is_a_note_not_a_conflict():
+    """Run dates are provenance: first non-null wins and the clash is reported."""
+    a = _cells(**{"DI H2 (ppm)": 50.0, "GC Run Date": "2026-07-22"})
+    b = _cells(**{"Sample pH": 7.24, "GC Run Date": "2026-07-28"})
+
+    merged, conflicts, notes = _merge_group([
+        (2, "HPHT_M11", a), (3, "HPHT_M11", b),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["GC Run Date"] == "2026-07-22", "first in sheet order"
+    assert notes.run_date_disagreements == ["GC Run Date"]
+
+
+def test_merge_group_overwrite_requires_every_row():
+    """Mixed OVERWRITE degrades to a non-destructive merge and is reported."""
+    a = _cells(**{"DI H2 (ppm)": 404.19, "Overwrite": "TRUE"})
+    b = _cells(**{"Sample pH": 9.03, "Overwrite": "FALSE"})
+
+    merged, conflicts, notes = _merge_group([
+        (154, "SERUM_M12c-t5", a), (204, "SERUM_M12c-t5", b),
+    ])
+
+    assert conflicts == []
+    assert merged.overwrite is False, "a destructive directive needs unanimity"
+    assert notes.overwrite_mixed is True
+
+
+def test_merge_group_unanimous_overwrite_is_honoured():
+    a = _cells(**{"DI H2 (ppm)": 404.19, "Overwrite": "TRUE"})
+    b = _cells(**{"Sample pH": 9.03, "Overwrite": "TRUE"})
+
+    merged, _conflicts, notes = _merge_group([
+        (154, "SERUM_M13c-t5", a), (204, "SERUM_M13c-t5", b),
+    ])
+
+    assert merged.overwrite is True
+    assert notes.overwrite_mixed is False
+
+
+def test_merge_group_records_distinct_spellings():
+    """Two spellings of one ID merge; the note names them so the typo is fixable."""
+    a = _cells(**{"DI H2 (ppm)": 50.0})
+    b = _cells(**{"Sample pH": 7.24})
+
+    merged, conflicts, notes = _merge_group([
+        (29, "SERUM_cation_001c-t5", a), (194, "SERUM_Cation_001c-t5", b),
+    ])
+
+    assert conflicts == []
+    assert notes.spellings == ["SERUM_cation_001c-t5", "SERUM_Cation_001c-t5"]
+
+
+def test_merge_group_single_spelling_records_one_entry():
+    a = _cells(**{"DI H2 (ppm)": 50.0})
+    b = _cells(**{"Sample pH": 7.24})
+
+    _merged, _conflicts, notes = _merge_group([
+        (2, "HPHT_M14", a), (3, "HPHT_M14", b),
+    ])
+
+    assert notes.spellings == ["HPHT_M14"], "no variant to report"
+
+
+def test_merge_group_merges_three_rows():
+    """Nothing in the rules assumes a pair."""
+    a = _cells(**{"DI H2 (ppm)": 50.0})
+    b = _cells(**{"Sample pH": 7.24})
+    c = _cells(**{"NH4 (mM)": 3.5, "Sampled Solution Volume (mL)": 2.0})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "HPHT_M15", a), (3, "HPHT_M15", b), (4, "HPHT_M15", c),
+    ])
+
+    assert conflicts == []
+    assert merged.cells["DI H2 (ppm)"] == 50.0
+    assert merged.cells["Sample pH"] == 7.24
+    assert merged.cells["NH4 (mM)"] == 3.5
+    assert merged.cells["Sampled Solution Volume (mL)"] == 2.0
+
+
+def test_merge_group_reports_every_conflicting_field():
+    """A group can disagree on more than one field; all are named."""
+    a = _cells(**{"Sample pH": 5.22, "Sample Conductivity (mS/cm)": 1.286})
+    b = _cells(**{"Sample pH": 7.27, "Sample Conductivity (mS/cm)": 1.705})
+
+    merged, conflicts, _notes = _merge_group([
+        (2, "SERUM_M16a-t1", a), (185, "SERUM_M16a-t1", b),
+    ])
+
+    assert merged is None
+    assert len(conflicts) == 2, f"one clause per bad field: {conflicts}"
+    assert any("Sample pH" in c for c in conflicts)
+    assert any("Sample Conductivity (mS/cm)" in c for c in conflicts)
