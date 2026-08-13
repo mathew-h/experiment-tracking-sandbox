@@ -111,7 +111,8 @@ class ScalarResponse(BaseModel):
 
 
 ICP_ELEMENTS = ["fe","si","mg","ca","ni","cu","mo","zn","mn","cr","co","al",
-                "sr","y","nb","sb","cs","ba","nd","gd","pt","rh","ir","pd","ru","os","tl","s"]
+                "sr","y","nb","sb","cs","ba","nd","gd","pt","rh","ir","pd","ru","os","tl",
+                "ag","ce","k","la","na","pb","sc","th","v","s"]
 
 
 class ResultWithFlagsResponse(BaseModel):
