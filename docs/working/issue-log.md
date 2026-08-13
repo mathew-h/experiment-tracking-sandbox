@@ -2384,3 +2384,32 @@ pre-existing `test_pg_backup_restore.py` failures also present on `develop` (pas
 1483 → 1492). 227 vitest pass across 33 files. Every test watched fail first. No schema
 change, no migration; `v_results_scalar_rollup`, the list router, and the deliberately
 pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
+
+---
+
+## 2026-08-13 | inline — Fix Vanadium/Sodium (and 7 other elements) missing from ICP API and React display
+- **Files changed:**
+  - `backend/api/schemas/results.py` — `ICPCreate` was missing 9 of the model's 37 fixed
+    ICP columns (`ag, ce, k, la, na, pb, sc, th, v`); since `ICPResponse` inherits it with
+    `from_attributes=True`, Pydantic silently dropped these on every response even though
+    they exist on `ICPResults` and are populated in the DB. Added all 9. Also synced the
+    same 9 into the unused (grep-confirmed, no importers) `ICP_ELEMENTS` module constant,
+    which the 2026-06-17 sulfur entry below established is meant to mirror `ICPCreate`.
+  - `frontend/src/pages/ExperimentDetail/ResultsTab.tsx` — `ExpandedRow`'s hardcoded
+    ICP element display list stopped at 13 of 37 elements; added `'na'` and `'v'` only
+    (per user instruction — not restoring the full element set to this view).
+  - `frontend/src/api/results.ts` — added `na`/`v` to the `ICPResult` TS interface.
+  - `.claude/rules/MODELS.md` — separately, corrected the stale `ICPResults` fixed-column
+    list (was missing `ag, ce, la, pb, sc, th, v`), committed directly to `develop` before
+    branching since it was a docs-only fix already in flight.
+- **Root cause:** two independent stale lists (API schema, frontend display array) both
+  predating the addition of these 9 element columns to the model, neither updated when the
+  columns were added. PowerBI's `v_results_icp` view already exposed `na_ppm`/`v_ppm`
+  correctly — not a code defect there; a dataset refresh or new visual field was the likely
+  gap. Noted separately (not fixed, out of scope): `v_results_icp` is itself missing
+  `s_ppm` (sulfur), a similar but distinct gap.
+- **Tests added:** no — existing suites cover this: 84 backend `-k icp` tests and 20
+  frontend `ResultsTab.*.test.tsx` tests pass unchanged; `eslint` clean on both frontend
+  files; pre-existing `flake8`/`black` violations in `results.py` predate this change and
+  were not introduced by it.
+- **Decision logged:** no
