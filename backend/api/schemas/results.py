@@ -191,6 +191,15 @@ class ICPCreate(BaseModel):
     ru: Optional[float] = None
     os: Optional[float] = None
     tl: Optional[float] = None
+    ag: Optional[float] = None
+    ce: Optional[float] = None
+    k:  Optional[float] = None
+    la: Optional[float] = None
+    na: Optional[float] = None
+    pb: Optional[float] = None
+    sc: Optional[float] = None
+    th: Optional[float] = None
+    v:  Optional[float] = None
     s:  Optional[float] = None
 
 

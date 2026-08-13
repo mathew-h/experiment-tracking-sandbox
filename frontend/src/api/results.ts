@@ -73,6 +73,8 @@ export interface ICPResult {
   cr: number | null
   co: number | null
   al: number | null
+  na: number | null
+  v: number | null
   s: number | null
 }
 
