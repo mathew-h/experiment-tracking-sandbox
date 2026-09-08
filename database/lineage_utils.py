@@ -513,13 +513,15 @@ def auto_create_treatment_experiment(
     db.add(new_experiment)
     db.flush()  # Get the ID
     
-    # Add initial note. Issue #118: typed -- a brand-new experiment has no
-    # notes, so this becomes its 'description', exactly what the legacy
-    # first-note readers already showed for it.
+    # Add initial note. Issue #118: typed -- the initial note IS the new
+    # experiment's 'description', exactly what the legacy first-note readers
+    # already showed for it.
     if initial_note:
-        from backend.services.notes import add_first_or_observation_note
-        add_first_or_observation_note(
-            db, new_experiment, initial_note, created_by="auto_create_treatment",
+        from backend.services.notes import add_note
+        from database.models.enums import NoteType
+        add_note(
+            db, new_experiment, initial_note,
+            note_type=NoteType.description, created_by="auto_create_treatment",
         )
     
     # Copy conditions from parent

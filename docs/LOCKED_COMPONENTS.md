@@ -192,8 +192,8 @@ in the parsers: `master_bulk_upload.py` mirrors `Description` → `observation`
 and `Modification` → `modification` (one slot per result via `sync_result_note`,
 inside the row's SAVEPOINT so a note failure rolls back only that vial-day);
 `timepoint_modifications.py` mirrors its column into the `modification` slot
-keyed on `modified_by`; `new_experiments.py` writes `initial_note` through
-`add_first_or_observation_note`. Dashboard template v4's `Observation Note` /
+keyed on `modified_by`; `new_experiments.py` writes `initial_note` as the experiment's `description`
+note through `add_note`. Dashboard template v4's `Observation Note` /
 `Modification Note` spellings are aliases onto the v3 names, which remain the
 internal canonical names so the `_merge_group` contract in ⁵ is untouched.
 Two blank-cell bugs were fixed alongside: `initial_note` and the timepoint

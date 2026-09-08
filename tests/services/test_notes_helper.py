@@ -3,11 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from backend.services.notes import (
-    add_first_or_observation_note,
-    add_note,
-    sync_result_note,
-)
+from backend.services.notes import add_note, sync_result_note
 from database import Experiment, ExperimentNotes, ExperimentalResults
 from database.models.enums import ExperimentStatus, NoteType
 
@@ -33,29 +29,6 @@ def _notes(db, exp):
     return db.execute(
         select(ExperimentNotes).where(ExperimentNotes.experiment_fk == exp.id).order_by(ExperimentNotes.id)
     ).scalars().all()
-
-
-# --- add_first_or_observation_note ------------------------------------------
-
-def test_first_note_is_description_later_notes_are_observations(db_session):
-    exp = _exp(db_session, "NH_FIRST_001", 9118101)
-    a = add_first_or_observation_note(db_session, exp, "the summary", created_by="new_experiments")
-    b = add_first_or_observation_note(db_session, exp, "later remark", created_by="new_experiments")
-    assert a.note_type is NoteType.description
-    assert b.note_type is NoteType.observation
-    assert a.created_by == b.created_by == "new_experiments"
-    assert [n.note_text for n in _notes(db_session, exp)] == ["the summary", "later remark"]
-
-
-def test_first_note_is_observation_when_legacy_notes_exist(db_session):
-    """Pre-PR2 an experiment's existing notes are all 'observation'. A new
-    initial_note must not become the description ahead of the oldest note,
-    which the min(id) readers still show and PR2 will promote."""
-    exp = _exp(db_session, "NH_FIRST_002", 9118102)
-    db_session.add(ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="legacy"))
-    db_session.flush()
-    n = add_first_or_observation_note(db_session, exp, "new upload text")
-    assert n.note_type is NoteType.observation
 
 
 # --- add_note ----------------------------------------------------------------

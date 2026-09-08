@@ -8,16 +8,17 @@ result_id, and during the transition every legacy write path writes BOTH its
 old column and a typed note row through the helpers here, so Power BI (still
 reading the old columns) and the new model always agree.
 
-Three helpers, three situations:
+Two helpers, two situations:
 
 * add_note -- append one typed note. Used when the caller knows the type and
-  scope (POST /experiments/{id}/notes, POST /api/results).
-* add_first_or_observation_note -- the legacy "first note is the description"
-  rule, made explicit: a note written to an experiment that has NO notes yet is
-  its 'description'; any later note is an 'observation'. Making a later note the
-  description would (a) contradict what the legacy min(id) readers show until
-  PR3 and (b) collide with the partial unique index once PR2 promotes the
-  oldest note. Used by the New Experiments upload and treatment auto-creation.
+  scope: POST /experiments/{id}/notes, POST /api/results, and the New
+  Experiments upload's `initial_note`, which IS the experiment's description
+  (note_type='description') -- that column has always been what the app showed
+  as the experiment description, and the PR2 backfill promotes the same row
+  (the oldest note) for every pre-existing experiment. The partial unique index
+  raises if a second description is ever attempted; the New Experiments parser
+  only reaches this call for a brand-new experiment or after an overwrite row
+  has cleared the old notes, so that cannot happen through the upload.
 * sync_result_note -- mirror a legacy result COLUMN into a note SLOT. A column
   holds one value, so the mirror is one note per (result, type, created_by):
   re-uploading a workbook updates the note's text in place rather than
@@ -84,24 +85,6 @@ def add_note(
     db.add(note)
     db.flush()
     return note
-
-
-def add_first_or_observation_note(
-    db: Session,
-    experiment: Experiment,
-    note_text: str,
-    *,
-    created_by: Optional[str] = None,
-) -> ExperimentNotes:
-    """Write ``note_text`` as the experiment's 'description' iff it has no notes
-    yet; otherwise as an 'observation'. See the module docstring for why."""
-    has_any = db.execute(
-        select(ExperimentNotes.id)
-        .where(ExperimentNotes.experiment_fk == experiment.id)
-        .limit(1)
-    ).first() is not None
-    note_type = NoteType.observation if has_any else NoteType.description
-    return add_note(db, experiment, note_text, note_type=note_type, created_by=created_by)
 
 
 def sync_result_note(

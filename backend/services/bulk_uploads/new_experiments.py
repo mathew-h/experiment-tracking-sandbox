@@ -17,7 +17,8 @@ from database import (
     ExperimentStatus,
     AmountUnit,
 )
-from backend.services.notes import add_first_or_observation_note
+from backend.services.notes import add_note
+from database.models.enums import NoteType
 from database.models.experiments import ModificationsLog
 from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 from database.reactor_slot import derive_reactor_slot
@@ -780,14 +781,15 @@ class NewExperimentsUploadService:
                     # NOTE: When overwrite=True, all existing notes are cleared first (see above)
                     # NOTE: initial_note is NEVER copied from parent - only user-provided notes are created
                     # This ensures user's description always takes precedence (per requirement)
-                    # Issue #118: typed. The first note an experiment ever gets
-                    # is its 'description'; a note added to an experiment that
-                    # already has notes is an 'observation' (the legacy readers
-                    # show the oldest note as the description until PR3, and
-                    # the partial unique index allows one description).
+                    # Issue #118: initial_note IS the experiment's description
+                    # (note_type='description') -- it always was: the legacy
+                    # readers show the oldest note as the description, and this
+                    # is the oldest note by construction (new experiment, or an
+                    # overwrite row that has just cleared the old ones).
                     if initial_note:
-                        add_first_or_observation_note(
-                            db, experiment, initial_note, created_by=_NOTE_SOURCE,
+                        add_note(
+                            db, experiment, initial_note,
+                            note_type=NoteType.description, created_by=_NOTE_SOURCE,
                         )
 
                     # Row body completed without exception or early `continue`.

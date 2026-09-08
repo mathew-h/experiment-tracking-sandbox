@@ -282,8 +282,9 @@ def test_blank_initial_note_creates_no_note_at_all(pg_session: Session):
 def test_initial_note_on_existing_experiment_without_overwrite_is_skipped(pg_session: Session):
     """Without overwrite the parser skips an existing experiment entirely
     ("already exists; set overwrite=True"), so no note of any type is added and
-    the legacy note is untouched. (The helper's own 'observation when notes
-    already exist' guard is covered in tests/services/test_notes_helper.py.)"""
+    the legacy note is untouched. This is what keeps `initial_note -> description`
+    safe: the parser only writes a description for a brand-new experiment or
+    after an overwrite row has cleared the old notes."""
     exp = _seed_experiment(pg_session, "TNN_003", 9118403)
     pg_session.add(ExperimentNotes(experiment_id="TNN_003", experiment_fk=exp.id, note_text="legacy first note"))
     pg_session.flush()
