@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text, Index, Boolean, text
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text, Index, Boolean, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
@@ -15,6 +15,11 @@ class ExperimentalResults(Base):
             unique=True,
             postgresql_where=text("is_primary_timepoint_result = true"),
         ),
+        # Target of experiment_notes.fk_note_result_same_experiment (issue #118):
+        # lets a note's (experiment_fk, result_id) pair prove the result belongs
+        # to the same experiment. Redundant with the PK on its own, required by
+        # Postgres for a composite FK reference.
+        UniqueConstraint("experiment_fk", "id", name="uq_results_experiment_fk_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -44,6 +49,15 @@ class ExperimentalResults(Base):
     experiment = relationship("Experiment", back_populates="results", foreign_keys=[experiment_fk])
     # Relationship to ResultFiles (one-to-many)
     files = relationship("ResultFiles", back_populates="result_entry", cascade="all, delete-orphan")
+    # Typed notes scoped to this timepoint (issue #118). viewonly: deletion is
+    # the DB's ON DELETE CASCADE, and experiment_fk is shared with the
+    # composite FK so the ORM must not try to manage it from this side.
+    notes = relationship(
+        "ExperimentNotes",
+        primaryjoin="ExperimentalResults.id == foreign(ExperimentNotes.result_id)",
+        viewonly=True,
+        order_by="ExperimentNotes.id",
+    )
 
     # Relationships to specific data tables (one-to-one)
     scalar_data = relationship(
