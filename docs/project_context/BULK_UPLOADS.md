@@ -89,7 +89,7 @@ uploads.)
 |--------|----------|-------|
 | Experiment ID | ✓ | Must match an existing experiment |
 | Duration (Days) | ✓ (column) | The **column** must exist; the **value** may be blank. Blank defers to the day in the ID's `-t<days>` token. A cell holding only spaces counts as blank — that is what the Sampling sheet's `=IF(ISBLANK([Date Started]), " ", …)` formula produces for an undated row. Blank *and* no `-t` token → the row is skipped |
-| Description | | Free text |
+| Observation Note | | Free text about this sampling. Also accepted (template v3): `Description`. Stored as an **observation note** on the timepoint; blank writes nothing |
 | Sample Date | | Date |
 | NMR Run Date | | Date |
 | ICP Run Date | | Date |
@@ -104,7 +104,7 @@ uploads.)
 | Sample pH | | |
 | Sample Conductivity (mS/cm) | | |
 | Sampled Solution Volume (mL) | | Volume of production fluid collected at this timepoint (mL) |
-| Modification | | Brine modification note |
+| Modification Note | | What was done to the vial at this timepoint (drives the MOD badge). Also accepted (template v3): `Modification`. Stored as a **modification note** on the timepoint |
 | OVERWRITE | | `TRUE` / `FALSE` — overwrite existing result row at same timepoint. Also accepted: `Overwrite` |
 
 Rows where both Experiment ID and Duration (Days) are present create or update a
@@ -123,6 +123,8 @@ and an overwrite upload leaves them exactly as they were.
 > `gross − background`, so a cleared value shifted the reported yield with no
 > error shown. If you ran an `OVERWRITE = TRUE` Master Results upload before that
 > date, check those fields on the affected timepoints.
+
+**Notes are typed (template v4, 2026-09-08).** The two free-text columns land in the experiment's Notes as an *observation* and a *modification* respectively, tagged as coming from the Master upload. Re-uploading the same workbook with edited text updates those notes rather than adding duplicates. Template v3 workbooks with the old `Description` / `Modification` headers upload identically for now; please move to the v4 headers.
 
 **Replicates:** rows may carry either a full lettered ID (`SERUM_001a`) in Experiment ID, or the bare base ID plus the optional `Replicate` column (`a`–`z`; `0` or blank = the group parent). Base + letter is resolved to the sibling experiment before upsert. Unresolved or conflicting rows are skipped with a per-row error — the rest of the file still uploads. See the [Replicates guide](REPLICATES.md#uploading-replicate-results).
 
@@ -232,6 +234,7 @@ so you can fill the template with the correct experiment IDs before uploading.
 | researcher | | |
 | date | | YYYY-MM-DD |
 | sample_id | | Must exist in SampleInfo |
+| initial_note | | Becomes the experiment's **description** note (the Description column on the experiments list). Leave blank to add no note — a blank cell no longer inserts a `nan` placeholder, and with `overwrite=TRUE` a blank cell leaves the existing notes untouched; only a filled cell replaces them |
 | temperature_c | | |
 | initial_ph | | |
 | rock_mass_g | | |
@@ -252,7 +255,7 @@ Use this when you added or replaced chemicals mid-experiment at a specific sampl
 |--------|----------|-------|
 | experiment_id | ✓ | Must match an existing experiment |
 | time_point | ✓ | Days (float); must match an existing result row within ±0.0001 day |
-| modification_description | ✓ | Text to set as `brine_modification_description` |
+| modification_description | ✓ | Text to set as `brine_modification_description`. Also accepted: `Modification Note`. The same text is stored as a **modification note** on the timepoint, so it appears in the experiment's Notes with the MOD badge |
 
 Validation rules:
 - Duplicate `(experiment_id, time_point)` pairs in one file are rejected — the whole file

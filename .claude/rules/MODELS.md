@@ -187,9 +187,21 @@ The central hub for all experimental data.
   - `xrd_phases`: One-to-Many with `XRDPhase` (Aeris time-series).
 
 ### `ExperimentNotes`
-Stores timestamped notes/logs for an experiment.
-- **Fields**: `experiment_id`, `experiment_fk`, `note_text`, `created_at`, `updated_at`.
-- **Relationships**: Linked to `Experiment`.
+Typed free text about an experiment, optionally scoped to one result row (issue #118).
+- **Fields**: `experiment_id` (denormalized string, synced by `denormalized_ids.py`), `experiment_fk`, `note_text`, `note_type`, `result_id`, `created_by`, `needs_review`, `created_at`, `updated_at`.
+- **`note_type`** (Postgres enum `note_type`, `NoteType` in `enums.py`, NOT NULL, default `observation`): `description` (the experiment's summary; at most one per experiment, never result-scoped), `modification` (what was done to the vial at a timepoint — the MOD badge; result-scoped), `observation` (free text; valid with or without a result — **deliberately scope-free, do not narrow it**), `result_note` (a remark about one measurement; result-scoped). Member name equals stored value, so raw SQL compares against the lowercase strings.
+- **`result_id`** (nullable): scopes the note to one `experimental_results` row.
+- **`created_by`** (nullable): Firebase email on API paths; a source tag on bulk paths (`master_bulk_upload`, `new_experiments`, `auto_create_treatment`, or the Timepoint Modifications call's `modified_by`).
+- **`needs_review`** (NOT NULL, default false): set by the PR2 backfill on rows it could not place with certainty; the review queue is `WHERE needs_review`.
+- **Enforced by the database, not app code:**
+  - `uq_one_description_per_experiment` — partial unique index on `(experiment_fk) WHERE note_type = 'description'`.
+  - `fk_note_result_same_experiment` — composite FK `(experiment_fk, result_id) → experimental_results (experiment_fk, id)`, `ON DELETE CASCADE`, backed by `uq_results_experiment_fk_id` on the results table. A result-scoped note can only name a result of its own experiment. `MATCH SIMPLE`, so a NULL `result_id` (every experiment-level note) is not checked — intended.
+  - `ck_note_scope` — `description` ⇒ `result_id IS NULL`; `modification`/`result_note` ⇒ `result_id IS NOT NULL`; `observation` ⇒ either.
+  - Indexes `ix_experiment_notes_result_id`, `ix_experiment_notes_scope (experiment_fk, note_type)`.
+- **Relationships**: `experiment` (back-populates `Experiment.notes`); `result` (viewonly) ↔ `ExperimentalResults.notes` (viewonly, ordered by id). Viewonly because the DB cascade owns deletion and `experiment_fk` is shared with the composite FK.
+- **Write paths go through `backend/services/notes.py`**, the single definition of the legacy → typed mapping: `add_note` (explicit type/scope), `add_first_or_observation_note` (the legacy "first note is the description" rule made explicit: `description` iff the experiment has no notes yet, else `observation`), and `sync_result_note` (mirrors a legacy result column into one note *slot* per `(result_id, note_type, created_by)` — re-upload updates in place, clearing the column deletes the note).
+- **Transition state (PR1 of #118, 2026-09-08).** Every legacy write path now writes BOTH its old column and a typed note: `POST /api/results` (`description` → `observation`, `brine_modification_description` → `modification`), the Master Results Dashboard (`Description`/`Observation Note` → `observation`, `Modification`/`Modification Note` → `modification`), Timepoint Modifications (→ `modification`), New Experiments `initial_note` (→ `description` via the first-note rule), and `POST /experiments/{id}/notes` (optional `note_type`, default `observation`, and `result_id`). **Readers are unchanged:** `Experiment.description` is still `notes[0].note_text`, the experiments list and dashboard still take `min(id)`, and `v_experiments` still orders by `created_at` — the three disagree when a bulk transaction gives several notes one `created_at`, which is the defect PR3 fixes by reading `note_type = 'description'`. Existing rows are all `observation` until `database/data_migrations/reclassify_notes_020.py` (PR2) is applied after audit.
+- **Blank `initial_note` bug fixed (was `docs/issues/issue-blank-initial-note-parses-to-nan.md`):** a blank cell parses to `None`, no `"nan"` note is inserted, and an `overwrite=TRUE` row clears existing notes only when it supplies replacement text — the deleted texts are snapshotted to `ModificationsLog` (`modified_table='experiment_notes'`, `old_values.note_texts`). The four historical `'nan'` notes are handled by the PR2 backfill (`needs_review`, never promoted).
 
 ### `ModificationsLog`
 Audit trail for tracking changes to records.
@@ -280,7 +292,9 @@ Parent table for all result data at a specific timepoint.
 - **Key Fields**:
   - `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`.
   - `is_primary_timepoint_result`: Boolean flag for the main result record of a timepoint (unique per experiment+bucket).
-  - `description` (required).
+  - `description` (required, NOT NULL). **Legacy — being retired by issue #118.** Rendered nowhere in the app; reaches Power BI only as `v_results_scalar.sampling_description`. Since PR1 every write path also mirrors researcher-supplied text into an `observation` note on the result (`ExperimentNotes.result_id`); code-generated fallbacks (`Analysis results for Day N`, `Master upload — day N`) satisfy the NOT NULL and are never mirrored. Dropped in PR4.
+  - `brine_modification_description` / `has_brine_modification`: **legacy, being retired by issue #118.** Mirrored into a `modification` note since PR1; the badge switches to `has_modification_note` (EXISTS over notes) in PR3 and both columns drop in PR4.
+  - `UNIQUE (experiment_fk, id)` (`uq_results_experiment_fk_id`): target of the notes composite FK; redundant with the PK on its own.
 - **Relationships**: `scalar_data` (One-to-One `ScalarResults`), `icp_data` (One-to-One `ICPResults`), `files` (One-to-Many `ResultFiles`).
 
 ### `ScalarResults`

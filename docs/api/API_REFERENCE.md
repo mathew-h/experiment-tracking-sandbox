@@ -21,7 +21,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), and is_outlier |
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
-| POST | `/api/experiments/{experiment_id}/notes` | Add a note |
+| POST | `/api/experiments/{experiment_id}/notes` | Add a typed note. Body: `{"note_text": "...", "note_type": "observation"\|"description"\|"modification"\|"result_note", "result_id": 123}` — `note_type` defaults to `observation`, `result_id` optional. `description` must not carry `result_id`; `modification`/`result_note` must; `observation` may or may not (422 otherwise). `result_id` of another experiment → 422. A second `description` → 409. Response adds `note_type`, `result_id`, `created_by` (caller email), `needs_review`. |
 | PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit note text. Body: `{"note_text": "..."}`. No-op if text unchanged. Writes ModificationsLog. Returns updated note with `updated_at`. |
 | GET | `/api/experiments/{experiment_id}/change-requests` | List reactor modification entries linked to this experiment. Returns `[]` if none. |
 | GET | `/api/experiments/{experiment_id}/change-requests/recent` | Reactor modification entry for `date` (query param, default today) plus the most recent prior entry — both scoped to this experiment only, never another experiment that previously occupied the same reactor. Returns `{"selected": ..., "previous": ...}`, either nullable. |

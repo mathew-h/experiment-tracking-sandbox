@@ -1,11 +1,21 @@
 # bug: a blank `initial_note` on an overwrite row wipes the notes and inserts `"nan"`
 
-> **Status 2026-08-05 — OPEN, not started.** Found during the code review of the
-> issue #109 follow-up branch `fix/issue-109-bulk-rename-id-sync`, which is
-> unrelated to this bug and deliberately does not fix it. The fix lands in
-> `backend/services/bulk_uploads/new_experiments.py`, which is **LOCKED**
-> (`docs/LOCKED_COMPONENTS.md`, CLAUDE.md §5), so it needs its own `/start-task`
-> and explicit user sign-off before any edit.
+> **Status 2026-09-08 — FIXED in issue #118 PR1 (`feat/typed-notes-schema`),
+> with Mat Hearl's explicit sign-off on the locked parser.** Both root causes
+> below are closed in `new_experiments.py`: the parse uses `pd.isna` so a blank
+> cell is `None`, and the overwrite branch clears existing notes only when the
+> row supplies replacement text (product decision: a blank cell means "leave the
+> notes alone"); when it does clear, the deleted texts are snapshotted to
+> `ModificationsLog` (`modified_table='experiment_notes'`). Tests:
+> `tests/services/bulk_uploads/test_typed_notes_dual_write.py` (New Experiments
+> section) and the updated
+> `test_new_experiments_rename_denormalized_ids.py::test_bulk_rename_syncs_all_five_tables`.
+> The four historical `"nan"` rows listed under Evidence are handled by the PR2
+> backfill `reclassify_notes_020.py`: flagged `needs_review`, never promoted to
+> the experiment's description. The same NaN-stringification was found and fixed
+> in `timepoint_modifications.py` (`modification` cell) in the same PR.
+>
+> Original report follows unchanged.
 
 ## Summary
 
