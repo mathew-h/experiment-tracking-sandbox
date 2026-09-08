@@ -1,4 +1,13 @@
-"""Bulk-set brine_modification_description on ExperimentalResults rows."""
+"""Bulk-set brine_modification_description on ExperimentalResults rows.
+
+Issue #118 (typed notes): every write here is mirrored into the result's
+'modification' note slot through backend.services.notes.sync_result_note --
+set the column, set the note; clear the column, delete the note -- so the
+legacy column Power BI still reads and the notes model never disagree during
+the transition. `created_by` on the mirrored note is this call's
+`modified_by`, which is also the slot key, so a researcher's hand-written
+modification note on the same result is never overwritten by an upload.
+"""
 from __future__ import annotations
 
 import io
@@ -8,6 +17,8 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from database import Experiment, ExperimentalResults, ModificationsLog
+from database.models.enums import NoteType
+from backend.services.notes import sync_result_note
 from backend.services.result_merge_utils import find_timepoint_candidates
 from backend.services.bulk_uploads._id_match import find_experiment_matches
 
@@ -17,6 +28,7 @@ _TIME_POINT_ALIASES = {"time_point", "time (days)", "time(days)", "duration (day
 _MODIFICATION_ALIASES = {
     "modification_description", "experiment_modification", "modification", "description",
     "brine_modification_description",
+    "modification note",  # Dashboard template v4 spelling (issue #118)
 }
 _OVERWRITE_ALIASES = {"overwrite_existing", "overwrite"}
 
@@ -118,7 +130,16 @@ class TimepointModificationsService:
             row_num = idx + 2  # 1-based, header on row 1
             exp_id = str(row.get(exp_col) or "").strip()
             tp_raw = row.get(tp_col)
-            modification = str(row.get(mod_col) or "").strip()
+            # pd.isna guard: pandas reads a blank cell as float('nan'), which is
+            # truthy, so `str(cell or "")` stored the literal text 'nan' (the
+            # same defect fix_nan_text_fields_019.py cleaned up for the Master
+            # sheet). An overwrite row with a blank cell must CLEAR, not write
+            # 'nan' -- and the typed-note mirror below must agree with it.
+            _mod_raw = row.get(mod_col)
+            if _mod_raw is None or (isinstance(_mod_raw, float) and pd.isna(_mod_raw)):
+                modification = ""
+            else:
+                modification = str(_mod_raw).strip()
 
             if not exp_id:
                 skipped += 1
@@ -183,6 +204,10 @@ class TimepointModificationsService:
             # --- Apply ---
             old_val = target.brine_modification_description
             target.brine_modification_description = modification or None
+            # Issue #118 dual-write: mirror the column into the typed-note slot.
+            sync_result_note(
+                db, target, NoteType.modification, modification or None, created_by=modified_by,
+            )
 
             # Audit log
             db.add(ModificationsLog(

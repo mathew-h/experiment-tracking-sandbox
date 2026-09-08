@@ -17,6 +17,8 @@ from database import (
     ExperimentStatus,
     AmountUnit,
 )
+from backend.services.notes import add_first_or_observation_note
+from database.models.experiments import ModificationsLog
 from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 from database.reactor_slot import derive_reactor_slot
 from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryService
@@ -25,6 +27,10 @@ from backend.services.experiment_validation import parse_experiment_id as parse_
 from backend.services.calculations.registry import recalculate
 from database.lineage_utils import update_experiment_lineage
 from backend.services.denormalized_ids import sync_denormalized_experiment_id
+
+
+# Provenance tag on the note rows this parser writes (experiment_notes.created_by).
+_NOTE_SOURCE = "new_experiments"
 
 
 def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment]:
@@ -537,7 +543,16 @@ class NewExperimentsUploadService:
                         date_val = None
                     
                     current_step = "parsing initial_note field"
-                    initial_note = str(row.get('initial_note')).strip() if row.get('initial_note') is not None and str(row.get('initial_note')).strip() != '' else None
+                    # pd.isna, not `is not None`: pandas reads a blank cell as
+                    # float('nan'), which stringifies to the truthy text 'nan'.
+                    # That inserted literal "nan" notes and, on overwrite rows,
+                    # wiped the real ones first (issue #118 / the blank-initial-
+                    # note bug). Same idiom the `date` field above already uses.
+                    _note_raw = row.get('initial_note')
+                    if _note_raw is None or pd.isna(_note_raw):
+                        initial_note = None
+                    else:
+                        initial_note = str(_note_raw).strip() or None
 
                     current_step = "checking experiment existence and overwrite rules"
                     if experiment is None and overwrite_flag:
@@ -721,11 +736,33 @@ class NewExperimentsUploadService:
                                     exp_id, PlanOverwrite(row=idx + 2, experiment_id=exp_id)
                                 ).fields_changed.extend(_fields_changed)
 
-                        # Clear existing notes when overwrite=True (full data replacement)
+                        # Clear existing notes when overwrite=True AND the row
+                        # supplies replacement text. A blank initial_note means
+                        # "leave the notes alone" (product decision, issue #118)
+                        # -- previously the clear ran unconditionally and left
+                        # nothing behind. The deleted texts are snapshotted to
+                        # ModificationsLog so the destruction is auditable.
                         current_step = "clearing existing notes for overwrite"
-                        db.query(ExperimentNotes).filter(
-                            ExperimentNotes.experiment_fk == experiment.id
-                        ).delete(synchronize_session=False)
+                        if initial_note:
+                            _old_texts = [
+                                t for (t,) in db.query(ExperimentNotes.note_text)
+                                .filter(ExperimentNotes.experiment_fk == experiment.id)
+                                .order_by(ExperimentNotes.id)
+                                .all()
+                            ]
+                            if _old_texts:
+                                db.add(ModificationsLog(
+                                    experiment_id=experiment.experiment_id,
+                                    experiment_fk=experiment.id,
+                                    modified_by="new_experiments_upload",
+                                    modification_type="delete",
+                                    modified_table="experiment_notes",
+                                    old_values={"note_texts": _old_texts},
+                                    new_values={"replaced_by_initial_note": initial_note},
+                                ))
+                                db.query(ExperimentNotes).filter(
+                                    ExperimentNotes.experiment_fk == experiment.id
+                                ).delete(synchronize_session=False)
 
                         if sample_id is not None:
                             experiment.sample_id = sample_id
@@ -743,13 +780,15 @@ class NewExperimentsUploadService:
                     # NOTE: When overwrite=True, all existing notes are cleared first (see above)
                     # NOTE: initial_note is NEVER copied from parent - only user-provided notes are created
                     # This ensures user's description always takes precedence (per requirement)
+                    # Issue #118: typed. The first note an experiment ever gets
+                    # is its 'description'; a note added to an experiment that
+                    # already has notes is an 'observation' (the legacy readers
+                    # show the oldest note as the description until PR3, and
+                    # the partial unique index allows one description).
                     if initial_note:
-                        note = ExperimentNotes(
-                            experiment_fk=experiment.id,
-                            experiment_id=experiment.experiment_id,
-                            note_text=initial_note,
+                        add_first_or_observation_note(
+                            db, experiment, initial_note, created_by=_NOTE_SOURCE,
                         )
-                        db.add(note)
 
                     # Row body completed without exception or early `continue`.
                     row_ok = True

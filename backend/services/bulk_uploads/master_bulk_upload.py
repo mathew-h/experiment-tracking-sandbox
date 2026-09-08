@@ -1,13 +1,27 @@
 """
 Master Results bulk upload — parses an uploaded Dashboard workbook.
 
-Dashboard sheet column spec (v3, issue #111, 2026-07-30):
-  Experiment ID | Description | Sample Collection Date | Duration (Days) |
+Dashboard sheet column spec (v4, issue #118, 2026-09-08):
+  Experiment ID | Observation Note | Sample Collection Date | Duration (Days) |
   NH4 (mM) |
   FL H2 (ppm)   | FL Gas Volume (mL) | FL Gas Pressure (psi) | Sample pH |
-  Sample Conductivity (mS/cm) | Modification | NMR Run Date |
+  Sample Conductivity (mS/cm) | Modification Note | NMR Run Date |
   Sampled Solution Volume (mL) | ICP Run Date | GC Run Date | XRD Run Date |
   OVERWRITE | DI H2 (ppm) | DI gas volume (mL) | DI gas pressure (psi)
+
+v4 renamed the two free-text columns: v3's 'Description' is 'Observation
+Note' and 'Modification' is 'Modification Note'. Both spellings are accepted
+for one deprecation window via _HEADER_ALIASES (internally the v3 names are
+canonical), and a v3 and a v4 workbook of the same data produce identical
+result rows and identical note rows.
+
+Typed notes (issue #118): both text columns are written twice during the
+transition -- to the legacy experimental_results columns Power BI still reads,
+and as experiment_notes rows (Observation Note -> 'observation', Modification
+Note -> 'modification', both scoped to the result) via
+backend.services.notes.sync_result_note, one slot per result so a re-upload
+updates rather than duplicates. A blank Observation Note writes NO note; the
+legacy column keeps its generated 'Master upload — day N' fallback until PR3.
 
 Several rows may describe one vial-day. Gas is drawn and run on one date and the
 liquid/solid fraction is collected later, so each fraction gets its own row;
@@ -45,12 +59,14 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from backend.services.bulk_uploads._id_match import normalize_id
+from backend.services.notes import sync_result_note
 from backend.services.bulk_uploads.replicate_routing import combine_replicate_id
 from backend.services.result_merge_utils import (
     TIMEPOINT_TOLERANCE_DAYS,
     normalize_timepoint,
 )
 from database.experiment_id_parser import split_timepoint_token
+from database.models.enums import NoteType
 
 _PSI_TO_MPA = 0.00689476
 _DASHBOARD_SHEET = "Dashboard"
@@ -71,6 +87,19 @@ _COLLECTION_DATE_SPELLINGS = (
     "Liquid/Solid Sample Date",
     "HPHT + Liquid/Solid Date Sampled",
 )
+
+# The two free-text columns. The canonical (internal) spelling is the v3 one;
+# the v4 template's 'Observation Note' / 'Modification Note' reach the row
+# reads through _HEADER_ALIASES (issue #118). Kept as v3 internally so the
+# _merge_group contract -- and the tests that exercise it with raw cell
+# dicts -- is unchanged.
+_OBSERVATION_NOTE = "Description"
+_MODIFICATION_NOTE = "Modification"
+
+# Provenance tag on the note rows this parser writes (experiment_notes.created_by).
+# Part of the slot key in sync_result_note, so a researcher's hand-written note
+# of the same type on the same result is never overwritten by an upload.
+_NOTE_SOURCE = "master_bulk_upload"
 
 # Canonical Dashboard headers, keyed by the lowercased sheet header.
 #
@@ -103,6 +132,15 @@ _HEADER_ALIASES: Dict[str, str] = {
     "hpht + liquid/solid date sampled": _COLLECTION_DATE,
     "sampled solution volume (ml)": "Sampled Solution Volume (mL)",
     "replicate": "Replicate",
+    # Free text -- Dashboard template v4 (issue #118) renamed 'Description' to
+    # 'Observation Note' and 'Modification' to 'Modification Note'. Both
+    # spellings are accepted for one deprecation window; the internal name is
+    # the v3 one (see _OBSERVATION_NOTE). Canonical spellings are included so
+    # a casing variant still normalises, same as 'overwrite' above.
+    "observation note": _OBSERVATION_NOTE,
+    "description": _OBSERVATION_NOTE,
+    "modification note": _MODIFICATION_NOTE,
+    "modification": _MODIFICATION_NOTE,
 }
 
 # H2 as a standalone token, so 'H2S (ppm)' and 'H2O' never look like a dropped
@@ -180,7 +218,7 @@ _LIQUID_SOLID_COLUMNS = (
 _RUN_DATE_COLUMNS = ("NMR Run Date", "ICP Run Date", "GC Run Date", "XRD Run Date")
 
 # Free text: distinct values joined, nothing discarded, so no warning needed.
-_JOINED_TEXT_COLUMNS = ("Description", "Modification")
+_JOINED_TEXT_COLUMNS = (_OBSERVATION_NOTE, _MODIFICATION_NOTE)
 
 
 @dataclass(frozen=True)
@@ -935,7 +973,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         # via ExperimentalResults.sync_brine_flag -- marked every row with a
         # blank Modification as brine-modified (12 of 140 flagged rows in the
         # dev DB). A merged group's cells are already _parse_text'd.
-        description = _parse_text(row.get("Description"))
+        description = _parse_text(row.get(_OBSERVATION_NOTE))
         sample_date = _parse_date(row.get(_COLLECTION_DATE))
         nmr_run_date = _parse_date(row.get("NMR Run Date"))
         icp_run_date = _parse_date(row.get("ICP Run Date"))
@@ -948,10 +986,15 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         ph = _parse_measurement_float(row.get("Sample pH"))
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
         sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
-        modification = _parse_text(row.get("Modification"))
+        modification = _parse_text(row.get(_MODIFICATION_NOTE))
 
         result_data: Dict[str, Any] = {
             "time_post_reaction": time_post_reaction,
+            # Legacy NOT NULL column. The generated fallback stays until PR3 of
+            # issue #118 removes the column from v_results_scalar (deleting it
+            # earlier would change what Power BI shows for a blank cell, and
+            # PR1 changes nothing a reader sees). The typed-note mirror below
+            # writes NO note for a blank cell -- a blank note is legal there.
             "description": description or f"Master upload — day {time_post_reaction}",
             "measurement_date": sample_date,
             "nmr_run_date": nmr_run_date,
@@ -995,6 +1038,20 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             # Apply modification description if provided
             if modification:
                 exp_result.brine_modification_description = modification
+
+            # Issue #118 dual-write, inside the same SAVEPOINT so a note
+            # failure rolls back only this vial-day. The legacy columns above
+            # remain what Power BI reads until PR3; the same text is mirrored
+            # into one typed-note slot per (result, type) so both sides agree
+            # after a re-upload, not just the first one. Blank -> no note.
+            if description:
+                sync_result_note(
+                    db, exp_result, NoteType.observation, description, created_by=_NOTE_SOURCE,
+                )
+            if modification:
+                sync_result_note(
+                    db, exp_result, NoteType.modification, modification, created_by=_NOTE_SOURCE,
+                )
 
             action = upsert.action
             if action == "created":

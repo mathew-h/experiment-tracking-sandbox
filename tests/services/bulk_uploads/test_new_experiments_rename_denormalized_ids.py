@@ -111,23 +111,21 @@ def test_bulk_rename_syncs_conditions_string(pg_session: Session):
 def test_bulk_rename_syncs_all_five_tables(pg_session: Session):
     """Full parity with PATCH /api/experiments/{id}.
 
-    `ExperimentNotes` is asserted separately below, NOT in the loop, because on
-    the `overwrite=True` branch a passing loop assertion would prove nothing:
+    `ExperimentNotes` is asserted separately below because on the
+    `overwrite=True` branch the notes behaviour is its own contract, fixed by
+    issue #118 (PR1) -- see docs/issues/issue-blank-initial-note-parses-to-nan.md:
 
-    1. The parser deletes *every* note for the experiment (`new_experiments.py`,
-       "clearing existing notes for overwrite") — and it does so AFTER the sync
-       has run, so the seeded row is gone by assertion time.
-    2. A blank `initial_note` cell does not parse to `None`: `pd.read_excel`
-       yields `float('nan')` and the parser stringifies it, so it inserts a
-       *fresh* note reading `"nan"` carrying `experiment.experiment_id` — the
-       new ID by construction, whatever the sync did.
+    1. A blank `initial_note` cell parses to None (pd.isna), not the literal
+       text "nan", so no placeholder note is inserted.
+    2. The overwrite branch clears existing notes only when the row supplies
+       replacement text. With a blank cell the seeded note SURVIVES, and its
+       denormalized experiment_id must carry the new ID -- which is the sync
+       this test exists to prove.
 
-    So the loop would have been green even with the notes sync deleted. The
-    notes sync is genuinely covered by
-    `tests/services/test_denormalized_ids.py::test_syncs_all_five_tables` and by
+    The notes sync is also covered by
+    `tests/services/test_denormalized_ids.py::test_syncs_all_five_tables` and
     `tests/api/test_experiments_rename_sync.py`, neither of which runs the
-    overwrite branch. The `"nan"` insert is a separate live bug in the locked
-    parser: `docs/issues/issue-blank-initial-note-parses-to-nan.md`.
+    overwrite branch.
     """
     exp = _seed_with_children(pg_session, "BULKSYNC_002", 8803002)
     exp_pk = exp.id
@@ -157,18 +155,19 @@ def test_bulk_rename_syncs_all_five_tables(pg_session: Session):
                 f"{model.__name__} not synced: {row.experiment_id!r}"
             )
 
-    # Notes: assert what actually happens, so this cannot read as a sync check.
-    assert pg_session.get(ExperimentNotes, seeded_note_pk) is None, (
-        "expected the overwrite branch to have deleted the seeded note"
-    )
+    # Notes: a blank initial_note on an overwrite row leaves the notes alone
+    # (issue #118 fix) -- the seeded note survives and is renamed.
+    pg_session.expire_all()
+    seeded = pg_session.get(ExperimentNotes, seeded_note_pk)
+    assert seeded is not None, "blank initial_note must not delete existing notes"
+    assert seeded.experiment_id == "BULKSYNC_002b-t3", "ExperimentNotes not synced"
     remaining = (
         pg_session.query(ExperimentNotes)
         .filter(ExperimentNotes.experiment_fk == exp_pk)
         .all()
     )
-    assert [n.note_text for n in remaining] == ["nan"], (
-        "expected the blank initial_note cell to have inserted a literal 'nan' "
-        "note — see docs/issues/issue-blank-initial-note-parses-to-nan.md"
+    assert [n.note_text for n in remaining] == ["seed"], (
+        "no literal 'nan' placeholder may be inserted for a blank cell"
     )
 
 
