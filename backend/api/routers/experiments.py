@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
-from database.models.enums import ExperimentStatus
+from database.models.enums import ExperimentStatus, NoteType
 from database.reactor_slot import derive_reactor_slot
 from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
@@ -38,6 +38,7 @@ from backend.api.schemas.notion_sync import (
 )
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
+from backend.services import notes as notes_service
 from backend.services.experiment_deletion import (
     DeleteImpact, collect_delete_impact, delete_experiment_cascade,
 )
@@ -1429,19 +1430,61 @@ def add_note(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> NoteResponse:
-    """Append a timestamped note to an experiment. 404 if the experiment does not exist."""
+    """Append a typed note to an experiment. 404 if the experiment does not exist.
+
+    Issue #118: `note_type` defaults to 'observation' and `result_id` is
+    optional, so the pre-existing body `{"note_text": ...}` is unchanged. The
+    database enforces scope, one-description-per-experiment and same-experiment
+    result ownership; the checks here only translate those into 422/409 with a
+    readable message instead of a 500.
+    """
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     if exp is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    note = ExperimentNotes(
-        experiment_id=experiment_id,
-        experiment_fk=exp.id,
-        note_text=payload.note_text,
-    )
-    db.add(note)
-    db.commit()
+
+    # Mirror of ck_note_scope, for the message.
+    if payload.note_type is NoteType.description and payload.result_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="A 'description' note is experiment-level; do not pass result_id.",
+        )
+    if payload.note_type in (NoteType.modification, NoteType.result_note) and payload.result_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"A '{payload.note_type.value}' note must name the result_id it describes.",
+        )
+    # Mirror of fk_note_result_same_experiment, for the message.
+    if payload.result_id is not None:
+        owner_fk = db.execute(
+            select(ExperimentalResults.experiment_fk)
+            .where(ExperimentalResults.id == payload.result_id)
+        ).scalar_one_or_none()
+        if owner_fk != exp.id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"result_id {payload.result_id} does not belong to experiment '{experiment_id}'.",
+            )
+
+    try:
+        note = notes_service.add_note(
+            db,
+            exp,
+            payload.note_text,
+            note_type=payload.note_type,
+            result_id=payload.result_id,
+            created_by=current_user.email,
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "uq_one_description_per_experiment" in str(exc.orig):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Experiment '{experiment_id}' already has a description note; edit it instead.",
+            )
+        raise
     db.refresh(note)
     return NoteResponse.model_validate(note)
 

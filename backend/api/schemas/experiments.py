@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from database.models.enums import ExperimentStatus
+from database.models.enums import ExperimentStatus, NoteType
 
 
 class ExperimentCreate(BaseModel):
@@ -117,7 +117,19 @@ class ExperimentDetailResponse(ExperimentResponse):
 
 
 class NoteCreate(BaseModel):
+    """Body of POST /experiments/{id}/notes.
+
+    Issue #118: `note_type` defaults to the scope-free 'observation' so every
+    existing caller keeps working unchanged. `result_id` scopes the note to one
+    of the experiment's own result rows; the router rejects a result of another
+    experiment (422) before the composite FK would, and the DB's ck_note_scope
+    is mirrored as a 422 for a friendlier message. Nothing here is required
+    beyond the text itself -- behaviour change comes from visibility, not
+    validators.
+    """
     note_text: str
+    note_type: NoteType = NoteType.observation
+    result_id: Optional[int] = None
 
 
 class NoteUpdate(BaseModel):
@@ -130,6 +142,10 @@ class NoteResponse(BaseModel):
     id: int
     experiment_id: str
     note_text: Optional[str] = None
+    note_type: NoteType = NoteType.observation
+    result_id: Optional[int] = None
+    created_by: Optional[str] = None
+    needs_review: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
