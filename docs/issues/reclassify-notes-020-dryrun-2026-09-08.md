@@ -1,6 +1,6 @@
 # `reclassify_notes_020` dry-run report — production mirror, 2026-09-09
 
-**Issue #118, PR2. Status: AWAITING AUDIT by Mat Hearl. `--apply` has NOT been run.**
+**Issue #118, PR2. Status: AWAITING FINAL SIGN-OFF by Mat Hearl. `--apply` has NOT been run.**
 
 Produced against a **mirror of the lab PC database**: the 2026-09-08 01:00 backup
 (`docs/sample_data/experiments_20260908_010003.sql`, data current to 2026-09-04)
@@ -15,13 +15,13 @@ History of this report:
 
 1. 2026-09-08, stale dev DB (data to ~May 2026): 1,009 experiments, review queue 1,682.
 2. 2026-09-08, production mirror, spec rules only: review queue **2,220**.
-3. **2026-09-09, production mirror + rule 4b** (this version): Mat ruled that GC
-   method / injection tags (`DI, GC-B`, `Gas, GC-A, DI`, ...) are not notes — they
-   matter to the person running the GC on the results sheet — so they are now
-   discarded. Review queue **1,891**.
+3. 2026-09-09, + rule 4b (GC method / injection tags discarded, Mat): **1,891**.
+4. **2026-09-09, + rules 4c/4d/4e** (this version, Mat: "discard all of those
+   remaining categories"): code-generated `Day N results` fallbacks, multi-fraction
+   lists, and the literal `0` are discarded. Review queue **1,242**.
 
-Everything else is applied exactly as written in the #118 spec. The **Audit notes**
-section is what the numbers say, including the parts that look wrong.
+Rules 1-3 and the spec's rule 4 are applied exactly as written in #118; rules
+4b-4e are Mat's audit decisions, each counted and listed separately below.
 
 Mirror size: 1,395 experiments · 1,536 notes · 2,461 results · 153 non-blank
 `brine_modification_description` · 14 `'nan'` notes.
@@ -69,8 +69,11 @@ PR1-era notes (created_by set, left untouched):   0
   or prefix:       'Master upload — day '
   blank (nothing to carry):                       109
   DISCARDED as filler (rule 4):                   146
-  DISCARDED as GC method tag (rule 4b):           329
-  PRESERVED as observation, needs_review=true:    1877
+  DISCARDED by rule 4b GC method tag:               329
+  DISCARDED by rule 4c code-generated fallback:     291
+  DISCARDED by rule 4d fraction list:               283
+  DISCARDED by rule 4e literal 0:                   75
+  PRESERVED as observation, needs_review=true:    1228
   already mirrored by PR1 dual-write (skipped):   0
 
   sample of 20 DISCARDED (result_id: text):
@@ -94,7 +97,7 @@ PR1-era notes (created_by set, left untouched):   0
     1390: 'Gas sample'
     1396: 'Liquid sample'
     1397: 'Liquid sample'
-  distinct GC method tags discarded (rule 4b), by frequency:
+  distinct texts discarded by rule 4b GC method tag, by frequency (329 rows):
       120  'DI, GC-B'
        56  'GC-B'
        45  'Gas, GC-A, DI'
@@ -110,23 +113,40 @@ PR1-era notes (created_by set, left untouched):   0
         4  'DI, GC-B, liq'
         4  'GC-B; Liq'
         4  'GC-B; Liquid'
-        4  'Gas, GC-A, DI; liquid'
-        3  'Gas (GC-A)'
-        2  'liquid, gas (GC-A)'
-        2  'GC-B; Liq; liquid'
-        2  'gas (GC-A), liquid'
-        2  'Gas; GC-A'
-        2  'Gas, GC-B; liquid'
-        1  'Full loop, GC-A, gas and liquid'
-        1  'DI, GC-B; Liquid; Solid'
-        1  'Full loop, GC-A'
-        1  'Gas (GC-A), liquid, solid'
-        1  'GC-A, liquid'
-        1  'Gas; Gas, GC-A, DI'
-        1  'GC-A; Liquid'
-        1  'Gas (GC-A), liquid'
-        1  'Gas, GC-A. DI'
-        1  'Gas, GC-A, DI; solid, liquid'
+  distinct texts discarded by rule 4c code-generated fallback, by frequency (291 rows):
+       63  'Day 1.0 results'
+       44  'Day 2.0 results'
+       41  'Day 6.0 results'
+       24  'Day 3.0 results'
+       18  'Day 7.0 results'
+       13  'Day 14.0 results'
+        5  'Day 9.0 results'
+        5  'Day 13.0 results'
+        5  'Day 19.0 results'
+        5  'Day 56.0 results'
+        5  'Day 10.0 results'
+        4  'Day 109.0 results'
+        4  'Day 8.0 results'
+        4  'Day 36.0 results'
+        4  'Day 16.0 results'
+  distinct texts discarded by rule 4d fraction list, by frequency (283 rows):
+       80  'gas, liquid'
+       65  'Gas, liquid'
+       31  'gas, liquid, solid'
+       26  'Gas and liquid sample'
+       14  'Liquid and gas sample'
+       12  'Solid, liquid, gas'
+        8  'Liquid, gas'
+        7  'Gas, liquid sample'
+        5  'Gas, liquid, solid'
+        4  'Liquid and Gas sample'
+        4  'Gas; Liquid'
+        3  'Gas and liquid'
+        3  'Gas, liquid, solid sample'
+        3  'Liquid and gas'
+        3  'Liquid, solid'
+  distinct texts discarded by rule 4e literal 0, by frequency (75 rows):
+       75  '0'
   sample of 20 PRESERVED (result_id: text):
     24: 'F1'
     25: 'N2 Experiment'
@@ -149,71 +169,66 @@ PR1-era notes (created_by set, left untouched):   0
     87: 'Pre Acidified'
     97: 'AOS Flush 2'
   top 15 PRESERVED texts by frequency (what the pattern did NOT catch):
-       80  'gas, liquid'
-       75  '0'
-       65  'Gas, liquid'
-       63  'Day 1.0 results'
-       44  'Day 2.0 results'
-       41  'Day 6.0 results'
-       31  'gas, liquid, solid'
        30  't=0'
-       26  'Gas and liquid sample'
        25  'End of exp.'
-       24  'Day 3.0 results'
-       18  'Day 7.0 results'
        18  'T=0'
        16  'Pre-rxn brine check'
-       14  'Liquid and gas sample'
+       13  'day 10 nmr'
+       12  't=1d, liquid'
+       12  't=7d liquid sample'
+       12  't=15d liquid sample'
+       10  'DAY 14 NMR'
+        9  'Day 7'
+        8  'Direct Inject'
+        7  'Day 14'
+        7  'DAY 7 NMR'
+        6  'day 30 nmr'
+        6  'day 38 nmr'
 
 -- Review queue (needs_review = true after --apply)
   'nan' legacy notes newly flagged:               14
-  preserved result descriptions:                  1877
-  TOTAL rows landing in the review queue:         1891
+  preserved result descriptions:                  1228
+  TOTAL rows landing in the review queue:         1242
 ==============================================================================
 before: {'description_notes': 0, 'experiments_with_description': 0, 'modification_notes': 0, 'observation_notes': 1536, 'review_queue': 0, 'notes_total': 1536}
 
 Dry run — pass --apply to commit changes.
 ```
 
-## Audit notes (what surprised me, not adjusted for unless stated)
+## Audit notes
 
-1. **Decided — rule 4b, GC method tags (329 rows) are discarded.** Mat,
-   2026-09-09: these tags say which GC method and injection produced a
-   reading, and belong to the researcher running the GC on the results bulk
-   upload sheet, not to the experiment's notes. The rule is narrow on purpose:
-   only text built from the tokens gas / liquid / liq / solid / DI / GC-A /
-   GC-B / FL / Full Loop and separators, containing at least one GC token. The
-   32 distinct texts it caught are listed in the raw output above. Texts with
-   any other word (`Cold dip tube liquid, GC-A`) and the `0; Gas, GC-A, DI`
-   variant are still preserved for review.
+1. **Decided — four filler families are discarded (rules 4b-4e).** Together they
+   remove 978 of the 2,206 descriptions the spec pattern alone would have queued:
 
-2. **Still pending — three more families the filler pattern misses.** They are
-   most of what is left in the 1,877 preserved rows:
+   | Rule | Family | Rows | Boundary |
+   |---|---|---|---|
+   | 4b | GC method / injection tags | 329 | only gas/liquid/liq/solid/DI/GC-A/GC-B/FL/Full Loop tokens + separators, with at least one GC token |
+   | 4c | Code-generated fallbacks from the other parsers | 291 | `Day N results`, `Analysis results [for Day N]` |
+   | 4d | Multi-fraction lists | 283 | two or more of gas/liquid/liq/solid/aqueous, any separator, optional `sample(s)` |
+   | 4e | The literal `0` | 75 | `0` or `0.0` only |
 
-   | Family | Rows | Examples |
-   |---|---|---|
-   | Code-generated fallbacks from the *other* parsers | **291** | `Day 1.0 results`, `Day 7.0 results`, `Analysis results for Day N` |
-   | Multi-fraction lists (no GC token) | **~250** | `gas, liquid`, `Gas, liquid`, `gas, liquid, solid`, `Gas and liquid sample`, `Liquid and gas sample` |
-   | The literal `0` (Excel blank read as zero; all created 2026-07-23 .. 08-31) | **75** | `0` |
+   Each rule is deliberately narrow: any extra word keeps a text out
+   (`Cold dip tube liquid, GC-A`, `0 rpm`, `t=1d, liquid` are all preserved).
+   The distinct texts each rule caught are listed in the raw output so the
+   boundary can be checked against real data.
 
-   The `Day N results` fallbacks are the same species as `Master upload — day`,
-   which the spec does discard, written by `scalar_results_service.py` when no
-   description was supplied. The fraction lists and the literal `0` are
-   placeholders. Treating all three as filler would drop the review queue from
-   **1,891 to roughly 1,270**; the remaining rows are the long tail of real free
-   text (`Pre-rxn brine check`, `End of exp.`, `t=0`, `AOS Flush 1`, ...).
-   **Not changed** — the spec says to report rather than tune, and whether a
-   fraction list is "no information" is a product call. Decision needed per
-   family before `--apply`.
+2. **What is left in the queue (1,228 descriptions + 14 `'nan'` notes).** The
+   remaining descriptions are the long tail of researcher-typed labels:
+   timepoint tags (`t=0`, `T=0`, `Day 7`, `t=7d liquid sample`), instrument
+   run labels (`day 10 nmr`, `DAY 14 NMR`, `Direct Inject`), and genuine
+   remarks (`End of exp.`, `Pre-rxn brine check`, `Sat for months`, `Not
+   stirred`, `AOS Flush 1`). Roughly 100 of them are timepoint tags that
+   duplicate `time_post_reaction_days`; they were left in because "t=7d liquid
+   sample" is a judgement call, not a pattern, and the queue is where judgement
+   calls go.
 
 3. **What happens to the review queue after `--apply`.** Nothing automatic.
    Each preserved row is an `observation` note on its result with
    `needs_review = true`. PR3 makes them visible (Results tab NOTE badge, the
    review endpoint, the Notes tab filter) and a researcher resolves each one:
-   keep, retype, edit, or delete. PR4 is gated on the queue being **empty**, so
-   every surviving row must be touched by hand — which is why the filler
-   decisions above matter. PR3 also needs a write path to clear `needs_review`
-   (the spec's review endpoint is read-only); scoped into PR3.
+   keep, retype, edit, or delete. PR4 is gated on the queue being **empty**.
+   PR3 also needs a write path to clear `needs_review` (the spec's review
+   endpoint is read-only); scoped into PR3.
 
 4. **`'nan'` notes grew from 4 to 14** since the 2026-08-05 measurement in the
    issue doc; the newest was written 2026-08-10. All ten new ones are
@@ -244,9 +259,9 @@ Dry run — pass --apply to commit changes.
 | `note_type = 'description'` rows | 0 | 1,277 |
 | experiments with a description | 0 | 1,277 (of 1,395; 104 have no notes, 14 hold only `'nan'`) |
 | `note_type = 'modification'` rows | 0 | 141 |
-| `note_type = 'observation'` rows | 1,536 | 259 legacy + 1,877 preserved = 2,136 |
-| `needs_review = true` (the review queue) | 0 | **1,891** |
-| notes total | 1,536 | 3,554 |
+| `note_type = 'observation'` rows | 1,536 | 259 legacy + 1,228 preserved = 1,487 |
+| `needs_review = true` (the review queue) | 0 | **1,242** |
+| notes total | 1,536 | 2,905 |
 
 The script exits non-zero if the post-apply review-queue count differs from the
 plan. These figures move with every upload on the lab PC between now and

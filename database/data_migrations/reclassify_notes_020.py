@@ -61,6 +61,17 @@ type, so this script never rewrites those.
      ('Cold dip tube liquid, GC-A') keeps the text out of this rule, and a
      plain fraction list with no GC token ('gas, liquid') is NOT covered.
      Reported on its own line so the audit can see the split.
+   * 4c (Mat, 2026-09-09): code-generated fallbacks from the OTHER parsers --
+     'Day 1.0 results', 'Analysis results for Day 7.0', 'Analysis results' --
+     written by scalar_results_service.py / scalar_results.py when no
+     description was supplied. Same species as 'Master upload — day'.
+   * 4d (Mat, 2026-09-09): multi-fraction lists -- two or more of gas / liquid
+     / liq / solid / aqueous joined by , ; / + & and, optional 'sample(s)' --
+     e.g. 'gas, liquid', 'Gas and liquid sample'. Placeholders for which phases
+     were sampled; the spec's rule-4 alternation only accepted one fraction.
+   * 4e (Mat, 2026-09-09): the literal '0' (also '0.0'): an Excel blank read
+     as zero, 75 rows all created 2026-07-23 .. 08-31.
+   Each of 4b-4e is counted and listed separately in the report.
    * blank: nothing to carry.
    * otherwise: an 'observation' note on the result with needs_review=true,
      created_at=er.created_at, created_by='reclassify_notes_020'. If an
@@ -124,6 +135,36 @@ GC_TAG_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# Rule 4c -- code-generated fallbacks from scalar_results_service.py /
+# scalar_results.py ('Day 7.0 results', 'Analysis results for Day 7.0',
+# 'Analysis results'). Mat, 2026-09-09.
+GENERATED_REGEX = re.compile(
+    r"^\s*(?:day\s+[0-9.]+\s+results|analysis\s+results(?:\s+for\s+day\s+[0-9.]+)?)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+
+# Rule 4d -- multi-fraction lists: two or more fraction tokens, any common
+# separator, optional trailing 'sample(s)'. Mat, 2026-09-09. Singletons are
+# already rule 4 (the spec pattern), which runs first.
+_FRACTION_LIST_TOKEN = r"(?:gas|liquid|liq|solid|aqueous)"
+_FRACTION_LIST_SEP = r"\s*(?:,|;|/|\+|&|\band\b)\s*"
+FRACTION_LIST_REGEX = re.compile(
+    rf"^\s*{_FRACTION_LIST_TOKEN}(?:{_FRACTION_LIST_SEP}{_FRACTION_LIST_TOKEN})+(?:\s+samples?)?\s*\.?\s*$",
+    re.IGNORECASE,
+)
+
+# Rule 4e -- the literal 0 (an Excel blank read as zero). Mat, 2026-09-09.
+ZERO_REGEX = re.compile(r"^\s*0(?:\.0+)?\s*$")
+
+# (report label, Plan attribute, compiled regex), applied in this order after
+# the spec's rule 4.
+EXTRA_FILLER_RULES = (
+    ("4b GC method tag", "discarded_gc_tags", GC_TAG_REGEX),
+    ("4c code-generated fallback", "discarded_generated", GENERATED_REGEX),
+    ("4d fraction list", "discarded_fraction_lists", FRACTION_LIST_REGEX),
+    ("4e literal 0", "discarded_zero", ZERO_REGEX),
+)
+
 SAMPLE_SIZE = 20
 TOP_N_PRESERVED = 15
 
@@ -149,6 +190,9 @@ class Plan:
     # Rule 4
     discarded_filler: List[Tuple[int, str]] = field(default_factory=list)          # (result_id, text)  rule 4
     discarded_gc_tags: List[Tuple[int, str]] = field(default_factory=list)         # (result_id, text)  rule 4b
+    discarded_generated: List[Tuple[int, str]] = field(default_factory=list)       # rule 4c
+    discarded_fraction_lists: List[Tuple[int, str]] = field(default_factory=list)  # rule 4d
+    discarded_zero: List[Tuple[int, str]] = field(default_factory=list)            # rule 4e
     blank_descriptions: int = 0
     observation_inserts: List[Tuple[int, int, str]] = field(default_factory=list)  # (result_id, experiment_fk, text)
     observation_already_mirrored: int = 0
@@ -286,8 +330,13 @@ def build_plan(db: Session) -> Plan:
         if is_filler:
             plan.discarded_filler.append((result_id, stripped))
             continue
-        if GC_TAG_REGEX.match(stripped):
-            plan.discarded_gc_tags.append((result_id, stripped))
+        matched_extra = False
+        for _label, attr, regex in EXTRA_FILLER_RULES:
+            if regex.match(stripped):
+                getattr(plan, attr).append((result_id, stripped))
+                matched_extra = True
+                break
+        if matched_extra:
             continue
         exists = db.execute(text(
             "SELECT 1 FROM experiment_notes"
@@ -348,16 +397,19 @@ def print_report(plan: Plan) -> None:
     p(f"  or prefix:       {MASTER_FALLBACK_PREFIX!r}")
     p(f"  blank (nothing to carry):                       {plan.blank_descriptions}")
     p(f"  DISCARDED as filler (rule 4):                   {len(plan.discarded_filler)}")
-    p(f"  DISCARDED as GC method tag (rule 4b):           {len(plan.discarded_gc_tags)}")
+    for label, attr, _regex in EXTRA_FILLER_RULES:
+        p(f"  {'DISCARDED by rule ' + label + ':':<50}{len(getattr(plan, attr))}")
     p(f"  PRESERVED as observation, needs_review=true:    {len(plan.observation_inserts)}")
     p(f"  already mirrored by PR1 dual-write (skipped):   {plan.observation_already_mirrored}")
     p("")
     p(f"  sample of {SAMPLE_SIZE} DISCARDED (result_id: text):")
     for rid, t in _sample(plan.discarded_filler):
         p(f"    {rid}: {t!r}")
-    p(f"  distinct GC method tags discarded (rule 4b), by frequency:")
-    for t, n in Counter(t for _r, t in plan.discarded_gc_tags).most_common():
-        p(f"    {n:5d}  {t!r}")
+    for label, attr, _regex in EXTRA_FILLER_RULES:
+        rows = getattr(plan, attr)
+        p(f"  distinct texts discarded by rule {label}, by frequency ({len(rows)} rows):")
+        for t, n in Counter(t for _r, t in rows).most_common(TOP_N_PRESERVED):
+            p(f"    {n:5d}  {t!r}")
     p(f"  sample of {SAMPLE_SIZE} PRESERVED (result_id: text):")
     for rid, _fk, t in _sample(plan.observation_inserts):
         p(f"    {rid}: {t[:90]!r}")

@@ -156,28 +156,64 @@ def test_gc_method_tags_are_discarded_as_rule_4b(migration_session):
     assert _notes(migration_session, exp) == []
 
 
-def test_gc_rule_does_not_swallow_fraction_lists_or_extra_words(migration_session):
-    """A plain fraction list has no GC token and is NOT covered by 4b (still a
-    pending decision); a tag with extra words is real text and is preserved."""
+def test_extra_words_keep_a_description_out_of_every_filler_rule(migration_session):
+    """Real text is preserved: a tag with extra words, a list with a stray
+    token, a sentence."""
     exp = _exp(migration_session, "RN_012", 62012)
-    kept = ["gas, liquid", "Cold dip tube liquid, GC-A", "0; Gas, GC-A, DI", "Pre-rxn brine check"]
+    kept = ["Cold dip tube liquid, GC-A", "0; Gas, GC-A, DI", "Pre-rxn brine check",
+            "t=1d, liquid", "End of exp.", "Day 7 looked cloudy"]
     for i, d in enumerate(kept):
         _result(migration_session, exp, float(i), d)
     plan = _apply(migration_session)
     mine = {r.id for r in exp.results}
-    assert [t for rid, t in plan.discarded_gc_tags if rid in mine] == []
+    for attr in ("discarded_gc_tags", "discarded_generated", "discarded_fraction_lists", "discarded_zero"):
+        assert [t for rid, t in getattr(plan, attr) if rid in mine] == [], attr
     preserved = sorted(t for rid, _fk, t in plan.observation_inserts if rid in mine)
     assert preserved == sorted(kept)
 
 
+def test_code_generated_fallbacks_are_discarded_as_rule_4c(migration_session):
+    exp = _exp(migration_session, "RN_013", 62013)
+    gen = ["Day 1.0 results", "Day 14.0 results", "Analysis results for Day 7.0", "Analysis results", "day 3 results"]
+    for i, d in enumerate(gen):
+        _result(migration_session, exp, float(i), d)
+    plan = _apply(migration_session)
+    mine = {r.id for r in exp.results}
+    assert sorted(t for rid, t in plan.discarded_generated if rid in mine) == sorted(gen)
+    assert _notes(migration_session, exp) == []
+
+
+def test_fraction_lists_are_discarded_as_rule_4d(migration_session):
+    exp = _exp(migration_session, "RN_014", 62014)
+    lists = ["gas, liquid", "Gas, liquid", "gas, liquid, solid", "Gas and liquid sample",
+             "Liquid and gas sample", "gas/liquid", "Gas; Liquid; Solid", "liquid + solid samples"]
+    for i, d in enumerate(lists):
+        _result(migration_session, exp, float(i), d)
+    plan = _apply(migration_session)
+    mine = {r.id for r in exp.results}
+    assert sorted(t for rid, t in plan.discarded_fraction_lists if rid in mine) == sorted(lists)
+    assert _notes(migration_session, exp) == []
+
+
+def test_literal_zero_is_discarded_as_rule_4e(migration_session):
+    exp = _exp(migration_session, "RN_015", 62015)
+    _result(migration_session, exp, 1.0, "0")
+    _result(migration_session, exp, 2.0, " 0.0 ")
+    _result(migration_session, exp, 3.0, "0 rpm")  # not the literal zero
+    plan = _apply(migration_session)
+    mine = {r.id for r in exp.results}
+    assert sorted(t for rid, t in plan.discarded_zero if rid in mine) == ["0", "0.0"]
+    assert [t for rid, _fk, t in plan.observation_inserts if rid in mine] == ["0 rpm"]
+
+
 def test_non_filler_description_is_preserved_for_review(migration_session):
     exp = _exp(migration_session, "RN_007", 62007)
-    r = _result(migration_session, exp, 7.0, "gas, liquid")  # NOT matched by the specified pattern
+    r = _result(migration_session, exp, 7.0, "Pre-rxn brine check")  # matched by no filler rule
     plan = _apply(migration_session)
-    assert (r.id, exp.id, "gas, liquid") in plan.observation_inserts
+    assert (r.id, exp.id, "Pre-rxn brine check") in plan.observation_inserts
     notes = _notes(migration_session, exp)
     assert [(n.note_type, n.result_id, n.note_text, n.needs_review, n.created_by) for n in notes] == [
-        (NoteType.observation, r.id, "gas, liquid", True, SOURCE_TAG),
+        (NoteType.observation, r.id, "Pre-rxn brine check", True, SOURCE_TAG),
     ]
 
 
