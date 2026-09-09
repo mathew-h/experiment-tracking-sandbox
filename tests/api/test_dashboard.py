@@ -240,10 +240,13 @@ def test_get_dashboard_with_ongoing_experiment(client, db_session):
     db_session.add(exp)
     db_session.flush()
 
+    # Issue #118 PR3: the card's description is the note TYPED 'description'.
+    from database.models.enums import NoteType
     note = ExperimentNotes(
         experiment_id="DASH_FULL_001",
         experiment_fk=exp.id,
         note_text="Dashboard integration test description",
+        note_type=NoteType.description,
         created_at=datetime.datetime.utcnow(),
     )
     db_session.add(note)

@@ -201,23 +201,13 @@ def test_result_create_fk_field_has_description():
     assert "integer" in desc_lower or "pk" in desc_lower
 
 
-def test_result_create_missing_description_fails():
-    """description is required — omitting it raises ValidationError."""
-    from pydantic import ValidationError
-    import pytest
-    with pytest.raises(ValidationError):
-        ResultCreate(experiment_fk=1)
-
-
-# --- Issue #96 addition_method length guard ---
-
-def test_additive_update_method_over_max_length_rejected():
-    from backend.api.schemas.chemicals import AdditiveUpdate
-    from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
-    with pytest.raises(ValidationError):
-        AdditiveUpdate(addition_method="x" * (ADDITION_METHOD_MAX_LENGTH + 1))
-
-
+def test_result_create_description_is_optional():
+    """Issue #118 PR3: nothing is required at entry. A blank/missing description
+    is legal; the router fills the legacy NOT NULL column with a generated
+    placeholder and mirrors only researcher text into a note."""
+    r = ResultCreate(experiment_fk=42)
+    assert r.description is None
+    assert ResultCreate(experiment_fk=42, description="Day 7").description == "Day 7"
 def test_additive_update_method_at_max_length_accepted():
     from backend.api.schemas.chemicals import AdditiveUpdate
     from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH

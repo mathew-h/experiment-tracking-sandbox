@@ -16,7 +16,8 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
-    NoteCreate, NoteResponse, NoteUpdate, ReplicateGroupMember, ReplicateGroupResponse,
+    NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse,
+    ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
     DeleteImpactResponse, ExperimentDeletedResponse,
@@ -90,13 +91,9 @@ def _build_list_item(db: Session, exp: Experiment) -> dict:
         {"exp_fk": exp.id},
     ).fetchone()
     item_data["additives_summary"] = additive_row[0] if additive_row else None
-    first_note = db.execute(
-        select(ExperimentNotes)
-        .where(ExperimentNotes.experiment_fk == exp.id)
-        .order_by(ExperimentNotes.id.asc())
-        .limit(1)
-    ).scalar_one_or_none()
-    item_data["condition_note"] = first_note.note_text if first_note else None
+    # Issue #118 PR3: the description is the note typed 'description'
+    # (Experiment.description hybrid), no longer the lowest-id note.
+    item_data["condition_note"] = exp.description
     return item_data
 
 
@@ -118,32 +115,19 @@ def list_experiments(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentListResponse:
     """List experiments with optional filters, joins for conditions/additives, and pagination."""
-    # First note per experiment (the "description" shown in the Description column) —
-    # same pattern as backend/api/routers/dashboard.py.
-    first_note_sq = (
-        select(ExperimentNotes.experiment_fk, func.min(ExperimentNotes.id).label("min_note_id"))
-        .group_by(ExperimentNotes.experiment_fk)
-        .subquery()
-    )
-    note_sq = (
-        select(ExperimentNotes.experiment_fk, ExperimentNotes.note_text)
-        .join(first_note_sq, ExperimentNotes.id == first_note_sq.c.min_note_id)
-        .subquery()
-    )
-
-    # Outer-join conditions/first-note so type, reactor #, and description filters run in
-    # SQL before pagination — filtering these in Python after offset/limit produced wrong
-    # totals and could return an empty page 1 even when matches existed (#64). Both joins
-    # are at most 1 row per experiment, so this cannot fan out rows or inflate
-    # `total`: note_sq is keyed by min note id, and ExperimentalConditions is 1:1
-    # with Experiment -- enforced by UNIQUE (experiment_fk) via the
-    # `uq_conditions_experiment_fk` constraint (issue #109). Before that
-    # constraint the 1:1 was assumed here and nowhere enforced, and a single
-    # duplicate row did fan out.
+    # Outer-join conditions so type and reactor # filters run in SQL before
+    # pagination — filtering these in Python after offset/limit produced wrong
+    # totals and could return an empty page 1 even when matches existed (#64).
+    # The join is at most 1 row per experiment, so it cannot fan out rows or
+    # inflate `total`: ExperimentalConditions is 1:1 with Experiment --
+    # enforced by UNIQUE (experiment_fk) via the `uq_conditions_experiment_fk`
+    # constraint (issue #109). The description filter below is a correlated
+    # scalar subquery on the note typed 'description' (Experiment.description
+    # hybrid, issue #118 PR3) -- the partial unique index guarantees one row,
+    # so it needs no join at all.
     stmt = (
         select(Experiment)
         .outerjoin(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
-        .outerjoin(note_sq, note_sq.c.experiment_fk == Experiment.id)
         .order_by(Experiment.experiment_number.desc())
     )
     if status:
@@ -163,7 +147,7 @@ def list_experiments(
     if reactor_number is not None:
         stmt = stmt.where(ExperimentalConditions.reactor_number == reactor_number)
     if description:
-        stmt = stmt.where(note_sq.c.note_text.ilike(f"%{description}%"))
+        stmt = stmt.where(Experiment.description.ilike(f"%{description}%"))
 
     if group_replicates:
         # Grouped mode: paginate over "top-level rows" (buckets). Bucket key
@@ -501,6 +485,47 @@ def get_group_rollup(
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
+@router.get("/notes/review", response_model=ReviewQueueResponse)
+def list_review_queue(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    researcher: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ReviewQueueResponse:
+    """Notes with needs_review = true across all experiments (issue #118 PR3).
+
+    These are the rows the 020 backfill could not place with certainty --
+    mostly legacy result descriptions preserved as 'observation' notes. Filter
+    by the owning experiment's `researcher`. Resolve a row with
+    PATCH /experiments/{id}/notes/{note_id} {"needs_review": false} (or edit,
+    retype, delete it). Registered before the /{experiment_id} routes so the
+    literal path is not captured as an experiment ID.
+    """
+    base = (
+        select(ExperimentNotes, Experiment.researcher, ExperimentalResults.time_post_reaction_days)
+        .join(Experiment, Experiment.id == ExperimentNotes.experiment_fk)
+        .outerjoin(ExperimentalResults, ExperimentalResults.id == ExperimentNotes.result_id)
+        .where(ExperimentNotes.needs_review.is_(True))
+    )
+    if researcher:
+        base = base.where(Experiment.researcher == researcher)
+    total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    rows = db.execute(
+        base.order_by(Experiment.experiment_id, ExperimentNotes.id).offset(skip).limit(limit)
+    ).all()
+    items = [
+        ReviewNoteItem(
+            **NoteResponse.model_validate(n).model_dump(),
+            experiment_fk=n.experiment_fk,
+            researcher=res,
+            time_post_reaction_days=day,
+        )
+        for n, res, day in rows
+    ]
+    return ReviewQueueResponse(items=items, total=total, skip=skip, limit=limit)
+
+
 @router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
 def get_experiment_results(
     experiment_id: str,
@@ -522,8 +547,20 @@ def get_experiment_results(
         .order_by(ExperimentalResults.time_post_reaction_days)
     ).scalars().all()
 
+    # Issue #118 PR3: every result-scoped typed note, one query for the whole
+    # experiment, grouped by result. has_modification_note is EXISTS over these
+    # -- computed here, deliberately not a calculation-engine field.
+    notes_by_result: dict[int, list[ExperimentNotes]] = {}
+    for n in db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.experiment_fk == exp.id, ExperimentNotes.result_id.isnot(None))
+        .order_by(ExperimentNotes.id)
+    ).scalars():
+        notes_by_result.setdefault(n.result_id, []).append(n)
+
     out = []
     for r in results:
+        r_notes = notes_by_result.get(r.id, [])
         scalar = db.execute(
             select(ScalarResults).where(ScalarResults.result_id == r.id)
         ).scalar_one_or_none()
@@ -541,7 +578,8 @@ def get_experiment_results(
             created_at=r.created_at,
             has_scalar=scalar is not None,
             has_icp=icp is not None,
-            has_brine_modification=r.has_brine_modification,
+            has_modification_note=any(n.note_type is NoteType.modification for n in r_notes),
+            notes=[NoteResponse.model_validate(n) for n in r_notes],
             brine_modification_description=r.brine_modification_description,
             grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
             h2_concentration=scalar.h2_concentration if scalar else None,
@@ -1080,7 +1118,16 @@ def get_experiment(
 
     cond_dict = ConditionsResponse.model_validate(cond).model_dump() if cond else None
     notes_list = [
-        {"id": n.id, "note_text": n.note_text, "created_at": n.created_at.isoformat()}
+        {
+            "id": n.id,
+            "note_text": n.note_text,
+            "note_type": n.note_type.value,
+            "result_id": n.result_id,
+            "created_by": n.created_by,
+            "needs_review": n.needs_review,
+            "created_at": n.created_at.isoformat(),
+            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+        }
         for n in notes
     ]
     mods_list = [
@@ -1497,7 +1544,12 @@ def patch_note(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> NoteResponse:
-    """Edit the text of an existing note. No-op if text is unchanged. Writes ModificationsLog."""
+    """Edit a note's text, retype it, or resolve its review flag (issue #118 PR3).
+
+    No-op if nothing changes. Writes one ModificationsLog row naming every field
+    that changed. Retyping obeys the DB scope rules (mirrored here as 422) and
+    the one-description index (409).
+    """
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
@@ -1510,23 +1562,53 @@ def patch_note(
     ).scalar_one_or_none()
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
-    if note.note_text == payload.note_text:
+
+    old_values: dict = {}
+    new_values: dict = {}
+    if payload.note_text is not None and payload.note_text != note.note_text:
+        old_values["note_text"], new_values["note_text"] = note.note_text, payload.note_text
+        note.note_text = payload.note_text
+    if payload.note_type is not None and payload.note_type is not note.note_type:
+        if payload.note_type is NoteType.description and note.result_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="A result-scoped note cannot become the 'description'; it is experiment-level.",
+            )
+        if payload.note_type in (NoteType.modification, NoteType.result_note) and note.result_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A '{payload.note_type.value}' note must be scoped to a result.",
+            )
+        old_values["note_type"], new_values["note_type"] = note.note_type.value, payload.note_type.value
+        note.note_type = payload.note_type
+    if payload.needs_review is not None and payload.needs_review != note.needs_review:
+        old_values["needs_review"], new_values["needs_review"] = note.needs_review, payload.needs_review
+        note.needs_review = payload.needs_review
+    if not new_values:
         return NoteResponse.model_validate(note)
-    old_text = note.note_text
-    note.note_text = payload.note_text
-    db.flush()
+
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        if "uq_one_description_per_experiment" in str(exc.orig):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Experiment '{experiment_id}' already has a description note.",
+            )
+        raise
     db.add(ModificationsLog(
         experiment_id=experiment_id,
         experiment_fk=exp.id,
         modified_by=current_user.email,
         modification_type="update",
         modified_table="experiment_notes",
-        old_values={"note_text": old_text},
-        new_values={"note_text": payload.note_text},
+        old_values=old_values,
+        new_values=new_values,
     ))
     db.commit()
     db.refresh(note)
-    log.info("note_updated", experiment_id=experiment_id, note_id=note_id)
+    log.info("note_updated", experiment_id=experiment_id, note_id=note_id, fields=sorted(new_values))
     return NoteResponse.model_validate(note)
 
 

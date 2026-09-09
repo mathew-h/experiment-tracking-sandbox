@@ -1,8 +1,9 @@
 from sqlalchemy import (
     Boolean, CheckConstraint, Column, DateTime, Enum as SQLEnum, Float, ForeignKey,
-    ForeignKeyConstraint, Index, Integer, String, Text, text,
+    ForeignKeyConstraint, Index, Integer, String, Text, select, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
@@ -46,44 +47,42 @@ class Experiment(Base):
     # XRD phase data linked to this experiment (Aeris time-series)
     xrd_phases = relationship("XRDPhase", back_populates="experiment", foreign_keys="[XRDPhase.experiment_fk]")
     
-    @property
+    # Issue #118 PR3: the description is the note TYPED 'description', not a row
+    # position. At most one exists per experiment (partial unique index
+    # uq_one_description_per_experiment), so uselist=False is exact. viewonly:
+    # writes go through backend/services/notes.py, never through this attribute.
+    description_note = relationship(
+        "ExperimentNotes",
+        primaryjoin="and_(ExperimentNotes.experiment_fk == Experiment.id, "
+                    "ExperimentNotes.note_type == 'description')",
+        uselist=False,
+        viewonly=True,
+    )
+
+    @hybrid_property
     def description(self):
+        """The experiment's description: the text of its 'description' note, or None.
+
+        Read-only. Before PR3 of issue #118 this was ``self.notes[0].note_text``
+        -- a row position that three readers resolved differently (min(id) in
+        the app, created_at in v_experiments). The SQL expression below lets the
+        experiments list and dashboard filter and select it in one query.
         """
-        Get the experiment description from the first note.
-        
-        Returns:
-            str: The text of the first note (oldest created), or None if no notes exist.
-        """
-        if self.notes and len(self.notes) > 0:
-            return self.notes[0].note_text
-        return None
-    
-    @description.setter
-    def description(self, value):
-        """
-        Set the experiment description by creating or updating the first note.
-        
-        Args:
-            value (str): The description text to set.
-        """
-        if not value:
-            return
-        
-        if self.notes and len(self.notes) > 0:
-            # Update the first note
-            self.notes[0].note_text = value
-        else:
-            # Create a new note
-            from datetime import datetime
-            note = ExperimentNotes(
-                experiment_id=self.experiment_id,
-                experiment_fk=self.id,
-                note_text=value,
-                created_at=datetime.now()
+        note = self.description_note
+        return note.note_text if note is not None else None
+
+    @description.inplace.expression
+    @classmethod
+    def _description_expression(cls):
+        return (
+            select(ExperimentNotes.note_text)
+            .where(
+                ExperimentNotes.experiment_fk == cls.id,
+                ExperimentNotes.note_type == NoteType.description,
             )
-            if not self.notes:
-                self.notes = []
-            self.notes.append(note)
+            .correlate(cls)
+            .scalar_subquery()
+        )
 
 class ExperimentNotes(Base):
     """Typed free text about an experiment, optionally scoped to one result row.

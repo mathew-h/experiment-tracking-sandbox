@@ -118,13 +118,18 @@ def create_result(
             )
             .values(is_primary_timepoint_result=False)
         )
+    # Issue #118 PR3: description is optional at entry. The legacy column is
+    # NOT NULL until PR4 drops it, so a blank gets a generated placeholder that
+    # is never mirrored (the 020 backfill treats such text as filler).
+    description = (data.get("description") or "").strip()
+    if not description:
+        day = data.get("time_post_reaction_days")
+        data["description"] = f"Day {day} results" if day is not None else "Analysis results"
     result = ExperimentalResults(**data)
     db.add(result)
     db.flush()
-    # Issue #118 dual-write: the legacy columns above stay the source Power BI
-    # reads until PR3; the same text is mirrored as typed notes so the two
-    # sides never disagree. Blank text writes no note -- nothing is required.
-    description = (data.get("description") or "").strip()
+    # Issue #118 dual-write: researcher-supplied text is mirrored as typed
+    # notes; the legacy columns are written too until PR4. Blank -> no note.
     if description:
         add_note(
             db, exp, description,

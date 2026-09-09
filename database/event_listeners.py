@@ -107,7 +107,16 @@ _VIEWS = [
     # ------------------------------------------------------------------
     # v_experiments
     # One row per experiment.  Includes key setup fields pulled from
-    # experimental_conditions and the first note entry as the description.
+    # experimental_conditions and the note typed 'description'.
+    #
+    # Correctness fix (issue #118 PR3), not a refactor: this used to take the
+    # first note by created_at. created_at is the transaction timestamp, so
+    # every note a bulk upload inserted in one transaction shared it and the
+    # LIMIT 1 was arbitrary; the app meanwhile took min(id). On the 2026-09-04
+    # production mirror the two disagreed on 16 experiments (e.g. Power BI
+    # showed "ICP Analysis - SERUM_JW_051-3_Day1_5x" where the app showed
+    # "SERUM_JW_051 with EDTA and pH 11"). The partial unique index
+    # uq_one_description_per_experiment guarantees at most one row here.
     # ------------------------------------------------------------------
     ("v_experiments", """
         CREATE VIEW v_experiments AS
@@ -128,8 +137,7 @@ _VIEWS = [
             (SELECT n.note_text
              FROM experiment_notes n
              WHERE n.experiment_fk = e.id
-             ORDER BY n.created_at ASC
-             LIMIT 1) AS description
+               AND n.note_type = 'description') AS description
         FROM experiments e
         LEFT JOIN experimental_conditions ec ON ec.experiment_fk = e.id
     """),
@@ -453,6 +461,10 @@ _VIEWS = [
     # experiment.  Sits between v_experiments and the result fact views
     # (v_results_scalar, v_results_h2, v_results_icp) so PowerBI report
     # authors have a single authoritative source for time-axis fields.
+    # modification_note (issue #118 PR3) replaces brine_modification_description:
+    # it is read from the 'modification' notes on the result, joined with '; '
+    # in id order when there is more than one (an upload's mirror and a
+    # hand-written one can coexist -- different created_by).
     # ------------------------------------------------------------------
     ("v_dim_timepoints", """
         CREATE VIEW v_dim_timepoints AS
@@ -462,7 +474,10 @@ _VIEWS = [
             er.time_post_reaction_days,
             er.time_post_reaction_bucket_days,
             er.cumulative_time_post_reaction_days,
-            er.brine_modification_description
+            (SELECT string_agg(n.note_text, '; ' ORDER BY n.id)
+             FROM experiment_notes n
+             WHERE n.result_id = er.id
+               AND n.note_type = 'modification') AS modification_note
         FROM experimental_results er
         JOIN experiments e ON e.id = er.experiment_fk
         WHERE er.is_primary_timepoint_result = TRUE
@@ -479,7 +494,6 @@ _VIEWS = [
             er.id                                    AS result_id,
             e.experiment_id,
             er.experiment_fk,
-            er.description                           AS sampling_description,
             er.time_post_reaction_days,
             er.time_post_reaction_bucket_days,
             er.cumulative_time_post_reaction_days,
@@ -666,6 +680,29 @@ _VIEWS = [
         JOIN icp_results icp        ON icp.result_id = er.id
         LEFT JOIN scalar_results sr ON sr.result_id  = er.id
         WHERE er.is_primary_timepoint_result = TRUE
+    """),
+
+    # ------------------------------------------------------------------
+    # v_notes (issue #118 PR3)
+    # One row per experiment note, typed and optionally scoped to a result.
+    # Power BI's entry point for this domain: join experiment_id to
+    # v_experiments and result_id to v_dim_timepoints / v_results_*.
+    # needs_review = true marks rows the 020 backfill could not place with
+    # certainty (the review queue); note_type is the enum as text.
+    # ------------------------------------------------------------------
+    ("v_notes", """
+        CREATE VIEW v_notes AS
+        SELECT
+            n.id                 AS note_id,
+            e.experiment_id,
+            n.result_id,
+            n.note_type::text    AS note_type,
+            n.note_text,
+            n.created_at,
+            n.created_by,
+            n.needs_review
+        FROM experiment_notes n
+        JOIN experiments e ON e.id = n.experiment_fk
     """),
 ]
 
