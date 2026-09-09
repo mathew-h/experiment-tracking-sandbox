@@ -200,7 +200,8 @@ Typed free text about an experiment, optionally scoped to one result row (issue 
   - Indexes `ix_experiment_notes_result_id`, `ix_experiment_notes_scope (experiment_fk, note_type)`.
 - **Relationships**: `experiment` (back-populates `Experiment.notes`); `result` (viewonly) ↔ `ExperimentalResults.notes` (viewonly, ordered by id). Viewonly because the DB cascade owns deletion and `experiment_fk` is shared with the composite FK.
 - **Write paths go through `backend/services/notes.py`**, the single definition of the legacy → typed mapping: `add_note` (explicit type/scope — the New Experiments `initial_note` is written with it as `description`, since that column has always been what the app showed as the experiment description) and `sync_result_note` (mirrors a legacy result column into one note *slot* per `(result_id, note_type, created_by)` — re-upload updates in place, clearing the column deletes the note).
-- **Transition state (PR1 of #118, 2026-09-08).** Every legacy write path now writes BOTH its old column and a typed note: `POST /api/results` (`description` → `observation`, `brine_modification_description` → `modification`), the Master Results Dashboard (`Description`/`Observation Note` → `observation`, `Modification`/`Modification Note` → `modification`), Timepoint Modifications (→ `modification`), New Experiments `initial_note` (→ `description`, always), and `POST /experiments/{id}/notes` (optional `note_type`, default `observation`, and `result_id`). **Readers are unchanged:** `Experiment.description` is still `notes[0].note_text`, the experiments list and dashboard still take `min(id)`, and `v_experiments` still orders by `created_at` — the three disagree when a bulk transaction gives several notes one `created_at`, which is the defect PR3 fixes by reading `note_type = 'description'`. Existing rows are all `observation` until `database/data_migrations/reclassify_notes_020.py` (PR2) is applied after audit.
+- **Dual-write (PR1 of #118, 2026-09-08).** Every legacy write path writes BOTH its old column and a typed note until PR4 drops the columns: `POST /api/results` (`description` → `observation`, `brine_modification_description` → `modification`), the Master Results Dashboard (`Description`/`Observation Note` → `observation`, `Modification`/`Modification Note` → `modification`), Timepoint Modifications (→ `modification`), New Experiments `initial_note` (→ `description`, always), and `POST /experiments/{id}/notes` (optional `note_type`, default `observation`, and `result_id`). `POST /api/results` no longer requires `description` (PR3); a blank gets a server-generated placeholder in the legacy column and no note.
+- **Readers (PR3 of #118, 2026-09-09) all resolve the description as the note typed `description`.** `Experiment.description` is a read-only `hybrid_property` over the viewonly `description_note` relationship, with a SQL expression (correlated scalar subquery) the experiments list (`condition_note`, the `description` filter), the dashboard reactor cards and `v_experiments` all use — so the three cannot disagree. This is a **correctness fix**: the old `v_experiments` took the first note by `created_at` (the transaction timestamp, shared by every note a bulk upload wrote in one transaction) while the app took `min(id)`; on the 2026-09-04 production mirror the two disagreed on 16 experiments. `GET /api/experiments/{id}/results` returns `has_modification_note` (EXISTS over `modification` notes — computed in the router, deliberately **not** a calculation-engine field) and the result's `notes`; the legacy `has_brine_modification` left the response. `GET /api/experiments/notes/review` lists `needs_review` rows across experiments (filter `researcher`); `PATCH /experiments/{id}/notes/{note_id}` accepts `note_text`, `note_type` (scope rules → 422, second description → 409) and `needs_review` (`false` resolves a review-queue row). Backfill: `database/data_migrations/reclassify_notes_020.py` (PR2; rehearsed on the mirror 2026-09-09, review queue 1,242).
 - **Blank `initial_note` bug fixed (was `docs/issues/issue-blank-initial-note-parses-to-nan.md`):** a blank cell parses to `None`, no `"nan"` note is inserted, and an `overwrite=TRUE` row clears existing notes only when it supplies replacement text — the deleted texts are snapshotted to `ModificationsLog` (`modified_table='experiment_notes'`, `old_values.note_texts`). The four historical `'nan'` notes are handled by the PR2 backfill (`needs_review`, never promoted).
 
 ### `ModificationsLog`
@@ -292,8 +293,8 @@ Parent table for all result data at a specific timepoint.
 - **Key Fields**:
   - `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`.
   - `is_primary_timepoint_result`: Boolean flag for the main result record of a timepoint (unique per experiment+bucket).
-  - `description` (required, NOT NULL). **Legacy — being retired by issue #118.** Rendered nowhere in the app; reaches Power BI only as `v_results_scalar.sampling_description`. Since PR1 every write path also mirrors researcher-supplied text into an `observation` note on the result (`ExperimentNotes.result_id`); code-generated fallbacks (`Analysis results for Day N`, `Master upload — day N`) satisfy the NOT NULL and are never mirrored. Dropped in PR4.
-  - `brine_modification_description` / `has_brine_modification`: **legacy, being retired by issue #118.** Mirrored into a `modification` note since PR1; the badge switches to `has_modification_note` (EXISTS over notes) in PR3 and both columns drop in PR4.
+  - `description` (NOT NULL). **Legacy — retired by issue #118, dropped in PR4.** Rendered nowhere in the app and, since PR3, exposed to no view (`v_results_scalar.sampling_description` is gone). Optional at entry since PR3: researcher text is mirrored into an `observation` note on the result, a blank gets a code-generated placeholder (`Day N results`) that is never mirrored.
+  - `brine_modification_description` / `has_brine_modification`: **legacy — retired by issue #118, dropped in PR4.** Mirrored into a `modification` note since PR1; since PR3 the MOD badge, the results API and `v_dim_timepoints.modification_note` all read the notes, not these columns.
   - `UNIQUE (experiment_fk, id)` (`uq_results_experiment_fk_id`): target of the notes composite FK; redundant with the PK on its own.
 - **Relationships**: `scalar_data` (One-to-One `ScalarResults`), `icp_data` (One-to-One `ICPResults`), `files` (One-to-Many `ResultFiles`).
 
@@ -449,6 +450,22 @@ Defined in `database/models/enums.py`.
 ## Reporting Views (Power BI)
 
 SQL views are created at application startup so Power BI (and other reporting tools) can query flattened, one-row-per-primary-result datasets. View creation runs in `database/event_listeners.py` on engine connect: views are dropped and recreated so their definitions stay in sync with the current schema.
+
+### `v_experiments` — `description` (issue #118 PR3)
+
+`description` is the note typed `'description'` (`WHERE n.note_type = 'description'`, at most one per experiment by the partial unique index). It replaced `ORDER BY n.created_at ASC LIMIT 1`, which was **wrong, not merely different**: `created_at` is the transaction timestamp, so every note a bulk upload inserted in one transaction shared it and the `LIMIT 1` was arbitrary. Recreated by Alembic `c4d8f1a2b6e7` and on API startup.
+
+### `v_dim_timepoints` — `modification_note` (issue #118 PR3)
+
+`brine_modification_description` was replaced by `modification_note`: the result's `'modification'` notes, `'; '`-joined in id order when more than one exists (an upload's mirror and a hand-written one can coexist under different `created_by`). NULL when none.
+
+### `v_results_scalar` — `sampling_description` dropped (issue #118 PR3)
+
+The legacy `experimental_results.description` column is no longer exposed anywhere; its researcher-written content lives in `v_notes` as `observation` rows scoped to the result.
+
+### `v_notes` (issue #118 PR3)
+
+One row per experiment note — Power BI's entry point for this domain. Columns: `note_id`, `experiment_id`, `result_id` (NULL for experiment-level notes), `note_type` (enum as text: `description` / `modification` / `observation` / `result_note`), `note_text`, `created_at`, `created_by`, `needs_review`. Join `experiment_id` to `v_experiments`, `result_id` to `v_dim_timepoints` / `v_results_*`. `WHERE needs_review` is the review queue left by the 020 backfill.
 
 ### `v_experiment_additives_summary`
 
