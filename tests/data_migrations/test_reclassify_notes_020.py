@@ -140,6 +140,36 @@ def test_filler_descriptions_are_discarded(migration_session):
     assert _notes(migration_session, exp) == []
 
 
+def test_gc_method_tags_are_discarded_as_rule_4b(migration_session):
+    """Mat, 2026-09-09: GC method / injection tags belong to the person running
+    the GC, not to the experiment's notes."""
+    exp = _exp(migration_session, "RN_011", 62011)
+    tags = ["DI, GC-B", "GC-B", "Gas, GC-A, DI", "Gas (GC-A), liquid, solid", "Full loop, GC-A",
+            "DI, GC-B; Liq", "Gas, GC-A. DI", "gas and liquid, GC-B"]
+    for i, d in enumerate(tags):
+        _result(migration_session, exp, float(i), d)
+    plan = _apply(migration_session)
+    mine = {r.id for r in exp.results}
+    got = sorted(t for rid, t in plan.discarded_gc_tags if rid in mine)
+    assert got == sorted(tags)
+    assert [x for x in plan.observation_inserts if x[0] in mine] == []
+    assert _notes(migration_session, exp) == []
+
+
+def test_gc_rule_does_not_swallow_fraction_lists_or_extra_words(migration_session):
+    """A plain fraction list has no GC token and is NOT covered by 4b (still a
+    pending decision); a tag with extra words is real text and is preserved."""
+    exp = _exp(migration_session, "RN_012", 62012)
+    kept = ["gas, liquid", "Cold dip tube liquid, GC-A", "0; Gas, GC-A, DI", "Pre-rxn brine check"]
+    for i, d in enumerate(kept):
+        _result(migration_session, exp, float(i), d)
+    plan = _apply(migration_session)
+    mine = {r.id for r in exp.results}
+    assert [t for rid, t in plan.discarded_gc_tags if rid in mine] == []
+    preserved = sorted(t for rid, _fk, t in plan.observation_inserts if rid in mine)
+    assert preserved == sorted(kept)
+
+
 def test_non_filler_description_is_preserved_for_review(migration_session):
     exp = _exp(migration_session, "RN_007", 62007)
     r = _result(migration_session, exp, 7.0, "gas, liquid")  # NOT matched by the specified pattern

@@ -52,6 +52,15 @@ type, so this script never rewrites those.
    * matches ^\\s*(gas|liquid|solid|aqueous|gas\\s*\\+\\s*liquid)(\\s+sample)?\\s*$
      case-insensitively, or starts with 'Master upload — day ': discarded --
      it carries no information (the second is text this codebase generated).
+   * 4b (Mat, 2026-09-09): a GC method / injection tag -- text built only from
+     the tokens gas, liquid, liq, solid, DI, GC-A, GC-B, FL, Full Loop (with
+     optional parenthesised method, e.g. 'Gas (GC-A)') joined by , ; . / + and,
+     and containing at least one GC token -- is discarded. These say which GC
+     method produced a reading; they matter to the person running the GC on
+     the results sheet, not as a note on the experiment. Any extra word
+     ('Cold dip tube liquid, GC-A') keeps the text out of this rule, and a
+     plain fraction list with no GC token ('gas, liquid') is NOT covered.
+     Reported on its own line so the audit can see the split.
    * blank: nothing to carry.
    * otherwise: an 'observation' note on the result with needs_review=true,
      created_at=er.created_at, created_by='reclassify_notes_020'. If an
@@ -83,6 +92,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -101,6 +111,18 @@ SOURCE_TAG = "reclassify_notes_020"
 # Rule 4 filler pattern -- exactly as specified in issue #118.
 FILLER_REGEX = r"^\s*(gas|liquid|solid|aqueous|gas\s*\+\s*liquid)(\s+sample)?\s*$"
 MASTER_FALLBACK_PREFIX = "Master upload — day "
+
+# Rule 4b -- GC method / injection tags (Mat, 2026-09-09). A text made only of
+# these tokens and separators, containing at least one GC token, is a tag for
+# whoever runs the GC, not a note. Python `re`, applied to the trimmed text.
+_GC_TOKENS = r"(?:gc-a|gc-b|di|fl|full\s*loop)"
+_FRACTION_TOKENS = r"(?:gas|liquid|liq|solid)"
+_TAG_TOKEN = rf"(?:{_FRACTION_TOKENS}|{_GC_TOKENS})(?:\s*\(\s*{_GC_TOKENS}\s*\))?"
+_TAG_SEP = r"\s*(?:,|;|\.|/|\+|\band\b)\s*"
+GC_TAG_REGEX = re.compile(
+    rf"^(?=.*{_GC_TOKENS})\s*{_TAG_TOKEN}(?:{_TAG_SEP}{_TAG_TOKEN})*\s*\.?\s*$",
+    re.IGNORECASE,
+)
 
 SAMPLE_SIZE = 20
 TOP_N_PRESERVED = 15
@@ -125,7 +147,8 @@ class Plan:
     modification_inserts: List[Tuple[int, int, str]] = field(default_factory=list)  # (result_id, experiment_fk, text)
     modification_already_mirrored: int = 0
     # Rule 4
-    discarded_filler: List[Tuple[int, str]] = field(default_factory=list)          # (result_id, text)
+    discarded_filler: List[Tuple[int, str]] = field(default_factory=list)          # (result_id, text)  rule 4
+    discarded_gc_tags: List[Tuple[int, str]] = field(default_factory=list)         # (result_id, text)  rule 4b
     blank_descriptions: int = 0
     observation_inserts: List[Tuple[int, int, str]] = field(default_factory=list)  # (result_id, experiment_fk, text)
     observation_already_mirrored: int = 0
@@ -263,6 +286,9 @@ def build_plan(db: Session) -> Plan:
         if is_filler:
             plan.discarded_filler.append((result_id, stripped))
             continue
+        if GC_TAG_REGEX.match(stripped):
+            plan.discarded_gc_tags.append((result_id, stripped))
+            continue
         exists = db.execute(text(
             "SELECT 1 FROM experiment_notes"
             " WHERE result_id = :rid AND note_type = 'observation' AND btrim(note_text) = :t LIMIT 1"
@@ -321,13 +347,17 @@ def print_report(plan: Plan) -> None:
     p(f"  filler pattern:  {FILLER_REGEX}")
     p(f"  or prefix:       {MASTER_FALLBACK_PREFIX!r}")
     p(f"  blank (nothing to carry):                       {plan.blank_descriptions}")
-    p(f"  DISCARDED as filler:                            {len(plan.discarded_filler)}")
+    p(f"  DISCARDED as filler (rule 4):                   {len(plan.discarded_filler)}")
+    p(f"  DISCARDED as GC method tag (rule 4b):           {len(plan.discarded_gc_tags)}")
     p(f"  PRESERVED as observation, needs_review=true:    {len(plan.observation_inserts)}")
     p(f"  already mirrored by PR1 dual-write (skipped):   {plan.observation_already_mirrored}")
     p("")
     p(f"  sample of {SAMPLE_SIZE} DISCARDED (result_id: text):")
     for rid, t in _sample(plan.discarded_filler):
         p(f"    {rid}: {t!r}")
+    p(f"  distinct GC method tags discarded (rule 4b), by frequency:")
+    for t, n in Counter(t for _r, t in plan.discarded_gc_tags).most_common():
+        p(f"    {n:5d}  {t!r}")
     p(f"  sample of {SAMPLE_SIZE} PRESERVED (result_id: text):")
     for rid, _fk, t in _sample(plan.observation_inserts):
         p(f"    {rid}: {t[:90]!r}")
