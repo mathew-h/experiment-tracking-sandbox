@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Modal, Button } from '@/components/ui'
 import { resultsApi, type ResultCreate, type ScalarCreate } from '@/api/results'
+import { experimentsApi } from '@/api/experiments'
+import { NOTE_TYPE_LABELS, type NoteType } from '@/api/noteTypes'
 
 const PSI_TO_MPA = 0.00689476
 
@@ -27,31 +29,38 @@ interface Props {
   idTimepointDays?: number | null
 }
 
+/** Note types that make sense on a timepoint (issue #118). 'description' is
+ *  experiment-level and lives on the Notes tab. */
+const RESULT_NOTE_TYPES: NoteType[] = ['observation', 'modification', 'result_note']
+
+interface NoteDraft {
+  note_type: NoteType
+  text: string
+}
+
 interface FormState {
   measurement_date: string
   time_post_reaction_days: string
-  description: string
   gross_ammonium_concentration_mM: string
   h2_concentration: string
   gas_sampling_pressure_psi: string
   gas_sampling_volume_ml: string
   final_ph: string
   final_conductivity_mS_cm: string
-  brine_modification_description: string
+  notes: NoteDraft[]
 }
 
 function buildInitial(idTimepointDays?: number | null): FormState {
   return {
     measurement_date: todayIso(),
     time_post_reaction_days: idTimepointDays != null ? String(idTimepointDays) : '',
-    description: 'Manual entry',
     gross_ammonium_concentration_mM: '',
     h2_concentration: '',
     gas_sampling_pressure_psi: '',
     gas_sampling_volume_ml: '',
     final_ph: '',
     final_conductivity_mS_cm: '',
-    brine_modification_description: '',
+    notes: [{ note_type: 'observation', text: '' }],
   }
 }
 
@@ -66,7 +75,6 @@ function validate(f: FormState, idTimepointDays?: number | null): string | null 
   if (!f.measurement_date) return 'Measurement date is required.'
   if (f.time_post_reaction_days.trim() === '') return 'Time post reaction is required.'
   if (isNaN(parseFloat(f.time_post_reaction_days))) return 'Time post reaction must be a number.'
-  if (!f.description.trim()) return 'Description is required.'
   for (const key of ['h2_concentration', 'gas_sampling_pressure_psi', 'gas_sampling_volume_ml'] as const) {
     const v = f[key].trim()
     if (v !== '') {
@@ -77,7 +85,9 @@ function validate(f: FormState, idTimepointDays?: number | null): string | null 
   return null
 }
 
-/** Two-step result entry modal: POST /api/results then POST /api/results/scalar. */
+/** Result entry modal: POST /api/results, POST /api/results/scalar, then one
+ *  POST /experiments/{id}/notes per non-blank typed note (issue #118). Nothing
+ *  textual is required. */
 export function AddResultsModal({ open, onClose, experimentFk, experimentId, idTimepointDays }: Props) {
   const [form, setForm] = useState<FormState>(() => buildInitial(idTimepointDays))
   const [serverError, setServerError] = useState<string | null>(null)
@@ -93,11 +103,28 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId, idT
         time_post_reaction_days: idTimepointDays != null ? String(idTimepointDays) : f.time_post_reaction_days,
       }))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, idTimepointDays])
 
-  function set(field: keyof FormState, value: string) {
+  function set(field: Exclude<keyof FormState, 'notes'>, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
+  }
+
+  function setNote(index: number, patch: Partial<NoteDraft>) {
+    setForm((f) => ({
+      ...f,
+      notes: f.notes.map((n, i) => (i === index ? { ...n, ...patch } : n)),
+    }))
+  }
+
+  function addNoteRow() {
+    setForm((f) => ({ ...f, notes: [...f.notes, { note_type: 'observation', text: '' }] }))
+  }
+
+  function removeNoteRow(index: number) {
+    setForm((f) => ({
+      ...f,
+      notes: f.notes.length === 1 ? [{ note_type: 'observation', text: '' }] : f.notes.filter((_, i) => i !== index),
+    }))
   }
 
   const mutation = useMutation({
@@ -105,9 +132,7 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId, idT
       const resultPayload: ResultCreate = {
         experiment_fk: experimentFk,
         time_post_reaction_days: parseFloat(f.time_post_reaction_days),
-        description: f.description.trim(),
         measurement_date: f.measurement_date || null,
-        brine_modification_description: f.brine_modification_description.trim() || null,
       }
       const result = await resultsApi.createResult(resultPayload)
 
@@ -126,9 +151,16 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId, idT
         final_conductivity_mS_cm: parseOptFloat(f.final_conductivity_mS_cm),
       }
       await resultsApi.createScalar(scalarPayload)
+
+      for (const n of f.notes) {
+        const text = n.text.trim()
+        if (!text) continue
+        await experimentsApi.addNote(experimentId, text, { note_type: n.note_type, result_id: result.id })
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['experiment-results', experimentId] })
+      queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
       setForm(buildInitial(idTimepointDays))
       setServerError(null)
       onClose()
@@ -216,18 +248,6 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId, idT
               </p>
             )}
           </div>
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className={labelCls}>Description <span className="text-red-400">*</span></label>
-          <input
-            type="text"
-            value={form.description}
-            onChange={(e) => set('description', e.target.value)}
-            className={inputCls}
-            required
-          />
         </div>
 
         {/* Row 2: NH4 + H2 */}
@@ -318,16 +338,49 @@ export function AddResultsModal({ open, onClose, experimentFk, experimentId, idT
           </div>
         </div>
 
-        {/* Sampling modification */}
+        {/* Notes (issue #118): typed, optional, as many as needed */}
         <div>
-          <label className={labelCls}>Sampling modification</label>
-          <textarea
-            rows={2}
-            placeholder="optional — e.g. brine replaced with DI water"
-            value={form.brine_modification_description}
-            onChange={(e) => set('brine_modification_description', e.target.value)}
-            className="w-full text-xs px-2 py-1.5 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
-          />
+          <p className={labelCls}>Notes <span className="text-ink-muted text-[10px]">optional</span></p>
+          <div className="space-y-2">
+            {form.notes.map((n, i) => (
+              <div key={i} className="flex items-start gap-2" data-testid="note-row">
+                <select
+                  aria-label={`Note ${i + 1} type`}
+                  value={n.note_type}
+                  onChange={(e) => setNote(i, { note_type: e.target.value as NoteType })}
+                  className="text-xs px-2 py-1.5 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-red-500 shrink-0"
+                >
+                  {RESULT_NOTE_TYPES.map((t) => (
+                    <option key={t} value={t}>{NOTE_TYPE_LABELS[t]}</option>
+                  ))}
+                </select>
+                <textarea
+                  aria-label={`Note ${i + 1} text`}
+                  rows={2}
+                  placeholder={
+                    n.note_type === 'modification'
+                      ? 'what was done to the vial — e.g. brine replaced with DI water'
+                      : 'e.g. liquid slightly cloudy'
+                  }
+                  value={n.text}
+                  onChange={(e) => setNote(i, { text: e.target.value })}
+                  className="w-full text-xs px-2 py-1.5 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove note ${i + 1}`}
+                  onClick={() => removeNoteRow(i)}
+                  className="p-1 text-ink-muted hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+          {/* type="button": inside the form, the default submit type would save the result on click */}
+          <Button type="button" variant="ghost" size="xs" className="mt-1" onClick={addNoteRow}>
+            + Add another note
+          </Button>
         </div>
 
         {serverError && (

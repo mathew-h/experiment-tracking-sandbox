@@ -18,8 +18,8 @@ vi.mock('@/components/ui', async () => {
 })
 
 const sampleNotes = [
-  { id: 1, note_text: 'First note', created_at: '2026-01-01T00:00:00Z', updated_at: null },
-  { id: 2, note_text: 'Second note', created_at: '2026-01-02T00:00:00Z', updated_at: null },
+  { id: 1, note_text: 'First note', note_type: 'description' as const, result_id: null, created_by: null, needs_review: false, created_at: '2026-01-01T00:00:00Z', updated_at: null },
+  { id: 2, note_text: 'Second note', note_type: 'observation' as const, result_id: null, created_by: null, needs_review: false, created_at: '2026-01-02T00:00:00Z', updated_at: null },
 ]
 
 function wrap(ui: React.ReactElement) {
