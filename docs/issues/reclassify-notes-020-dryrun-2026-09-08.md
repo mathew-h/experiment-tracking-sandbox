@@ -267,3 +267,27 @@ The script exits non-zero if the post-apply review-queue count differs from the
 plan. These figures move with every upload on the lab PC between now and
 `--apply`; the lab-PC dry run is the number that has to match, this report is
 the rehearsal.
+
+## Rehearsal: `--apply` on the production mirror (2026-09-09)
+
+Mat approved the plan above ("apply"). Run on the dev-DB mirror, with a
+`pg_dump -Fc` of the pre-apply state taken first.
+
+```
+after:  {'description_notes': 1277, 'experiments_with_description': 1277,
+         'modification_notes': 141, 'observation_notes': 1487,
+         'review_queue': 1242, 'notes_total': 2905}
+Applied. Review queue = 1242 (matches the dry-run plan).
+```
+
+Every figure matches the "Expected state" table exactly. Checks run afterwards:
+
+| Check | Result |
+|---|---|
+| Second dry run (idempotency) | 0 to promote, 0 to insert, 0 newly flagged; 1,277 "already promoted", 141 + 1,228 "already mirrored" |
+| Legacy `min(id)` reader vs typed `description`, per experiment | **1,277 agree, 0 disagree** — the app's description text is unchanged for every experiment |
+| `v_experiments` (`ORDER BY created_at`) vs typed `description` | **16 disagree.** In every case the view picks a note with a higher id but earlier `created_at` — e.g. `SERUM_JW_051-3` shows `ICP Analysis - SERUM_JW_051-3_Day1_5x` in Power BI while the app shows `SERUM_JW_051 with EDTA and pH 11`. This is the created_at-vs-min(id) defect the spec names; PR3's `WHERE note_type = 'description'` fixes it, and these 16 are the rows whose Power BI description will change. |
+| Experiments with notes but no description | 27 = the 14 `'nan'` experiments + 13 experiments whose only notes are the new result-scoped ones |
+| `modification` notes vs non-blank `brine_modification_description` | 141 vs 153. The 12 unmirrored rows all hold the literal `'nan'` — the rows `fix_nan_text_fields_019.py` cleans. **019 has not been applied to production either**; run it on the lab PC before or alongside 020 (its dry run on this mirror reports the same 12). Rule 3 skips them correctly. |
+
+Pre-apply snapshot: session scratchpad `dev_mirror_pre_apply.dump` (not committed).
