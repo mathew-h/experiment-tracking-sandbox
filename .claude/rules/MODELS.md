@@ -357,7 +357,26 @@ Stores solution chemistry measurements.
 
 ### `ICPResults`
 Stores ICP-OES elemental analysis data.
-- **Fixed Columns**: `fe`, `si`, `ni`, `cu`, `mo`, `ca`, `zn`, `mn`, `cr`, `co`, `mg`, `al`, `sr`, `y`, `nb`, `sb`, `cs`, `ba`, `nd`, `gd`, `pt`, `rh`, `ir`, `pd`, `ru`, `os`, `tl`, `ag`, `ce`, `k`, `la`, `na`, `pb`, `sc`, `th`, `v`, `s` (Float, ppm).
+- **Fixed Columns**: `fe`, `si`, `ni`, `cu`, `mo`, `ca`, `zn`, `mn`, `cr`, `co`, `mg`, `al`, `sr`, `y`, `nb`, `sb`, `cs`, `ba`, `nd`, `gd`, `pt`, `rh`, `ir`, `pd`, `ru`, `os`, `tl`, `ag`, `ce`, `k`, `la`, `na`, `pb`, `sc`, `th`, `v`, `s`, `ti` (Float, ppm).
+  - `ti` (Titanium) added 2026-09-22 by Alembic `5840d41bf18d`, which also backfills it
+    from `all_elements` (120 rows already held a Ti reading on the 2026-09-04 production
+    mirror).
+  - **Which elements reach a fixed column is decided at upload time by
+    `ICP_FIXED_ELEMENT_FIELDS`, not by the model.** `backend/services/icp_service.py`
+    imports that list from `frontend.config.variable_config`, a Streamlit-era module that
+    no longer exists; the ICP-OES route in `backend/api/routers/bulk_uploads.py` fabricates
+    the module at request time, so the list it installs is what production stores. Until
+    2026-09-22 that was a 27-element literal predating `ag ce k la na pb sc th v` (2026-05)
+    and `s` (2026-06): every one of those readings landed in `all_elements` only and the
+    fixed columns were NULL on all 1171 production rows (so `v_results_icp.na_ppm` etc.
+    were all NULL in Power BI — the 2026-08-13 issue-log claim that they were populated was
+    wrong). The route and `tests/conftest.py` now both take the list from
+    `backend/api/schemas/results.py::ICP_ELEMENTS`, and `5840d41bf18d` backfills those ten
+    columns from JSONB too (NULLs only, numeric-looking values only, clamped at 0 to match
+    `458f344f73d8`). `tests/models/test_icp_ti_column.py` pins `ICP_ELEMENTS` to the model's
+    element columns, to `ICPCreate`, and to the view — **adding a fixed element column means
+    the model, `ICP_ELEMENTS`, `ICPCreate`, `v_results_icp`, and a migration, or that test
+    fails.**
 - **Flexible Data**: `all_elements` (JSON) stores full dataset.
 - **Metadata**: `dilution_factor`, `instrument_used`, `detection_limits` (JSON), `measurement_date`, `sample_date`, `raw_label`, `created_at`, `updated_at`.
 

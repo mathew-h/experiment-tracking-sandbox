@@ -170,6 +170,7 @@ class ICPResults(Base):
     th = Column(Float, nullable=True)   # Thorium
     v = Column(Float, nullable=True)    # Vanadium
     s = Column(Float, nullable=True)    # Sulfur
+    ti = Column(Float, nullable=True)   # Titanium
 
     # JSON storage for all elements (including the fixed ones above for completeness)
     all_elements = Column(JSONB, nullable=True)  # e.g., {"fe": 125.0, "mg": 45.8, "ca": 12.3, "k": 8.9}

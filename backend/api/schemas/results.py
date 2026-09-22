@@ -112,7 +112,7 @@ class ScalarResponse(BaseModel):
 
 ICP_ELEMENTS = ["fe","si","mg","ca","ni","cu","mo","zn","mn","cr","co","al",
                 "sr","y","nb","sb","cs","ba","nd","gd","pt","rh","ir","pd","ru","os","tl",
-                "ag","ce","k","la","na","pb","sc","th","v","s"]
+                "ag","ce","k","la","na","pb","sc","th","v","s","ti"]
 
 
 class ResultWithFlagsResponse(BaseModel):
@@ -202,6 +202,7 @@ class ICPCreate(BaseModel):
     th: Optional[float] = None
     v:  Optional[float] = None
     s:  Optional[float] = None
+    ti: Optional[float] = None
 
 
 class ICPResponse(ICPCreate):

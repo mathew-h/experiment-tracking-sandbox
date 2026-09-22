@@ -1224,6 +1224,39 @@ class TestICPSStorage:
         assert icp.all_elements.get('s') == 3.7
 
 
+class TestICPTiStorage:
+    """Titanium (Ti) must be stored in a dedicated ICPResults column (2026-09-22).
+
+    Routing depends on the runtime ICP_FIXED_ELEMENT_FIELDS list, which
+    tests/conftest.py and the upload router both take from ICP_ELEMENTS.
+    """
+
+    def test_ti_stored_in_fixed_column_on_create(self, test_db):
+        data = [{
+            'experiment_id': 'Test_MH_001',
+            'time_post_reaction': 30.0,
+            'dilution_factor': 1.0,
+            'ti': 0.11,
+            'fe': 44.0,
+            'raw_label': 'Test_MH_001_Day30_1x',
+        }]
+        results, updated_count, errors = ICPService.bulk_create_icp_results(test_db, data)
+        assert not errors, errors
+        test_db.commit()
+
+        icp = (
+            test_db.query(ICPResults)
+            .join(ExperimentalResults)
+            .filter(ExperimentalResults.experiment_fk == results[0].experiment_fk)
+            .filter(ExperimentalResults.time_post_reaction_bucket_days == 30.0)
+            .first()
+        )
+        assert icp is not None, "ICPResults row not found"
+        assert icp.ti == 0.11, f"Expected ti=0.11, got {icp.ti}"
+        assert icp.all_elements is not None
+        assert icp.all_elements.get('ti') == 0.11
+
+
 class TestICPMultiFileMerge:
     """
     Regression suite for ICP multi-file merge behavior.

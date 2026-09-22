@@ -2413,3 +2413,48 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
   files; pre-existing `flake8`/`black` violations in `results.py` predate this change and
   were not introduced by it.
 - **Decision logged:** no
+
+## 2026-09-22 | inline — Add Titanium (`ti`) fixed ICP column + fix fixed-column routing (`feat/icp-add-titanium`)
+- **Files changed:**
+  - `database/models/results.py` — `ti = Column(Float, nullable=True)` (Titanium), 38th fixed element column.
+  - `alembic/versions/5840d41bf18d_add_ti_column_to_icp_results.py` — additive migration off
+    `00063a5dd6a8`: inspector-guarded `add_column`, then backfills `ti` **and** the ten fixed
+    columns that were never populated (`ag ce k la na pb sc th v s`) from `all_elements` JSONB
+    (NULLs only, numeric-looking values only, `GREATEST(…, 0)` to match the 2026-03-30 clamp).
+    Downgrade drops `v_results_icp` (now selects `ti_ppm`) before dropping the column; the app
+    recreates views on startup. Rehearsed on `experiments_test`: upgrade → downgrade → upgrade,
+    all six seeded edge cases behaved (string/native numerics, `nd`/`<0.01` skipped, negatives
+    clamped, pre-set value untouched, JSONB unchanged). Dev DB was NOT upgraded — it is at
+    `c4d8f1a2b6e7` from the unmerged `feat/typed-notes-readers` branch.
+  - `database/event_listeners.py` — `icp.ti AS ti_ppm` in `v_results_icp`; stale "27 fixed
+    element columns" comment corrected (`s_ppm` still missing, still out of scope).
+  - `backend/api/schemas/results.py` — `ti` in `ICPCreate` and in `ICP_ELEMENTS`.
+  - `backend/api/routers/bulk_uploads.py` — the ICP-OES route's runtime stub of
+    `ICP_FIXED_ELEMENT_FIELDS` now mirrors `ICP_ELEMENTS` instead of a 27-element literal.
+  - `tests/conftest.py` — same: stub list is `list(ICP_ELEMENTS)`.
+  - `legacy/streamlit_frontend/config/variable_config.py` — `'ti'` appended (legacy-only mirror).
+  - `frontend/src/api/results.ts` (`ti` on `ICPResult`), `frontend/src/pages/ExperimentDetail/ResultsTab.tsx`
+    (`ti` in the expanded-row ICP display list).
+  - `.claude/rules/MODELS.md`, `docs/POWERBI_MODEL.md` — updated.
+- **Root cause of the routing fix:** `icp_service.py` imports `ICP_FIXED_ELEMENT_FIELDS` from
+  `frontend.config.variable_config`, which no longer exists; the upload route fabricates that
+  module per request, so *its* literal is what production uses. The 2026-05 and 2026-06 column
+  additions updated the legacy config and the test stub but not the route, so tests routed
+  K/Na/S to fixed columns while production never did. Measured on the dev DB (2026-09-04 prod
+  mirror): `k`/`na`/`v`/`s`/`sc` fixed columns NULL on all 1171 rows while JSONB held them on
+  683/714/714/354/426 rows. This corrects the 2026-08-13 entry's claim that `na`/`v` "are
+  populated in the DB" — they were not; `v_results_icp.na_ppm`/`v_ppm` were all NULL.
+- **Migration-chain caveat:** `feat/typed-notes-readers` adds `b7e2c9a41d05` → `c4d8f1a2b6e7`
+  off the same parent `00063a5dd6a8`. Whichever branch merges second must re-parent its first
+  migration (one-line `down_revision` change) or add a merge revision, or `alembic upgrade head`
+  fails with two heads.
+- **Tests added:** yes — `tests/models/test_icp_ti_column.py` (5: column round-trip, nullability,
+  `ICP_ELEMENTS` == model element columns, `ICPCreate` covers every element, view exposes every
+  element but `s`), `tests/views/test_results_icp_view.py` (2), `tests/api/test_icp_oes_fixed_column_stub.py`
+  (1: route installs `ICP_ELEMENTS`), `tests/test_icp_handling.py::TestICPTiStorage` (1).
+  176 passed across the ICP/view/bulk-upload suites in one process. Frontend: eslint clean,
+  64 vitest tests in `ExperimentDetail/__tests__` pass; `tsc` reports 3 pre-existing errors in
+  `ResultsTab.columns.test.tsx` (`null` passed as `ScalarResult`), identical on `develop`.
+- **Decision logged:** yes — backfilling the ten pre-existing columns in the same migration
+  (rather than only `ti`) so Power BI series are continuous instead of NULL-then-populated from
+  the deploy date. Reversible: the values remain in `all_elements`.

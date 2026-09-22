@@ -608,7 +608,8 @@ _VIEWS = [
     # ------------------------------------------------------------------
     # v_results_icp
     # One row per primary result timepoint where ICP data exists.
-    # All 27 fixed element columns exposed with _ppm suffix.
+    # Fixed element columns exposed with _ppm suffix (s_ppm is still missing --
+    # a known gap noted 2026-08-13, not fixed here).
     # icp_run_date is sourced from scalar_results (master upload field).
     # Join key to v_results_scalar: result_id.
     # ------------------------------------------------------------------
@@ -660,7 +661,8 @@ _VIEWS = [
             icp.pb   AS pb_ppm,
             icp.sc   AS sc_ppm,
             icp.th   AS th_ppm,
-            icp.v    AS v_ppm
+            icp.v    AS v_ppm,
+            icp.ti   AS ti_ppm
         FROM experimental_results er
         JOIN experiments e          ON e.id  = er.experiment_fk
         JOIN icp_results icp        ON icp.result_id = er.id

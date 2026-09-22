@@ -76,6 +76,7 @@ export interface ICPResult {
   na: number | null
   v: number | null
   s: number | null
+  ti: number | null
 }
 
 /** Payload for POST /api/results/scalar. result_id must be ExperimentResult.id. */
