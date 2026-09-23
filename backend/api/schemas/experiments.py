@@ -179,6 +179,38 @@ class ReviewQueueResponse(BaseModel):
     limit: int
 
 
+class NotesBulkPatch(BaseModel):
+    """Body of PATCH /experiments/notes/bulk (issue #122 PR-A).
+
+    Acts on up to 500 notes at once. At least one of `needs_review` /
+    `note_type` must be present. The call is atomic: any id that is unknown
+    (404) or whose scope forbids the requested type (422) rejects the whole
+    request before a row is written. Duplicate ids are collapsed.
+    """
+    ids: list[int] = Field(min_length=1, max_length=500)
+    needs_review: Optional[bool] = None
+    note_type: Optional[NoteType] = None
+
+    @model_validator(mode="after")
+    def _at_least_one_action(self):
+        if self.needs_review is None and self.note_type is None:
+            raise ValueError("provide at least one of needs_review, note_type")
+        return self
+
+
+class NotesBulkDelete(BaseModel):
+    """Body of DELETE /experiments/notes/bulk (issue #122 PR-A). Same cap and
+    atomicity as NotesBulkPatch."""
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class NotesBulkResponse(BaseModel):
+    """`count` notes changed (or deleted); `ids` names them, sorted. A note
+    already in the requested state is not counted and gets no audit row."""
+    count: int
+    ids: list[int]
+
+
 class ReplicateGroupMember(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
