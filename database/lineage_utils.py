@@ -482,7 +482,7 @@ def auto_create_treatment_experiment(
         - Sets status to COMPLETED
         - Uses current date/time
     """
-    from .models import Experiment, ExperimentNotes
+    from .models import Experiment
     from datetime import datetime
 
     base_id, derivation_num, treatment_variant, _replicate_label = parse_experiment_id(experiment_id)

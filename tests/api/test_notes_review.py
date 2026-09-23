@@ -39,7 +39,8 @@ def test_review_queue_lists_flagged_notes_with_context(client, db_session):
     a = _exp(db_session, "RQ_001", 7201, researcher="MH")
     b = _exp(db_session, "RQ_002", 7202, researcher="JW")
     ra = _result(db_session, a, 3.0)
-    flagged_a = _note(db_session, a, "t=3d liquid", needs_review=True, result_id=ra.id, created_by="reclassify_notes_020")
+    flagged_a = _note(db_session, a, "t=3d liquid", needs_review=True, result_id=ra.id,
+                      created_by="reclassify_notes_020")
     _note(db_session, a, "fine", needs_review=False)
     flagged_b = _note(db_session, b, "End of exp.", needs_review=True)
 

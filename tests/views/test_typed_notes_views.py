@@ -99,8 +99,10 @@ class TestVDimTimepointsModificationNote:
     def test_reads_modification_notes_joined_in_id_order(self, view_db):
         exp = _exp(view_db, "VN_003", 63003)
         r = _result(view_db, exp, 7.0)
-        _note(view_db, exp, "added KOH", note_type=NoteType.modification, result_id=r.id, created_by="master_bulk_upload")
-        _note(view_db, exp, "then filtered", note_type=NoteType.modification, result_id=r.id, created_by="someone@addisenergy.com")
+        _note(view_db, exp, "added KOH", note_type=NoteType.modification, result_id=r.id,
+              created_by="master_bulk_upload")
+        _note(view_db, exp, "then filtered", note_type=NoteType.modification, result_id=r.id,
+              created_by="someone@addisenergy.com")
         _note(view_db, exp, "not a modification", note_type=NoteType.observation, result_id=r.id)
         row = view_db.execute(
             text("SELECT modification_note FROM v_dim_timepoints WHERE result_id = :rid"), {"rid": r.id}

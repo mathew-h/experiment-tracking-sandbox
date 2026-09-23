@@ -121,7 +121,8 @@ _V_SCALAR_BODY = """
         sr.background_experiment_fk,
         sr.measurement_date                      AS scalar_measurement_date,
         sr.nmr_run_date,
-        GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM") AS net_ammonium_concentration
+        GREATEST(0, sr."gross_ammonium_concentration_mM" - sr."background_ammonium_concentration_mM")
+            AS net_ammonium_concentration
     FROM experimental_results er
     JOIN experiments e        ON e.id  = er.experiment_fk
     LEFT JOIN scalar_results sr ON sr.result_id = er.id

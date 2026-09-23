@@ -235,7 +235,8 @@ _TEST_DB_URL = "postgresql://experiments_user:password@localhost:5432/experiment
 _engine = create_engine(_TEST_DB_URL, pool_pre_ping=True)
 _SessionAutoflushOff = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
-_EXP_HEADERS = ["experiment_id", "old_experiment_id", "sample_id", "researcher", "date", "status", "initial_note", "overwrite"]
+_EXP_HEADERS = ["experiment_id", "old_experiment_id", "sample_id", "researcher", "date", "status",
+                "initial_note", "overwrite"]
 
 
 @pytest.fixture()
