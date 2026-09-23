@@ -51,7 +51,8 @@ def test_sync_creates_then_updates_in_place(db_session):
     exp = _exp(db_session, "NH_SYNC_001", 9118104)
     r = _result(db_session, exp)
     first = sync_result_note(db_session, r, NoteType.modification, "added 5 g Mg(OH)2", created_by="master_bulk_upload")
-    second = sync_result_note(db_session, r, NoteType.modification, "added 10 g Mg(OH)2", created_by="master_bulk_upload")
+    second = sync_result_note(db_session, r, NoteType.modification, "added 10 g Mg(OH)2",
+                              created_by="master_bulk_upload")
     assert first is not None and second is not None
     assert first.id == second.id, "a re-upload must update the slot, not append"
     notes = _notes(db_session, exp)

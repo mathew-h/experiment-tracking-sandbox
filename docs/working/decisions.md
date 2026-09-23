@@ -645,3 +645,57 @@ underscores (`SERUM_pH_002`).
 **Related:** issue #101, split from #98; `docs/working/issues/06-letterless-t-vial-group-membership.md`;
 `.claude/rules/MODELS.md` (`id_timepoint_days`, `v_results_scalar_rollup`);
 issue #105, whose stale-cache exposure this widened from two query consumers to four.
+
+## 2026-09-23 — A note declares what it is for; the description is a type, not a row position
+
+**Decision:** free text about an experiment lives in exactly one table,
+`experiment_notes`, and every row carries a `note_type` — `description` (the experiment's
+summary, at most one, never on a timepoint), `modification` (what was done to the vial at a
+timepoint; the MOD badge), `result_note` (a remark about one measurement), or `observation`
+(free text, on a timepoint or not — deliberately scope-free). Timepoint text is a note with a
+`result_id`, tied to a result of the **same** experiment by a composite FK. The rules are
+enforced by PostgreSQL (partial unique index, composite FK with `ON DELETE CASCADE`, scope
+CHECK), not by app code. Nothing textual is required at entry: behaviour change comes from
+visibility, not validators. (Issue #118, PR1–PR3; Mat Hearl, 2026-09-08.)
+
+**Why:** the description used to be `notes[0]` — a row position — and three readers resolved
+"first" differently: the app by `min(id)`, `v_experiments` by `created_at`. `created_at` is
+the transaction timestamp, so every note a bulk upload wrote in one transaction shared it and
+the view's `LIMIT 1` was arbitrary; on the 2026-09-04 production mirror Power BI and the app
+disagreed on 16 experiments. Meanwhile `experimental_results.description` was NOT NULL,
+required by the UI, rendered nowhere, and had filled with filler ("Gas sample", "DI, GC-B",
+"Day 7.0 results", "0" — 1,121 of 2,461 rows), and researchers were putting real content into
+`brine_modification_description` because it was the only timepoint text with a visible badge.
+
+**How to apply:**
+
+1. **Resolve the description by type, never by position.** `Experiment.description` is a
+   read-only hybrid over the `description`-typed note, and its SQL expression is what the
+   experiments list, the dashboard and `v_experiments` all use. Do not reintroduce a
+   `min(id)`/`ORDER BY created_at` subquery anywhere — `grep -rn "min(ExperimentNotes.id)\|ORDER BY n.created_at" backend/ database/` must stay empty.
+2. **Write through `backend/services/notes.py`.** `add_note` when the type and scope are
+   known; `sync_result_note` when mirroring a *column* into a note *slot* (one per
+   `(result_id, note_type, created_by)`, updated in place, deleted when the column clears).
+   `created_by` is part of the slot key so an upload's mirror never overwrites a researcher's
+   hand-written note of the same type.
+3. **`observation` stays scope-free.** Forcing "is this about the experiment or the
+   timepoint?" at entry recreates the required-field-with-no-feedback problem this replaced.
+4. **`has_modification_note` is EXISTS over notes, computed in the router.** It is not a
+   calculation-engine derived field; nothing in `backend/services/calculations/` references
+   notes and it must stay that way.
+5. **The review queue is `needs_review = true`** — rows the 020 backfill could not place
+   with certainty (1,242 on the mirror after Mat's four filler rulings). A researcher
+   resolves each via `PATCH …/notes/{id} {"needs_review": false}`, retype, edit or delete.
+   PR4 (dropping `experimental_results.description`, `brine_modification_description`,
+   `has_brine_modification`) is gated on that queue being empty; until then every legacy
+   write path dual-writes.
+6. **Backfills are deterministic and audited, never guessed.** `reclassify_notes_020.py`
+   promotes the oldest note by `min(id)`, never promotes a `'nan'` note, and discards only
+   text matching an explicitly agreed pattern; anything else is preserved with
+   `needs_review`. Audit rulings are recorded as separate rules (4b–4e) so the report shows
+   the split.
+
+**Related:** issue #118 (PR1 #119, PR2 #120, PR3 #121; PR4 pending);
+`docs/issues/reclassify-notes-020-dryrun-2026-09-08.md`;
+`docs/superpowers/plans/2026-09-08-typed-notes-pr1-pr2.md`; `.claude/rules/MODELS.md`
+(`ExperimentNotes`, reporting views); `docs/LOCKED_COMPONENTS.md` footnote ⁶.

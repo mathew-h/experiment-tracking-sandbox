@@ -178,7 +178,8 @@ class Plan:
     # Rule 1
     promote_ids: List[int] = field(default_factory=list)          # legacy note ids -> description
     demote_ids: List[int] = field(default_factory=list)           # legacy note ids -> observation (explicit)
-    kept_pr1_description: List[Tuple[str, int, int]] = field(default_factory=list)  # (experiment_id, pr1 note id, min legacy id)
+    # (experiment_id, PR1-era description note id, min(id) legacy note id)
+    kept_pr1_description: List[Tuple[str, int, int]] = field(default_factory=list)
     already_promoted_experiments: int = 0                        # a prior run's description exists
     # Rule 2
     nan_note_ids: List[int] = field(default_factory=list)          # every legacy 'nan' note
