@@ -163,3 +163,42 @@ def test_orm_delete_of_experiment_removes_scoped_and_free_notes(db_session):
         select(ExperimentNotes.id).where(ExperimentNotes.experiment_id == "TN_CAS_002")
     ).scalars().all()
     assert remaining == []
+
+
+# --- Experiment.description hybrid (issue #118 PR3) --------------------------
+
+def test_description_reads_the_typed_note_only(db_session):
+    exp = _exp(db_session, "TN_HYB_001", 9118015)
+    _note(db_session, exp, note_text="earlier observation")
+    _note(db_session, exp, note_text="the description", note_type=NoteType.description)
+    db_session.expire_all()
+    assert exp.description == "the description"
+
+
+def test_description_is_none_without_a_description_note(db_session):
+    exp = _exp(db_session, "TN_HYB_002", 9118016)
+    _note(db_session, exp, note_text="only an observation")
+    db_session.expire_all()
+    assert exp.description is None
+
+
+def test_description_expression_filters_in_sql(db_session):
+    a = _exp(db_session, "TN_HYB_003", 9118017)
+    b = _exp(db_session, "TN_HYB_004", 9118018)
+    _note(db_session, a, note_text="magnetite pulse", note_type=NoteType.description)
+    _note(db_session, b, note_text="magnetite mentioned in an observation")
+    ids = db_session.execute(
+        select(Experiment.experiment_id).where(Experiment.description.ilike("%magnetite%"))
+    ).scalars().all()
+    assert ids == ["TN_HYB_003"]
+    labelled = db_session.execute(
+        select(Experiment.experiment_id, Experiment.description.label("description"))
+        .where(Experiment.id.in_([a.id, b.id])).order_by(Experiment.experiment_id)
+    ).all()
+    assert [tuple(r) for r in labelled] == [("TN_HYB_003", "magnetite pulse"), ("TN_HYB_004", None)]
+
+
+def test_description_has_no_setter(db_session):
+    exp = _exp(db_session, "TN_HYB_005", 9118019)
+    with pytest.raises(AttributeError):
+        exp.description = "nope"

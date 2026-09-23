@@ -432,11 +432,14 @@ async def upload_icp_oes(
         sys.modules["frontend.config.variable_config"] = _stub
     _vc = sys.modules["frontend.config.variable_config"]
     if not hasattr(_vc, "ICP_FIXED_ELEMENT_FIELDS"):
-        _vc.ICP_FIXED_ELEMENT_FIELDS = [
-            "fe", "si", "mg", "ca", "ni", "cu", "mo", "zn", "mn", "cr",
-            "co", "al", "sr", "y", "nb", "sb", "cs", "ba", "nd", "gd",
-            "pt", "rh", "ir", "pd", "ru", "os", "tl",
-        ]
+        # Mirror the canonical fixed-column list rather than a literal. This
+        # stub is what production actually runs (frontend.config no longer
+        # exists), and its previous 27-element literal predated the ag/ce/k/
+        # la/na/pb/sc/th/v (2026-05) and s (2026-06) columns -- so every one
+        # of those readings landed in all_elements only and the fixed columns
+        # stayed NULL in production. Migration 5840d41bf18d backfills them.
+        from backend.api.schemas.results import ICP_ELEMENTS  # noqa: PLC0415
+        _vc.ICP_FIXED_ELEMENT_FIELDS = list(ICP_ELEMENTS)
     from backend.services.icp_service import ICPService  # noqa: PLC0415
     file_bytes = await file.read()
     try:

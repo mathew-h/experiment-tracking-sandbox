@@ -4,7 +4,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, case, distinct
 from sqlalchemy.orm import Session
-from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
+from database.models.experiments import Experiment, ModificationsLog
 from database.models.conditions import ExperimentalConditions
 from database.models.results import ExperimentalResults, ScalarResults, ICPResults
 from database.models.enums import ExperimentStatus
@@ -76,20 +76,9 @@ def get_dashboard(
     now = datetime.now(timezone.utc)
 
     # ── 2. Reactor cards (ONGOING experiments with a reactor assigned) ────
-    # Subquery: pick the oldest note per experiment (the "description" note)
-    first_note_sq = (
-        select(
-            ExperimentNotes.experiment_fk,
-            func.min(ExperimentNotes.id).label("min_note_id"),
-        )
-        .group_by(ExperimentNotes.experiment_fk)
-        .subquery()
-    )
-    note_sq = (
-        select(ExperimentNotes.experiment_fk, ExperimentNotes.note_text)
-        .join(first_note_sq, ExperimentNotes.id == first_note_sq.c.min_note_id)
-        .subquery()
-    )
+    # The description is the note typed 'description' (Experiment.description
+    # hybrid, issue #118 PR3) -- the same expression the experiments list and
+    # v_experiments use, so the three can no longer disagree.
 
     reactor_rows = db.execute(
         select(
@@ -104,10 +93,9 @@ def get_dashboard(
             Experiment.date,                          # ← use date (with created_at fallback) for started_at
             ExperimentalConditions.temperature_c,
             ExperimentalConditions.experiment_type,
-            note_sq.c.note_text.label("description"),
+            Experiment.description.label("description"),
         )
         .join(Experiment, Experiment.id == ExperimentalConditions.experiment_fk)
-        .outerjoin(note_sq, note_sq.c.experiment_fk == Experiment.id)
         .where(
             Experiment.status.in_([ExperimentStatus.ONGOING, ExperimentStatus.QUEUED])
         )

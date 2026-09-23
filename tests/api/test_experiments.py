@@ -359,8 +359,10 @@ def test_list_experiments_total_stable_across_pages(client, db_session):
 
 
 def test_list_experiments_description_search(client, db_session):
-    """description filters on the experiment's first note (initial_note)."""
+    """description filters on the experiment's 'description' note (issue #118 PR3):
+    an observation mentioning the term must NOT match."""
     from database.models.experiments import ExperimentNotes
+    from database.models.enums import NoteType
     from sqlalchemy import select, func as sqlfunc
     base_num = (db_session.execute(select(sqlfunc.max(Experiment.experiment_number))).scalar() or 0) + 3000
 
@@ -368,8 +370,10 @@ def test_list_experiments_description_search(client, db_session):
     exp_other = Experiment(experiment_id="DESC_OTHER_001", experiment_number=base_num + 1, status=ExperimentStatus.ONGOING)
     db_session.add_all([exp_match, exp_other])
     db_session.flush()
-    db_session.add(ExperimentNotes(experiment_id=exp_match.experiment_id, experiment_fk=exp_match.id, note_text="unique magnetite pulse test"))
-    db_session.add(ExperimentNotes(experiment_id=exp_other.experiment_id, experiment_fk=exp_other.id, note_text="unrelated note text"))
+    db_session.add(ExperimentNotes(experiment_id=exp_match.experiment_id, experiment_fk=exp_match.id,
+                                   note_text="unique magnetite pulse test", note_type=NoteType.description))
+    db_session.add(ExperimentNotes(experiment_id=exp_other.experiment_id, experiment_fk=exp_other.id,
+                                   note_text="magnetite in an observation, not the description"))
     db_session.commit()
 
     resp = client.get("/api/experiments?description=magnetite")

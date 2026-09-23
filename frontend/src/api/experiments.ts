@@ -2,6 +2,49 @@ import { apiClient } from './client'
 
 export type ExperimentStatus = 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
 
+import type { NoteType } from './noteTypes'
+export type { NoteType } from './noteTypes'
+
+export interface ExperimentNote {
+  id: number
+  note_text: string
+  note_type: NoteType
+  /** Set when the note is about one timepoint (experimental_results.id). */
+  result_id: number | null
+  /** Firebase email on notes typed in the app; a source tag on uploaded ones. */
+  created_by: string | null
+  /** True for rows the #118 backfill could not place with certainty. */
+  needs_review: boolean
+  created_at: string
+  updated_at: string | null
+}
+
+export interface NoteCreate {
+  note_text: string
+  note_type?: NoteType
+  result_id?: number | null
+}
+
+export interface NotePatch {
+  note_text?: string
+  note_type?: NoteType
+  needs_review?: boolean
+}
+
+export interface ReviewNoteItem extends ExperimentNote {
+  experiment_id: string
+  experiment_fk: number
+  researcher: string | null
+  time_post_reaction_days: number | null
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewNoteItem[]
+  total: number
+  skip: number
+  limit: number
+}
+
 export interface ExperimentListItem {
   id: number
   experiment_id: string
@@ -55,7 +98,7 @@ export interface ExperimentDetail {
   created_at: string
   updated_at: string | null
   conditions: Record<string, unknown> | null
-  notes: Array<{ id: number; note_text: string; created_at: string; updated_at: string | null }>
+  notes: ExperimentNote[]
   modifications: Array<{
     id: number
     modified_by: string | null
@@ -107,7 +150,11 @@ export interface ResultWithFlags {
   created_at: string
   has_scalar: boolean
   has_icp: boolean
-  has_brine_modification: boolean
+  /** Issue #118: true when a 'modification' note is scoped to this result. */
+  has_modification_note: boolean
+  /** Every typed note scoped to this result, in id order. */
+  notes: ExperimentNote[]
+  /** Legacy column, dropped in #118 PR4. Read `notes` instead. */
   brine_modification_description: string | null
   grams_per_ton_yield: number | null
   h2_concentration: number | null
@@ -303,11 +350,19 @@ export const experimentsApi = {
   setBackgroundAmmonium: (experimentId: string, value: number) =>
     apiClient.patch<{ updated: number }>(`/experiments/${experimentId}/background-ammonium`, { value }).then((r) => r.data),
 
-  addNote: (experimentId: string, text: string) =>
-    apiClient.post(`/experiments/${experimentId}/notes`, { note_text: text }).then((r) => r.data),
+  addNote: (experimentId: string, text: string, opts: Omit<NoteCreate, 'note_text'> = {}) =>
+    apiClient
+      .post<ExperimentNote>(`/experiments/${experimentId}/notes`, { note_text: text, ...opts })
+      .then((r) => r.data),
 
-  patchNote: (experimentId: string, noteId: number, text: string) =>
-    apiClient.patch<{ id: number; note_text: string; created_at: string; updated_at: string | null }>(`/experiments/${experimentId}/notes/${noteId}`, { note_text: text }),
+  patchNote: (experimentId: string, noteId: number, patch: NotePatch) =>
+    apiClient.patch<ExperimentNote>(`/experiments/${experimentId}/notes/${noteId}`, patch),
+
+  /** Issue #118: notes the backfill flagged needs_review, across all experiments. */
+  getReviewQueue: (params: { researcher?: string; skip?: number; limit?: number } = {}) =>
+    apiClient
+      .get<ReviewQueueResponse>('/experiments/notes/review', { params })
+      .then((r) => r.data),
 
   deleteNote: (experimentId: string, noteId: number) =>
     apiClient.delete(`/experiments/${experimentId}/notes/${noteId}`),

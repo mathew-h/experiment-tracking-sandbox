@@ -20,7 +20,7 @@ What the constraints guarantee (enforced by Postgres, not by app code):
     'result_note' always are; 'observation' may be either (scope-free by design).
 
 Revision ID: b7e2c9a41d05
-Revises: 00063a5dd6a8
+Revises: 5840d41bf18d
 Create Date: 2026-09-08
 """
 from alembic import op
@@ -29,7 +29,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "b7e2c9a41d05"
-down_revision = "00063a5dd6a8"
+down_revision = "5840d41bf18d"
 branch_labels = None
 depends_on = None
 

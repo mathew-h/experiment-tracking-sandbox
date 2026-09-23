@@ -18,7 +18,8 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_chemical_additives` | `experiment_id`, `compound_name`, `formula`, `amount`, `unit`, `addition_order`, `addition_method`, `purity`, `mass_in_grams`, `moles_added`, `final_concentration`, `concentration_units`, `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm` |
 | `public.v_experiment_additives_summary` | `experiment_id`, `additives_summary` |
 | `public.v_experiment_additive_names_summary` | `experiment_id`, `additive_names` |
-| `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `brine_modification_description` |
+| `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `modification_note` |
+| `public.v_notes` | `note_id`, `experiment_id`, `result_id`, `note_type`, `note_text`, `created_at`, `created_by`, `needs_review` |
 | `public.v_experiment_xrd` | `experiment_id`, `time_post_reaction_days`, `mineral_name`, `amount_pct`, `rwp`, `measurement_date` |
 
 ---
@@ -27,9 +28,9 @@ PostgreSQL database on the lab PC and import these views as tables.
 
 | View | Key columns |
 |---|---|
-| `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `sampling_description`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `cumulative_ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
+| `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `cumulative_ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
-| `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `v_ppm` (36 element columns) |
+| `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `ti_ppm` (37 element columns; `s_ppm` is a known gap) |
 | `public.v_results_scalar_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_vials`, `n_replicate_letters`, `n_values`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph` |
 
 ---
@@ -97,6 +98,8 @@ v_dim_timepoints (result_id)    1 ──── 1 v_results_icp (result_id)
 v_experiments (base_experiment_id or experiment_id)  * ──── 1 v_results_scalar_rollup (base_experiment_id, time_post_reaction_bucket_days)
 
 v_sample_info (sample_id)       1 ──── * v_experiments (sample_id)
+v_experiments (experiment_id)   1 ──── * v_notes (experiment_id)
+v_dim_timepoints (result_id)    1 ──── * v_notes (result_id)      -- result-scoped notes only
 v_sample_info (sample_id)       1 ──── * v_sample_characterization (sample_id)
 v_sample_info (sample_id)       1 ──── * v_pxrf_characterization (sample_id)
 v_sample_info (sample_id)       1 ──── * v_sample_elemental_comp (sample_id)
@@ -118,7 +121,7 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
 | `time_post_reaction_days` | Yes | Authoritative source for time axis |
 | `time_post_reaction_bucket_days` | Yes | Authoritative source for bucketed time axis |
 | `cumulative_time_post_reaction_days` | Yes | Authoritative source for cumulative time |
-| `brine_modification_description` | Yes | Documents brine changes between timepoints |
+| `modification_note` | Yes | What was done to the vial at this timepoint — the result's `modification` notes, `; `-joined (issue #118) |
 | `experiment_id` | **Hide** | Users get `experiment_id` from `v_experiments` |
 | `result_id` | **Hide** | Join key only |
 
@@ -154,6 +157,16 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
 
 ## Notes
 
+- **Typed notes (issue #118, 2026-09-09) — three column changes and one new view.**
+  `v_experiments.description` now reads the note typed `description` instead of the first
+  note by `created_at`; the old definition disagreed with the app on 16 experiments
+  (bulk uploads give every note in one transaction the same `created_at`), so expect the
+  Description text to change on those rows. `v_dim_timepoints.brine_modification_description`
+  is renamed `modification_note` and sourced from `modification` notes.
+  `v_results_scalar.sampling_description` is gone. `v_notes` is the new per-note view: join
+  `experiment_id` to `v_experiments` and `result_id` to `v_dim_timepoints`; filter
+  `note_type` for one kind, `needs_review = true` for the rows the migration left for a
+  researcher to check. Update visuals bound to the two removed/renamed columns by hand.
 - `net_ammonium_concentration` in `v_results_scalar` is a computed column: `GREATEST(0, gross - background)` in mM. It is always ≥ 0 — use it instead of computing the difference in Power BI measures.
 - `v_experiment_xrd` covers Aeris time-series XRD data (`experiment_fk IS NOT NULL`).
 - `v_sample_xrd` covers sample characterisation XRD (Mode A + ActLabs reports), where

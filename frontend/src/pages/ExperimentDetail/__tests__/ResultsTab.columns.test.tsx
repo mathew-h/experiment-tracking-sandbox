@@ -36,7 +36,8 @@ const baseResult: ResultWithFlags = {
   created_at: '2026-04-01T00:00:00Z',
   has_scalar: false,
   has_icp: false,
-  has_brine_modification: false,
+  has_modification_note: false,
+  notes: [],
   brine_modification_description: null,
   grams_per_ton_yield: null,
   h2_concentration: null,
@@ -115,15 +116,15 @@ describe('ResultsTab — H2-first columns', () => {
     expect(screen.queryByText('XRD')).not.toBeInTheDocument()
   })
 
-  it('renders MOD badge in the main row when has_brine_modification is true', async () => {
+  it('renders MOD badge in the main row when has_modification_note is true', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, has_brine_modification: true, brine_modification_description: 'Added HCl' },
+      { ...baseResult, has_modification_note: true, notes: [{ id: 5, note_text: 'Added HCl', note_type: 'modification', result_id: 1, created_by: null, needs_review: false, created_at: '2026-04-01T00:00:00Z', updated_at: null }] },
     ])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
     expect(await screen.findAllByText('MOD')).not.toHaveLength(0)
   })
 
-  it('does not render MOD badge when has_brine_modification is false', async () => {
+  it('does not render MOD badge when has_modification_note is false', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
     await screen.findByText('T+7')

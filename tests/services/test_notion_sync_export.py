@@ -47,10 +47,13 @@ def _seed_experiment(
     db.add(exp)
     db.flush()
     if description:
+        # Issue #118 PR3: Experiment.description is the note typed 'description'.
+        from database.models.enums import NoteType
         note = ExperimentNotes(
             experiment_fk=exp.id,
             experiment_id=experiment_id,
             note_text=description,
+            note_type=NoteType.description,
         )
         db.add(note)
     cond = ExperimentalConditions(

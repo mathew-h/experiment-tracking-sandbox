@@ -11,7 +11,8 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
-| GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags |
+| GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. |
+| GET | `/api/experiments/notes/review` | Review queue: notes with `needs_review = true` across all experiments, with `experiment_id`, `researcher`, `time_post_reaction_days`. Query: `researcher`, `skip`, `limit`. Resolve a row with the PATCH below. |
 | GET | `/api/experiments/{experiment_id}/rollup` | Cross-replicate mean/median/std per timepoint bucket from `v_results_scalar_rollup` |
 | GET | `/api/experiments/{experiment_id}/replicate-group` | The lettered replicate set (parent + members) this experiment belongs to |
 | GET | `/api/experiments/groups/{base_id}` | Replicate group detail addressed by base-ID string (not an experiment row) — members, shared/divergent conditions, additives summary |
@@ -22,7 +23,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a typed note. Body: `{"note_text": "...", "note_type": "observation"\|"description"\|"modification"\|"result_note", "result_id": 123}` — `note_type` defaults to `observation`, `result_id` optional. `description` must not carry `result_id`; `modification`/`result_note` must; `observation` may or may not (422 otherwise). `result_id` of another experiment → 422. A second `description` → 409. Response adds `note_type`, `result_id`, `created_by` (caller email), `needs_review`. |
-| PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit note text. Body: `{"note_text": "..."}`. No-op if text unchanged. Writes ModificationsLog. Returns updated note with `updated_at`. |
+| PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit a note. Body: any of `note_text`, `note_type`, `needs_review` (at least one). `needs_review: false` resolves a review-queue row. Retyping obeys scope (`description` never result-scoped, `modification`/`result_note` always → 422; second `description` → 409). No-op if nothing changes. Writes ModificationsLog naming the changed fields. |
 | GET | `/api/experiments/{experiment_id}/change-requests` | List reactor modification entries linked to this experiment. Returns `[]` if none. |
 | GET | `/api/experiments/{experiment_id}/change-requests/recent` | Reactor modification entry for `date` (query param, default today) plus the most recent prior entry — both scoped to this experiment only, never another experiment that previously occupied the same reactor. Returns `{"selected": ..., "previous": ...}`, either nullable. |
 | POST | `/api/experiments/{experiment_id}/change-requests` | Create or update a reactor modification for a given reactor + date. Body: `{"reactor_label": "R05", "requested_change": "...", "sync_date": "2026-07-20"}` (`sync_date` optional, defaults to today). Upserts on `(reactor_label, experiment_id, sync_date)`. |
@@ -426,12 +427,14 @@ Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/results/{experiment_id}` | List all result timepoints for an experiment |
-| POST | `/api/results` | Create result entry |
+| POST | `/api/results` | Create result entry. `description` is optional (#118 PR3): researcher text becomes an `observation` note on the result, a blank gets a server-generated placeholder in the legacy column. `brine_modification_description` becomes a `modification` note. |
 | GET | `/api/results/scalar/{result_id}` | Get scalar result |
 | POST | `/api/results/scalar` | Create scalar (triggers H2 + ammonium yield calc) |
 | PATCH | `/api/results/scalar/{scalar_id}` | Update scalar (recalculates) |
 | GET | `/api/results/icp/{result_id}` | Get ICP result |
 | POST | `/api/results/icp` | Create ICP result |
+
+`GET /api/experiments/{experiment_id}/description` semantics (#118 PR3): everywhere the API reports an experiment's description — `condition_note` on the experiments list, `description` on dashboard reactor cards, the `description` list filter — it is the note typed `description` (`Experiment.description`), never a positional first note. Experiment detail `notes[]` entries carry `note_type`, `result_id`, `created_by`, `needs_review`, `updated_at`.
 
 `GET /api/experiments/{experiment_id}/results` and scalar result responses now include `nmr_run_date`, `icp_run_date`, `gc_run_date`, and `xrd_run_date` (all nullable) — instrument run-date provenance.
 

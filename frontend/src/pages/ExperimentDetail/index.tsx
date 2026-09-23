@@ -62,6 +62,7 @@ export function ExperimentDetailPage() {
     queryFn: () => experimentsApi.get(id!),
     enabled: Boolean(id),
   })
+  const descriptionNote = experiment?.notes.find((n) => n.note_type === 'description')
 
   const { data: conditions } = useQuery({
     queryKey: ['conditions', id],
@@ -307,6 +308,13 @@ export function ExperimentDetailPage() {
                 </span>
               </>
             )}
+          </p>
+        )}
+
+        {/* Issue #118: the description is the note typed 'description'. */}
+        {descriptionNote && (
+          <p className="text-sm text-ink-secondary mt-1" data-testid="experiment-description">
+            {descriptionNote.note_text}
           </p>
         )}
 

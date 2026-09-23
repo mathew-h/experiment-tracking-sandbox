@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from database.models.enums import ExperimentStatus, NoteType
 
 
@@ -133,7 +133,21 @@ class NoteCreate(BaseModel):
 
 
 class NoteUpdate(BaseModel):
-    note_text: str = Field(min_length=1)
+    """Body of PATCH /experiments/{id}/notes/{note_id}. Every field optional;
+    at least one must be present. `needs_review=false` is how a review-queue
+    row is resolved without deleting it (issue #118 PR3); `note_type` retypes
+    a note (scope rules apply: 'description' cannot carry a result_id, and
+    'modification' / 'result_note' must)."""
+    note_text: Optional[str] = Field(default=None, min_length=1)
+    note_type: Optional[NoteType] = None
+    needs_review: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self):
+        # A field validator would not run for an omitted field, so check the model.
+        if self.note_text is None and self.note_type is None and self.needs_review is None:
+            raise ValueError("provide at least one of note_text, note_type, needs_review")
+        return self
 
 
 class NoteResponse(BaseModel):
@@ -148,6 +162,21 @@ class NoteResponse(BaseModel):
     needs_review: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class ReviewNoteItem(NoteResponse):
+    """One review-queue row (issue #118 PR3): a note with needs_review = true,
+    plus enough experiment context to act on it without another request."""
+    experiment_fk: int
+    researcher: Optional[str] = None
+    time_post_reaction_days: Optional[float] = None
+
+
+class ReviewQueueResponse(BaseModel):
+    items: list[ReviewNoteItem]
+    total: int
+    skip: int
+    limit: int
 
 
 class ReplicateGroupMember(BaseModel):

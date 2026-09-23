@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { experimentsApi, type ResultWithFlags } from '@/api/experiments'
+import { experimentsApi, type ExperimentNote, type ResultWithFlags } from '@/api/experiments'
+import { NOTE_TYPE_LABELS } from '@/api/noteTypes'
 import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
 import { AddResultsModal } from './AddResultsModal'
@@ -28,6 +29,28 @@ const RUN_DATE_FIELDS = [
   ['GC', 'gc_run_date'],
   ['XRD', 'xrd_run_date'],
 ] as const
+
+/** One typed note on a timepoint (issue #118). 'modification' keeps the MOD
+ *  badge researchers know; every other type gets the quieter NOTE badge. */
+function NoteLine({ note }: { note: ExperimentNote }) {
+  const isMod = note.note_type === 'modification'
+  return (
+    <li className="text-xs flex items-start gap-2">
+      <Badge variant={isMod ? 'warning' : 'default'} dot={isMod}>
+        {isMod ? 'MOD' : 'NOTE'}
+      </Badge>
+      <span className="text-ink-primary">
+        {note.note_text}
+        <span className="text-ink-muted"> · {NOTE_TYPE_LABELS[note.note_type]}</span>
+        {note.needs_review && <span className="text-status-error"> · needs review</span>}
+      </span>
+    </li>
+  )
+}
+
+function hasNonModificationNote(r: ResultWithFlags): boolean {
+  return r.notes.some((n) => n.note_type !== 'modification')
+}
 
 function ExpandedRow({ result }: { result: ResultWithFlags }) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
@@ -98,22 +121,19 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
           )}
         </div>
       )}
-      {result.has_brine_modification && (
-        <div>
-          <p className="text-xs font-semibold text-ink-secondary mb-1">
-            Sampling Modification
-            <Badge variant="warning" dot className="ml-2">MOD</Badge>
-          </p>
-          {result.brine_modification_description && (
-            <p className="text-xs text-ink-primary">{result.brine_modification_description}</p>
-          )}
+      {result.notes.length > 0 && (
+        <div data-testid="timepoint-notes">
+          <p className="text-xs font-semibold text-ink-secondary mb-1">Notes</p>
+          <ul className="space-y-1">
+            {result.notes.map((n) => <NoteLine key={n.id} note={n} />)}
+          </ul>
         </div>
       )}
       {icp && (
         <div>
           <p className="text-xs font-semibold text-ink-secondary mb-1">ICP-OES</p>
           <div className="grid grid-cols-4 gap-x-4 gap-y-1">
-            {['fe','si','mg','ca','ni','cu','mo','zn','mn','cr','co','al','na','v','s'].map((el) => {
+            {['fe','si','mg','ca','ni','cu','mo','zn','mn','cr','co','al','na','v','s','ti'].map((el) => {
               const val = (icp as unknown as Record<string, unknown>)[el]
               return val != null ? (
                 <div key={el} className="text-xs">
@@ -233,7 +253,7 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
                 <span>Fe²⁺ H₂ (%)</span>
                 <span>pH</span>
                 <span>Cond. (mS/cm)</span>
-                <span>ICP / XRD / MOD</span>
+                <span>ICP / XRD / MOD / NOTE</span>
                 <span></span>
               </div>
               {results.map((r) => (
@@ -254,7 +274,8 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
                     <span className="flex items-center gap-1">
                       {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
                       {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
-                      {r.has_brine_modification && <Badge variant="warning" dot>MOD</Badge>}
+                      {r.has_modification_note && <Badge variant="warning" dot>MOD</Badge>}
+                      {hasNonModificationNote(r) && <Badge variant="default">NOTE</Badge>}
                     </span>
                     <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
                   </div>

@@ -4,12 +4,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # Stub frontend.config.variable_config before any imports that depend on it
 # (icp_service, scalar_results, pxrf_data parsers all import from frontend.config)
 from unittest.mock import MagicMock
+# Same list the upload router installs in production (bulk_uploads.py), so
+# tests and the lab PC route the same elements to fixed columns.
+from backend.api.schemas.results import ICP_ELEMENTS
 sys.modules['frontend'] = MagicMock()
 sys.modules['frontend.config'] = MagicMock()
 sys.modules['frontend.config.variable_config'] = MagicMock(
-    ICP_FIXED_ELEMENT_FIELDS=['fe', 'si', 'ni', 'cu', 'mo', 'zn', 'mn', 'ca', 'cr', 'co', 'mg',
-                               'al', 'sr', 'y', 'nb', 'sb', 'cs', 'ba', 'nd', 'gd', 'pt', 'rh',
-                               'ir', 'pd', 'ru', 'os', 'tl', 'k', 'na', 's'],
+    ICP_FIXED_ELEMENT_FIELDS=list(ICP_ELEMENTS),
     PXRF_REQUIRED_COLUMNS={"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"},
     # Mirrors the stub in backend/api/routers/bulk_uploads.py::upload_scalar_results
     # (scalar_results.py imports this dict at module load time).

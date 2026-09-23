@@ -2432,3 +2432,69 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Root cause:** free text lived in four places with nothing declaring its purpose; the "description" was a row position that three readers resolved differently. PR1 adds the declared type and mirrors every write; readers switch in PR3, columns drop in PR4.
 - **Tests added:** yes — 44 new; `pytest tests/services/ tests/regression/ tests/api/ tests/models/` → 1189 passed.
 - **Decisions logged:** (1) `initial_note` is always the `description` note (Mat, 2026-09-08 — note[0] has always been the experiment description); the parser only writes it for a new experiment or after an overwrite row clears the old notes, so the one-description index cannot fire. (2) Blank `initial_note` + `overwrite=TRUE` leaves notes untouched. (3) Bulk mirrors are one slot per `(result, type, created_by)`, not appends. (4) Code-generated result descriptions are never mirrored. (5) `Master upload — day N` fallback deletion deferred to PR3 (PR1 changes nothing a reader sees; the pinned master test must pass unchanged). (6) Found and fixed the same NaN bug in `timepoint_modifications.py`.
+
+## 2026-09-09 | issue #118 PR2+PR3 — Notes backfill rehearsed; readers switched to typed notes (`chore/reclassify-notes-backfill`, `feat/typed-notes-readers`)
+- **Files changed (PR2):**
+  - `database/data_migrations/reclassify_notes_020.py` — rules 1–4 as specified plus Mat's audit rulings 4b–4e (GC method tags, code-generated `Day N results` fallbacks, fraction lists, literal `0` discarded); idempotent; only `created_by IS NULL` rows touched
+  - `docs/issues/reclassify-notes-020-dryrun-2026-09-08.md` — four-pass report against the production mirror (2026-09-08 backup, data to 09-04) and the rehearsal `--apply`: 1,277 descriptions, 141 modification notes, review queue **1,242**, second dry run a no-op
+  - Tests: `tests/data_migrations/test_reclassify_notes_020.py` (15)
+- **Files changed (PR3):**
+  - `database/models/experiments.py` — `Experiment.description` is a read-only hybrid over the viewonly `description_note` relationship (SQL expression = correlated scalar subquery); property setter gone
+  - `database/event_listeners.py`, `alembic/versions/c4d8f1a2b6e7_typed_notes_reporting_views.py` — `v_experiments.description` by `note_type` (correctness fix: created_at ordering disagreed with the app on 16 mirror experiments); `v_dim_timepoints.modification_note`; `v_results_scalar` drops `sampling_description`; new `v_notes`
+  - `backend/api/routers/experiments.py` — duplicated `min(id)` subqueries deleted (DoD grep clean); list/`_build_list_item`/dashboard use the hybrid; `GET /notes/review`; `PATCH notes` takes `note_type`/`needs_review`; results list returns `has_modification_note` + `notes`
+  - `backend/api/routers/results.py`, `backend/api/schemas/{results,experiments}.py` — `description` optional on create; `ReviewNoteItem`/`ReviewQueueResponse`; `NoteUpdate` model validator
+  - Frontend: `ResultsTab` (MOD/NOTE badges, notes in expanded row), `AddResultsModal` (typed note composer, no required Description), `NotesTab` (type selector, labels, review filter, Mark reviewed), detail header description, `api/experiments.ts`, new `api/noteTypes.ts`
+  - Tests: `tests/views/test_typed_notes_views.py` (9), `tests/api/test_notes_review.py` (10), `tests/api/test_results_typed_notes.py` (4), hybrid tests; `frontend/.../TypedNotes.test.tsx` (8); seeds typed in dashboard/experiments/notion-export tests
+- **Verification:** `pytest tests/services tests/regression tests/api tests/models tests/views tests/data_migrations` → 1,294 passed; vitest ExperimentDetail + ExperimentList suites → 96 passed; tsc/eslint show only the pre-existing #106 baseline. DoD 3 on the mirror: ORM hybrid, SQL expression and `v_experiments` agree on all 1,395 experiments.
+- **Decisions logged:** GC method tags, `Day N results` fallbacks, fraction lists and the literal `0` are filler (Mat, 2026-09-09). Timepoint tags (`t=0`, `Day 7`) stay in the review queue. `fix_nan_text_fields_019.py` is also still pending on production — 12 `'nan'` brine rows. PR4 waits for the review queue to empty.
+## 2026-09-22 | inline — Add Titanium (`ti`) fixed ICP column + fix fixed-column routing (`feat/icp-add-titanium`)
+- **Files changed:**
+  - `database/models/results.py` — `ti = Column(Float, nullable=True)` (Titanium), 38th fixed element column.
+  - `alembic/versions/5840d41bf18d_add_ti_column_to_icp_results.py` — additive migration off
+    `00063a5dd6a8`: inspector-guarded `add_column`, then backfills `ti` **and** the ten fixed
+    columns that were never populated (`ag ce k la na pb sc th v s`) from `all_elements` JSONB
+    (NULLs only, numeric-looking values only, `GREATEST(…, 0)` to match the 2026-03-30 clamp).
+    Downgrade drops `v_results_icp` (now selects `ti_ppm`) before dropping the column; the app
+    recreates views on startup. Rehearsed on `experiments_test`: upgrade → downgrade → upgrade,
+    all six seeded edge cases behaved (string/native numerics, `nd`/`<0.01` skipped, negatives
+    clamped, pre-set value untouched, JSONB unchanged). Dev DB was NOT upgraded — it is at
+    `c4d8f1a2b6e7` from the unmerged `feat/typed-notes-readers` branch.
+  - `database/event_listeners.py` — `icp.ti AS ti_ppm` in `v_results_icp`; stale "27 fixed
+    element columns" comment corrected (`s_ppm` still missing, still out of scope).
+  - `backend/api/schemas/results.py` — `ti` in `ICPCreate` and in `ICP_ELEMENTS`.
+  - `backend/api/routers/bulk_uploads.py` — the ICP-OES route's runtime stub of
+    `ICP_FIXED_ELEMENT_FIELDS` now mirrors `ICP_ELEMENTS` instead of a 27-element literal.
+  - `tests/conftest.py` — same: stub list is `list(ICP_ELEMENTS)`.
+  - `legacy/streamlit_frontend/config/variable_config.py` — `'ti'` appended (legacy-only mirror).
+  - `frontend/src/api/results.ts` (`ti` on `ICPResult`), `frontend/src/pages/ExperimentDetail/ResultsTab.tsx`
+    (`ti` in the expanded-row ICP display list).
+  - `.claude/rules/MODELS.md`, `docs/POWERBI_MODEL.md` — updated.
+- **Root cause of the routing fix:** `icp_service.py` imports `ICP_FIXED_ELEMENT_FIELDS` from
+  `frontend.config.variable_config`, which no longer exists; the upload route fabricates that
+  module per request, so *its* literal is what production uses. The 2026-05 and 2026-06 column
+  additions updated the legacy config and the test stub but not the route, so tests routed
+  K/Na/S to fixed columns while production never did. Measured on the dev DB (2026-09-04 prod
+  mirror): `k`/`na`/`v`/`s`/`sc` fixed columns NULL on all 1171 rows while JSONB held them on
+  683/714/714/354/426 rows. This corrects the 2026-08-13 entry's claim that `na`/`v` "are
+  populated in the DB" — they were not; `v_results_icp.na_ppm`/`v_ppm` were all NULL.
+- **Migration-chain caveat:** `feat/typed-notes-readers` adds `b7e2c9a41d05` → `c4d8f1a2b6e7`
+  off the same parent `00063a5dd6a8`. Whichever branch merges second must re-parent its first
+  migration (one-line `down_revision` change) or add a merge revision, or `alembic upgrade head`
+  fails with two heads.
+- **Tests added:** yes — `tests/models/test_icp_ti_column.py` (5: column round-trip, nullability,
+  `ICP_ELEMENTS` == model element columns, `ICPCreate` covers every element, view exposes every
+  element but `s`), `tests/views/test_results_icp_view.py` (2), `tests/api/test_icp_oes_fixed_column_stub.py`
+  (1: route installs `ICP_ELEMENTS`), `tests/test_icp_handling.py::TestICPTiStorage` (1).
+  176 passed across the ICP/view/bulk-upload suites in one process. Frontend: eslint clean,
+  64 vitest tests in `ExperimentDetail/__tests__` pass; `tsc` reports 3 pre-existing errors in
+  `ResultsTab.columns.test.tsx` (`null` passed as `ScalarResult`), identical on `develop`.
+- **Decision logged:** yes — backfilling the ten pre-existing columns in the same migration
+  (rather than only `ti`) so Power BI series are continuous instead of NULL-then-populated from
+  the deploy date. Reversible: the values remain in `all_elements`.
+
+## 2026-09-22 | issue #118 — Re-parent the typed-notes Alembic chain onto the Titanium revision (`feat/typed-notes-readers`)
+- **What:** `feat/icp-add-titanium` (commit `480277d`, = `develop` + `5840d41bf18d`) and this branch both added migrations off `00063a5dd6a8`, leaving two heads. Merged `480277d` into this branch (only `docs/working/issue-log.md` conflicted; both entries kept — MODELS.md, `event_listeners.py`, `tests/conftest.py` auto-merged with both sides intact) and changed `b7e2c9a41d05.down_revision` to `5840d41bf18d`. No merge revision; `5840d41bf18d` untouched. Chain is now `00063a5dd6a8 → 5840d41bf18d → b7e2c9a41d05 → c4d8f1a2b6e7`, one head.
+- **Dev DB stamp fix:** the dev DB was stamped `c4d8f1a2b6e7` without `icp_results.ti`. Ran `stamp 00063a5dd6a8 → upgrade 5840d41bf18d → stamp c4d8f1a2b6e7` (no downgrade, so no typed-notes downgrade ran against the mirror). Result: `ti` populated on 120 rows, `na` on 714 of 1171; notes untouched (2,905 notes, 1,277 descriptions, review queue 1,242).
+- **Tests:** `tests/models tests/views tests/api tests/test_icp_handling.py tests/services`, one process, fresh `experiments_test` each time — baseline before the merge **1,310 passed / 0 failed**, after **1,319 passed / 0 failed** (+9 Ti tests). `import database.event_listeners` against the dev DB recreates every view incl. `v_results_icp.ti_ppm` and `v_notes`.
+- **Note:** the task text described `480277d` as merged to develop; locally and on origin, `develop` is still `d3113f0` and the commit lives only on `feat/icp-add-titanium`. Merging that branch is content-identical to merging a develop that had fast-forwarded to it.
+- **Tests added:** no. **Docs updated:** yes (MODELS.md gained the Ti bullets from the merge).

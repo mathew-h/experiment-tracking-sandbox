@@ -31,7 +31,9 @@ export interface ExperimentResult {
 export interface ResultCreate {
   /** experiments.id integer PK — resolve via experimentsApi.get(), never pass the URL string param */
   experiment_fk: number
-  description: string
+  /** Issue #118: optional. Researcher text becomes an observation note on the
+   *  result; blank gets a server-side placeholder in the legacy column. */
+  description?: string | null
   time_post_reaction_days?: number | null
   time_post_reaction_bucket_days?: number | null
   cumulative_time_post_reaction_days?: number | null
@@ -76,6 +78,7 @@ export interface ICPResult {
   na: number | null
   v: number | null
   s: number | null
+  ti: number | null
 }
 
 /** Payload for POST /api/results/scalar. result_id must be ExperimentResult.id. */
