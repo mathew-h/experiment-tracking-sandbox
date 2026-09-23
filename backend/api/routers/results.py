@@ -13,6 +13,8 @@ from backend.api.schemas.results import (
     ResultCreate, ResultResponse, ScalarCreate, ScalarUpdate,
     ScalarResponse, ICPCreate, ICPResponse,
 )
+from backend.services.notes import add_note
+from database.models.enums import NoteType
 from backend.services.result_merge_utils import (
     apply_id_timepoint,
     normalize_timepoint,
@@ -118,6 +120,22 @@ def create_result(
         )
     result = ExperimentalResults(**data)
     db.add(result)
+    db.flush()
+    # Issue #118 dual-write: the legacy columns above stay the source Power BI
+    # reads until PR3; the same text is mirrored as typed notes so the two
+    # sides never disagree. Blank text writes no note -- nothing is required.
+    description = (data.get("description") or "").strip()
+    if description:
+        add_note(
+            db, exp, description,
+            note_type=NoteType.observation, result_id=result.id, created_by=current_user.email,
+        )
+    modification = (data.get("brine_modification_description") or "").strip()
+    if modification:
+        add_note(
+            db, exp, modification,
+            note_type=NoteType.modification, result_id=result.id, created_by=current_user.email,
+        )
     db.commit()
     db.refresh(result)
     log.info("result_created", experiment_fk=result.experiment_fk, result_id=result.id)

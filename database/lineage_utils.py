@@ -513,15 +513,16 @@ def auto_create_treatment_experiment(
     db.add(new_experiment)
     db.flush()  # Get the ID
     
-    # Add initial note
+    # Add initial note. Issue #118: typed -- the initial note IS the new
+    # experiment's 'description', exactly what the legacy first-note readers
+    # already showed for it.
     if initial_note:
-        note = ExperimentNotes(
-            experiment_id=new_experiment.experiment_id,
-            experiment_fk=new_experiment.id,
-            note_text=initial_note,
-            created_at=datetime.now()
+        from backend.services.notes import add_note
+        from database.models.enums import NoteType
+        add_note(
+            db, new_experiment, initial_note,
+            note_type=NoteType.description, created_by="auto_create_treatment",
         )
-        db.add(note)
     
     # Copy conditions from parent
     _copy_conditions_from_parent(db, parent, new_experiment, include_additives=False)

@@ -1,9 +1,12 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text, Boolean, Float, text
+from sqlalchemy import (
+    Boolean, CheckConstraint, Column, DateTime, Enum as SQLEnum, Float, ForeignKey,
+    ForeignKeyConstraint, Index, Integer, String, Text, text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
-from .enums import ExperimentStatus
+from .enums import ExperimentStatus, NoteType
 
 class Experiment(Base):
     __tablename__ = "experiments"
@@ -83,16 +86,66 @@ class Experiment(Base):
             self.notes.append(note)
 
 class ExperimentNotes(Base):
+    """Typed free text about an experiment, optionally scoped to one result row.
+
+    Issue #118. The database, not app code, enforces the three rules:
+      * uq_one_description_per_experiment -- at most one 'description' note
+        per experiment (partial unique index).
+      * fk_note_result_same_experiment -- a result-scoped note points at a
+        result of THIS experiment (composite FK on (experiment_fk, result_id);
+        MATCH SIMPLE leaves rows with result_id NULL unconstrained, which is
+        intended -- experiment-level notes never touch it).
+      * ck_note_scope -- 'description' is never result-scoped, 'modification'
+        and 'result_note' always are, 'observation' may be either.
+
+    The legacy -> typed mapping lives in backend/services/notes.py; write paths
+    call it rather than constructing rows here directly.
+    """
     __tablename__ = "experiment_notes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["experiment_fk", "result_id"],
+            ["experimental_results.experiment_fk", "experimental_results.id"],
+            name="fk_note_result_same_experiment",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "(note_type = 'description' AND result_id IS NULL) OR "
+            "(note_type IN ('modification', 'result_note') AND result_id IS NOT NULL) OR "
+            "(note_type = 'observation')",
+            name="ck_note_scope",
+        ),
+        Index(
+            "uq_one_description_per_experiment", "experiment_fk", unique=True,
+            postgresql_where=text("note_type = 'description'"),
+        ),
+        Index("ix_experiment_notes_result_id", "result_id"),
+        Index("ix_experiment_notes_scope", "experiment_fk", "note_type"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    experiment_id = Column(String, nullable=False, index=True) # Human-readable ID
+    experiment_id = Column(String, nullable=False, index=True) # Human-readable ID (denormalized; kept in sync by backend/services/denormalized_ids.py)
     experiment_fk = Column(Integer, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False) # FK to Experiment PK
     note_text = Column(Text)
+    note_type = Column(
+        SQLEnum(NoteType, name="note_type"), nullable=False,
+        default=NoteType.observation, server_default=text("'observation'"),
+    )
+    result_id = Column(Integer, nullable=True)  # scoped to one experimental_results row; see the composite FK above
+    created_by = Column(String, nullable=True)  # Firebase email on API paths, a source tag on bulk paths
+    needs_review = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # the backfill could not place this row with certainty
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     experiment = relationship("Experiment", back_populates="notes", foreign_keys=[experiment_fk])
+    # viewonly: ON DELETE CASCADE owns deletion, and experiment_fk is shared
+    # with the composite FK, so the ORM must not try to manage result_id.
+    result = relationship(
+        "ExperimentalResults",
+        primaryjoin="ExperimentNotes.result_id == ExperimentalResults.id",
+        foreign_keys=[result_id],
+        viewonly=True,
+    )
 
 class ModificationsLog(Base):
     __tablename__ = "modifications_log"

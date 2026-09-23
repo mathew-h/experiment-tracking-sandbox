@@ -134,3 +134,17 @@ class AmountUnit(enum.Enum):
     WEIGHT_PERCENT = "wt%"
     PERCENT_OF_ROCK = "% of Rock"
     WT_PCT_FLUID = "wt% of fluid"
+
+# === Notes (issue #118) ===
+class NoteType(enum.Enum):
+    """Declared purpose of an experiment_notes row.
+
+    Member NAME equals the stored VALUE (lowercase) so SQLAlchemy's default
+    persist-by-name produces exactly the Postgres enum labels the migration
+    declares ('description', 'modification', 'observation', 'result_note'),
+    and raw SQL in views / data migrations can compare against those strings.
+    """
+    description = "description"    # the experiment's summary; at most one per experiment, never result-scoped
+    modification = "modification"  # what was done to the vial at a timepoint (the MOD badge); result-scoped
+    observation = "observation"    # free text; valid with or without a result -- deliberately scope-free
+    result_note = "result_note"    # a remark about a specific measurement; result-scoped

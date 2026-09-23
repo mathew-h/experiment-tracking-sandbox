@@ -33,6 +33,7 @@ Supports structured naming conventions:
 ### Advanced Behaviors
 - **Auto-copy:** Sequential and treatment variant experiments automatically inherit conditions from their parent experiment. However, chemical additives are never auto-copied and must be explicitly defined.
 - **Renaming:** Utilizing the `old_experiment_id` column alongside `overwrite=True` locates the experiment by its old ID and renames it to the newly provided `experiment_id`.
+- **`initial_note` (issue #118):** written as the experiment's **`description`** note (`experiment_notes` with `note_type='description'`, `created_by='new_experiments'`) via `backend/services/notes.py::add_note`. It always was the description: the app has always shown the oldest note as the experiment description, and `initial_note` is the oldest note by construction — a brand-new experiment, or an `overwrite=True` row that has just replaced the old notes. A **blank** cell parses to nothing: no note is inserted (a blank used to insert the literal text `"nan"`), and on an `overwrite=True` row the existing notes are **left alone** — they are cleared only when the row supplies replacement text, in which case the deleted texts are snapshotted to `ModificationsLog` (`modified_table='experiment_notes'`, `old_values.note_texts`). An existing experiment without `overwrite=True` is skipped as before, so its notes are never touched.
 
 ## Data Model Specifications
 

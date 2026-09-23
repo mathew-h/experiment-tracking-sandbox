@@ -2413,3 +2413,22 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
   files; pre-existing `flake8`/`black` violations in `results.py` predate this change and
   were not introduced by it.
 - **Decision logged:** no
+
+## 2026-09-08 | issue #118 PR1 — Typed experiment notes: schema + dual-write (`feat/typed-notes-schema`)
+- **Files changed:**
+  - `database/models/enums.py` — new `NoteType` enum (`description`, `modification`, `observation`, `result_note`; name == value)
+  - `database/models/experiments.py` — `ExperimentNotes` gains `note_type`, `result_id`, `created_by`, `needs_review`; partial unique index `uq_one_description_per_experiment`; composite FK `fk_note_result_same_experiment` (ON DELETE CASCADE); `ck_note_scope`; two indexes; viewonly `result` relationship
+  - `database/models/results.py` — `UNIQUE (experiment_fk, id)` as the composite-FK target; viewonly `notes` relationship
+  - `alembic/versions/b7e2c9a41d05_typed_experiment_notes.py` — additive migration, verified up/down/up on the dev DB (1131 notes → all `observation`)
+  - `backend/services/notes.py` (new) — `add_note`, `sync_result_note`: the single legacy → typed mapping
+  - `backend/api/schemas/experiments.py`, `backend/api/routers/experiments.py` — `POST /{id}/notes` takes optional `note_type`/`result_id`; 422 on scope/ownership, 409 on a second description; `created_by` = caller
+  - `backend/api/routers/results.py` — `POST /api/results` mirrors `description` → observation note and `brine_modification_description` → modification note
+  - `backend/services/bulk_uploads/master_bulk_upload.py` (LOCKED, signed off) — v4 header aliases; both text columns mirrored via `sync_result_note` inside the row SAVEPOINT; internal names and `_merge_group` unchanged; legacy fallback text kept until PR3
+  - `backend/services/bulk_uploads/timepoint_modifications.py` (LOCKED, signed off) — mirror into the modification slot; blank cell no longer stored as `'nan'`; `Modification Note` alias
+  - `backend/services/bulk_uploads/new_experiments.py` (LOCKED, signed off) — `initial_note` NaN fix; overwrite clears notes only with replacement text and audits the deletion; initial note typed `description`
+  - `database/lineage_utils.py` — treatment auto-create uses the same helper
+  - Tests: `tests/models/test_typed_notes_columns.py` (13), `tests/services/test_notes_helper.py` (9), `tests/api/test_notes.py` (+7), `tests/api/test_results.py` (+3), `tests/services/bulk_uploads/test_typed_notes_dual_write.py` (12); pinned `"nan"` assertion in `test_new_experiments_rename_denormalized_ids.py` updated to the fixed behaviour. `test_master_bulk_upload.py` passes unchanged.
+  - Docs: `.claude/rules/MODELS.md`, `docs/LOCKED_COMPONENTS.md` (footnote ⁶), `docs/upload_templates/{master_bulk_upload,new_experiments,timepoint_modifications}.md`, `docs/user_guide/BULK_UPLOADS.md`, `docs/api/API_REFERENCE.md`, `docs/issues/issue-blank-initial-note-parses-to-nan.md`
+- **Root cause:** free text lived in four places with nothing declaring its purpose; the "description" was a row position that three readers resolved differently. PR1 adds the declared type and mirrors every write; readers switch in PR3, columns drop in PR4.
+- **Tests added:** yes — 44 new; `pytest tests/services/ tests/regression/ tests/api/ tests/models/` → 1189 passed.
+- **Decisions logged:** (1) `initial_note` is always the `description` note (Mat, 2026-09-08 — note[0] has always been the experiment description); the parser only writes it for a new experiment or after an overwrite row clears the old notes, so the one-description index cannot fire. (2) Blank `initial_note` + `overwrite=TRUE` leaves notes untouched. (3) Bulk mirrors are one slot per `(result, type, created_by)`, not appends. (4) Code-generated result descriptions are never mirrored. (5) `Master upload — day N` fallback deletion deferred to PR3 (PR1 changes nothing a reader sees; the pinned master test must pass unchanged). (6) Found and fixed the same NaN bug in `timepoint_modifications.py`.

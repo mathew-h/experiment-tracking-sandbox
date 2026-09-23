@@ -444,3 +444,66 @@ def test_create_result_nonprimary_leaves_existing_primary(client, db_session):
     db_session.expire_all()
     old = db_session.get(ExperimentalResults, first.id)
     assert old.is_primary_timepoint_result is True
+
+
+# ---------------------------------------------------------------------------
+# Dual-write of typed notes on POST /api/results (issue #118, PR1)
+# ---------------------------------------------------------------------------
+from sqlalchemy import select  # noqa: E402
+from database.models.experiments import ExperimentNotes  # noqa: E402
+from database.models.enums import NoteType  # noqa: E402
+
+
+def _notes_for(db, result_id):
+    return db.execute(
+        select(ExperimentNotes).where(ExperimentNotes.result_id == result_id).order_by(ExperimentNotes.id)
+    ).scalars().all()
+
+
+def test_create_result_mirrors_description_and_modification_into_notes(client, db_session):
+    exp, _ = _seed(db_session)
+    payload = {
+        "experiment_fk": exp.id,
+        "description": "Liquid sample, slightly cloudy",
+        "brine_modification_description": "Replaced 5 mL brine with DI water",
+        "time_post_reaction_days": 7.0,
+        "is_primary_timepoint_result": True,
+    }
+    resp = client.post("/api/results", json=payload)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    # Legacy columns still written -- readers are unchanged in PR1.
+    assert body["description"] == payload["description"]
+    row = db_session.get(ExperimentalResults, body["id"])
+    assert row.brine_modification_description == payload["brine_modification_description"]
+    assert row.has_brine_modification is True
+    # ...and mirrored as typed notes with matching text.
+    notes = _notes_for(db_session, body["id"])
+    got = {n.note_type: n for n in notes}
+    assert set(got) == {NoteType.observation, NoteType.modification}
+    assert got[NoteType.observation].note_text == payload["description"]
+    assert got[NoteType.modification].note_text == payload["brine_modification_description"]
+    assert all(n.created_by == "test@addisenergy.com" for n in notes)
+    assert all(n.experiment_fk == exp.id and n.experiment_id == exp.experiment_id for n in notes)
+
+
+def test_create_result_without_modification_writes_only_observation(client, db_session):
+    exp, _ = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id, "description": "Day 7", "time_post_reaction_days": 7.0,
+    })
+    assert resp.status_code == 201, resp.text
+    notes = _notes_for(db_session, resp.json()["id"])
+    assert [(n.note_type, n.note_text) for n in notes] == [(NoteType.observation, "Day 7")]
+
+
+def test_create_result_blank_texts_write_no_notes(client, db_session):
+    """Nothing is required at entry and blank text carries no information: the
+    legacy column stores what it always did, the notes side stays empty."""
+    exp, _ = _seed(db_session)
+    resp = client.post("/api/results", json={
+        "experiment_fk": exp.id, "description": "   ",
+        "brine_modification_description": "", "time_post_reaction_days": 7.0,
+    })
+    assert resp.status_code == 201, resp.text
+    assert _notes_for(db_session, resp.json()["id"]) == []
