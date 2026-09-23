@@ -143,6 +143,18 @@ def test_bulk_patch_two_selected_on_same_experiment_to_description_is_409(client
     assert _logs(db_session, exp) == []
 
 
+def test_bulk_patch_batch_containing_existing_description_plus_sibling_is_409_naming_experiment(client, db_session):
+    exp = _exp(db_session, "BULK_012", 7312)
+    desc = _note(db_session, exp, "the description", note_type=NoteType.description, needs_review=True)
+    other = _note(db_session, exp, "an observation", needs_review=True)
+    resp = client.patch("/api/experiments/notes/bulk", json={"ids": [desc.id, other.id], "note_type": "description"})
+    assert resp.status_code == 409, resp.text
+    assert "BULK_012" in resp.json()["detail"]
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, other.id).note_type is NoteType.observation
+    assert _logs(db_session, exp) == []
+
+
 def test_bulk_patch_unknown_id_is_404_naming_it(client, db_session):
     exp = _exp(db_session, "BULK_009", 7309)
     a = _note(db_session, exp, "x", needs_review=True)
@@ -164,6 +176,50 @@ def test_bulk_patch_body_validation(client, db_session):
 
 
 def test_bulk_path_is_not_captured_as_an_experiment_id(client, db_session):
-    """/notes/bulk must hit the bulk route (422 on a bad body), not /{experiment_id}/... (404)."""
-    resp = client.patch("/api/experiments/notes/bulk", json={})
-    assert resp.status_code == 422
+    """/notes/bulk must hit the bulk route, not /{experiment_id}/...: only the
+    bulk route answers a valid no-op body with {"count": 0, "ids": []}."""
+    exp = _exp(db_session, "BULK_013", 7313)
+    n = _note(db_session, exp, "already fine", needs_review=False)
+    resp = client.patch("/api/experiments/notes/bulk", json={"ids": [n.id], "needs_review": False})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"count": 0, "ids": []}
+
+
+# --------------------------------------------------------------- DELETE ----
+
+def test_bulk_delete_removes_notes_and_logs_one_row_per_note(client, db_session):
+    exp = _exp(db_session, "BULK_010", 7310)
+    r = _result(db_session, exp)
+    a = _note(db_session, exp, "t=0", needs_review=True, result_id=r.id)
+    b = _note(db_session, exp, "Day 7", needs_review=True)
+    keep = _note(db_session, exp, "keep me")
+    resp = client.request("DELETE", "/api/experiments/notes/bulk", json={"ids": [b.id, a.id]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"count": 2, "ids": sorted([a.id, b.id])}
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, a.id) is None
+    assert db_session.get(ExperimentNotes, b.id) is None
+    assert db_session.get(ExperimentNotes, keep.id) is not None
+    logs = _logs(db_session, exp)
+    assert len(logs) == 2
+    assert all(l.modification_type == "delete" for l in logs)
+    snap = next(l for l in logs if l.old_values["note_text"] == "t=0").old_values
+    assert snap == {"id": a.id, "note_text": "t=0", "note_type": "observation",
+                    "result_id": r.id, "created_by": None, "needs_review": True}
+
+
+def test_bulk_delete_unknown_id_is_404_and_deletes_nothing(client, db_session):
+    exp = _exp(db_session, "BULK_011", 7311)
+    a = _note(db_session, exp, "x", needs_review=True)
+    resp = client.request("DELETE", "/api/experiments/notes/bulk", json={"ids": [a.id, 999999]})
+    assert resp.status_code == 404
+    assert "999999" in resp.json()["detail"]
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, a.id) is not None
+    assert _logs(db_session, exp) == []
+
+
+def test_bulk_delete_body_validation(client, db_session):
+    assert client.request("DELETE", "/api/experiments/notes/bulk", json={"ids": []}).status_code == 422
+    assert client.request("DELETE", "/api/experiments/notes/bulk",
+                          json={"ids": list(range(1, 502))}).status_code == 422

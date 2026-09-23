@@ -561,7 +561,7 @@ def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteTy
                 select(ExperimentNotes.experiment_fk)
                 .where(ExperimentNotes.experiment_fk.in_(list(per_exp)))
                 .where(ExperimentNotes.note_type == NoteType.description)
-                .where(ExperimentNotes.id.notin_([n.id for n in notes]))
+                .where(ExperimentNotes.id.notin_([n.id for n in wanting]))
             ).scalars().all()
             clashing_fks |= set(existing)
         if clashing_fks:
@@ -632,6 +632,41 @@ def bulk_patch_notes(
              note_type=payload.note_type.value if payload.note_type else None,
              needs_review=payload.needs_review)
     return NotesBulkResponse(count=len(changed), ids=sorted(changed))
+
+
+@router.delete("/notes/bulk", response_model=NotesBulkResponse)
+def bulk_delete_notes(
+    payload: NotesBulkDelete,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> NotesBulkResponse:
+    """Delete many notes at once (issue #122 PR-A). Atomic; one
+    ModificationsLog 'delete' row per note holding the full note snapshot
+    (text, type, result_id, created_by, needs_review) -- the only trace left."""
+    notes = _load_notes_for_bulk(db, payload.ids)
+    ids: list[int] = []
+    for n in notes:
+        db.add(ModificationsLog(
+            experiment_id=n.experiment_id,
+            experiment_fk=n.experiment_fk,
+            modified_by=current_user.email,
+            modification_type="delete",
+            modified_table="experiment_notes",
+            old_values={
+                "id": n.id,
+                "note_text": n.note_text,
+                "note_type": n.note_type.value,
+                "result_id": n.result_id,
+                "created_by": n.created_by,
+                "needs_review": n.needs_review,
+            },
+            new_values=None,
+        ))
+        db.delete(n)
+        ids.append(n.id)
+    db.commit()
+    log.info("notes_bulk_deleted", count=len(ids))
+    return NotesBulkResponse(count=len(ids), ids=sorted(ids))
 
 
 @router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
