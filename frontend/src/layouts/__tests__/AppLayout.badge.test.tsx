@@ -17,13 +17,14 @@ import { experimentsApi } from '@/api/experiments'
 
 function wrap() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <MemoryRouter>
       <QueryClientProvider client={qc}>
         <AppLayout />
       </QueryClientProvider>
     </MemoryRouter>,
   )
+  return { ...view, qc }
 }
 
 describe('AppLayout review-queue badge', () => {
@@ -36,9 +37,20 @@ describe('AppLayout review-queue badge', () => {
   })
 
   it('hides the badge when the queue is empty', async () => {
-    vi.mocked(experimentsApi.getReviewQueue).mockResolvedValueOnce({ items: [], total: 0, skip: 0, limit: 1, distinct_texts: [] })
-    wrap()
-    await waitFor(() => expect(experimentsApi.getReviewQueue).toHaveBeenCalled())
-    expect(screen.queryByTestId('review-count-badge')).not.toBeInTheDocument()
+    const { qc } = wrap()
+    // Prove the badge CAN show first, so the later absence assertion means
+    // something (it would pass trivially if the badge never rendered at all).
+    await waitFor(() => expect(screen.getByText('1288')).toBeInTheDocument())
+
+    vi.mocked(experimentsApi.getReviewQueue).mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      skip: 0,
+      limit: 1,
+      distinct_texts: [],
+    })
+    await qc.invalidateQueries({ queryKey: ['notes-review'] })
+
+    await waitFor(() => expect(screen.queryByTestId('review-count-badge')).not.toBeInTheDocument())
   })
 })
