@@ -132,7 +132,7 @@ class TestVNotes:
         cols = [r[0] for r in view_db.execute(text(
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'v_notes' ORDER BY ordinal_position"
         ))]
-        assert cols == ["note_id", "experiment_id", "result_id", "note_type", "note_text",
+        assert cols == ["note_id", "experiment_id", "result_id", "event_date", "note_type", "note_text",
                         "created_at", "created_by", "needs_review"]
 
     def test_one_row_per_note_with_type_as_text(self, view_db):
@@ -160,3 +160,20 @@ class TestVNotes:
             "SELECT count(*) FROM v_notes WHERE experiment_id = 'VN_006' AND needs_review"
         )).scalar()
         assert n == 1
+
+
+def test_v_notes_exposes_event_date(view_db):
+    exp = _exp(view_db, "VNOTE_EVD_001", 93001)
+    dated = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="swapped brine",
+                            note_type=NoteType.modification, event_date=datetime.date(2026, 9, 24))
+    undated = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="looks fine",
+                              note_type=NoteType.observation)
+    view_db.add_all([dated, undated])
+    view_db.flush()
+    rows = {r.note_id: r for r in view_db.execute(
+        text("SELECT note_id, event_date, note_type FROM v_notes WHERE experiment_id = :e"),
+        {"e": exp.experiment_id},
+    ).all()}
+    assert rows[dated.id].event_date == datetime.date(2026, 9, 24)
+    assert rows[dated.id].note_type == "modification"
+    assert rows[undated.id].event_date is None
