@@ -156,4 +156,21 @@ describe('NotesReviewPage', () => {
     await waitFor(() => expect(screen.getByText(/failed to load/i)).toBeInTheDocument())
     expect(screen.queryByText(/0 open/)).not.toBeInTheDocument()
   })
+
+  it('a blank-text chip gets a readable title instead of a mangled empty-string replace', async () => {
+    const blankItem = item({ id: 4, note_text: '', experiment_id: 'HPHT_041' })
+    vi.mocked(experimentsApi.getReviewQueue).mockResolvedValue({
+      items: [blankItem],
+      total: 1,
+      skip: 0,
+      limit: 500,
+      distinct_texts: [{ text: '', count: 1 }],
+    })
+    wrap()
+    await screen.findByRole('link', { name: 'HPHT_041' })
+    expect(screen.getByRole('button', { name: /select all 1 reading/i })).toHaveAttribute(
+      'title',
+      'Select all 1 reading "(blank)"',
+    )
+  })
 })

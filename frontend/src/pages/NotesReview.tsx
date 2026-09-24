@@ -190,15 +190,19 @@ export function NotesReviewPage() {
             // the chip honestly when the loaded set is a truncated subset.
             const loadedCount = items.filter((i) => i.note_text === d.text).length
             const truncated = loadedCount !== d.count
+            const shown = d.text || '(blank)'
             const label = truncated
               ? `Select ${loadedCount} loaded of ${d.count} reading ${d.text}`
               : `Select all ${d.count} reading ${d.text}`
+            const title = truncated
+              ? `Select ${loadedCount} loaded of ${d.count} reading "${shown}"`
+              : `Select all ${d.count} reading "${shown}"`
             return (
               <button
                 key={d.text}
                 type="button"
                 aria-label={label}
-                title={label.replace(d.text, `"${d.text}"`)}
+                title={title}
                 onClick={() => selectText(d.text)}
                 className="inline-flex items-center gap-1.5 max-w-xs px-2 py-0.5 rounded border border-surface-border bg-surface-raised text-2xs text-ink-secondary hover:text-ink-primary hover:border-ink-muted transition-colors"
               >
