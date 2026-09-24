@@ -39,12 +39,16 @@ vi.mock('@/api/results', () => ({
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(
+  const utils = render(
     <QueryClientProvider client={qc}>
       <ToastProvider>{ui}</ToastProvider>
     </QueryClientProvider>,
   )
+  return { ...utils, qc }
 }
+
+/** The value of every <option> in a select, in DOM order. */
+const optionValues = (s: HTMLSelectElement) => Array.from(s.options).map((o) => o.value)
 
 function note(partial: Partial<ExperimentNote> & { id: number; note_text: string }): ExperimentNote {
   return {
@@ -145,11 +149,11 @@ describe('NotesTab — typed notes', () => {
     note({ id: 3, note_text: 'A plain observation' }),
   ]
 
-  it('labels each note with its type and flags the review queue', () => {
+  it('labels each note with its type via a scoped select and flags the review queue', () => {
     wrap(<NotesTab experimentId="HPHT_001" notes={notes} />)
-    expect(screen.getByText('Description', { selector: 'span' })).toBeInTheDocument()
-    // badges only -- the add-note <select> also has an 'Observation' option
-    expect(screen.getAllByText('Observation', { selector: 'span' })).toHaveLength(2)
+    // Feed is newest-first: id 3 (observation), id 2 (timepoint observation), id 1 (description).
+    const selects = screen.getAllByLabelText('Note type') as HTMLSelectElement[]
+    expect(selects.map((s) => s.value)).toEqual(['observation', 'observation', 'description'])
     expect(screen.getByText('Needs review')).toBeInTheDocument()
     expect(screen.getByText(/Review queue only \(1\)/)).toBeInTheDocument()
   })
@@ -180,6 +184,65 @@ describe('NotesTab — typed notes', () => {
     expect(experimentsApiModule.experimentsApi.addNote).toHaveBeenCalledWith(
       'HPHT_001', 'fresh observation', { note_type: 'observation' },
     )
+  })
+
+  it('offers only the types valid for each note’s anchor (mirrors ck_note_scope)', () => {
+    wrap(<NotesTab experimentId="HPHT_001" notes={notes} />)
+    const [expLevel, timepoint, description] = screen.getAllByLabelText('Note type') as HTMLSelectElement[]
+    expect(optionValues(expLevel)).toEqual(['observation', 'description'])
+    expect(optionValues(timepoint)).toEqual(['observation', 'modification', 'result_note'])
+    expect(optionValues(description)).toEqual(['observation', 'description'])
+  })
+
+  it('disables Description "(already set)" on other experiment-level notes but not on the description itself', () => {
+    wrap(<NotesTab experimentId="HPHT_001" notes={notes} />)
+    const [expLevel, timepoint, description] = screen.getAllByLabelText('Note type') as HTMLSelectElement[]
+    const taken = within(expLevel).getByRole('option', { name: 'Description (already set)' }) as HTMLOptionElement
+    expect(taken.disabled).toBe(true)
+    const own = within(description).getByRole('option', { name: 'Description' }) as HTMLOptionElement
+    expect(own.disabled).toBe(false)
+    // A timepoint note never lists Description at all — not even disabled.
+    expect(within(timepoint).queryByRole('option', { name: /description/i })).toBeNull()
+  })
+
+  it('retypes an experiment-level observation to Description through PATCH when none exists', async () => {
+    const user = userEvent.setup()
+    const { qc } = wrap(
+      <NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'A plain observation' })]} />,
+    )
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const select = screen.getByLabelText('Note type') as HTMLSelectElement
+    const desc = within(select).getByRole('option', { name: 'Description' }) as HTMLOptionElement
+    expect(desc.disabled).toBe(false)
+    await user.selectOptions(select, 'description')
+    expect(experimentsApiModule.experimentsApi.patchNote).toHaveBeenCalledWith(
+      'HPHT_001', 3, { note_type: 'description' },
+    )
+    // Retyping to/from description changes the reactor card, so the dashboard refetches too.
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard'] }))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiment', 'HPHT_001'] })
+  })
+
+  it('retypes a timepoint note to Modification through PATCH', async () => {
+    const user = userEvent.setup()
+    wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 2, note_text: 'brine swapped', result_id: 5 })]} />)
+    await user.selectOptions(screen.getByLabelText('Note type'), 'modification')
+    expect(experimentsApiModule.experimentsApi.patchNote).toHaveBeenCalledWith(
+      'HPHT_001', 2, { note_type: 'modification' },
+    )
+  })
+
+  it('shows the server detail in a toast when a retype is rejected, and the select keeps the real type', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApiModule.experimentsApi.patchNote).mockRejectedValueOnce(
+      new Error("Experiment 'HPHT_001' already has a description note."),
+    )
+    wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'A plain observation' })]} />)
+    const select = screen.getByLabelText('Note type') as HTMLSelectElement
+    await user.selectOptions(select, 'description')
+    expect(await screen.findByText(/already has a description note/)).toBeInTheDocument()
+    // Controlled input bound to the note's stored type: no optimistic value survives the failure.
+    expect(select.value).toBe('observation')
   })
 })
 
