@@ -128,9 +128,13 @@ export function NewExperimentPage() {
         date: step1.date || undefined,
       })
 
-      // 2. Add condition note if provided
-      if (step1.note) {
-        await experimentsApi.addNote(exp.experiment_id, step1.note)
+      // 2. The Step 1 text is the experiment's description (issue #122, design
+      //    decision 7). Every reader — reactor card, detail header, v_experiments —
+      //    resolves the description by note_type, so an untyped note would be
+      //    invisible as a description. Blank or whitespace writes no note.
+      const description = step1.note.trim()
+      if (description) {
+        await experimentsApi.addNote(exp.experiment_id, description, { note_type: 'description' })
       }
 
       // 3. Create conditions
@@ -187,6 +191,8 @@ export function NewExperimentPage() {
     },
     onSuccess: ({ exp, replicates, replicateError }) => {
       queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      // The new experiment may occupy a reactor slot; its card shows the description.
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       const replicaSuffix = replicates?.created.length
         ? `, plus ${replicates.created.length} replicates`
         : ''
