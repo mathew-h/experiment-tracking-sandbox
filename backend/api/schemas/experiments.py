@@ -172,11 +172,21 @@ class ReviewNoteItem(NoteResponse):
     time_post_reaction_days: Optional[float] = None
 
 
+class DistinctText(BaseModel):
+    """One bar of the review-queue text histogram (issue #122 PR-A): how many
+    rows in the current filter carry exactly this note_text."""
+    text: str
+    count: int
+
+
 class ReviewQueueResponse(BaseModel):
     items: list[ReviewNoteItem]
     total: int
     skip: int
     limit: int
+    #: Top 50 distinct note_text values in the current filter, most frequent
+    #: first, so the page can offer "select all 30 rows reading `t=0`".
+    distinct_texts: list[DistinctText] = []
 
 
 class NotesBulkPatch(BaseModel):

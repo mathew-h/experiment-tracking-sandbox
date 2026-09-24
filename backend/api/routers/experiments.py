@@ -16,7 +16,7 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
-    NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse,
+    NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse, DistinctText,
     NotesBulkPatch, NotesBulkDelete, NotesBulkResponse,
     ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
@@ -486,22 +486,36 @@ def get_group_rollup(
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
+_REVIEW_ORDERS = ("experiment", "created_at", "text")
+
+
+def _escape_like(s: str) -> str:
+    """Make a user string safe as a LIKE *literal*: `%`/`_` lose their wildcard meaning."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("/notes/review", response_model=ReviewQueueResponse)
 def list_review_queue(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     researcher: str | None = None,
+    note_type: NoteType | None = None,
+    q: str | None = Query(None, description="case-insensitive substring of note_text"),
+    experiment_id: str | None = Query(None, description="case-insensitive substring of experiment_id"),
+    order: str = Query("experiment", pattern="^(experiment|created_at|text)$"),
+    desc: bool = False,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ReviewQueueResponse:
-    """Notes with needs_review = true across all experiments (issue #118 PR3).
+    """Notes with needs_review = true across all experiments (issue #118 PR3;
+    filters, order and distinct_texts added by #122 PR-A).
 
-    These are the rows the 020 backfill could not place with certainty --
-    mostly legacy result descriptions preserved as 'observation' notes. Filter
-    by the owning experiment's `researcher`. Resolve a row with
-    PATCH /experiments/{id}/notes/{note_id} {"needs_review": false} (or edit,
-    retype, delete it). Registered before the /{experiment_id} routes so the
-    literal path is not captured as an experiment ID.
+    These are the rows the 020 backfill could not place with certainty.
+    Resolve rows with PATCH /notes/bulk (many) or PATCH
+    /experiments/{id}/notes/{note_id} (one). `distinct_texts` is the top-50
+    histogram of note_text over the *current filter* (not the page), so the
+    page can select every row reading e.g. `t=0`. Registered before the
+    /{experiment_id} routes so the literal path is not captured.
     """
     base = (
         select(ExperimentNotes, Experiment.researcher, ExperimentalResults.time_post_reaction_days)
@@ -511,10 +525,31 @@ def list_review_queue(
     )
     if researcher:
         base = base.where(Experiment.researcher == researcher)
+    if note_type is not None:
+        base = base.where(ExperimentNotes.note_type == note_type)
+    if q:
+        base = base.where(ExperimentNotes.note_text.ilike(f"%{_escape_like(q)}%", escape="\\"))
+    if experiment_id:
+        base = base.where(Experiment.experiment_id.ilike(f"%{_escape_like(experiment_id)}%", escape="\\"))
+
+    primary = {
+        "experiment": Experiment.experiment_id,
+        "created_at": ExperimentNotes.created_at,
+        "text": ExperimentNotes.note_text,
+    }[order]
+    ordering = (primary.desc() if desc else primary.asc(), ExperimentNotes.id.desc() if desc else ExperimentNotes.id.asc())
+
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-    rows = db.execute(
-        base.order_by(Experiment.experiment_id, ExperimentNotes.id).offset(skip).limit(limit)
+    rows = db.execute(base.order_by(*ordering).offset(skip).limit(limit)).all()
+
+    hist_sub = base.subquery()
+    hist = db.execute(
+        select(hist_sub.c.note_text, func.count().label("n"))
+        .group_by(hist_sub.c.note_text)
+        .order_by(func.count().desc(), hist_sub.c.note_text.asc())
+        .limit(50)
     ).all()
+
     items = [
         ReviewNoteItem(
             **NoteResponse.model_validate(n).model_dump(),
@@ -524,7 +559,10 @@ def list_review_queue(
         )
         for n, res, day in rows
     ]
-    return ReviewQueueResponse(items=items, total=total, skip=skip, limit=limit)
+    return ReviewQueueResponse(
+        items=items, total=total, skip=skip, limit=limit,
+        distinct_texts=[DistinctText(text=t if t is not None else "", count=c) for t, c in hist],
+    )
 
 
 def _load_notes_for_bulk(db: Session, ids: list[int]) -> list[ExperimentNotes]:
