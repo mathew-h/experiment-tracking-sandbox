@@ -167,17 +167,22 @@ def test_review_queue_q_treats_percent_and_underscore_literally(client, db_sessi
     exp = _exp(db_session, "RQ_103", 7403)
     lit = _note(db_session, exp, "yield 5% at t_0", needs_review=True)
     other = _note(db_session, exp, "yield 5 at t0", needs_review=True)
+    # Only an unescaped LIKE would match this: "%" absorbs "X", "_" matches "Q".
+    wildcard_bait = _note(db_session, exp, "yield 5X at tQ0", needs_review=True)
     ids = {i["id"] for i in client.get("/api/experiments/notes/review", params={"q": "5% at t_0"}).json()["items"]}
-    assert lit.id in ids and other.id not in ids
+    assert lit.id in ids and other.id not in ids and wildcard_bait.id not in ids
 
 
 def test_review_queue_filters_by_experiment_id_contains(client, db_session):
     a = _exp(db_session, "RQ_104_SERUM", 7404)
     b = _exp(db_session, "RQ_105_HPHT", 7405)
+    # Only an unescaped LIKE would match "104_serum" against this: "_" matches "X".
+    c = _exp(db_session, "RQ_104XSERUM", 7408)
     na = _note(db_session, a, "x", needs_review=True)
     nb = _note(db_session, b, "x", needs_review=True)
+    nc = _note(db_session, c, "x", needs_review=True)
     ids = {i["id"] for i in client.get("/api/experiments/notes/review?experiment_id=104_serum").json()["items"]}
-    assert na.id in ids and nb.id not in ids
+    assert na.id in ids and nb.id not in ids and nc.id not in ids
 
 
 def test_review_queue_orders_by_created_at_desc(client, db_session):

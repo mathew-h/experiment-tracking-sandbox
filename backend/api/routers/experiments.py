@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date
+from typing import Literal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, func, text, case, or_
@@ -486,9 +487,6 @@ def get_group_rollup(
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
-_REVIEW_ORDERS = ("experiment", "created_at", "text")
-
-
 def _escape_like(s: str) -> str:
     """Make a user string safe as a LIKE *literal*: `%`/`_` lose their wildcard meaning."""
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -502,7 +500,7 @@ def list_review_queue(
     note_type: NoteType | None = None,
     q: str | None = Query(None, description="case-insensitive substring of note_text"),
     experiment_id: str | None = Query(None, description="case-insensitive substring of experiment_id"),
-    order: str = Query("experiment", pattern="^(experiment|created_at|text)$"),
+    order: Literal["experiment", "created_at", "text"] = "experiment",
     desc: bool = False,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
