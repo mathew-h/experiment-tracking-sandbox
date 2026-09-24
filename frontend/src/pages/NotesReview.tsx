@@ -114,12 +114,20 @@ export function NotesReviewPage() {
   const patch = useMutation({
     mutationFn: (body: NotesBulkPatch) => experimentsApi.bulkPatchNotes(body),
     onSuccess: (r) => afterAction(`${plural(r.count, 'note')} updated`),
-    onError: (err: Error) => toastError('Bulk update failed', err.message),
+    onError: (err: Error) => {
+      toastError('Bulk update failed', err.message)
+      setPending(null)
+      queryClient.invalidateQueries({ queryKey: ['notes-review'] })
+    },
   })
   const remove = useMutation({
     mutationFn: (ids: number[]) => experimentsApi.bulkDeleteNotes(ids),
     onSuccess: (r) => afterAction(`${plural(r.count, 'note')} deleted`),
-    onError: (err: Error) => toastError('Bulk delete failed', err.message),
+    onError: (err: Error) => {
+      toastError('Bulk delete failed', err.message)
+      setPending(null)
+      queryClient.invalidateQueries({ queryKey: ['notes-review'] })
+    },
   })
 
   const confirmPending = () => {

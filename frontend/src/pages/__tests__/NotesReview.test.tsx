@@ -85,6 +85,22 @@ describe('NotesReviewPage', () => {
       expect(experimentsApi.bulkPatchNotes).toHaveBeenCalledWith({ ids: [1, 2], needs_review: false }),
     )
     await waitFor(() => expect(screen.queryByText('2 selected')).not.toBeInTheDocument())
+    await waitFor(() => expect(experimentsApi.getReviewQueue).toHaveBeenCalledTimes(2))
+  })
+
+  it('a bulk error keeps the modal in sync: closes it and refetches so stale ids drop out', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.bulkPatchNotes).mockRejectedValueOnce(new Error('Notes not found: [2]'))
+    wrap()
+    await screen.findByRole('link', { name: 'SERUM_001a' })
+    await user.click(screen.getByRole('checkbox', { name: /select note 1/i }))
+    await user.click(screen.getByRole('checkbox', { name: /select note 2/i }))
+    await user.click(screen.getByRole('button', { name: /mark reviewed/i }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: /^mark reviewed$/i }))
+    await waitFor(() => expect(experimentsApi.bulkPatchNotes).toHaveBeenCalledWith({ ids: [1, 2], needs_review: false }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(experimentsApi.getReviewQueue).toHaveBeenCalledTimes(2))
   })
 
   it('a distinct-text chip adds every row with that text to the selection without toggling', async () => {

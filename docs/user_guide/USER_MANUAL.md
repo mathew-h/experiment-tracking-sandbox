@@ -31,6 +31,7 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 | **Bulk Uploads** (`/bulk-uploads`) | Accordion panel for uploading analytical data in bulk (solution chemistry, ICP-OES, XRD, pXRF, and more). See the [Bulk Uploads Guide](BULK_UPLOADS.md). |
 | **Samples** (`/samples`) | Browse and manage geological sample inventory. |
 | **Chemicals** (`/chemicals`) | Browse the reagent/compound inventory used in experiment conditions. |
+| **Notes review** (`/notes/review`) | Global queue of notes flagged for review after the typed-notes migration. Filter by researcher, experiment, type or text; select rows (or every row reading the same text) and mark reviewed, retype, or delete them in one audited action. |
 
 ---
 
