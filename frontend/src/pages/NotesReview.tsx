@@ -147,7 +147,7 @@ export function NotesReviewPage() {
         <div>
           <h1 className="text-lg font-semibold text-ink-primary">Notes review</h1>
           <p className="text-xs text-ink-muted mt-0.5">
-            {isLoading ? 'Loading…' : `${total} open`}
+            {isLoading ? 'Loading…' : data ? `${total} open` : '—'}
             {!isLoading && total > items.length && (
               <> · showing first {items.length} of {total} — narrow the filter to reach the rest</>
             )}
@@ -184,19 +184,29 @@ export function NotesReviewPage() {
       {/* Distinct-text chips */}
       {data && data.distinct_texts.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {data.distinct_texts.map((d) => (
-            <button
-              key={d.text}
-              type="button"
-              aria-label={`Select all ${d.count} reading ${d.text}`}
-              title={`Select all ${d.count} reading "${d.text}"`}
-              onClick={() => selectText(d.text)}
-              className="inline-flex items-center gap-1.5 max-w-xs px-2 py-0.5 rounded border border-surface-border bg-surface-raised text-2xs text-ink-secondary hover:text-ink-primary hover:border-ink-muted transition-colors"
-            >
-              <span className="truncate font-mono-data">{d.text || '(blank)'}</span>
-              <span className="text-ink-muted">×{d.count}</span>
-            </button>
-          ))}
+          {data.distinct_texts.map((d) => {
+            // distinct_texts.count is server-side over the whole filter, but a
+            // chip click only selects rows already LOADED on the page — name
+            // the chip honestly when the loaded set is a truncated subset.
+            const loadedCount = items.filter((i) => i.note_text === d.text).length
+            const truncated = loadedCount !== d.count
+            const label = truncated
+              ? `Select ${loadedCount} loaded of ${d.count} reading ${d.text}`
+              : `Select all ${d.count} reading ${d.text}`
+            return (
+              <button
+                key={d.text}
+                type="button"
+                aria-label={label}
+                title={label.replace(d.text, `"${d.text}"`)}
+                onClick={() => selectText(d.text)}
+                className="inline-flex items-center gap-1.5 max-w-xs px-2 py-0.5 rounded border border-surface-border bg-surface-raised text-2xs text-ink-secondary hover:text-ink-primary hover:border-ink-muted transition-colors"
+              >
+                <span className="truncate font-mono-data">{d.text || '(blank)'}</span>
+                <span className="text-ink-muted">×{d.count}</span>
+              </button>
+            )
+          })}
         </div>
       )}
 

@@ -91,12 +91,16 @@ describe('NotesReviewPage', () => {
     const user = userEvent.setup()
     wrap()
     await screen.findByRole('link', { name: 'SERUM_001a' })
-    await user.click(screen.getByRole('checkbox', { name: /select note 1/i }))
+    // Pre-select note 3, which the chip does NOT match — a replace
+    // implementation would drop it; a union implementation keeps it. Clicking
+    // the chip twice must also stay idempotent (still 3 selected, not 5).
+    await user.click(screen.getByRole('checkbox', { name: /select note 3/i }))
     await user.click(screen.getByRole('button', { name: /select all 2 reading/i }))
-    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /select all 2 reading/i }))
+    expect(screen.getByText('3 selected')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: /select note 1/i })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: /select note 2/i })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /select note 3/i })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /select note 3/i })).toBeChecked()
   })
 
   it('Retype sends note_type and clears the review flag', async () => {
@@ -144,5 +148,12 @@ describe('NotesReviewPage', () => {
     vi.mocked(experimentsApi.getReviewQueue).mockResolvedValue({ ...RESPONSE, total: 1288 })
     wrap()
     await waitFor(() => expect(screen.getByText(/showing first 3 of 1288/i)).toBeInTheDocument())
+  })
+
+  it('does not show a bogus open count when the load fails', async () => {
+    vi.mocked(experimentsApi.getReviewQueue).mockRejectedValue(new Error('boom'))
+    wrap()
+    await waitFor(() => expect(screen.getByText(/failed to load/i)).toBeInTheDocument())
+    expect(screen.queryByText(/0 open/)).not.toBeInTheDocument()
   })
 })
