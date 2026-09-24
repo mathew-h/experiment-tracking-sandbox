@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date
+from typing import Literal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, func, text, case, or_
@@ -16,7 +17,8 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
-    NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse,
+    NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse, DistinctText,
+    NotesBulkPatch, NotesBulkDelete, NotesBulkResponse,
     ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
@@ -485,22 +487,33 @@ def get_group_rollup(
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
 
+def _escape_like(s: str) -> str:
+    """Make a user string safe as a LIKE *literal*: `%`/`_` lose their wildcard meaning."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("/notes/review", response_model=ReviewQueueResponse)
 def list_review_queue(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     researcher: str | None = None,
+    note_type: NoteType | None = None,
+    q: str | None = Query(None, description="case-insensitive substring of note_text"),
+    experiment_id: str | None = Query(None, description="case-insensitive substring of experiment_id"),
+    order: Literal["experiment", "created_at", "text"] = "experiment",
+    desc: bool = False,
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ReviewQueueResponse:
-    """Notes with needs_review = true across all experiments (issue #118 PR3).
+    """Notes with needs_review = true across all experiments (issue #118 PR3;
+    filters, order and distinct_texts added by #122 PR-A).
 
-    These are the rows the 020 backfill could not place with certainty --
-    mostly legacy result descriptions preserved as 'observation' notes. Filter
-    by the owning experiment's `researcher`. Resolve a row with
-    PATCH /experiments/{id}/notes/{note_id} {"needs_review": false} (or edit,
-    retype, delete it). Registered before the /{experiment_id} routes so the
-    literal path is not captured as an experiment ID.
+    These are the rows the 020 backfill could not place with certainty.
+    Resolve rows with PATCH /notes/bulk (many) or PATCH
+    /experiments/{id}/notes/{note_id} (one). `distinct_texts` is the top-50
+    histogram of note_text over the *current filter* (not the page), so the
+    page can select every row reading e.g. `t=0`. Registered before the
+    /{experiment_id} routes so the literal path is not captured.
     """
     base = (
         select(ExperimentNotes, Experiment.researcher, ExperimentalResults.time_post_reaction_days)
@@ -510,10 +523,31 @@ def list_review_queue(
     )
     if researcher:
         base = base.where(Experiment.researcher == researcher)
+    if note_type is not None:
+        base = base.where(ExperimentNotes.note_type == note_type)
+    if q:
+        base = base.where(ExperimentNotes.note_text.ilike(f"%{_escape_like(q)}%", escape="\\"))
+    if experiment_id:
+        base = base.where(Experiment.experiment_id.ilike(f"%{_escape_like(experiment_id)}%", escape="\\"))
+
+    primary = {
+        "experiment": Experiment.experiment_id,
+        "created_at": ExperimentNotes.created_at,
+        "text": ExperimentNotes.note_text,
+    }[order]
+    ordering = (primary.desc() if desc else primary.asc(), ExperimentNotes.id.desc() if desc else ExperimentNotes.id.asc())
+
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-    rows = db.execute(
-        base.order_by(Experiment.experiment_id, ExperimentNotes.id).offset(skip).limit(limit)
+    rows = db.execute(base.order_by(*ordering).offset(skip).limit(limit)).all()
+
+    hist_sub = base.subquery()
+    hist = db.execute(
+        select(hist_sub.c.note_text, func.count().label("n"))
+        .group_by(hist_sub.c.note_text)
+        .order_by(func.count().desc(), hist_sub.c.note_text.asc())
+        .limit(50)
     ).all()
+
     items = [
         ReviewNoteItem(
             **NoteResponse.model_validate(n).model_dump(),
@@ -523,7 +557,152 @@ def list_review_queue(
         )
         for n, res, day in rows
     ]
-    return ReviewQueueResponse(items=items, total=total, skip=skip, limit=limit)
+    return ReviewQueueResponse(
+        items=items, total=total, skip=skip, limit=limit,
+        distinct_texts=[DistinctText(text=t if t is not None else "", count=c) for t, c in hist],
+    )
+
+
+def _load_notes_for_bulk(db: Session, ids: list[int]) -> list[ExperimentNotes]:
+    """Resolve a bulk body's ids to rows, 404 naming every id that does not exist."""
+    unique = sorted(set(ids))
+    notes = db.execute(
+        select(ExperimentNotes).where(ExperimentNotes.id.in_(unique)).order_by(ExperimentNotes.id)
+    ).scalars().all()
+    missing = sorted(set(unique) - {n.id for n in notes})
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Notes not found: {missing}")
+    return notes
+
+
+def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteType) -> None:
+    """Mirror ck_note_scope and uq_one_description_per_experiment for a whole
+    batch so the caller gets one 422/409 naming the offenders and nothing is
+    half-applied. Same rules as patch_note, applied to N rows."""
+    if target is NoteType.description:
+        offending = [n.id for n in notes if n.result_id is not None]
+        if offending:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Result-scoped notes cannot become 'description': {offending}",
+            )
+        # Two selected notes on one experiment, or an existing description there.
+        wanting = [n for n in notes if n.note_type is not NoteType.description]
+        per_exp: dict[int, list[int]] = {}
+        for n in wanting:
+            per_exp.setdefault(n.experiment_fk, []).append(n.id)
+        clashing_fks = {fk for fk, ids in per_exp.items() if len(ids) > 1}
+        if per_exp:
+            existing = db.execute(
+                select(ExperimentNotes.experiment_fk)
+                .where(ExperimentNotes.experiment_fk.in_(list(per_exp)))
+                .where(ExperimentNotes.note_type == NoteType.description)
+                .where(ExperimentNotes.id.notin_([n.id for n in wanting]))
+            ).scalars().all()
+            clashing_fks |= set(existing)
+        if clashing_fks:
+            eids = sorted({n.experiment_id for n in wanting if n.experiment_fk in clashing_fks})
+            raise HTTPException(
+                status_code=409,
+                detail=f"These experiments would end up with more than one description: {eids}",
+            )
+    elif target in (NoteType.modification, NoteType.result_note):
+        offending = [n.id for n in notes if n.result_id is None]
+        if offending:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A '{target.value}' note must be scoped to a result; these are not: {offending}",
+            )
+
+
+@router.patch("/notes/bulk", response_model=NotesBulkResponse)
+def bulk_patch_notes(
+    payload: NotesBulkPatch,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> NotesBulkResponse:
+    """Resolve or retype many review-queue notes at once (issue #122 PR-A).
+
+    Atomic: ids are validated (404), scope is checked for the whole batch
+    (422/409), then every row changes in one transaction with one
+    ModificationsLog row per changed note. Registered before the
+    /{experiment_id} routes so the literal path is not captured.
+    """
+    notes = _load_notes_for_bulk(db, payload.ids)
+    if payload.note_type is not None:
+        _check_bulk_retype(db, notes, payload.note_type)
+
+    changed: list[int] = []
+    for n in notes:
+        old: dict = {}
+        new: dict = {}
+        if payload.note_type is not None and payload.note_type is not n.note_type:
+            old["note_type"], new["note_type"] = n.note_type.value, payload.note_type.value
+            n.note_type = payload.note_type
+        if payload.needs_review is not None and payload.needs_review != n.needs_review:
+            old["needs_review"], new["needs_review"] = n.needs_review, payload.needs_review
+            n.needs_review = payload.needs_review
+        if not new:
+            continue
+        db.add(ModificationsLog(
+            experiment_id=n.experiment_id,
+            experiment_fk=n.experiment_fk,
+            modified_by=current_user.email,
+            modification_type="update",
+            modified_table="experiment_notes",
+            old_values=old,
+            new_values=new,
+        ))
+        changed.append(n.id)
+
+    if not changed:
+        return NotesBulkResponse(count=0, ids=[])
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "uq_one_description_per_experiment" in str(exc.orig):
+            raise HTTPException(status_code=409, detail="An experiment already has a description note.")
+        raise
+    log.info("notes_bulk_patched", count=len(changed),
+             note_type=payload.note_type.value if payload.note_type else None,
+             needs_review=payload.needs_review)
+    return NotesBulkResponse(count=len(changed), ids=sorted(changed))
+
+
+@router.delete("/notes/bulk", response_model=NotesBulkResponse)
+def bulk_delete_notes(
+    payload: NotesBulkDelete,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> NotesBulkResponse:
+    """Delete many notes at once (issue #122 PR-A). Atomic; one
+    ModificationsLog 'delete' row per note holding the full note snapshot
+    (text, type, result_id, created_by, needs_review) -- the only trace left."""
+    notes = _load_notes_for_bulk(db, payload.ids)
+    ids: list[int] = []
+    for n in notes:
+        db.add(ModificationsLog(
+            experiment_id=n.experiment_id,
+            experiment_fk=n.experiment_fk,
+            modified_by=current_user.email,
+            modification_type="delete",
+            modified_table="experiment_notes",
+            old_values={
+                "id": n.id,
+                "note_text": n.note_text,
+                "note_type": n.note_type.value,
+                "result_id": n.result_id,
+                "created_by": n.created_by,
+                "needs_review": n.needs_review,
+            },
+            new_values=None,
+        ))
+        db.delete(n)
+        ids.append(n.id)
+    db.commit()
+    log.info("notes_bulk_deleted", count=len(ids))
+    return NotesBulkResponse(count=len(ids), ids=sorted(ids))
 
 
 @router.get("/{experiment_id}/results", response_model=list[ResultWithFlagsResponse])
