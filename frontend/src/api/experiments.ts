@@ -11,6 +11,8 @@ export interface ExperimentNote {
   note_type: NoteType
   /** Set when the note is about one timepoint (experimental_results.id). */
   result_id: number | null
+  /** Calendar-date anchor for a 'modification' not tied to a result (issue #122 PR-B). */
+  event_date?: string | null
   /** Firebase email on notes typed in the app; a source tag on uploaded ones. */
   created_by: string | null
   /** True for rows the #118 backfill could not place with certainty. */
@@ -23,12 +25,14 @@ export interface NoteCreate {
   note_text: string
   note_type?: NoteType
   result_id?: number | null
+  event_date?: string | null
 }
 
 export interface NotePatch {
   note_text?: string
   note_type?: NoteType
   needs_review?: boolean
+  event_date?: string | null
 }
 
 export interface ReviewNoteItem extends ExperimentNote {

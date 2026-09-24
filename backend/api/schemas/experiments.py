@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from database.models.enums import ExperimentStatus, NoteType
@@ -125,11 +125,14 @@ class NoteCreate(BaseModel):
     experiment (422) before the composite FK would, and the DB's ck_note_scope
     is mirrored as a 422 for a friendlier message. Nothing here is required
     beyond the text itself -- behaviour change comes from visibility, not
-    validators.
+    validators. 'modification' needs result_id OR event_date (issue #122 PR-B).
     """
     note_text: str
     note_type: NoteType = NoteType.observation
     result_id: Optional[int] = None
+    # Issue #122 PR-B: a calendar-date anchor. Required (instead of result_id) for
+    # a 'modification' not tied to a result -- the dashboard's reactor form.
+    event_date: Optional[date] = None
 
 
 class NoteUpdate(BaseModel):
@@ -137,16 +140,21 @@ class NoteUpdate(BaseModel):
     at least one must be present. `needs_review=false` is how a review-queue
     row is resolved without deleting it (issue #118 PR3); `note_type` retypes
     a note (scope rules apply: 'description' cannot carry a result_id, and
-    'modification' / 'result_note' must)."""
+    'modification' / 'result_note' must). `event_date` (issue #122 PR-B) sets or,
+    with an explicit null, clears the date anchor; a 'modification' must keep at
+    least one anchor."""
     note_text: Optional[str] = Field(default=None, min_length=1)
     note_type: Optional[NoteType] = None
+    event_date: Optional[date] = None
     needs_review: Optional[bool] = None
 
     @model_validator(mode="after")
     def _at_least_one_field(self):
-        # A field validator would not run for an omitted field, so check the model.
-        if self.note_text is None and self.note_type is None and self.needs_review is None:
-            raise ValueError("provide at least one of note_text, note_type, needs_review")
+        # A field validator would not run for an omitted field, so check the
+        # model. `event_date: null` is a real instruction (clear the date), so
+        # look at what was SET, not at what is non-None.
+        if not self.model_fields_set:
+            raise ValueError("provide at least one of note_text, note_type, needs_review, event_date")
         return self
 
 
@@ -158,6 +166,7 @@ class NoteResponse(BaseModel):
     note_text: Optional[str] = None
     note_type: NoteType = NoteType.observation
     result_id: Optional[int] = None
+    event_date: Optional[date] = None
     created_by: Optional[str] = None
     needs_review: bool = False
     created_at: datetime

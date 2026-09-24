@@ -30,7 +30,7 @@ writes no note (spec: behaviour change comes from visibility, not validators).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -61,6 +61,7 @@ def add_note(
     created_by: Optional[str] = None,
     needs_review: bool = False,
     created_at: Optional[datetime] = None,
+    event_date: Optional[date] = None,
 ) -> ExperimentNotes:
     """Append one typed note to ``experiment`` and flush it.
 
@@ -69,7 +70,8 @@ def add_note(
     (fk_note_result_same_experiment); an invalid combination raises
     IntegrityError at flush. Callers that want a friendlier error pre-check
     (see the notes router) -- this helper does not, so the DB stays the
-    authority.
+    authority. `event_date` is the calendar anchor a 'modification' may carry
+    instead of a result (issue #122 PR-B).
     """
     note = ExperimentNotes(
         experiment_id=experiment.experiment_id,
@@ -79,6 +81,7 @@ def add_note(
         result_id=result_id,
         created_by=created_by,
         needs_review=needs_review,
+        event_date=event_date,
     )
     if created_at is not None:
         note.created_at = created_at
