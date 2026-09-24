@@ -26,7 +26,7 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 | Page | What it does |
 |------|--------------|
 | **Dashboard** (`/dashboard`) | Reactor grid showing all ONGOING experiments. Click a status badge to change an experiment's status (Ongoing → Completed or Cancelled). |
-| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, and Analysis tabs. |
+| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and Analysis tabs. |
 | **New Experiment** (`/experiments/new`) | 4-step guided form to create a new experiment: basic info, conditions, chemical additives, and confirmation. |
 | **Bulk Uploads** (`/bulk-uploads`) | Accordion panel for uploading analytical data in bulk (solution chemistry, ICP-OES, XRD, pXRF, and more). See the [Bulk Uploads Guide](BULK_UPLOADS.md). |
 | **Samples** (`/samples`) | Browse and manage geological sample inventory. |
@@ -56,6 +56,8 @@ Experiments move through a defined lifecycle from creation to completion:
 | Check Water:Rock Ratio | Open an experiment → **Conditions** tab |
 | Upload ICP data | **Bulk Uploads** → ICP-OES Data → upload the instrument CSV |
 | View all results for an experiment | Open an experiment → **Results** tab |
+| Add or fix an experiment's description | Fill in "Experiment Description" in step 1 of **New Experiment**; it is saved as the experiment's Description note and shows on the reactor card and detail header. To fix one later, open the experiment → **Notes** tab → change the note's type to **Description** |
+| Change a note's type | Open an experiment → **Notes** tab → use the type dropdown on the note. Experiment-level notes can be Observation or Description; notes on a timepoint can be Observation, Modification or Result note. Only one Description is allowed per experiment |
 | Attach an external analysis file | Open an experiment → **Analysis** tab → Add Analysis |
 | Search for a sample | Navigate to **Samples**, use the search bar |
 | Add a new user (admin only) | Run `python scripts/manage_users.py create <email> <password> <display_name>` on the lab PC, then `approve <request_id>` |
