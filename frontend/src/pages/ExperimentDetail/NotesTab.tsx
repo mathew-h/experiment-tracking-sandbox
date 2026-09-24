@@ -72,10 +72,15 @@ export function NotesTab({ experimentId, notes }: Props) {
     mutationFn: ({ noteId, noteType }: { noteId: number; noteType: NoteType }) =>
       experimentsApi.patchNote(experimentId, noteId, { note_type: noteType }),
     onSuccess: (_data, { noteType }) => {
-      invalidate()
-      // To or from 'description' changes what the reactor card shows.
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       success('Note type changed', NOTE_TYPE_LABELS[noteType])
+      // Returned so the row stays pending (and shows the chosen type) until the
+      // refetch lands. To or from 'description' changes the reactor card and
+      // the experiments list's Description column as well as this page.
+      return Promise.all([
+        invalidate(),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['experiments'] }),
+      ])
     },
     onError: (err: Error) => toastError('Failed to change note type', err.message),
   })
@@ -155,7 +160,9 @@ export function NotesTab({ experimentId, notes }: Props) {
         {notes.length > 0 && visible.length === 0 && (
           <p className="text-sm text-ink-muted">Nothing left to review</p>
         )}
-        {visible.map((n, i) => (
+        {visible.map((n, i) => {
+          const isRetyping = retypeNote.isPending && retypeNote.variables?.noteId === n.id
+          return (
           <div
             key={n.id}
             className={`text-xs border-b border-surface-border pb-3 group ${i === visible.length - 1 ? 'border-b-0' : ''}`}
@@ -164,8 +171,8 @@ export function NotesTab({ experimentId, notes }: Props) {
               <div className="flex items-center gap-1.5 flex-wrap">
                 <select
                   aria-label="Note type"
-                  value={n.note_type}
-                  disabled={retypeNote.isPending && retypeNote.variables?.noteId === n.id}
+                  value={isRetyping ? retypeNote.variables!.noteType : n.note_type}
+                  disabled={isRetyping}
                   onChange={(e) => retypeNote.mutate({ noteId: n.id, noteType: e.target.value as NoteType })}
                   className="text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50 disabled:opacity-40"
                 >
@@ -265,7 +272,8 @@ export function NotesTab({ experimentId, notes }: Props) {
               </>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Delete note confirmation */}

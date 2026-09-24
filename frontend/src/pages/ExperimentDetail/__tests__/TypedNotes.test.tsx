@@ -244,6 +244,32 @@ describe('NotesTab — typed notes', () => {
     // Controlled input bound to the note's stored type: no optimistic value survives the failure.
     expect(select.value).toBe('observation')
   })
+
+  it('while a retype is in flight the select shows the chosen type and is disabled, then re-enables', async () => {
+    const user = userEvent.setup()
+    let resolvePatch: (v: unknown) => void = () => {}
+    vi.mocked(experimentsApiModule.experimentsApi.patchNote).mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePatch = resolve }) as never,
+    )
+    wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'A plain observation' })]} />)
+    const select = screen.getByLabelText('Note type') as HTMLSelectElement
+    await user.selectOptions(select, 'description')
+    // Pending: bound to the mutation's variables, not to local state.
+    expect(select.value).toBe('description')
+    expect(select.disabled).toBe(true)
+    resolvePatch({ data: {} })
+    await vi.waitFor(() => expect(select.disabled).toBe(false))
+  })
+
+  it('a successful retype also refreshes the experiments list', async () => {
+    const user = userEvent.setup()
+    const { qc } = wrap(
+      <NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'A plain observation' })]} />,
+    )
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    await user.selectOptions(screen.getByLabelText('Note type'), 'description')
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiments'] }))
+  })
 })
 
 describe('AddResultsModal — typed note composer', () => {
