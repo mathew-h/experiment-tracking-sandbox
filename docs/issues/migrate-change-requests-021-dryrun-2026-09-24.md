@@ -177,7 +177,34 @@ PYTHONPATH=. .venv/Scripts/python.exe database/data_migrations/migrate_reactor_c
 A second dry run afterwards must report `already converted by a prior run (skipped): 307`
 and `convertible: 0`.
 
-## Questions for Mat
+## Mirror `--apply` (2026-10-05, approved by Mat)
+
+Decisions 2 and 3 were left at their defaults (no label prefix; the 26 orphaned rows stay
+in `reactor_change_requests` for PR-E2).
+
+```
+before: {'change_request_rows': 333, 'modification_notes': 151, 'dated_modification_notes': 0, 'notes_by_021': 0, 'snapshots_by_021': 0, 'notes_total': 3119}
+after:  {'change_request_rows': 333, 'modification_notes': 458, 'dated_modification_notes': 307, 'notes_by_021': 307, 'snapshots_by_021': 307, 'notes_total': 3426}
+Applied. 307 notes created (matches the dry-run plan).
+```
+
+Second dry run immediately afterwards: `convertible 0`, `already converted by a prior run
+(skipped) 307`, `orphaned 26`, `collapsed 0` — idempotent.
+
+Spot-checks: note 5608 (`HPHT_112`, `event_date 2026-04-07`, `created_at` = the source row's
+`2026-04-07 11:45:12-04`, `result_id` NULL, `created_by migrate_change_requests_021`);
+its snapshot `modifications_log` 108066 (`modified_table reactor_change_requests`,
+`new_values {"note_id": 5608}`, `old_values` = the full row 5 incl. `reactor_label R02`,
+`notion_status "In Progress"`, `notion_page_id`, `carried_forward true`); `v_notes` returns
+307 dated modification rows; source rows 5 and 333 each match exactly one note on
+`(experiment, date, stripped text, tag)`.
+
+**Production runbook (after the branch merges and the nightly `alembic upgrade head` has
+applied `e5b2d9c7a1f4`):** dry run → compare to this report's shape (production will have
+more rows than 333; the orphaned count should still be 26 unless rows were deleted) →
+`--apply` → second dry run must report `convertible 0`.
+
+## Questions for Mat (answered 2026-10-05: apply approved; 2 and 3 at defaults)
 
 1. **Approve `--apply` on the mirror** with the numbers above? (Production follows the
    normal deploy runbook after the branch merges: `alembic upgrade head`, then this
