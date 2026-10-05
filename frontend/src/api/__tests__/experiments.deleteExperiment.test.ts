@@ -17,7 +17,6 @@ const IMPACT = {
   additives: 3,
   external_analyses: 0,
   xrd_phases: 4,
-  change_requests: 0,
   total: 13,
   background_for: ['SERUM_002a'],
   replicate_children: [],

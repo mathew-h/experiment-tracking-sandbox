@@ -1143,7 +1143,12 @@ def list_change_requests(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ChangeRequestResponse]:
-    """List change request entries linked to this experiment. Returns [] if none."""
+    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
+    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
+    through POST /experiments/{id}/notes with note_type='modification' and
+    event_date.
+
+    List change request entries linked to this experiment. Returns [] if none."""
     exp = db.execute(
         select(Experiment.id).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
@@ -1164,7 +1169,12 @@ def get_recent_change_requests(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> RecentChangeRequestsResponse:
-    """Return this experiment's modification entry for `date` (default today) and the
+    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
+    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
+    through POST /experiments/{id}/notes with note_type='modification' and
+    event_date.
+
+    Return this experiment's modification entry for `date` (default today) and the
     most recent prior entry, both scoped to this experiment_id only — never another
     experiment that previously occupied the same physical reactor.
     """
@@ -1206,7 +1216,12 @@ def upsert_change_request(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ChangeRequestResponse:
-    """Create or update a reactor modification entry for a given reactor + date.
+    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
+    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
+    through POST /experiments/{id}/notes with note_type='modification' and
+    event_date.
+
+    Create or update a reactor modification entry for a given reactor + date.
 
     Upserts on the unique constraint (reactor_label, experiment_id, sync_date): if a
     row already exists for this reactor, experiment, and date, its requested_change
@@ -1594,7 +1609,6 @@ def _impact_to_response(impact: DeleteImpact) -> DeleteImpactResponse:
         additives=impact.additives,
         external_analyses=impact.external_analyses,
         xrd_phases=impact.xrd_phases,
-        change_requests=impact.change_requests,
         total=impact.total,
         background_for=impact.background_for,
         replicate_children=impact.replicate_children,
@@ -1676,10 +1690,15 @@ def add_note(
             status_code=422,
             detail="A 'description' note is experiment-level; do not pass result_id.",
         )
-    if payload.note_type in (NoteType.modification, NoteType.result_note) and payload.result_id is None:
+    if payload.note_type is NoteType.modification and payload.result_id is None and payload.event_date is None:
         raise HTTPException(
             status_code=422,
-            detail=f"A '{payload.note_type.value}' note must name the result_id it describes.",
+            detail="A 'modification' note must be scoped to a result or carry an event_date.",
+        )
+    if payload.note_type is NoteType.result_note and payload.result_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A 'result_note' note must name the result_id it describes.",
         )
     # Mirror of fk_note_result_same_experiment, for the message.
     if payload.result_id is not None:
@@ -1701,6 +1720,7 @@ def add_note(
             note_type=payload.note_type,
             result_id=payload.result_id,
             created_by=current_user.email,
+            event_date=payload.event_date,
         )
         db.commit()
     except IntegrityError as exc:
@@ -1744,22 +1764,38 @@ def patch_note(
 
     old_values: dict = {}
     new_values: dict = {}
+    new_type = payload.note_type if payload.note_type is not None else note.note_type
+    date_changed = "event_date" in payload.model_fields_set
+    new_date = payload.event_date if date_changed else note.event_date
+
+    # Mirror of ck_note_scope on the state AFTER this patch (issue #122 PR-B):
+    # a retype and a date change can each remove a 'modification's only anchor.
+    if new_type is NoteType.description and note.result_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="A result-scoped note cannot become the 'description'; it is experiment-level.",
+        )
+    if new_type is NoteType.modification and note.result_id is None and new_date is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A 'modification' note must be scoped to a result or carry an event_date.",
+        )
+    if new_type is NoteType.result_note and note.result_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A 'result_note' note must be scoped to a result.",
+        )
+
     if payload.note_text is not None and payload.note_text != note.note_text:
         old_values["note_text"], new_values["note_text"] = note.note_text, payload.note_text
         note.note_text = payload.note_text
     if payload.note_type is not None and payload.note_type is not note.note_type:
-        if payload.note_type is NoteType.description and note.result_id is not None:
-            raise HTTPException(
-                status_code=422,
-                detail="A result-scoped note cannot become the 'description'; it is experiment-level.",
-            )
-        if payload.note_type in (NoteType.modification, NoteType.result_note) and note.result_id is None:
-            raise HTTPException(
-                status_code=422,
-                detail=f"A '{payload.note_type.value}' note must be scoped to a result.",
-            )
         old_values["note_type"], new_values["note_type"] = note.note_type.value, payload.note_type.value
         note.note_type = payload.note_type
+    if date_changed and new_date != note.event_date:
+        old_values["event_date"] = note.event_date.isoformat() if note.event_date else None
+        new_values["event_date"] = new_date.isoformat() if new_date else None
+        note.event_date = new_date
     if payload.needs_review is not None and payload.needs_review != note.needs_review:
         old_values["needs_review"], new_values["needs_review"] = note.needs_review, payload.needs_review
         note.needs_review = payload.needs_review

@@ -18,8 +18,7 @@ vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     patchStatus: vi.fn(),
     patch: vi.fn(),
-    getRecentChangeRequests: vi.fn(),
-    createChangeRequest: vi.fn(),
+    addNote: vi.fn(),
   },
 }))
 

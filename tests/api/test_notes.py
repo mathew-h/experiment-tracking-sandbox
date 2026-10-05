@@ -1,6 +1,7 @@
 from __future__ import annotations
+import datetime
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
-from database.models.enums import ExperimentStatus
+from database.models.enums import ExperimentStatus, NoteType
 from sqlalchemy import select
 
 
@@ -203,3 +204,116 @@ def test_post_note_unknown_type_is_422(client, db_session):
         json={"note_text": "x", "note_type": "gossip"},
     )
     assert resp.status_code == 422
+
+
+# --- issue #122 PR-B: event_date -------------------------------------------
+
+def _make_experiment(db, exp_id="EVD_API_001", number=7101):
+    exp = Experiment(experiment_id=exp_id, experiment_number=number, status=ExperimentStatus.ONGOING)
+    db.add(exp)
+    db.commit()
+    db.refresh(exp)
+    return exp
+
+
+def test_post_modification_with_event_date_and_no_result(client, db_session):
+    exp = _make_experiment(db_session)
+    resp = client.post(f"/api/experiments/{exp.experiment_id}/notes",
+                       json={"note_text": "swapped stir shaft", "note_type": "modification",
+                             "event_date": "2026-09-24"})
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["note_type"] == "modification"
+    assert body["result_id"] is None
+    assert body["event_date"] == "2026-09-24"
+    assert body["created_by"] == "test@addisenergy.com"
+
+
+def test_post_modification_with_neither_anchor_is_422_with_exact_text(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_002", 7102)
+    resp = client.post(f"/api/experiments/{exp.experiment_id}/notes",
+                       json={"note_text": "x", "note_type": "modification"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "A 'modification' note must be scoped to a result or carry an event_date."
+
+
+def test_post_observation_may_carry_event_date(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_003", 7103)
+    resp = client.post(f"/api/experiments/{exp.experiment_id}/notes",
+                       json={"note_text": "cloudy", "event_date": "2026-09-20"})
+    assert resp.status_code == 201
+    assert resp.json()["event_date"] == "2026-09-20"
+    assert resp.json()["note_type"] == "observation"
+
+
+def test_post_result_note_with_date_only_is_422(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_004", 7104)
+    resp = client.post(f"/api/experiments/{exp.experiment_id}/notes",
+                       json={"note_text": "x", "note_type": "result_note", "event_date": "2026-09-24"})
+    assert resp.status_code == 422
+    assert "must name the result_id" in resp.json()["detail"]
+
+
+def test_patch_sets_event_date_and_logs_it(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_005", 7105)
+    note = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="obs")
+    db_session.add(note)
+    db_session.commit()
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"event_date": "2026-09-21"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["event_date"] == "2026-09-21"
+    log = db_session.execute(
+        select(ModificationsLog).where(ModificationsLog.modified_table == "experiment_notes")
+        .order_by(ModificationsLog.id.desc())
+    ).scalars().first()
+    assert log.old_values == {"event_date": None}
+    assert log.new_values == {"event_date": "2026-09-21"}
+
+
+def test_patch_can_retype_a_dated_observation_to_modification(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_006", 7106)
+    note = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="obs",
+                           event_date=datetime.date(2026, 9, 21))
+    db_session.add(note)
+    db_session.commit()
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"note_type": "modification"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["note_type"] == "modification"
+
+
+def test_patch_clearing_the_only_anchor_of_a_modification_is_422(client, db_session):
+    # Review Focus 1: the check runs on the state AFTER the patch.
+    exp = _make_experiment(db_session, "EVD_API_007", 7107)
+    note = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="mod",
+                           note_type=NoteType.modification, event_date=datetime.date(2026, 9, 21))
+    db_session.add(note)
+    db_session.commit()
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"event_date": None})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "A 'modification' note must be scoped to a result or carry an event_date."
+
+
+def test_patch_retype_to_modification_without_any_anchor_is_422(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_008", 7108)
+    note = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="obs")
+    db_session.add(note)
+    db_session.commit()
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"note_type": "modification"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "A 'modification' note must be scoped to a result or carry an event_date."
+
+
+def test_patch_with_only_event_date_null_on_an_observation_clears_it(client, db_session):
+    exp = _make_experiment(db_session, "EVD_API_009", 7109)
+    note = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text="obs",
+                           event_date=datetime.date(2026, 9, 21))
+    db_session.add(note)
+    db_session.commit()
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"event_date": None})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["event_date"] is None

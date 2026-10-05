@@ -68,6 +68,22 @@ Shows all 19 reactor slots:
 
 Click any occupied reactor slot to open a detail panel showing all card fields in full, plus the experiment start date. A **View Detail →** button navigates to the experiment's full detail page.
 
+#### Reactor Modification box (issue #122 PR-B, 2026-09-24)
+
+The detail panel's **Reactor Modification** section shows the most recent entry
+(today's included) for this experiment (date + text, read-only) above an editable date field
+(defaults to today) and a text box. "Today" is the lab's calendar day
+(America/New_York), on both this date field and the server's "Modified today"
+lookup below — not UTC (Mat's ruling, 2026-10-05). Clicking **Save** adds a dated `modification`
+note to the experiment — visible on that experiment's Notes tab — rather than
+writing to a separate reactor-modifications table; saves are append-only, so each
+Save creates a new note instead of overwriting the previous one. The grid card
+itself shows **"Modified today:"** when one or more modification notes carry
+today's (lab-day) date, joining their text if there is more than one. To correct or remove
+a modification after saving, edit it from the experiment's Notes tab, not from
+this card. There is no longer a separate Reactor Modifications tab on the
+experiment detail page — modifications live among the experiment's regular notes.
+
 ---
 
 ## Experiment Timeline (Gantt)

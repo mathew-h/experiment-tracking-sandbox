@@ -25,7 +25,6 @@ const IMPACT_ROWS: Array<[keyof DeleteImpact, string, string]> = [
   ['additives', 'chemical additive', 'chemical additives'],
   ['external_analyses', 'external analysis', 'external analyses'],
   ['xrd_phases', 'XRD phase row', 'XRD phase rows'],
-  ['change_requests', 'reactor change request', 'reactor change requests'],
 ]
 
 /**

@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, DateTime, Enum as SQLEnum, Float, ForeignKey,
+    Boolean, CheckConstraint, Column, Date, DateTime, Enum as SQLEnum, Float, ForeignKey,
     ForeignKeyConstraint, Index, Integer, String, Text, select, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -94,8 +94,9 @@ class ExperimentNotes(Base):
         result of THIS experiment (composite FK on (experiment_fk, result_id);
         MATCH SIMPLE leaves rows with result_id NULL unconstrained, which is
         intended -- experiment-level notes never touch it).
-      * ck_note_scope -- 'description' is never result-scoped, 'modification'
-        and 'result_note' always are, 'observation' may be either.
+      * ck_note_scope -- 'description' is never result-scoped; 'modification'
+        is anchored to a result OR an event_date (issue #122 PR-B); 'result_note'
+        always to a result; 'observation' may be anything.
 
     The legacy -> typed mapping lives in backend/services/notes.py; write paths
     call it rather than constructing rows here directly.
@@ -110,7 +111,8 @@ class ExperimentNotes(Base):
         ),
         CheckConstraint(
             "(note_type = 'description' AND result_id IS NULL) OR "
-            "(note_type IN ('modification', 'result_note') AND result_id IS NOT NULL) OR "
+            "(note_type = 'modification' AND (result_id IS NOT NULL OR event_date IS NOT NULL)) OR "
+            "(note_type = 'result_note' AND result_id IS NOT NULL) OR "
             "(note_type = 'observation')",
             name="ck_note_scope",
         ),
@@ -131,6 +133,11 @@ class ExperimentNotes(Base):
         default=NoteType.observation, server_default=text("'observation'"),
     )
     result_id = Column(Integer, nullable=True)  # scoped to one experimental_results row; see the composite FK above
+    # Issue #122 PR-B: a calendar-date anchor for a 'modification' note that is
+    # not tied to a result row (the dashboard's reactor-modification form, and the
+    # 021 backfill of reactor_change_requests). Either anchor satisfies
+    # ck_note_scope for 'modification'; 'result_note' still requires a result.
+    event_date = Column(Date, nullable=True, index=True)
     created_by = Column(String, nullable=True)  # Firebase email on API paths, a source tag on bulk paths
     needs_review = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # the backfill could not place this row with certainty
     created_at = Column(DateTime(timezone=True), server_default=func.now())

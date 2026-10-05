@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import app
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
+from backend.services.workdays import LAB_TZ
 
 
 # ---------------------------------------------------------------------------
@@ -814,173 +815,140 @@ def test_reactor_status_excludes_non_hpht_experiments(client, db_session):
 # Today's reactor modification on cards (issue #72)
 # ---------------------------------------------------------------------------
 
-def _utc_today() -> datetime.date:
-    """The dashboard's definition of 'today' — UTC, matching the pop-out save path."""
-    return datetime.datetime.now(datetime.timezone.utc).date()
+def _lab_today() -> datetime.date:
+    """The dashboard's definition of 'today' — the lab's calendar day, America/New_York,
+    matching the card's date input default (Mat's ruling, 2026-10-05)."""
+    return datetime.datetime.now(LAB_TZ).date()
 
 
 def test_reactor_card_data_schema_todays_modification_defaults_none():
     from backend.api.schemas.dashboard import ReactorCardData
     r = ReactorCardData(reactor_number=5, reactor_label="R05")
     assert r.todays_modification is None
+    assert r.latest_modification is None
+
+
+def _card_exp(db, eid, number, reactor, status=None):
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+    exp = Experiment(experiment_id=eid, experiment_number=number, status=status or ExperimentStatus.ONGOING,
+                     created_at=datetime.datetime.utcnow())
+    db.add(exp)
+    db.flush()
+    db.add(ExperimentalConditions(experiment_fk=exp.id, experiment_id=eid,
+                                  reactor_number=reactor, experiment_type="HPHT"))
+    db.flush()
+    return exp
+
+
+def _mod(db, exp, text_, event_date=None, result_id=None, created_at=None):
+    from database.models.experiments import ExperimentNotes
+    from database.models.enums import NoteType
+    n = ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id, note_text=text_,
+                        note_type=NoteType.modification, event_date=event_date, result_id=result_id)
+    if created_at is not None:
+        n.created_at = created_at
+    db.add(n)
+    db.flush()
+    return n
 
 
 def test_reactor_card_shows_todays_modification(client, db_session):
-    """A card whose experiment has a change request with sync_date == today (UTC)
-    returns the requested_change text in todays_modification."""
-    from database.models.experiments import Experiment
-    from database.models.conditions import ExperimentalConditions
-    from database.models.notion_sync import ReactorChangeRequest
-    from database.models.enums import ExperimentStatus
-
-    exp = Experiment(
-        experiment_id="MOD_TODAY_001",
-        experiment_number=72001,
-        status=ExperimentStatus.ONGOING,
-        created_at=datetime.datetime.utcnow(),
-    )
-    db_session.add(exp)
-    db_session.flush()
-    db_session.add(ExperimentalConditions(
-        experiment_fk=exp.id,
-        experiment_id="MOD_TODAY_001",
-        reactor_number=4,
-        experiment_type="HPHT",
-    ))
-    db_session.add(ReactorChangeRequest(
-        reactor_label="R04",
-        experiment_id="MOD_TODAY_001",
-        requested_change="Swapped stir shaft; topped up catalyst",
-        sync_date=_utc_today(),
-    ))
+    """A 'modification' note with event_date == today (the lab's calendar day,
+    America/New_York) is the card's todays_modification."""
+    exp = _card_exp(db_session, "MOD_TODAY_001", 72001, 4)
+    _mod(db_session, exp, "Swapped stir shaft; topped up catalyst", event_date=_lab_today())
     db_session.commit()
-
     resp = client.get("/api/dashboard/")
     assert resp.status_code == 200
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
-    assert "R04" in cards
     assert cards["R04"]["todays_modification"] == "Swapped stir shaft; topped up catalyst"
+    assert cards["R04"]["latest_modification"]["note_text"] == "Swapped stir shaft; topped up catalyst"
+    assert cards["R04"]["latest_modification"]["event_date"] == _lab_today().isoformat()
 
 
-def test_reactor_card_prior_day_modification_not_shown(client, db_session):
-    """A modification saved yesterday must NOT surface on the card."""
-    from database.models.experiments import Experiment
-    from database.models.conditions import ExperimentalConditions
-    from database.models.notion_sync import ReactorChangeRequest
-    from database.models.enums import ExperimentStatus
-
-    exp = Experiment(
-        experiment_id="MOD_YDAY_001",
-        experiment_number=72002,
-        status=ExperimentStatus.ONGOING,
-        created_at=datetime.datetime.utcnow(),
-    )
-    db_session.add(exp)
-    db_session.flush()
-    db_session.add(ExperimentalConditions(
-        experiment_fk=exp.id,
-        experiment_id="MOD_YDAY_001",
-        reactor_number=5,
-        experiment_type="HPHT",
-    ))
-    db_session.add(ReactorChangeRequest(
-        reactor_label="R05",
-        experiment_id="MOD_YDAY_001",
-        requested_change="Yesterday's note",
-        sync_date=_utc_today() - datetime.timedelta(days=1),
-    ))
+def test_reactor_card_prior_day_modification_not_shown_as_today_but_is_latest(client, db_session):
+    exp = _card_exp(db_session, "MOD_YDAY_001", 72002, 5)
+    _mod(db_session, exp, "yesterday's change", event_date=_lab_today() - datetime.timedelta(days=1))
     db_session.commit()
-
     resp = client.get("/api/dashboard/")
-    assert resp.status_code == 200
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
-    assert "R05" in cards
     assert cards["R05"]["todays_modification"] is None
+    assert cards["R05"]["latest_modification"]["note_text"] == "yesterday's change"
 
 
-def test_todays_modification_keys_on_experiment_and_reactor_label(client, db_session):
-    """Three cards: ONGOING with a today-mod, QUEUED with a today-mod, ONGOING without.
-    Only the two with a matching (experiment_id, reactor_label, today) row are populated.
-    A same-day row saved under a DIFFERENT reactor_label must not leak onto the card."""
-    from database.models.experiments import Experiment
-    from database.models.conditions import ExperimentalConditions
-    from database.models.notion_sync import ReactorChangeRequest
-    from database.models.enums import ExperimentStatus
-
-    specs = [
-        ("MOD_KEY_ON", 72010, ExperimentStatus.ONGOING, 6),
-        ("MOD_KEY_QU", 72011, ExperimentStatus.QUEUED, 7),
-        ("MOD_KEY_NO", 72012, ExperimentStatus.ONGOING, 8),
-        ("MOD_KEY_WRONG_SLOT", 72013, ExperimentStatus.ONGOING, 9),
-    ]
-    for exp_id, num, status, rn in specs:
-        exp = Experiment(
-            experiment_id=exp_id,
-            experiment_number=num,
-            status=status,
-            created_at=datetime.datetime.utcnow(),
-        )
-        db_session.add(exp)
-        db_session.flush()
-        db_session.add(ExperimentalConditions(
-            experiment_fk=exp.id,
-            experiment_id=exp_id,
-            reactor_number=rn,
-            experiment_type="HPHT",
-        ))
-    db_session.add(ReactorChangeRequest(
-        reactor_label="R06", experiment_id="MOD_KEY_ON",
-        requested_change="ongoing mod", sync_date=_utc_today(),
-    ))
-    db_session.add(ReactorChangeRequest(
-        reactor_label="R07", experiment_id="MOD_KEY_QU",
-        requested_change="queued mod", sync_date=_utc_today(),
-    ))
-    # Saved today for MOD_KEY_WRONG_SLOT but under a reactor label it does NOT occupy:
-    db_session.add(ReactorChangeRequest(
-        reactor_label="R01", experiment_id="MOD_KEY_WRONG_SLOT",
-        requested_change="wrong slot mod", sync_date=_utc_today(),
-    ))
+def test_several_todays_modifications_are_joined_in_id_order(client, db_session):
+    # Review Focus 4
+    exp = _card_exp(db_session, "MOD_MULTI_001", 72003, 6)
+    _mod(db_session, exp, "first", event_date=_lab_today())
+    _mod(db_session, exp, "second", event_date=_lab_today())
     db_session.commit()
-
     resp = client.get("/api/dashboard/")
-    assert resp.status_code == 200
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
-    assert cards["R06"]["todays_modification"] == "ongoing mod"
-    assert cards["R07"]["todays_modification"] == "queued mod"
-    assert cards["R08"]["todays_modification"] is None
-    assert cards["R09"]["todays_modification"] is None, (
-        "A same-day row under a different reactor_label must not appear on this card"
-    )
+    assert cards["R06"]["todays_modification"] == "first; second"
+
+
+def test_latest_modification_orders_by_event_date_then_id_and_falls_back_to_created_at(client, db_session):
+    # Review Focus 3: a result-anchored modification (no event_date) counts by created_at::date
+    # for "latest" but is never "today's".
+    from database.models.results import ExperimentalResults
+    exp = _card_exp(db_session, "MOD_LATEST_001", 72004, 7)
+    r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=1.0,
+                            time_post_reaction_bucket_days=1.0, description="seed")
+    db_session.add(r)
+    db_session.flush()
+    long_ago = datetime.datetime(2026, 1, 5, 12, 0, tzinfo=datetime.timezone.utc)
+    _mod(db_session, exp, "old dated", event_date=datetime.date(2026, 3, 1))
+    _mod(db_session, exp, "result-anchored today", result_id=r.id,
+         created_at=datetime.datetime.now(datetime.timezone.utc))
+    _mod(db_session, exp, "ancient by created_at", result_id=r.id, created_at=long_ago)
+    db_session.commit()
+    resp = client.get("/api/dashboard/")
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R07"]["todays_modification"] is None
+    assert cards["R07"]["latest_modification"]["note_text"] == "result-anchored today"
+    assert cards["R07"]["latest_modification"]["event_date"] is None
+
+
+def test_todays_modification_keys_on_experiment_not_reactor(client, db_session):
+    """Two cards each show only their own experiment's note; an occupied card with no notes shows none."""
+    a = _card_exp(db_session, "MOD_KEY_A", 72005, 8)
+    b = _card_exp(db_session, "MOD_KEY_B", 72006, 9)
+    c = _card_exp(db_session, "MOD_KEY_C", 72007, 10)
+    _mod(db_session, a, "mod A", event_date=_lab_today())
+    _mod(db_session, b, "mod B", event_date=_lab_today())
+    db_session.commit()
+    resp = client.get("/api/dashboard/")
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R08"]["todays_modification"] == "mod A"
+    assert cards["R09"]["todays_modification"] == "mod B"
+    assert cards["R10"]["todays_modification"] is None
+    assert cards["R10"]["latest_modification"] is None
+
+
+def test_queued_card_also_gets_todays_and_latest_modification(client, db_session):
+    """Section 2b enriches QUEUED cards the same as ONGOING ones."""
+    from database.models.enums import ExperimentStatus
+    exp = _card_exp(db_session, "MOD_QUEUED_001", 72008, 11, status=ExperimentStatus.QUEUED)
+    _mod(db_session, exp, "queued mod", event_date=_lab_today())
+    db_session.commit()
+    resp = client.get("/api/dashboard/")
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R11"]["status"] == "QUEUED"
+    assert cards["R11"]["todays_modification"] == "queued mod"
+    assert cards["R11"]["latest_modification"]["note_text"] == "queued mod"
 
 
 def test_dashboard_modification_lookup_is_single_batched_query(client, db_session):
-    """The enrichment must add exactly ONE query touching reactor_change_requests,
-    regardless of how many cards are occupied (no per-card N+1)."""
+    """At most two statements touch experiment_notes for any number of cards: the
+    card query (whose description subquery reads notes) and ONE batched
+    modification query. No per-card N+1."""
     import sqlalchemy
     from sqlalchemy.engine import Engine
-    from database.models.experiments import Experiment
-    from database.models.conditions import ExperimentalConditions
-    from database.models.notion_sync import ReactorChangeRequest
-    from database.models.enums import ExperimentStatus
-
     for i, rn in enumerate((10, 11, 12)):
-        exp = Experiment(
-            experiment_id=f"MOD_BATCH_{rn}",
-            experiment_number=72100 + i,
-            status=ExperimentStatus.ONGOING,
-            created_at=datetime.datetime.utcnow(),
-        )
-        db_session.add(exp)
-        db_session.flush()
-        db_session.add(ExperimentalConditions(
-            experiment_fk=exp.id, experiment_id=exp.experiment_id,
-            reactor_number=rn, experiment_type="HPHT",
-        ))
-        db_session.add(ReactorChangeRequest(
-            reactor_label=f"R{rn:02d}", experiment_id=exp.experiment_id,
-            requested_change=f"mod {rn}", sync_date=_utc_today(),
-        ))
+        exp = _card_exp(db_session, f"MOD_BATCH_{rn}", 72100 + i, rn)
+        _mod(db_session, exp, f"mod {rn}", event_date=_lab_today())
     db_session.commit()
 
     statements: list[str] = []
@@ -998,10 +966,30 @@ def test_dashboard_modification_lookup_is_single_batched_query(client, db_sessio
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
     assert cards["R10"]["todays_modification"] == "mod 10"
     assert cards["R12"]["todays_modification"] == "mod 12"
-    cr_queries = [s for s in statements if "reactor_change_requests" in s]
-    assert len(cr_queries) == 1, (
-        f"Expected exactly 1 batched change-request query, got {len(cr_queries)}"
+    notes_queries = [s for s in statements if "experiment_notes" in s]
+    assert len(notes_queries) <= 2, (
+        f"Expected the card query plus one batched notes query, got {len(notes_queries)}"
     )
+    assert not any("reactor_change_requests" in s for s in statements)
+
+
+def test_todays_modification_uses_lab_day_not_utc(client, db_session):
+    """Mat's ruling, 2026-10-05: 'today' is the lab's calendar day
+    (America/New_York), not UTC — it can differ from UTC's date late in the ET
+    evening, when UTC has already rolled to the next day."""
+    exp = _card_exp(db_session, "MOD_LABDAY_001", 72200, 13)
+    _mod(db_session, exp, "lab-day today", event_date=_lab_today())
+    db_session.commit()
+    resp = client.get("/api/dashboard/")
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R13"]["todays_modification"] == "lab-day today"
+
+    exp2 = _card_exp(db_session, "MOD_LABDAY_002", 72201, 14)
+    _mod(db_session, exp2, "utc tomorrow", event_date=_lab_today() + datetime.timedelta(days=1))
+    db_session.commit()
+    resp2 = client.get("/api/dashboard/")
+    cards2 = {c["reactor_label"]: c for c in resp2.json()["reactors"]}
+    assert cards2["R14"]["todays_modification"] is None
 
 
 # ---------------------------------------------------------------------------

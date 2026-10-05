@@ -102,8 +102,15 @@ def test_collect_impact_counts_every_dependent_record(db):
     assert impact.additives == 1
     assert impact.external_analyses == 1
     assert impact.xrd_phases == 1
-    assert impact.change_requests == 1
-    assert impact.total == 10
+    assert impact.total == 9
+
+
+def test_delete_impact_has_no_change_requests_field():
+    from backend.services.experiment_deletion import DeleteImpact
+    impact = DeleteImpact(experiment_id="X", conditions=1, results=2, scalar_results=3, icp_results=4,
+                          result_files=5, notes=6, additives=7, external_analyses=8, xrd_phases=9)
+    assert not hasattr(impact, "change_requests")
+    assert impact.total == 45
 
 
 def test_collect_impact_counts_the_conditions_row(db):
@@ -311,8 +318,8 @@ def test_delete_decouples_background_string_and_fk(db):
 
 def test_delete_purges_change_requests(db):
     """Product decision (2026-07-29): change requests are PURGED with the
-    experiment, not unlinked. This also makes `change_requests` -- already summed
-    into `total`, which is documented as rows destroyed -- truthful."""
+    experiment, not unlinked. Purged, no longer counted since #122 PR-B --
+    the migrated data lives in experiment_notes and is counted under notes."""
     from backend.services.experiment_deletion import delete_experiment_cascade
 
     exp = _full_experiment(db, "DEL_CR_001", 7207)

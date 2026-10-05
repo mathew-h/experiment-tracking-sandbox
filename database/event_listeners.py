@@ -687,6 +687,7 @@ _VIEWS = [
     # ------------------------------------------------------------------
     # v_notes (issue #118 PR3)
     # One row per experiment note, typed and optionally scoped to a result.
+    # event_date (issue #122 PR-B) anchors a dated reactor modification.
     # Power BI's entry point for this domain: join experiment_id to
     # v_experiments and result_id to v_dim_timepoints / v_results_*.
     # needs_review = true marks rows the 020 backfill could not place with
@@ -698,6 +699,7 @@ _VIEWS = [
             n.id                 AS note_id,
             e.experiment_id,
             n.result_id,
+            n.event_date,
             n.note_type::text    AS note_type,
             n.note_text,
             n.created_at,
