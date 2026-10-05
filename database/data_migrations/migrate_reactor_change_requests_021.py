@@ -34,11 +34,14 @@ Rules, in id order (deterministic; nothing is guessed)
    experiment_fk=<exp.id>) so label, Notion status and page id are recoverable.
    experiment_fk is set on purpose: these snapshots belong to the experiment
    and die with it.
-5. Idempotent. A row is ALREADY CONVERTED when a note exists with the same
-   experiment_fk, event_date, note_text and created_by=SOURCE_TAG. Two source
-   rows sharing (experiment, date, text) -- possible only under two different
-   reactor_labels, because of the table's unique key -- COLLAPSE into one
-   note; the second is reported as collapsed, never doubled or dropped silently.
+5. Idempotent. A row is ALREADY CONVERTED when its ModificationsLog snapshot
+   exists (modified_table='reactor_change_requests', old_values.id = the row
+   id) -- this survives later edits or deletion of the note -- or, failing
+   that, when a note with the same experiment_fk, event_date, note_text and
+   created_by=SOURCE_TAG exists. Two source rows sharing (experiment, date,
+   text) -- possible only under two different reactor_labels, because of the
+   table's unique key -- COLLAPSE into one note; the second is reported as
+   collapsed, never doubled or dropped silently.
 6. Informational: how many convertible rows carry a reactor_label that differs
    from the experiment's current experimental_conditions.reactor_slot. A
    difference is expected when an experiment moved reactors; it is reported so
@@ -134,6 +137,16 @@ def build_plan(db: Session) -> Plan:
             .where(ExperimentNotes.created_by == SOURCE_TAG, ExperimentNotes.note_type == NoteType.modification)
         ).all()
     }
+    converted_ids: set[int] = set()
+    for (old_values,) in db.execute(
+        select(ModificationsLog.old_values)
+        .where(ModificationsLog.modified_table == "reactor_change_requests")
+    ).all():
+        try:
+            converted_ids.add(int((old_values or {}).get("id")))
+        except (TypeError, ValueError):
+            continue
+
     seen_this_run: set[tuple[int, date, str]] = set()
 
     for row in rows:
@@ -153,6 +166,9 @@ def build_plan(db: Session) -> Plan:
         text_ = (row.requested_change or "").strip()
         if not text_:
             plan.blank.append(row)
+            continue
+        if row.id in converted_ids:
+            plan.already_converted.append(row)
             continue
         key = (exp.id, row.sync_date, text_)
         if key in existing:

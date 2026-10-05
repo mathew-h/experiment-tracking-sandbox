@@ -40,11 +40,11 @@ function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
   }
 }
 
-function renderGrid(cards: ReactorCardData[], rSlotCount = 16, cfSlotCount = 3) {
+function tree(cards: ReactorCardData[], rSlotCount = 16, cfSlotCount = 3) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  return (
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
@@ -53,6 +53,10 @@ function renderGrid(cards: ReactorCardData[], rSlotCount = 16, cfSlotCount = 3) 
       </QueryClientProvider>
     </MemoryRouter>
   )
+}
+
+function renderGrid(cards: ReactorCardData[], rSlotCount = 16, cfSlotCount = 3) {
+  return render(tree(cards, rSlotCount, cfSlotCount))
 }
 
 describe('ReactorCard — todays_modification (issue #72)', () => {
@@ -199,5 +203,16 @@ describe('ReactorCard — reactor modification saves a dated note (issue #122 PR
     fireEvent.click(screen.getByText('HPHT_MH_072'))
     expect(screen.getByText('Replaced septum')).toBeInTheDocument()
     expect(screen.getByText('Sep 18, 2026')).toBeInTheDocument()
+  })
+
+  it('an open modal shows the latest modification after the grid refreshes (no stale snapshot)', async () => {
+    const first = makeCard({ latest_modification: { note_text: 'Replaced septum', event_date: '2026-09-18', created_at: '2026-09-18T10:00:00Z' } })
+    const { rerender } = renderGrid([first])
+    fireEvent.click(screen.getByText('HPHT_MH_072'))
+    expect(screen.getByText('Replaced septum')).toBeInTheDocument()
+    const refreshed = makeCard({ latest_modification: { note_text: 'Topped up catalyst', event_date: '2026-09-20', created_at: '2026-09-20T10:00:00Z' } })
+    rerender(tree([refreshed]))
+    expect(await screen.findByText('Topped up catalyst')).toBeInTheDocument()
+    expect(screen.queryByText('Replaced septum')).toBeNull()
   })
 })

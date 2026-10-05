@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, case, distinct
@@ -186,7 +186,7 @@ def get_dashboard(
         for r in mod_rows:
             if r.event_date == today:
                 todays.setdefault(r.experiment_fk, []).append(r.note_text or "")
-            anchor = (r.event_date or r.created_at.astimezone(timezone.utc).date(), r.id)
+            anchor = (r.event_date or (r.created_at.astimezone(timezone.utc).date() if r.created_at else date.min), r.id)
             if r.experiment_fk not in latest or anchor > latest[r.experiment_fk][0]:
                 latest[r.experiment_fk] = (anchor, r)
         for c in reactor_cards:

@@ -318,8 +318,8 @@ def test_delete_decouples_background_string_and_fk(db):
 
 def test_delete_purges_change_requests(db):
     """Product decision (2026-07-29): change requests are PURGED with the
-    experiment, not unlinked. This also makes `change_requests` -- already summed
-    into `total`, which is documented as rows destroyed -- truthful."""
+    experiment, not unlinked. Purged, no longer counted since #122 PR-B --
+    the migrated data lives in experiment_notes and is counted under notes."""
     from backend.services.experiment_deletion import delete_experiment_cascade
 
     exp = _full_experiment(db, "DEL_CR_001", 7207)

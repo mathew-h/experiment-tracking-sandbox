@@ -28,10 +28,10 @@ them have no usable DB-level protection:
      This is a DECOUPLING of another experiment's row: provenance only -- the
      background NUMBER lives in background_ammonium_concentration_mM, which is
      left intact, so no derived value changes and no recalculate() is needed.
-  3. reactor_change_requests.experiment_id -- ondelete="SET NULL", but these
-     rows are PURGED (product decision, 2026-07-29): they belong to this
-     experiment, and change_requests is summed into DeleteImpact.total, which is
-     documented as rows destroyed. Purging makes that count truthful.
+  3. reactor_change_requests.experiment_id -- ondelete="SET NULL", but the
+     rows are purged (they belong to the experiment); since #122 PR-B they
+     are no longer counted in DeleteImpact -- the migrated data lives in
+     experiment_notes and is counted under notes.
   4. Replicate children -- parent_experiment_fk is dropped, nothing else. Their
      base_experiment_id and replicate_label stay, because replicate groups are
      addressed by the base-ID string (issue #87). A DECOUPLING, not a purge.

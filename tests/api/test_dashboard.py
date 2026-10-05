@@ -897,8 +897,8 @@ def test_latest_modification_orders_by_event_date_then_id_and_falls_back_to_crea
     db_session.flush()
     long_ago = datetime.datetime(2026, 1, 5, 12, 0, tzinfo=datetime.timezone.utc)
     _mod(db_session, exp, "old dated", event_date=datetime.date(2026, 3, 1))
-    newest = _mod(db_session, exp, "result-anchored today", result_id=r.id,
-                  created_at=datetime.datetime.now(datetime.timezone.utc))
+    _mod(db_session, exp, "result-anchored today", result_id=r.id,
+         created_at=datetime.datetime.now(datetime.timezone.utc))
     _mod(db_session, exp, "ancient by created_at", result_id=r.id, created_at=long_ago)
     db_session.commit()
     resp = client.get("/api/dashboard/")
@@ -906,7 +906,6 @@ def test_latest_modification_orders_by_event_date_then_id_and_falls_back_to_crea
     assert cards["R07"]["todays_modification"] is None
     assert cards["R07"]["latest_modification"]["note_text"] == "result-anchored today"
     assert cards["R07"]["latest_modification"]["event_date"] is None
-    assert newest.id  # sanity: the row exists
 
 
 def test_todays_modification_keys_on_experiment_not_reactor(client, db_session):

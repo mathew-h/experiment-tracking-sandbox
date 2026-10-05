@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import select, func
+import pytest
+from sqlalchemy import select, func, delete
 
 from database.data_migrations.migrate_reactor_change_requests_021 import (
     SOURCE_TAG,
@@ -48,6 +49,19 @@ def _notes(db, exp):
     ).scalars().all()
 
 
+@pytest.fixture(autouse=True)
+def _clean_slate(migration_session):
+    """build_plan reads the whole reactor_change_requests table, so start every
+    test from an empty table and no 021 artifacts; the fixture's outer
+    transaction rolls all of this back."""
+    db = migration_session
+    db.execute(delete(ModificationsLog).where(ModificationsLog.modified_table == "reactor_change_requests"))
+    db.execute(delete(ExperimentNotes).where(ExperimentNotes.created_by == SOURCE_TAG))
+    db.execute(delete(ReactorChangeRequest))
+    db.flush()
+    yield
+
+
 def test_converts_dashboard_and_notion_rows_alike(migration_session):
     db = migration_session
     exp = _exp(db, "CR021_001", 81001, reactor=5)
@@ -77,7 +91,9 @@ def test_null_experiment_rows_are_reported_not_converted(migration_session):
     assert plan.convertible == []
     apply_plan(db, plan)
     db.commit()
-    assert db.execute(select(func.count()).select_from(ExperimentNotes)).scalar_one() == 0
+    assert db.execute(
+        select(func.count()).select_from(ExperimentNotes).where(ExperimentNotes.created_by == SOURCE_TAG)
+    ).scalar_one() == 0
 
 
 def test_blank_text_rows_are_reported_not_converted(migration_session):
@@ -97,7 +113,9 @@ def test_snapshot_shape(migration_session):
     (note_id,) = apply_plan(db, plan)
     db.commit()
     log = db.execute(
-        select(ModificationsLog).where(ModificationsLog.modified_table == "reactor_change_requests")
+        select(ModificationsLog)
+        .where(ModificationsLog.modified_table == "reactor_change_requests")
+        .where(ModificationsLog.experiment_fk == exp.id)
     ).scalar_one()
     assert log.modification_type == "update"
     assert log.modified_by == SOURCE_TAG
@@ -128,7 +146,8 @@ def test_second_run_is_a_no_op(migration_session):
     db.commit()
     assert len(_notes(db, exp)) == 1
     assert db.execute(select(func.count()).select_from(ModificationsLog)
-                      .where(ModificationsLog.modified_table == "reactor_change_requests")).scalar_one() == 1
+                      .where(ModificationsLog.modified_table == "reactor_change_requests")
+                      .where(ModificationsLog.experiment_fk == exp.id)).scalar_one() == 1
 
 
 def test_same_experiment_date_text_under_two_labels_collapses_to_one_note(migration_session):
@@ -162,4 +181,26 @@ def test_dry_run_writes_nothing(migration_session):
     build_plan(db)                                        # no apply_plan
     db.commit()
     assert _notes(db, exp) == []
-    assert db.execute(select(func.count()).select_from(ModificationsLog)).scalar_one() == 0
+    assert db.execute(
+        select(func.count()).select_from(ModificationsLog)
+        .where(ModificationsLog.modified_table == "reactor_change_requests")
+        .where(ModificationsLog.experiment_fk == exp.id)
+    ).scalar_one() == 0
+
+
+def test_editing_or_deleting_a_migrated_note_does_not_reconvert(migration_session):
+    db = migration_session
+    exp = _exp(db, "CR021_009", 81009)
+    _cr(db, "R02", exp.experiment_id, "Replaced septum", D1)
+    first = build_plan(db)
+    (note_id,) = apply_plan(db, first)
+    db.commit()
+    note = db.get(ExperimentNotes, note_id)
+    note.note_text = "Replaced septum (corrected)"
+    db.flush()
+    assert build_plan(db).convertible == []
+    db.delete(note)
+    db.flush()
+    again = build_plan(db)
+    assert again.convertible == []
+    assert len(again.already_converted) == 1

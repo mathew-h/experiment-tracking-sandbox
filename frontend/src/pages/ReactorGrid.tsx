@@ -601,7 +601,14 @@ export function ReactorGrid({
       {selected && (
         <ReactorDetailModal
           key={selected.experiment_id ?? selected.reactor_label}
-          card={selected}
+          // Render from the live card so a save (which invalidates ['dashboard'])
+          // updates the open modal's "latest" block; fall back to the click-time
+          // snapshot if the slot's occupant changed under us (the key resets state).
+          card={
+            byLabel[selected.reactor_label]?.experiment_id === selected.experiment_id
+              ? byLabel[selected.reactor_label]
+              : selected
+          }
           onClose={() => setSelected(null)}
         />
       )}
