@@ -36,6 +36,7 @@ function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
     material: null,
     vendor: null,
     todays_modification: null,
+    latest_modification: null,
     ...overrides,
   }
 }

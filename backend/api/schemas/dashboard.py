@@ -52,6 +52,14 @@ class DashboardSummary(BaseModel):
     workday_window_end: date                 # last workday in the window (== today if a workday)
 
 
+class LatestModification(BaseModel):
+    """The most recent 'modification' note on a card's experiment (issue #122 PR-B):
+    ordered by COALESCE(event_date, created_at::date), then id."""
+    note_text: str
+    event_date: Optional[date] = None
+    created_at: datetime
+
+
 class ReactorCardData(BaseModel):
     reactor_number: int
     reactor_label: str              # "R05" or "CF01"
@@ -68,7 +76,9 @@ class ReactorCardData(BaseModel):
     volume_mL: Optional[int] = None     # reactor hardware spec
     material: Optional[str] = None      # reactor hardware spec
     vendor: Optional[str] = None        # reactor hardware spec
-    todays_modification: Optional[str] = None  # requested_change saved today (UTC) for this card; None if none
+    # Issue #122 PR-B: both read 'modification' notes, not reactor_change_requests.
+    todays_modification: Optional[str] = None   # notes with event_date == today (UTC), '; '-joined in id order
+    latest_modification: Optional[LatestModification] = None
 
 
 class GanttEntry(BaseModel):

@@ -48,6 +48,8 @@ export interface ReactorCardData {
   material: string | null
   vendor: string | null
   todays_modification: string | null
+  /** Most recent 'modification' note on this card's experiment (issue #122 PR-B). */
+  latest_modification: { note_text: string; event_date: string | null; created_at: string } | null
 }
 
 export interface GanttEntry {

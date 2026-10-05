@@ -4,16 +4,16 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, case, distinct
 from sqlalchemy.orm import Session
-from database.models.experiments import Experiment, ModificationsLog
+from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.conditions import ExperimentalConditions
 from database.models.results import ExperimentalResults, ScalarResults, ICPResults
-from database.models.enums import ExperimentStatus
-from database.models.notion_sync import ReactorChangeRequest
+from database.models.enums import ExperimentStatus, NoteType
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.dashboard import (
     ReactorStatusResponse, ExperimentTimelineResponse, TimelinePoint,
     DashboardResponse, DashboardSummary, SlotOccupancy, ReactorCardData, GanttEntry, ActivityEntry,
+    LatestModification,
 )
 from backend.services.workdays import workday_window
 
@@ -158,26 +158,48 @@ def get_dashboard(
             vendor=specs.get("vendor"),
         ))
 
-    # ── 2b. Today's reactor modification per card (issue #72) ─────────────
-    # One batched query keyed on (experiment_id, reactor_label) — keeps the
-    # "no N+1" contract of this endpoint. "Today" is UTC, matching the
-    # pop-out's save path (todayISO() is the UTC date).
+    # ── 2b. Reactor modifications per card (issue #72, re-sourced by #122 PR-B) ─
+    # A reactor modification is a 'modification' note anchored to an event_date
+    # (dashboard saves, the 021 backfill) or to a result (Add Results). One
+    # batched query over the cards' experiments keeps this endpoint's "no N+1"
+    # contract; the reduction to "today's" and "latest" happens here. "Today" is
+    # UTC, matching the card's save path (todayISO() is the UTC date).
     today = now.date()
-    card_exp_ids = [c.experiment_id for c in reactor_cards if c.experiment_id]
-    if card_exp_ids:
+    card_fks = [c.experiment_db_id for c in reactor_cards if c.experiment_db_id]
+    if card_fks:
         mod_rows = db.execute(
             select(
-                ReactorChangeRequest.experiment_id,
-                ReactorChangeRequest.reactor_label,
-                ReactorChangeRequest.requested_change,
-            ).where(
-                ReactorChangeRequest.experiment_id.in_(card_exp_ids),
-                ReactorChangeRequest.sync_date == today,
+                ExperimentNotes.experiment_fk,
+                ExperimentNotes.id,
+                ExperimentNotes.note_text,
+                ExperimentNotes.event_date,
+                ExperimentNotes.created_at,
             )
+            .where(
+                ExperimentNotes.experiment_fk.in_(card_fks),
+                ExperimentNotes.note_type == NoteType.modification,
+            )
+            .order_by(ExperimentNotes.experiment_fk, ExperimentNotes.id)
         ).all()
-        mods = {(r.experiment_id, r.reactor_label): r.requested_change for r in mod_rows}
+        todays: dict[int, list[str]] = {}
+        latest: dict[int, tuple] = {}   # experiment_fk -> ((anchor_date, id), row)
+        for r in mod_rows:
+            if r.event_date == today:
+                todays.setdefault(r.experiment_fk, []).append(r.note_text or "")
+            anchor = (r.event_date or r.created_at.date(), r.id)
+            if r.experiment_fk not in latest or anchor > latest[r.experiment_fk][0]:
+                latest[r.experiment_fk] = (anchor, r)
         for c in reactor_cards:
-            c.todays_modification = mods.get((c.experiment_id, c.reactor_label))
+            if not c.experiment_db_id:
+                continue
+            texts = todays.get(c.experiment_db_id)
+            c.todays_modification = "; ".join(texts) if texts else None
+            hit = latest.get(c.experiment_db_id)
+            if hit is not None:
+                _, r = hit
+                c.latest_modification = LatestModification(
+                    note_text=r.note_text or "", event_date=r.event_date, created_at=r.created_at,
+                )
 
     # ── 2c. Workday-window KPI counts + slot occupancy ─────────────────────
     # ET is used here (not UTC) because "last 7 workdays" is a statement about
