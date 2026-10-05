@@ -96,7 +96,8 @@ export interface ExperimentListItem {
   experiment_type: string | null
   reactor_number: number | null
   additives_summary: string | null
-  condition_note: string | null
+  /** The note typed 'description' (issue #118). */
+  description: string | null
   base_experiment_id: string | null
   parent_experiment_fk: number | null
   replicate_label: string | null

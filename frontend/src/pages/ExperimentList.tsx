@@ -364,7 +364,7 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
         {groupBadge}
       </Td>
       <Td className="text-xs text-ink-secondary max-w-48 truncate">
-        {exp.condition_note ?? <span className="text-ink-muted">—</span>}
+        {exp.description ?? <span className="text-ink-muted">—</span>}
       </Td>
       <Td className="font-mono-data text-xs">
         {exp.sample_id ?? <span className="text-ink-muted">—</span>}
