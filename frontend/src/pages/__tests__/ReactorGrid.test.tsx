@@ -165,6 +165,18 @@ describe('StatusBadge — reactor occupancy 409 (issue #97)', () => {
   })
 })
 
+describe('ReactorCard — modification date defaults to the lab day (Mat, 2026-10-05)', () => {
+  it('defaults the Modification date input to today in America/New_York, not the browser zone', () => {
+    renderGrid([makeCard()])
+    fireEvent.click(screen.getByText('HPHT_MH_072'))
+    const date = screen.getByLabelText('Modification date') as HTMLInputElement
+    const expected = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date())
+    expect(date.value).toBe(expected)
+  })
+})
+
 describe('ReactorCard — reactor modification saves a dated note (issue #122 PR-B)', () => {
   beforeEach(() => {
     vi.mocked(experimentsApi.addNote).mockClear()

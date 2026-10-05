@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from backend.api.main import app
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
+from backend.services.workdays import LAB_TZ
 
 
 # ---------------------------------------------------------------------------
@@ -814,9 +815,10 @@ def test_reactor_status_excludes_non_hpht_experiments(client, db_session):
 # Today's reactor modification on cards (issue #72)
 # ---------------------------------------------------------------------------
 
-def _utc_today() -> datetime.date:
-    """The dashboard's definition of 'today' — UTC, matching the pop-out save path."""
-    return datetime.datetime.now(datetime.timezone.utc).date()
+def _lab_today() -> datetime.date:
+    """The dashboard's definition of 'today' — the lab's calendar day, America/New_York,
+    matching the card's date input default (Mat's ruling, 2026-10-05)."""
+    return datetime.datetime.now(LAB_TZ).date()
 
 
 def test_reactor_card_data_schema_todays_modification_defaults_none():
@@ -853,21 +855,22 @@ def _mod(db, exp, text_, event_date=None, result_id=None, created_at=None):
 
 
 def test_reactor_card_shows_todays_modification(client, db_session):
-    """A 'modification' note with event_date == today (UTC) is the card's todays_modification."""
+    """A 'modification' note with event_date == today (the lab's calendar day,
+    America/New_York) is the card's todays_modification."""
     exp = _card_exp(db_session, "MOD_TODAY_001", 72001, 4)
-    _mod(db_session, exp, "Swapped stir shaft; topped up catalyst", event_date=_utc_today())
+    _mod(db_session, exp, "Swapped stir shaft; topped up catalyst", event_date=_lab_today())
     db_session.commit()
     resp = client.get("/api/dashboard/")
     assert resp.status_code == 200
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
     assert cards["R04"]["todays_modification"] == "Swapped stir shaft; topped up catalyst"
     assert cards["R04"]["latest_modification"]["note_text"] == "Swapped stir shaft; topped up catalyst"
-    assert cards["R04"]["latest_modification"]["event_date"] == _utc_today().isoformat()
+    assert cards["R04"]["latest_modification"]["event_date"] == _lab_today().isoformat()
 
 
 def test_reactor_card_prior_day_modification_not_shown_as_today_but_is_latest(client, db_session):
     exp = _card_exp(db_session, "MOD_YDAY_001", 72002, 5)
-    _mod(db_session, exp, "yesterday's change", event_date=_utc_today() - datetime.timedelta(days=1))
+    _mod(db_session, exp, "yesterday's change", event_date=_lab_today() - datetime.timedelta(days=1))
     db_session.commit()
     resp = client.get("/api/dashboard/")
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
@@ -878,8 +881,8 @@ def test_reactor_card_prior_day_modification_not_shown_as_today_but_is_latest(cl
 def test_several_todays_modifications_are_joined_in_id_order(client, db_session):
     # Review Focus 4
     exp = _card_exp(db_session, "MOD_MULTI_001", 72003, 6)
-    _mod(db_session, exp, "first", event_date=_utc_today())
-    _mod(db_session, exp, "second", event_date=_utc_today())
+    _mod(db_session, exp, "first", event_date=_lab_today())
+    _mod(db_session, exp, "second", event_date=_lab_today())
     db_session.commit()
     resp = client.get("/api/dashboard/")
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
@@ -913,8 +916,8 @@ def test_todays_modification_keys_on_experiment_not_reactor(client, db_session):
     a = _card_exp(db_session, "MOD_KEY_A", 72005, 8)
     b = _card_exp(db_session, "MOD_KEY_B", 72006, 9)
     c = _card_exp(db_session, "MOD_KEY_C", 72007, 10)
-    _mod(db_session, a, "mod A", event_date=_utc_today())
-    _mod(db_session, b, "mod B", event_date=_utc_today())
+    _mod(db_session, a, "mod A", event_date=_lab_today())
+    _mod(db_session, b, "mod B", event_date=_lab_today())
     db_session.commit()
     resp = client.get("/api/dashboard/")
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
@@ -928,7 +931,7 @@ def test_queued_card_also_gets_todays_and_latest_modification(client, db_session
     """Section 2b enriches QUEUED cards the same as ONGOING ones."""
     from database.models.enums import ExperimentStatus
     exp = _card_exp(db_session, "MOD_QUEUED_001", 72008, 11, status=ExperimentStatus.QUEUED)
-    _mod(db_session, exp, "queued mod", event_date=_utc_today())
+    _mod(db_session, exp, "queued mod", event_date=_lab_today())
     db_session.commit()
     resp = client.get("/api/dashboard/")
     cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
@@ -945,7 +948,7 @@ def test_dashboard_modification_lookup_is_single_batched_query(client, db_sessio
     from sqlalchemy.engine import Engine
     for i, rn in enumerate((10, 11, 12)):
         exp = _card_exp(db_session, f"MOD_BATCH_{rn}", 72100 + i, rn)
-        _mod(db_session, exp, f"mod {rn}", event_date=_utc_today())
+        _mod(db_session, exp, f"mod {rn}", event_date=_lab_today())
     db_session.commit()
 
     statements: list[str] = []
@@ -968,6 +971,25 @@ def test_dashboard_modification_lookup_is_single_batched_query(client, db_sessio
         f"Expected the card query plus one batched notes query, got {len(notes_queries)}"
     )
     assert not any("reactor_change_requests" in s for s in statements)
+
+
+def test_todays_modification_uses_lab_day_not_utc(client, db_session):
+    """Mat's ruling, 2026-10-05: 'today' is the lab's calendar day
+    (America/New_York), not UTC — it can differ from UTC's date late in the ET
+    evening, when UTC has already rolled to the next day."""
+    exp = _card_exp(db_session, "MOD_LABDAY_001", 72200, 13)
+    _mod(db_session, exp, "lab-day today", event_date=_lab_today())
+    db_session.commit()
+    resp = client.get("/api/dashboard/")
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R13"]["todays_modification"] == "lab-day today"
+
+    exp2 = _card_exp(db_session, "MOD_LABDAY_002", 72201, 14)
+    _mod(db_session, exp2, "utc tomorrow", event_date=_lab_today() + datetime.timedelta(days=1))
+    db_session.commit()
+    resp2 = client.get("/api/dashboard/")
+    cards2 = {c["reactor_label"]: c for c in resp2.json()["reactors"]}
+    assert cards2["R14"]["todays_modification"] is None
 
 
 # ---------------------------------------------------------------------------

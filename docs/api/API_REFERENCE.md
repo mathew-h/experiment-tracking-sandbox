@@ -641,7 +641,7 @@ Returns all dashboard data in a single call. Response shape:
 - Timeline limited to 100 most recent experiments
 - Activity limited to last 20 modification log entries
 - Core Flood experiments use `CF01`/`CF02` labels; all others use `R01`–`R16`
-- `todays_modification` and `latest_modification` are sourced from `experiment_notes` (issue #122 PR-B, re-sourced from the now-deprecated `reactor_change_requests`): `'modification'`-typed notes on the card's experiment, keyed by `experiment_fk`, in one batched query — the endpoint remains a single call. `todays_modification` is the `'; '`-joined `note_text` of every modification note whose `event_date` equals the current UTC day (`null` if none). `latest_modification` is `{"note_text", "event_date", "created_at"}` for the single most recent modification note, ordered by `COALESCE(event_date, created_at::date)` then `id`; `null` if the experiment has no modification notes.
+- `todays_modification` and `latest_modification` are sourced from `experiment_notes` (issue #122 PR-B, re-sourced from the now-deprecated `reactor_change_requests`): `'modification'`-typed notes on the card's experiment, keyed by `experiment_fk`, in one batched query — the endpoint remains a single call. `todays_modification` is the `'; '`-joined `note_text` of every modification note whose `event_date` equals the current day in the lab's time zone (America/New_York, `LAB_TZ`) — not UTC (Mat's ruling, 2026-10-05) — (`null` if none). `latest_modification` is `{"note_text", "event_date", "created_at"}` for the single most recent modification note, ordered by `COALESCE(event_date, created_at::date)` then `id`; `null` if the experiment has no modification notes.
 
 ## Admin
 

@@ -761,3 +761,8 @@ relitigated):**
 `.claude/rules/MODELS.md` (`ExperimentNotes`, `event_date`, deletion impact
 counts); the 2026-09-23 entry above this one (the related typed-notes
 decision, not the source of the reversed line).
+
+**Addendum 2026-10-05 (Mat):** "today" for reactor modifications is the lab's
+calendar day (America/New_York), on the card's date default and the server's
+`todays_modification`, reversing the spec's "UTC, unchanged". `event_date` is
+a calendar date in lab time.

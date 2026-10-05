@@ -15,7 +15,7 @@ from backend.api.schemas.dashboard import (
     DashboardResponse, DashboardSummary, SlotOccupancy, ReactorCardData, GanttEntry, ActivityEntry,
     LatestModification,
 )
-from backend.services.workdays import workday_window
+from backend.services.workdays import workday_window, LAB_TZ
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -163,8 +163,10 @@ def get_dashboard(
     # (dashboard saves, the 021 backfill) or to a result (Add Results). One
     # batched query over the cards' experiments keeps this endpoint's "no N+1"
     # contract; the reduction to "today's" and "latest" happens here. "Today" is
-    # UTC, matching the card's save path (todayISO() is the UTC date).
-    today = now.date()
+    # the lab's calendar day (America/New_York, `LAB_TZ`), matching the card's
+    # date input default and the KPI window in 2c — Mat's ruling 2026-10-05,
+    # reversing the spec's "UTC, unchanged".
+    today = now.astimezone(LAB_TZ).date()
     card_fks = [c.experiment_db_id for c in reactor_cards if c.experiment_db_id]
     if card_fks:
         mod_rows = db.execute(
@@ -186,7 +188,7 @@ def get_dashboard(
         for r in mod_rows:
             if r.event_date == today:
                 todays.setdefault(r.experiment_fk, []).append(r.note_text or "")
-            anchor = (r.event_date or (r.created_at.astimezone(timezone.utc).date() if r.created_at else date.min), r.id)
+            anchor = (r.event_date or (r.created_at.astimezone(LAB_TZ).date() if r.created_at else date.min), r.id)
             if r.experiment_fk not in latest or anchor > latest[r.experiment_fk][0]:
                 latest[r.experiment_fk] = (anchor, r)
         for c in reactor_cards:
@@ -203,8 +205,8 @@ def get_dashboard(
 
     # ── 2c. Workday-window KPI counts + slot occupancy ─────────────────────
     # ET is used here (not UTC) because "last 7 workdays" is a statement about
-    # the lab's week — see design notes in issue #85. This is intentionally
-    # NOT the same "today" as section 2b's UTC-based modification lookup.
+    # the lab's week — see design notes in issue #85. This is now the SAME
+    # "today" as section 2b's modification lookup (both use LAB_TZ).
     wd_first, wd_last, wd_start, wd_end = workday_window(7)
 
     gc_row = db.execute(

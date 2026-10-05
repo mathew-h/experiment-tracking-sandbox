@@ -2538,4 +2538,5 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
   - Frontend: `npx vitest run` → 237 passed in 34 files; `npx eslint src --ext .ts,.tsx` → 5 problems (#106 baseline); `npx tsc --noEmit` → 3 errors in `ResultsTab.columns.test.tsx` (baseline).
   - `grep -rn "ReactorChangeRequest\|change_requests\|change-requests" backend/api/routers/dashboard.py frontend/src` → only the deprecated client methods/types in `frontend/src/api/experiments.ts` (confirmed no UI path still writes `reactor_change_requests`).
 - **Final-review fix wave (2026-10-05):** modal renders the live card; 021 idempotency keyed on the snapshot; 021 tests isolated; runbook and decision citation corrected.
+- **Addendum (2026-10-05, same day, Mat's ruling):** "today" for reactor modifications — the card's date default and the server's `todays_modification`/`latest_modification` fallback — moved from UTC to the lab's calendar day (America/New_York, `LAB_TZ`), reversing the "UTC, unchanged" line in the row above and in the phase-2 spec. See `docs/working/decisions.md` addendum.
 - **Tests added:** yes (see Files changed). **Docs updated:** yes.

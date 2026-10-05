@@ -5,8 +5,12 @@ import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 
+/** Today as YYYY-MM-DD in the lab's time zone (America/New_York), matching the
+ *  server's definition of "today" for reactor modifications (Mat, 2026-10-05). */
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
 }
 
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
