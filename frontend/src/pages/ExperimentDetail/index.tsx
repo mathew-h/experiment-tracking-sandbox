@@ -13,9 +13,8 @@ import { ResultsTab } from './ResultsTab'
 import { NotesTab } from './NotesTab'
 import { ModificationsTab } from './ModificationsTab'
 import { AnalysisTab } from './AnalysisTab'
-import { ChangeRequestsTab } from './ChangeRequestsTab'
 
-const TABS = ['Conditions', 'Results', 'Notes', 'Reactor Modifications', 'Analysis', 'Entry Logs'] as const
+const TABS = ['Conditions', 'Results', 'Notes', 'Analysis', 'Entry Logs'] as const
 type Tab = typeof TABS[number]
 
 /**
@@ -511,7 +510,6 @@ export function ExperimentDetailPage() {
         {activeTab === 'Notes' && (
           <NotesTab experimentId={id!} notes={experiment.notes} />
         )}
-        {activeTab === 'Reactor Modifications' && <ChangeRequestsTab experimentId={id!} />}
         {activeTab === 'Entry Logs' && (
           <ModificationsTab modifications={experiment.modifications} />
         )}
