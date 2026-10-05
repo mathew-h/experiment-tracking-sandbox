@@ -95,7 +95,8 @@ def _build_list_item(db: Session, exp: Experiment) -> dict:
     item_data["additives_summary"] = additive_row[0] if additive_row else None
     # Issue #118 PR3: the description is the note typed 'description'
     # (Experiment.description hybrid), no longer the lowest-id note.
-    item_data["condition_note"] = exp.description
+    # Issue #122 PR-C: exposed as `description` (was `condition_note`).
+    item_data["description"] = exp.description
     return item_data
 
 

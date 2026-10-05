@@ -61,8 +61,8 @@ def test_patch_note_empty_text_returns_422(client, db_session):
     assert resp.status_code == 422
 
 
-def test_patch_condition_note_is_editable(client, db_session):
-    """First note (condition note) must be editable — no special read-only treatment."""
+def test_patch_description_note_is_editable(client, db_session):
+    """The description note must be editable — no special read-only treatment."""
     exp, note = _make_experiment_with_note(db_session, "NOTE_005", 7005, text="Original condition note")
     resp = client.patch(
         f"/api/experiments/{exp.experiment_id}/notes/{note.id}",

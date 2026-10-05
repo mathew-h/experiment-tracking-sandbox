@@ -34,7 +34,7 @@ def test_experiment_list_item_has_additives_summary():
     item = ExperimentListItem(
         id=1, experiment_id="X", experiment_number=1,
         status="ONGOING", created_at=datetime.now(),
-        additives_summary=None, condition_note=None,
+        additives_summary=None, description=None,
         experiment_type=None, reactor_number=None,
     )
     assert item.additives_summary is None

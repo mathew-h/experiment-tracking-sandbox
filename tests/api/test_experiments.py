@@ -1,7 +1,7 @@
 import pytest
 
-from database.models.experiments import Experiment
-from database.models.enums import ExperimentStatus
+from database.models.experiments import Experiment, ExperimentNotes
+from database.models.enums import ExperimentStatus, NoteType
 from tests.pre_constraint_conditions import without_conditions_unique
 
 
@@ -1861,3 +1861,19 @@ def test_patch_status_reongoing_on_own_slot_is_allowed(client, db_session):
     )
     resp = client.patch("/api/experiments/SLOT409_I/status", json={"status": "ONGOING"})
     assert resp.status_code == 200
+
+
+def test_list_item_without_description_note_has_null_description(client, db_session):
+    """Issue #122 PR-C: `description` is None (not missing) when the experiment
+    has no 'description' note, so the UI can render the "Add description" state."""
+    exp = Experiment(experiment_id="LIST_DESC_001", experiment_number=7401, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentNotes(experiment_id=exp.experiment_id, experiment_fk=exp.id,
+                                   note_text="just an observation", note_type=NoteType.observation))
+    db_session.commit()
+    resp = client.get("/api/experiments?search=LIST_DESC_001")
+    assert resp.status_code == 200
+    item = next(i for i in resp.json()["items"] if i["experiment_id"] == "LIST_DESC_001")
+    assert "description" in item
+    assert item["description"] is None

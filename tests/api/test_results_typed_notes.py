@@ -82,7 +82,7 @@ def test_create_result_without_description_uses_placeholder_and_writes_no_note(c
     assert listed[0]["notes"] == []
 
 
-def test_list_item_condition_note_is_the_typed_description(client, db_session):
+def test_list_item_description_is_the_typed_description(client, db_session):
     exp = _exp(db_session, "RTN_004", 7304)
     _note(db_session, exp, "an older observation")
     _note(db_session, exp, "the description", note_type=NoteType.description)
@@ -90,4 +90,6 @@ def test_list_item_condition_note_is_the_typed_description(client, db_session):
     resp = client.get("/api/experiments?search=RTN_004")
     assert resp.status_code == 200
     item = next(i for i in resp.json()["items"] if i["experiment_id"] == "RTN_004")
-    assert item["condition_note"] == "the description"
+    assert item["description"] == "the description"
+    # Issue #122 PR-C: the field is called what it is; the old name is gone.
+    assert "condition_note" not in item

@@ -66,7 +66,7 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
   ID. Grouped mode: the group stem (`SERUM_001`). Flat mode: the
   timepoint-stripped stem (`SERUM_001a`). `experiment_id` continues to name the
   real representative row, which is the earliest non-outlier vial and also
-  supplies `sample_id`, `reactor_number`, `date`, `condition_note` and
+  supplies `sample_id`, `reactor_number`, `date`, `description` and
   `additives_summary`.
 - `vial_count` (integer, default 1) — how many experiment rows this row stands
   for. Flat mode counts matched rows sharing the stem; grouped mode counts every
@@ -436,7 +436,7 @@ Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
 | GET | `/api/results/icp/{result_id}` | Get ICP result |
 | POST | `/api/results/icp` | Create ICP result |
 
-`GET /api/experiments/{experiment_id}/description` semantics (#118 PR3): everywhere the API reports an experiment's description — `condition_note` on the experiments list, `description` on dashboard reactor cards, the `description` list filter — it is the note typed `description` (`Experiment.description`), never a positional first note. Experiment detail `notes[]` entries carry `note_type`, `result_id`, `created_by`, `needs_review`, `updated_at`.
+`GET /api/experiments/{experiment_id}/description` semantics (#118 PR3): everywhere the API reports an experiment's description — `description` on the experiments list (renamed from `condition_note` in #122 PR-C), `description` on dashboard reactor cards, the `description` list filter — it is the note typed `description` (`Experiment.description`), never a positional first note. Experiment detail `notes[]` entries carry `note_type`, `result_id`, `created_by`, `needs_review`, `updated_at`.
 
 `GET /api/experiments/{experiment_id}/results` and scalar result responses now include `nmr_run_date`, `icp_run_date`, `gc_run_date`, and `xrd_run_date` (all nullable) — instrument run-date provenance.
 
