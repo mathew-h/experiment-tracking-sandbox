@@ -9,8 +9,9 @@ import {
   type NotesBulkPatch,
 } from '@/api/experiments'
 import { NOTE_TYPE_LABELS, type NoteType } from '@/api/noteTypes'
+import { NoteBadge } from '@/components/experiments/NoteBadge'
 import {
-  Badge, Button, ConfirmModal, Input, Select, Spinner,
+  Button, ConfirmModal, Input, Select, Spinner,
   Table, TableBody, TableHead, TableRow, Td, Th, useToast,
 } from '@/components/ui'
 
@@ -21,12 +22,6 @@ const PAGE_LIMIT = 500
 const NOTE_TYPES: NoteType[] = ['description', 'modification', 'observation', 'result_note']
 
 type PendingAction = { kind: 'review' } | { kind: 'retype'; to: NoteType } | { kind: 'delete' } | null
-
-function typeBadgeVariant(t: NoteType): 'default' | 'warning' | 'info' {
-  if (t === 'modification') return 'warning'
-  if (t === 'description') return 'info'
-  return 'default'
-}
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
@@ -262,7 +257,7 @@ export function NotesReviewPage() {
                 <Td className="font-mono-data text-ink-secondary">
                   {n.time_post_reaction_days != null ? `T+${n.time_post_reaction_days}` : '—'}
                 </Td>
-                <Td><Badge variant={typeBadgeVariant(n.note_type)}>{NOTE_TYPE_LABELS[n.note_type]}</Badge></Td>
+                <Td><NoteBadge type={n.note_type} /></Td>
                 <Td className="max-w-md whitespace-pre-wrap text-ink-primary">{n.note_text}</Td>
                 <Td className="text-ink-muted text-xs">{n.created_by ?? '—'}</Td>
                 <Td className="text-ink-muted text-xs font-mono-data whitespace-nowrap">

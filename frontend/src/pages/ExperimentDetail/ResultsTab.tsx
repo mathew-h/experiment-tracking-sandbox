@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi, type ExperimentNote, type ResultWithFlags } from '@/api/experiments'
-import { NOTE_TYPE_LABELS } from '@/api/noteTypes'
+import { NoteBadge } from '@/components/experiments/NoteBadge'
 import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
 import { AddResultsModal } from './AddResultsModal'
@@ -30,18 +30,15 @@ const RUN_DATE_FIELDS = [
   ['XRD', 'xrd_run_date'],
 ] as const
 
-/** One typed note on a timepoint (issue #118). 'modification' keeps the MOD
- *  badge researchers know; every other type gets the quieter NOTE badge. */
+/** One typed note on a timepoint (issue #118). The badge is the shared
+ *  NoteBadge (issue #122 PR-C) so this row, the Notes timeline and
+ *  /notes/review all label a note the same way. */
 function NoteLine({ note }: { note: ExperimentNote }) {
-  const isMod = note.note_type === 'modification'
   return (
     <li className="text-xs flex items-start gap-2">
-      <Badge variant={isMod ? 'warning' : 'default'} dot={isMod}>
-        {isMod ? 'MOD' : 'NOTE'}
-      </Badge>
+      <NoteBadge type={note.note_type} />
       <span className="text-ink-primary">
         {note.note_text}
-        <span className="text-ink-muted"> · {NOTE_TYPE_LABELS[note.note_type]}</span>
         {note.needs_review && <span className="text-status-error"> · needs review</span>}
       </span>
     </li>
