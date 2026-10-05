@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -10,8 +10,7 @@ vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     patchStatus: vi.fn(),
     patch: vi.fn(),
-    getRecentChangeRequests: vi.fn(),
-    createChangeRequest: vi.fn(),
+    addNote: vi.fn(() => Promise.resolve({})),
   },
 }))
 
@@ -159,5 +158,45 @@ describe('StatusBadge — reactor occupancy 409 (issue #97)', () => {
     await waitFor(() =>
       expect(screen.getByText('Could not update status')).toBeInTheDocument()
     )
+  })
+})
+
+describe('ReactorCard — reactor modification saves a dated note (issue #122 PR-B)', () => {
+  beforeEach(() => {
+    vi.mocked(experimentsApi.addNote).mockClear()
+  })
+
+  it('posts a modification note with the picked event_date and clears the textarea', async () => {
+    renderGrid([makeCard()])
+    fireEvent.click(screen.getByText('HPHT_MH_072'))
+    const date = screen.getByLabelText('Modification date') as HTMLInputElement
+    fireEvent.change(date, { target: { value: '2026-09-20' } })
+    const box = screen.getByPlaceholderText(/enter a reactor modification/i) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: '  Swapped stir shaft  ' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() =>
+      expect(experimentsApi.addNote).toHaveBeenCalledWith(
+        'HPHT_MH_072', 'Swapped stir shaft', { note_type: 'modification', event_date: '2026-09-20' },
+      ),
+    )
+    await waitFor(() => expect(box.value).toBe(''))
+    expect(await screen.findByText(/Modification saved for 2026-09-20/)).toBeInTheDocument()
+  })
+
+  it('Save is disabled while the textarea is blank (Review Focus 5)', () => {
+    renderGrid([makeCard()])
+    fireEvent.click(screen.getByText('HPHT_MH_072'))
+    const box = screen.getByPlaceholderText(/enter a reactor modification/i)
+    fireEvent.change(box, { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
+    expect(experimentsApi.addNote).not.toHaveBeenCalled()
+  })
+
+  it('renders the latest prior modification from the card payload, not a change-request query', () => {
+    renderGrid([makeCard({
+      latest_modification: { note_text: 'Replaced septum', event_date: '2026-09-18', created_at: '2026-09-18T10:00:00Z' },
+    })])
+    fireEvent.click(screen.getByText('HPHT_MH_072'))
+    expect(screen.getByText('Replaced septum')).toBeInTheDocument()
   })
 })

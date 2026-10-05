@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
@@ -280,23 +280,7 @@ function ReactorDetailModal({
   const [dateDraft, setDateDraft] = useState('')
   const [crDate, setCrDate] = useState(todayISO)
   const [crText, setCrText] = useState('')
-  const [crLoadedForDate, setCrLoadedForDate] = useState<string | null>(null)
   const isQueued = card.status === 'QUEUED'
-
-  const { data: recentCR } = useQuery({
-    queryKey: ['reactorModificationRecent', card.experiment_id, crDate],
-    queryFn: () => experimentsApi.getRecentChangeRequests(card.experiment_id as string, crDate),
-    enabled: !!card.experiment_id,
-  })
-
-  // Pre-populate the modification text field with whatever entry exists for the
-  // selected date, whenever the selected date changes and its data has arrived.
-  useEffect(() => {
-    if (recentCR && crLoadedForDate !== crDate) {
-      setCrText(recentCR.selected?.requested_change ?? '')
-      setCrLoadedForDate(crDate)
-    }
-  }, [recentCR, crDate, crLoadedForDate])
 
   const dateMutation = useMutation({
     mutationFn: (newDate: string) =>
@@ -313,22 +297,22 @@ function ReactorDetailModal({
     },
   })
 
+  // Issue #122 PR-B (decision 9): each save is a NEW dated 'modification' note.
+  // Corrections happen in the experiment's Notes tab; there is no per-date upsert.
   const crMutation = useMutation({
     mutationFn: (text: string) =>
-      experimentsApi.createChangeRequest(card.experiment_id as string, {
-        reactor_label: card.reactor_label,
-        requested_change: text,
-        sync_date: crDate,
+      experimentsApi.addNote(card.experiment_id as string, text, {
+        note_type: 'modification',
+        event_date: crDate,
       }),
-    onSuccess: (saved) => {
-      setCrText(saved.requested_change)
-      queryClient.invalidateQueries({ queryKey: ['reactorModificationRecent', card.experiment_id] })
-      queryClient.invalidateQueries({ queryKey: ['changeRequests', card.experiment_id] })
+    onSuccess: () => {
+      setCrText('')
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      success('Reactor modification saved')
+      queryClient.invalidateQueries({ queryKey: ['experiment', card.experiment_id] })
+      success(`Modification saved for ${crDate}`)
     },
-    onError: () => {
-      toastError('Save failed', 'Could not save reactor modification')
+    onError: (err: Error) => {
+      toastError('Save failed', err.message || 'Could not save reactor modification')
     },
   })
 
@@ -510,14 +494,14 @@ function ReactorDetailModal({
           <div className="pt-3 border-t border-surface-border">
             <p className="text-ink-muted text-2xs uppercase tracking-wider mb-3">Reactor Modification</p>
 
-            {/* Most recent prior entry for this experiment — read only */}
-            {recentCR?.previous && (
+            {/* Most recent modification on this experiment — read only (from the card payload) */}
+            {card.latest_modification && (
               <div className="mb-3 p-2.5 bg-surface-raised rounded border border-surface-border">
                 <p className="text-2xs text-ink-muted mb-1">
-                  {formatDateShort(recentCR.previous.sync_date)}
+                  {formatDateShort(card.latest_modification.event_date ?? card.latest_modification.created_at)}
                 </p>
                 <p className="text-xs text-ink-secondary leading-relaxed">
-                  {recentCR.previous.requested_change}
+                  {card.latest_modification.note_text}
                 </p>
               </div>
             )}
