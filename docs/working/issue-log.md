@@ -2581,3 +2581,23 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
   - `npx tsc --noEmit` → 3 errors, all in `ResultsTab.columns.test.tsx` (baseline, pre-existing).
   - `.venv/Scripts/alembic.exe heads` → single head `e5b2d9c7a1f4`.
 - **Tests added:** yes (+2). **Docs updated:** yes.
+
+## 2026-10-05 | issue #122 PR-C — Unified notes timeline + description editing (`feat/notes-timeline`)
+- **Files changed:**
+  - `frontend/src/components/experiments/NoteBadge.tsx` (new) — the one badge for a note's type; `ResultsTab.tsx` (`NoteLine`) and `NotesReview.tsx` consume it (`typeBadgeVariant` deleted).
+  - `frontend/src/utils/labDate.ts` (new) — `labTodayISO()` / `LAB_TZ`, extracted from `ReactorGrid.tsx`.
+  - `frontend/src/pages/ExperimentDetail/notesTimeline.ts` (new) — `sortTimeline` (COALESCE(event_date, created_at) newest first, id tiebreak), `timelineKey`, `timepointLabel`.
+  - `frontend/src/pages/ExperimentDetail/NotesTab.tsx` — one chronological timeline of every note (experiment-level and timepoint-scoped); `NoteBadge`, `T+N` chip (days from the shared `['experiment-results', id]` query; `T+?` if unknown), date chip, author, needs-review marker + Mark reviewed, the PR-B0 retype select (now always visible in the row's right-hand controls), edit, delete; type filter + the existing review-only checkbox.
+  - `frontend/src/pages/ExperimentDetail/NoteComposer.tsx` (new) — all four types via `POST /notes`; `ANCHOR_RULE` / `anchorProblem` / `composerPayload` mirror `ck_note_scope`; timepoint select or date picker (modification only; defaults to the lab's today when no timepoint); server 422/409 shown verbatim inline and in a toast; on success also invalidates `['experiment-results', id]` so the Results tab's MOD/NOTE flags refresh.
+  - `frontend/src/pages/ExperimentDetail/DescriptionEditor.tsx` (new) + `index.tsx` — header description is click-to-edit (PATCH `note_text`) or "Add description" (POST a `description` note); invalidates `['experiment', id]`, `['experiments']`, `['dashboard']`.
+  - `backend/api/schemas/experiments.py`, `backend/api/routers/experiments.py`, `frontend/src/api/experiments.ts`, `frontend/src/pages/ExperimentList.tsx` — `ExperimentListItem.condition_note` → `description`.
+  - Tests: `NoteBadge.test.tsx`, `labDate.test.ts`, `notesTimeline.test.ts`, `NoteComposer.test.tsx`, `DescriptionEdit.test.tsx` (new); `TypedNotes.test.tsx`, `NotesTab.buttons.test.tsx`, `ExperimentList.test.tsx`, `tests/api/test_results_typed_notes.py`, `tests/api/test_experiments.py`, `tests/api/test_schemas.py`, `tests/api/test_notes.py` updated.
+  - Docs: `docs/api/API_REFERENCE.md`, `.claude/rules/MODELS.md`, `docs/user_guide/USER_MANUAL.md`, spec §1 table, this entry.
+- **Why:** after PR-B a modification can be anchored to a result or a date, so the Notes tab had to show both kinds in one place, with the same badge the Results tab and `/notes/review` use; the composer had to be able to write every type the schema allows (the old one offered only Observation/Description); and the header description — read by the reactor card and the experiments list — needed an edit path so the 118 description-less experiments on the mirror can get one without the wizard.
+- **Gap calls (Conductor, 2026-10-05; for Mat's review):** see `docs/superpowers/plans/2026-10-05-notes-timeline-pr-c.md` "Gap calls" — sort key parses `event_date` as local midnight; `T+N` comes from the results query (no API change); the retype select remains the control beside the badge; timepoint and date are mutually exclusive in the composer; the date editor on an existing note is deferred (PATCH supports it).
+- **Verification (full suite, fresh `experiments_test`):**
+  - Backend: `.venv/Scripts/pytest.exe tests/models tests/views tests/api tests/test_icp_handling.py tests/services tests/regression tests/data_migrations -q` → **1427 passed, 0 failed**.
+  - Frontend: `npx vitest run` → **298 passed, 43 files, 0 failed**; `npx eslint src --ext .ts,.tsx` → 5 problems (#106 baseline); `npx tsc --noEmit` → 3 errors in `ResultsTab.columns.test.tsx` (baseline).
+  - `grep -rn "condition_note" backend/ frontend/src docs/api/ docs/project_context/API_REFERENCE.md` → empty.
+  - Chrome DevTools check on `http://localhost:5173` (dev DB = 2026-09-23 mirror + 020 + 021): timeline, composer (each type), header edit — see PR body.
+- **Tests added:** yes. **Docs updated:** yes.
