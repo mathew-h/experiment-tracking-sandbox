@@ -145,6 +145,8 @@ describe('NoteComposer', () => {
     const { qc } = wrap(<NoteComposer experimentId="HPHT_001" hasDescription={false} results={RESULTS} />)
     const invalidate = vi.spyOn(qc, 'invalidateQueries')
     await user.type(screen.getByPlaceholderText(/add a note/i), 'x')
+    await user.selectOptions(screen.getByLabelText('Type'), 'modification')
+    await user.selectOptions(screen.getByLabelText('At timepoint'), '5')
     await user.click(screen.getByRole('button', { name: /add note/i }))
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiment', 'HPHT_001'] }))
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiments'] })

@@ -118,6 +118,20 @@ describe('DescriptionEditor', () => {
     expect(api().patchNote).toHaveBeenCalledWith('SERUM_050', 41, { note_text: 'Pyrite + Cu, 90 °C more' })
   })
 
+  it('Ctrl+Enter while a save is in flight does not send a second request', async () => {
+    const user = userEvent.setup()
+    let resolvePatch: (v: unknown) => void = () => {}
+    vi.mocked(api().patchNote).mockImplementationOnce(() => new Promise((r) => { resolvePatch = r }) as never)
+    wrap(<DescriptionEditor experimentId="SERUM_050" note={DESC} />)
+    await user.click(screen.getByRole('button', { name: /edit description/i }))
+    await user.type(screen.getByLabelText('Description'), ' more')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(api().patchNote).toHaveBeenCalledTimes(1)
+    resolvePatch({ data: {} })
+    await vi.waitFor(() => expect(screen.queryByLabelText('Description')).not.toBeInTheDocument())
+  })
+
   it('a rejected save shows the server detail in a toast and stays in edit mode', async () => {
     const user = userEvent.setup()
     vi.mocked(api().patchNote).mockRejectedValueOnce(new Error('Note 41 not found'))
@@ -150,5 +164,26 @@ describe('ExperimentDetailPage header wiring', () => {
     wrap(<ExperimentDetailPage />)
     expect(await screen.findByRole('button', { name: /edit description/i })).toHaveTextContent('Pyrite + Cu, 90 °C')
     expect(screen.queryByRole('button', { name: /add description/i })).not.toBeInTheDocument()
+  })
+
+  it('navigating to a sibling experiment closes an open description editor (no stale draft)', async () => {
+    const user = userEvent.setup()
+    const B: ExperimentDetail = { ...BASE, id: 6, experiment_id: 'SERUM_051', experiment_number: 151, notes: [DESC] }
+    vi.mocked(api().get).mockImplementation((eid: string) => Promise.resolve(eid === 'SERUM_051' ? B : BASE))
+    vi.mocked(api().getReplicateGroup).mockResolvedValue({
+      base_experiment_id: 'SERUM_050', parent: null,
+      members: [
+        { id: 5, experiment_id: 'SERUM_050', replicate_label: 'a' },
+        { id: 6, experiment_id: 'SERUM_051', replicate_label: 'b' },
+      ],
+    } as never)
+    wrap(<ExperimentDetailPage />)
+    await user.click(await screen.findByRole('button', { name: /add description/i }))
+    await user.type(screen.getByLabelText('Description'), 'draft for A')
+    await user.click(screen.getByRole('link', { name: 'b' }))
+    await screen.findByRole('button', { name: /edit description/i })
+    expect(screen.queryByLabelText('Description')).not.toBeInTheDocument()
+    expect(api().addNote).not.toHaveBeenCalled()
+    expect(api().patchNote).not.toHaveBeenCalled()
   })
 })

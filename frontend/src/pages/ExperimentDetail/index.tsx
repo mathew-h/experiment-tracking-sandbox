@@ -313,7 +313,8 @@ export function ExperimentDetailPage() {
 
         {/* Issue #118: the description is the note typed 'description';
             issue #122 PR-C: edited in place, or added when missing. */}
-        <DescriptionEditor experimentId={id!} note={descriptionNote} />
+        {/* key={id}: a draft must never survive navigation to another experiment. */}
+        <DescriptionEditor key={id} experimentId={id!} note={descriptionNote} />
 
         <p className="text-xs text-ink-muted mt-0.5">
           #{experiment.experiment_number}
@@ -506,7 +507,8 @@ export function ExperimentDetailPage() {
           />
         )}
         {activeTab === 'Notes' && (
-          <NotesTab experimentId={id!} notes={experiment.notes} />
+          // key={id}: a draft must never survive navigation to another experiment.
+          <NotesTab key={id} experimentId={id!} notes={experiment.notes} />
         )}
         {activeTab === 'Entry Logs' && (
           <ModificationsTab modifications={experiment.modifications} />

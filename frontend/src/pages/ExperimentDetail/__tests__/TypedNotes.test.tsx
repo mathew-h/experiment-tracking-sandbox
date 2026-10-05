@@ -354,8 +354,9 @@ describe('NotesTab — timeline (issue #122 PR-C)', () => {
   })
 
   it('renders T+? when the note’s result is not in the results list (Review Focus 1)', async () => {
-    wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'orphan', result_id: 999 })]} />)
-    expect(await screen.findByLabelText('Timepoint')).toHaveTextContent('T+?')
+    const { qc } = wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'orphan', result_id: 999 })]} />)
+    await waitFor(() => expect(qc.getQueryState(['experiment-results', 'HPHT_001'])?.status).toBe('success'))
+    expect(screen.getByLabelText('Timepoint')).toHaveTextContent('T+?')
     expect(screen.getByText('orphan')).toBeInTheDocument()
   })
 
@@ -378,5 +379,16 @@ describe('NotesTab — timeline (issue #122 PR-C)', () => {
   it('shows the author on each row', () => {
     wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 1, note_text: 'x', created_by: 'mhearl@addisenergy.com' })]} />)
     expect(screen.getByText(/mhearl@addisenergy\.com/)).toBeInTheDocument()
+  })
+
+  it('deleting a note refreshes the results flags, the experiments list and the dashboard too', async () => {
+    const user = userEvent.setup()
+    const { qc } = wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 1, note_text: 'The description', note_type: 'description' })]} />)
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    await user.click(screen.getByRole('button', { name: /delete note/i }))
+    await user.click(screen.getByRole('button', { name: /^delete$/i }))
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiment-results', 'HPHT_001'] }))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiments'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard'] })
   })
 })

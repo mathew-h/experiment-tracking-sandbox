@@ -436,7 +436,7 @@ Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
 | GET | `/api/results/icp/{result_id}` | Get ICP result |
 | POST | `/api/results/icp` | Create ICP result |
 
-`GET /api/experiments/{experiment_id}/description` semantics (#118 PR3): everywhere the API reports an experiment's description — `description` on the experiments list, `description` on dashboard reactor cards, the `description` list filter — it is the note typed `description` (`Experiment.description`), never a positional first note. Experiment detail `notes[]` entries carry `note_type`, `result_id`, `created_by`, `needs_review`, `updated_at`.
+`GET /api/experiments/{experiment_id}/description` semantics (#118 PR3): everywhere the API reports an experiment's description — `description` on the experiments list, `description` on dashboard reactor cards, the `description` list filter — it is the note typed `description` (`Experiment.description`), never a positional first note. Experiment detail `notes[]` entries carry `note_type`, `result_id`, `event_date` (#122 PR-B/PR-C), `created_by`, `needs_review`, `updated_at`.
 
 `GET /api/experiments/{experiment_id}/results` and scalar result responses now include `nmr_run_date`, `icp_run_date`, `gc_run_date`, and `xrd_run_date` (all nullable) — instrument run-date provenance.
 

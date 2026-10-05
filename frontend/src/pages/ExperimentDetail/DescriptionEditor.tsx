@@ -63,7 +63,7 @@ export function DescriptionEditor({ experimentId, note }: Props) {
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') cancel()
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canSave) save.mutate(trimmed)
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canSave && !save.isPending) save.mutate(trimmed)
           }}
           autoFocus
         />

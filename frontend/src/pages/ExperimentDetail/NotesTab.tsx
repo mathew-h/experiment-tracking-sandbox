@@ -39,7 +39,16 @@ export function NotesTab({ experimentId, notes }: Props) {
 
   const hasDescription = notes.some((n) => n.note_type === 'description')
   const reviewCount = notes.filter((n) => n.needs_review).length
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
+
+  /** Every page that renders a note: this tab, the Results tab's MOD/NOTE
+   *  flags, the experiments list's Description column, the reactor card. */
+  const invalidateNoteQueries = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] }),
+      queryClient.invalidateQueries({ queryKey: ['experiment-results', experimentId] }),
+      queryClient.invalidateQueries({ queryKey: ['experiments'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+    ])
 
   /** Days per result id, so a result-scoped note can show its T+N chip. Shares
    *  the Results tab's query key, so an Add Results save refreshes both. */
@@ -57,10 +66,10 @@ export function NotesTab({ experimentId, notes }: Props) {
     mutationFn: ({ noteId, newText }: { noteId: number; newText: string }) =>
       experimentsApi.patchNote(experimentId, noteId, { note_text: newText }),
     onSuccess: () => {
-      invalidate()
       success('Note updated')
       setEditingId(null)
       setEditText('')
+      return invalidateNoteQueries()
     },
     onError: (err: Error) => toastError('Failed to update note', err.message),
   })
@@ -68,8 +77,8 @@ export function NotesTab({ experimentId, notes }: Props) {
   const resolveNote = useMutation({
     mutationFn: (noteId: number) => experimentsApi.patchNote(experimentId, noteId, { needs_review: false }),
     onSuccess: () => {
-      invalidate()
       success('Marked as reviewed')
+      return invalidateNoteQueries()
     },
     onError: (err: Error) => toastError('Failed to mark reviewed', err.message),
   })
@@ -82,11 +91,7 @@ export function NotesTab({ experimentId, notes }: Props) {
       // Returned so the row stays pending (and shows the chosen type) until the
       // refetch lands. To or from 'description' changes the reactor card and
       // the experiments list's Description column as well as this page.
-      return Promise.all([
-        invalidate(),
-        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
-        queryClient.invalidateQueries({ queryKey: ['experiments'] }),
-      ])
+      return invalidateNoteQueries()
     },
     onError: (err: Error) => toastError('Failed to change note type', err.message),
   })
@@ -94,9 +99,9 @@ export function NotesTab({ experimentId, notes }: Props) {
   const deleteNote = useMutation({
     mutationFn: (noteId: number) => experimentsApi.deleteNote(experimentId, noteId),
     onSuccess: () => {
-      invalidate()
       success('Note deleted')
       setDeleteNoteId(null)
+      return invalidateNoteQueries()
     },
     onError: (err: Error) => toastError('Failed to delete note', err.message),
   })
