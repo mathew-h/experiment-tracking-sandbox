@@ -317,3 +317,23 @@ def test_patch_with_only_event_date_null_on_an_observation_clears_it(client, db_
                         json={"event_date": None})
     assert resp.status_code == 200, resp.text
     assert resp.json()["event_date"] is None
+
+
+def test_get_experiment_detail_notes_carry_event_date(client, db_session):
+    """Issue #122 PR-C: the detail endpoint's notes[] must serialize event_date,
+    or the Notes timeline cannot show a date chip or offer Modification on a
+    dated note (found with Chrome DevTools on the 2026-09-23 mirror)."""
+    exp, plain = _make_experiment_with_note(db_session, "NOTE_ED_001", 7901, text="undated")
+    dated = ExperimentNotes(
+        experiment_id=exp.experiment_id, experiment_fk=exp.id,
+        note_text="swapped stir bar", note_type=NoteType.modification,
+        event_date=datetime.date(2026, 9, 24),
+    )
+    db_session.add(dated)
+    db_session.commit()
+    resp = client.get(f"/api/experiments/{exp.experiment_id}")
+    assert resp.status_code == 200
+    by_id = {n["id"]: n for n in resp.json()["notes"]}
+    assert by_id[dated.id]["event_date"] == "2026-09-24"
+    assert "event_date" in by_id[plain.id]
+    assert by_id[plain.id]["event_date"] is None

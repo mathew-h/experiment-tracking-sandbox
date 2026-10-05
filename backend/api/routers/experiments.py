@@ -1325,6 +1325,7 @@ def get_experiment(
             "note_text": n.note_text,
             "note_type": n.note_type.value,
             "result_id": n.result_id,
+            "event_date": n.event_date.isoformat() if n.event_date else None,
             "created_by": n.created_by,
             "needs_review": n.needs_review,
             "created_at": n.created_at.isoformat(),
