@@ -10,6 +10,7 @@ vi.mock('@/api/experiments', () => ({
     addNote: vi.fn(),
     patchNote: vi.fn(),
     deleteNote: vi.fn(() => Promise.resolve()),
+    getResults: vi.fn(() => Promise.resolve([])),
   },
 }))
 vi.mock('@/components/ui', async () => {

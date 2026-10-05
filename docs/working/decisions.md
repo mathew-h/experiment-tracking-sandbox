@@ -766,3 +766,34 @@ decision, not the source of the reversed line).
 calendar day (America/New_York), on the card's date default and the server's
 `todays_modification`, reversing the spec's "UTC, unchanged". `event_date` is
 a calendar date in lab time.
+
+## 2026-10-05 — The notes timeline is ordered day first; a dated note belongs to its event day
+
+**Decision (Mat, 2026-10-05, issue #122 PR-C):** the Notes tab's timeline sorts by
+the calendar day a note belongs to — `event_date` when it has one, otherwise the
+local day it was written — newest day first; within a day by `created_at`
+(most recently recorded first); then by id.
+
+**Why:** the first cut keyed a dated note at local midnight of its day (the
+spec's `COALESCE(event_date, created_at)` read literally). That put a
+modification logged *today* from the reactor card **below** every undated note
+written earlier today, because 00:00 is older than 09:00 — the opposite of
+what a researcher opening the Notes tab after logging it expects. A dated
+modification is "something done on that day" and has no time of its own; its
+`created_at` is the only time information it carries, so that is what orders
+it among the day's other notes. A backdated modification still lands on its
+event day, not on the day it was typed.
+
+**How to apply:**
+
+1. `frontend/src/pages/ExperimentDetail/notesTimeline.ts` (`timelineDay`,
+   `recordedAt`, `sortTimeline`) is the single definition; do not re-derive the
+   order in a component.
+2. The day is the **browser's** local day of `event_date` / `created_at`. On the
+   lab PC that is the lab day; a browser in another zone on the same calendar
+   day may group a note into the neighbouring day. Accepted (8 users, one site).
+3. `v_notes` and the review page are unaffected; this is presentation order only.
+
+**Related:** issue #122 PR-C (`feat/notes-timeline`, PR #126); the 2026-10-05
+entry above (event_date anchor); `docs/superpowers/plans/2026-10-05-notes-timeline-pr-c.md`
+gap call 2.

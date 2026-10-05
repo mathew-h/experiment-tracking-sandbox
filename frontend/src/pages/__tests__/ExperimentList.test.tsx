@@ -34,7 +34,7 @@ function makeItems(skip: number, limit: number): ExperimentListItem[] {
     experiment_type: null,
     reactor_number: null,
     additives_summary: null,
-    condition_note: null,
+    description: null,
     base_experiment_id: null,
     parent_experiment_fk: null,
     replicate_label: null,
@@ -211,7 +211,7 @@ function makeGroupedItem(): ExperimentListItem {
   const base = {
     status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
-    additives_summary: null, condition_note: null,
+    additives_summary: null, description: null,
     base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
     replicate_label: null as string | null, is_outlier: false,
     id_timepoint_days: null as number | null,
@@ -268,7 +268,7 @@ describe('ExperimentListPage — issue #98: the -t token is never rendered', () 
   const base = {
     status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
-    additives_summary: null, condition_note: null,
+    additives_summary: null, description: null,
     base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
     replicate_label: null as string | null, is_outlier: false,
   }
@@ -310,7 +310,7 @@ describe('ExperimentListPage — issue #98: group rows', () => {
   const base = {
     status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
-    additives_summary: null, condition_note: null,
+    additives_summary: null, description: null,
     base_experiment_id: 'SERUM_001' as string | null,
     parent_experiment_fk: null as number | null,
     replicate_label: 'a' as string | null, is_outlier: false,
@@ -377,7 +377,7 @@ describe('ExperimentListPage — issue #98: status editable iff label names the 
   const base = {
     status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
-    additives_summary: null, condition_note: null,
+    additives_summary: null, description: null,
     base_experiment_id: null as string | null, parent_experiment_fk: null as number | null,
     replicate_label: null as string | null, is_outlier: false,
     id_timepoint_days: null as number | null,
@@ -497,7 +497,7 @@ describe('ExperimentListPage — issue #101: letterless timepoint vial rows', ()
   const base = {
     status: 'ONGOING' as const, researcher: null, date: null, sample_id: null,
     created_at: '2026-07-01T00:00:00Z', experiment_type: 'Serum', reactor_number: null,
-    additives_summary: null, condition_note: null,
+    additives_summary: null, description: null,
     base_experiment_id: 'SERUM_pH_002' as string | null,
     parent_experiment_fk: null as number | null,
     replicate_label: null as string | null, is_outlier: false,
@@ -604,3 +604,16 @@ function DetailRouteProbe() {
   const { id } = useParams()
   return <div data-testid="detail-route">{id}</div>
 }
+
+describe('ExperimentListPage — issue #122 PR-C: the Description column reads `description`', () => {
+  it('renders the description text, and a dash when there is none', async () => {
+    const [withDesc, without] = makeItems(0, 2)
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [{ ...withDesc, description: 'Pyrite + Cu catalyst, 90 °C' }, { ...without, description: null }],
+      total: 2, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    expect(await screen.findByText('Pyrite + Cu catalyst, 90 °C')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+})
