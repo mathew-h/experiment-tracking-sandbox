@@ -328,12 +328,15 @@ function ReactorDetailModal({
     else setEditingDate(false)
   }
 
+  /** Date-only strings (YYYY-MM-DD) are calendar dates, not instants: parse them
+   *  as LOCAL midnight so the rendered day never shifts west of UTC. Full ISO
+   *  datetimes (started_at, created_at) still go through Date normally. */
   function formatDateShort(iso: string): string {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+    const d = dateOnly
+      ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+      : new Date(iso)
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
   return (

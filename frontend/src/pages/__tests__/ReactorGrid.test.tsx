@@ -198,5 +198,6 @@ describe('ReactorCard — reactor modification saves a dated note (issue #122 PR
     })])
     fireEvent.click(screen.getByText('HPHT_MH_072'))
     expect(screen.getByText('Replaced septum')).toBeInTheDocument()
+    expect(screen.getByText('Sep 18, 2026')).toBeInTheDocument()
   })
 })
