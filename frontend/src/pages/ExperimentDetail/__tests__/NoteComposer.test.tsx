@@ -140,7 +140,7 @@ describe('NoteComposer', () => {
     expect((screen.getByPlaceholderText(/add a note/i) as HTMLTextAreaElement).value).toBe('dup')
   })
 
-  it('a successful add refreshes the experiment, the experiments list and the dashboard', async () => {
+  it('a successful add refreshes the experiment, its results, the experiments list and the dashboard', async () => {
     const user = userEvent.setup()
     const { qc } = wrap(<NoteComposer experimentId="HPHT_001" hasDescription={false} results={RESULTS} />)
     const invalidate = vi.spyOn(qc, 'invalidateQueries')
@@ -149,6 +149,9 @@ describe('NoteComposer', () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiment', 'HPHT_001'] }))
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiments'] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiment-results', 'HPHT_001'] })
     expect((screen.getByPlaceholderText(/add a note/i) as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByLabelText('Type') as HTMLSelectElement).value).toBe('observation')
+    expect((screen.getByLabelText('At timepoint') as HTMLSelectElement).value).toBe('')
   })
 })

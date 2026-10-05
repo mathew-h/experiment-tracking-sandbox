@@ -116,6 +116,8 @@ export function NoteComposer({ experimentId, hasDescription, results }: Props) {
         queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] }),
         queryClient.invalidateQueries({ queryKey: ['experiments'] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        // A result-scoped note changes the Results tab's MOD/NOTE flags.
+        queryClient.invalidateQueries({ queryKey: ['experiment-results', experimentId] }),
       ])
     },
     onError: (err: Error) => {
