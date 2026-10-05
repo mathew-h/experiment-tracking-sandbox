@@ -368,8 +368,8 @@ Expected: the two list-item tests FAIL on `KeyError: 'description'` / `assert "c
 `backend/api/schemas/experiments.py` lines 64–65:
 
 ```python
-    # The note typed 'description' (Experiment.description hybrid, issue #118).
-    # Renamed from `condition_note` in issue #122 PR-C.
+    # The note typed 'description' (Experiment.description hybrid, issue #118;
+    # field name aligned in issue #122 PR-C).
     description: Optional[str] = None
 ```
 
@@ -378,7 +378,7 @@ Expected: the two list-item tests FAIL on `KeyError: 'description'` / `assert "c
 ```python
     # Issue #118 PR3: the description is the note typed 'description'
     # (Experiment.description hybrid), no longer the lowest-id note.
-    # Issue #122 PR-C: exposed as `description` (was `condition_note`).
+    # Issue #122 PR-C: the list item field is `description`.
     item_data["description"] = exp.description
 ```
 
@@ -392,14 +392,14 @@ Expected: all pass.
 - [ ] **Step 5: Docs**
 
 `docs/api/API_REFERENCE.md` line 69: change `` `condition_note` `` to `` `description` ``.
-Line 439: change `` `condition_note` on the experiments list `` to `` `description` on the experiments list (renamed from `condition_note` in #122 PR-C) ``.
+Line 439: change `` `condition_note` on the experiments list `` to `` `description` on the experiments list ``.
 `.claude/rules/MODELS.md` line 220: change `` (`condition_note`, the `description` filter) `` to `` (the list item's `description` field — renamed from `condition_note` in #122 PR-C — and the `description` filter) ``.
 Use the Edit tool for all three so the `project_context` hook copies them.
 
 - [ ] **Step 6: Confirm the old name is gone from the backend**
 
-Run (repo root, Git Bash): `grep -rn "condition_note" backend/ docs/api/ .claude/rules/ tests/`
-Expected: no output.
+Run (repo root, Git Bash): `grep -rn "condition_note" backend/ docs/api/ docs/project_context/API_REFERENCE.md`
+Expected: no output. (The spec's acceptance set is `backend/`, `frontend/src` and the API reference. `.claude/rules/MODELS.md` keeps its "renamed from" pointer and `tests/` keeps the negative assertion — both are outside that set.)
 
 - [ ] **Step 7: Commit**
 
@@ -458,7 +458,7 @@ Expected: the new test FAILS (text not found — the column still reads `conditi
 `frontend/src/api/experiments.ts` line 99:
 
 ```ts
-  /** The note typed 'description' (issue #118); renamed from condition_note in #122 PR-C. */
+  /** The note typed 'description' (issue #118). */
   description: string | null
 ```
 
@@ -1856,7 +1856,7 @@ Expected: vitest 0 failed (264 on develop + ~30 new); eslint exactly the 5 basel
 
 Acceptance grep (repo root, Git Bash):
 ```
-grep -rn "condition_note" backend/ frontend/src docs/api/ docs/project_context/api/ .claude/rules/ tests/
+grep -rn "condition_note" backend/ frontend/src docs/api/ docs/project_context/API_REFERENCE.md
 grep -rn "typeBadgeVariant" frontend/src
 ```
 Expected: both empty.
@@ -1882,7 +1882,7 @@ Append to `docs/working/issue-log.md`, filling the counts from Step 3:
 - **Verification (full suite, fresh `experiments_test`):**
   - Backend: `.venv/Scripts/pytest.exe tests/models tests/views tests/api tests/test_icp_handling.py tests/services tests/regression tests/data_migrations -q` → **<N> passed, 0 failed**.
   - Frontend: `npx vitest run` → **<N> passed, <F> files, 0 failed**; `npx eslint src --ext .ts,.tsx` → 5 problems (#106 baseline); `npx tsc --noEmit` → 3 errors in `ResultsTab.columns.test.tsx` (baseline).
-  - `grep -rn "condition_note" backend/ frontend/src docs/api/ .claude/rules/ tests/` → empty.
+  - `grep -rn "condition_note" backend/ frontend/src docs/api/ docs/project_context/API_REFERENCE.md` → empty.
   - Chrome DevTools check on `http://localhost:5173` (dev DB = 2026-09-23 mirror + 020 + 021): timeline, composer (each type), header edit — see PR body.
 - **Tests added:** yes. **Docs updated:** yes.
 ```
