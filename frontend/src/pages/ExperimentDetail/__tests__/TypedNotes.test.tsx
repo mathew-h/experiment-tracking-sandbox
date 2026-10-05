@@ -1,6 +1,6 @@
 /** Issue #118 PR3: the Results tab, Notes tab and Add Results modal read and
  *  write the typed notes model. */
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -95,6 +95,8 @@ const baseResult: ResultWithFlags = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // The Notes tab now reads the results list for its T+N chips (issue #122 PR-C).
+  vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([])
 })
 
 describe('ResultsTab — typed notes', () => {
@@ -276,8 +278,9 @@ describe('NotesTab — typed notes', () => {
       note({ id: 7, note_text: 'dated', note_type: 'modification', event_date: '2026-09-24' }),
       note({ id: 8, note_text: 'bare' }),
     ]} />)
-    const [bare, dated] = screen.getAllByLabelText('Note type') as HTMLSelectElement[]
-    // feed is newest-first: id 8 (bare) then id 7 (dated)
+    const [dated, bare] = screen.getAllByLabelText('Note type') as HTMLSelectElement[]
+    // Timeline order is COALESCE(event_date, created_at) newest-first (PR-C):
+    // id 7 (dated 2026-09-24) precedes id 8 (created 2026-04-01).
     expect(optionValues(bare)).toEqual(['observation', 'description'])
     expect(optionValues(dated)).toEqual(['observation', 'modification', 'description'])
     expect(dated.value).toBe('modification')
@@ -315,5 +318,65 @@ describe('AddResultsModal — typed note composer', () => {
     await user.click(screen.getByRole('button', { name: /save results/i }))
     await vi.waitFor(() => expect(resultsApiModule.resultsApi.createScalar).toHaveBeenCalled())
     expect(experimentsApiModule.experimentsApi.addNote).not.toHaveBeenCalled()
+  })
+})
+
+describe('NotesTab — timeline (issue #122 PR-C)', () => {
+  const rowIds = () => screen.getAllByTestId(/^note-row-/).map((el) => Number(el.dataset.noteId))
+
+  it('mixes experiment-level and timepoint notes in one list, newest first by COALESCE(event_date, created_at)', () => {
+    wrap(<NotesTab experimentId="HPHT_001" notes={[
+      note({ id: 1, note_text: 'oldest', created_at: '2026-09-01T10:00:00Z' }),
+      note({ id: 2, note_text: 'dated mod', note_type: 'modification', event_date: '2026-09-20', created_at: '2026-08-01T10:00:00Z' }),
+      note({ id: 3, note_text: 'on a result', result_id: 5, created_at: '2026-09-10T10:00:00Z' }),
+    ]} />)
+    expect(rowIds()).toEqual([2, 3, 1])
+    expect(screen.getAllByTestId('note-badge').map((b) => b.textContent)).toEqual(['Modification', 'Observation', 'Observation'])
+  })
+
+  it('shows a T+N chip for a result-scoped note and a date chip for a dated one, and neither on a bare note', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, id: 5, time_post_reaction_days: 7 },
+    ])
+    wrap(<NotesTab experimentId="HPHT_001" notes={[
+      note({ id: 3, note_text: 'on a result', result_id: 5 }),
+      note({ id: 2, note_text: 'dated mod', note_type: 'modification', event_date: '2026-09-20' }),
+      note({ id: 1, note_text: 'bare' }),
+    ]} />)
+    // findByLabelText would resolve on the first synchronous check (the chip
+    // renders its 'T+?' placeholder from the first paint, before the results
+    // query settles), so it never actually waits for the resolved days. Wait
+    // on the content itself instead.
+    await waitFor(() => expect(screen.getByLabelText('Timepoint')).toHaveTextContent('T+7'))
+    expect(screen.getByLabelText('Event date')).toHaveTextContent('2026-09-20')
+    expect(screen.getAllByLabelText('Timepoint')).toHaveLength(1)
+    expect(screen.getAllByLabelText('Event date')).toHaveLength(1)
+  })
+
+  it('renders T+? when the note’s result is not in the results list (Review Focus 1)', async () => {
+    wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 3, note_text: 'orphan', result_id: 999 })]} />)
+    expect(await screen.findByLabelText('Timepoint')).toHaveTextContent('T+?')
+    expect(screen.getByText('orphan')).toBeInTheDocument()
+  })
+
+  it('the type filter narrows the timeline and combines with review-only (Review Focus 4)', async () => {
+    const user = userEvent.setup()
+    wrap(<NotesTab experimentId="HPHT_001" notes={[
+      note({ id: 1, note_text: 'obs reviewed' }),
+      note({ id: 2, note_text: 'obs queued', needs_review: true }),
+      note({ id: 3, note_text: 'mod queued', note_type: 'modification', result_id: 5, needs_review: true }),
+    ]} />)
+    await user.selectOptions(screen.getByLabelText('Filter by type'), 'observation')
+    expect(screen.queryByText('mod queued')).not.toBeInTheDocument()
+    expect(screen.getByText('obs reviewed')).toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: /review queue only/i }))
+    expect(screen.queryByText('obs reviewed')).not.toBeInTheDocument()
+    expect(screen.getByText('obs queued')).toBeInTheDocument()
+    expect(screen.queryByText('mod queued')).not.toBeInTheDocument()
+  })
+
+  it('shows the author on each row', () => {
+    wrap(<NotesTab experimentId="HPHT_001" notes={[note({ id: 1, note_text: 'x', created_by: 'mhearl@addisenergy.com' })]} />)
+    expect(screen.getByText(/mhearl@addisenergy\.com/)).toBeInTheDocument()
   })
 })

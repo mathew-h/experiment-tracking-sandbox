@@ -1,8 +1,10 @@
-import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi, type ExperimentNote } from '@/api/experiments'
 import { NOTE_TYPE_LABELS, type NoteType } from '@/api/noteTypes'
 import { Badge, Button, ConfirmModal, useToast } from '@/components/ui'
+import { NoteBadge } from '@/components/experiments/NoteBadge'
+import { sortTimeline, timepointLabel } from './notesTimeline'
 
 interface Props { experimentId: string; notes: ExperimentNote[] }
 
@@ -10,6 +12,9 @@ interface Props { experimentId: string; notes: ExperimentNote[] }
  *  'modification' and 'result_note' are scoped to a timepoint and are written
  *  from the Results tab (Add Results), not from this feed. */
 const ADDABLE_TYPES: NoteType[] = ['observation', 'description']
+
+/** Every type, in the order the timeline's type filter lists them. */
+const ALL_TYPES: NoteType[] = ['description', 'modification', 'observation', 'result_note']
 
 /** Types a note may be retyped to, given its anchor — the UI mirror of the
  *  ck_note_scope CHECK (issue #122, decisions 1 and 8). A result anchors
@@ -21,12 +26,17 @@ function retypeOptions(n: ExperimentNote): NoteType[] {
   return ['observation', 'description']
 }
 
-/** Notes tab (issue #118): typed lab notes with inline add, edit, delete, and
- *  the review queue for rows the backfill could not place with certainty. */
+const CHIP = 'font-mono-data'
+
+/** Notes tab (issue #118, #122 PR-C): one chronological timeline of every
+ *  note on the experiment — experiment-level and timepoint-scoped mixed —
+ *  with inline add, edit, retype, delete, and the review queue for rows the
+ *  backfill could not place with certainty. */
 export function NotesTab({ experimentId, notes }: Props) {
   const [text, setText] = useState('')
   const [newType, setNewType] = useState<NoteType>('observation')
   const [reviewOnly, setReviewOnly] = useState(false)
+  const [typeFilter, setTypeFilter] = useState<NoteType | 'all'>('all')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
   const [deleteNoteId, setDeleteNoteId] = useState<number | null>(null)
@@ -36,6 +46,18 @@ export function NotesTab({ experimentId, notes }: Props) {
   const hasDescription = notes.some((n) => n.note_type === 'description')
   const reviewCount = notes.filter((n) => n.needs_review).length
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
+
+  /** Days per result id, so a result-scoped note can show its T+N chip. Shares
+   *  the Results tab's query key, so an Add Results save refreshes both. */
+  const { data: results } = useQuery({
+    queryKey: ['experiment-results', experimentId],
+    queryFn: () => experimentsApi.getResults(experimentId),
+  })
+  const daysByResult = useMemo(() => {
+    const m = new Map<number, number | null>()
+    for (const r of results ?? []) m.set(r.id, r.time_post_reaction_days)
+    return m
+  }, [results])
 
   const addNote = useMutation({
     mutationFn: () => experimentsApi.addNote(experimentId, text, { note_type: newType }),
@@ -109,7 +131,12 @@ export function NotesTab({ experimentId, notes }: Props) {
   const isEdited = (note: ExperimentNote) =>
     note.updated_at != null && note.updated_at !== note.created_at
 
-  const visible = [...notes].reverse().filter((n) => !reviewOnly || n.needs_review)
+  const visible = useMemo(
+    () => sortTimeline(notes).filter(
+      (n) => (!reviewOnly || n.needs_review) && (typeFilter === 'all' || n.note_type === typeFilter),
+    ),
+    [notes, reviewOnly, typeFilter],
+  )
 
   return (
     <div className="p-4 space-y-4">
@@ -143,33 +170,74 @@ export function NotesTab({ experimentId, notes }: Props) {
         </div>
       </div>
 
-      {/* Review-queue filter */}
-      {reviewCount > 0 && (
-        <label className="flex items-center gap-2 text-xs text-ink-secondary">
-          <input
-            type="checkbox"
-            checked={reviewOnly}
-            onChange={(e) => setReviewOnly(e.target.checked)}
-          />
-          Review queue only ({reviewCount})
-        </label>
+      {/* Filters */}
+      {notes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-4 text-xs text-ink-secondary">
+          <label className="flex items-center gap-2">
+            <span>Show</span>
+            <select
+              aria-label="Filter by type"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as NoteType | 'all')}
+              className="text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
+            >
+              <option value="all">All types</option>
+              {ALL_TYPES.map((t) => (
+                <option key={t} value={t}>{NOTE_TYPE_LABELS[t]}</option>
+              ))}
+            </select>
+          </label>
+          {reviewCount > 0 && (
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={reviewOnly}
+                onChange={(e) => setReviewOnly(e.target.checked)}
+              />
+              Review queue only ({reviewCount})
+            </label>
+          )}
+        </div>
       )}
 
-      {/* Feed */}
+      {/* Timeline */}
       <div className="space-y-3">
         {notes.length === 0 && <p className="text-sm text-ink-muted">No notes yet</p>}
         {notes.length > 0 && visible.length === 0 && (
-          <p className="text-sm text-ink-muted">Nothing left to review</p>
+          <p className="text-sm text-ink-muted">
+            {reviewOnly ? 'Nothing left to review' : 'No notes of this type'}
+          </p>
         )}
         {visible.map((n, i) => {
           const isRetyping = retypeNote.isPending && retypeNote.variables?.noteId === n.id
           return (
           <div
             key={n.id}
+            data-testid={`note-row-${n.id}`}
+            data-note-id={n.id}
             className={`text-xs border-b border-surface-border pb-3 group ${i === visible.length - 1 ? 'border-b-0' : ''}`}
           >
             <div className="flex items-start justify-between gap-2 mb-0.5">
               <div className="flex items-center gap-1.5 flex-wrap">
+                <NoteBadge type={n.note_type} />
+                {n.result_id != null && (
+                  <span aria-label="Timepoint" className="inline-flex">
+                    <Badge className={CHIP}>{timepointLabel(daysByResult.get(n.result_id))}</Badge>
+                  </span>
+                )}
+                {n.event_date && (
+                  <span aria-label="Event date" className="inline-flex">
+                    <Badge className={CHIP}>{n.event_date}</Badge>
+                  </span>
+                )}
+                {n.needs_review && (
+                  <Badge variant="error" dot>Needs review</Badge>
+                )}
+                {isEdited(n) && (
+                  <span className="text-[10px] text-ink-muted italic">(edited)</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
                 <select
                   aria-label="Note type"
                   value={isRetyping ? retypeNote.variables!.noteType : n.note_type}
@@ -188,55 +256,46 @@ export function NotesTab({ experimentId, notes }: Props) {
                     )
                   })}
                 </select>
-                {n.result_id != null && (
-                  <span className="text-[10px] text-ink-muted">on a timepoint</span>
-                )}
-                {n.needs_review && (
-                  <Badge variant="error" dot>Needs review</Badge>
-                )}
-                {isEdited(n) && (
-                  <span className="text-[10px] text-ink-muted italic">(edited)</span>
+                {editingId !== n.id && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100 transition-opacity">
+                    {n.needs_review && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="Mark reviewed"
+                        loading={resolveNote.isPending && resolveNote.variables === n.id}
+                        onClick={() => resolveNote.mutate(n.id)}
+                      >
+                        Mark reviewed
+                      </Button>
+                    )}
+                    {/* Edit */}
+                    <button
+                      type="button"
+                      aria-label="Edit note"
+                      onClick={() => startEdit(n)}
+                      className="p-1 rounded text-ink-secondary hover:text-ink-primary hover:bg-surface-overlay transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round"
+                          d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
+                      </svg>
+                    </button>
+                    {/* Delete */}
+                    <button
+                      type="button"
+                      aria-label="Delete note"
+                      onClick={() => setDeleteNoteId(n.id)}
+                      className="p-1 rounded text-ink-secondary hover:text-red-400 hover:bg-surface-overlay transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round"
+                          d="M3 4h10M6 4V2h4v2M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" />
+                      </svg>
+                    </button>
+                  </div>
                 )}
               </div>
-              {editingId !== n.id && (
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100 transition-opacity shrink-0">
-                  {n.needs_review && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      aria-label="Mark reviewed"
-                      loading={resolveNote.isPending && resolveNote.variables === n.id}
-                      onClick={() => resolveNote.mutate(n.id)}
-                    >
-                      Mark reviewed
-                    </Button>
-                  )}
-                  {/* Edit */}
-                  <button
-                    type="button"
-                    aria-label="Edit note"
-                    onClick={() => startEdit(n)}
-                    className="p-1 rounded text-ink-secondary hover:text-ink-primary hover:bg-surface-overlay transition-colors"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round"
-                        d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
-                    </svg>
-                  </button>
-                  {/* Delete */}
-                  <button
-                    type="button"
-                    aria-label="Delete note"
-                    onClick={() => setDeleteNoteId(n.id)}
-                    className="p-1 rounded text-ink-secondary hover:text-red-400 hover:bg-surface-overlay transition-colors"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round"
-                        d="M3 4h10M6 4V2h4v2M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" />
-                    </svg>
-                  </button>
-                </div>
-              )}
             </div>
 
             {editingId === n.id ? (
@@ -265,7 +324,7 @@ export function NotesTab({ experimentId, notes }: Props) {
               </div>
             ) : (
               <>
-                <p className="text-ink-secondary leading-relaxed">{n.note_text}</p>
+                <p className="text-ink-secondary leading-relaxed whitespace-pre-wrap">{n.note_text}</p>
                 <p className="text-ink-muted mt-0.5 font-mono-data">
                   {new Date(n.created_at).toLocaleString()}
                   {n.created_by && ` · ${n.created_by}`}
