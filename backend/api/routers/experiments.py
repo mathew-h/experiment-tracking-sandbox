@@ -606,12 +606,19 @@ def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteTy
                 status_code=409,
                 detail=f"These experiments would end up with more than one description: {eids}",
             )
-    elif target in (NoteType.modification, NoteType.result_note):
+    elif target is NoteType.modification:
+        offending = [n.id for n in notes if n.result_id is None and n.event_date is None]
+        if offending:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A 'modification' note must be scoped to a result or carry an event_date: {offending}",
+            )
+    elif target is NoteType.result_note:
         offending = [n.id for n in notes if n.result_id is None]
         if offending:
             raise HTTPException(
                 status_code=422,
-                detail=f"A '{target.value}' note must be scoped to a result; these are not: {offending}",
+                detail=f"A 'result_note' note must be scoped to a result: {offending}",
             )
 
 

@@ -6,6 +6,8 @@ in one transaction, with one ModificationsLog row per note.
 """
 from __future__ import annotations
 
+import datetime
+
 from sqlalchemy import select
 
 from database.models.enums import ExperimentStatus, NoteType
@@ -223,3 +225,17 @@ def test_bulk_delete_body_validation(client, db_session):
     assert client.request("DELETE", "/api/experiments/notes/bulk", json={"ids": []}).status_code == 422
     assert client.request("DELETE", "/api/experiments/notes/bulk",
                           json={"ids": list(range(1, 502))}).status_code == 422
+
+
+def test_bulk_patch_retypes_a_dated_note_to_modification(client, db_session):
+    """Issue #122 PR-B: an event_date anchors a modification as well as a result_id does."""
+    exp = _exp(db_session, "BULK_EVD_001", 7301)
+    dated = _note(db_session, exp, "swapped septum", event_date=datetime.date(2026, 9, 24))
+    undated = _note(db_session, exp, "no anchor")
+    ok = client.patch("/api/experiments/notes/bulk", json={"ids": [dated.id], "note_type": "modification"})
+    assert ok.status_code == 200, ok.text
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, dated.id).note_type is NoteType.modification
+    bad = client.patch("/api/experiments/notes/bulk", json={"ids": [undated.id], "note_type": "modification"})
+    assert bad.status_code == 422
+    assert str(undated.id) in bad.json()["detail"]

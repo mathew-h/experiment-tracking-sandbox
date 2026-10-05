@@ -270,6 +270,18 @@ describe('NotesTab — typed notes', () => {
     await user.selectOptions(screen.getByLabelText('Note type'), 'description')
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiments'] }))
   })
+
+  it('a date-anchored note offers Modification (and Description) but a bare experiment-level note does not', () => {
+    wrap(<NotesTab experimentId="HPHT_001" notes={[
+      note({ id: 7, note_text: 'dated', note_type: 'modification', event_date: '2026-09-24' }),
+      note({ id: 8, note_text: 'bare' }),
+    ]} />)
+    const [bare, dated] = screen.getAllByLabelText('Note type') as HTMLSelectElement[]
+    // feed is newest-first: id 8 (bare) then id 7 (dated)
+    expect(optionValues(bare)).toEqual(['observation', 'description'])
+    expect(optionValues(dated)).toEqual(['observation', 'modification', 'description'])
+    expect(dated.value).toBe('modification')
+  })
 })
 
 describe('AddResultsModal — typed note composer', () => {
