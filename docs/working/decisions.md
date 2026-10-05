@@ -699,3 +699,61 @@ required by the UI, rendered nowhere, and had filled with filler ("Gas sample", 
 `docs/issues/reclassify-notes-020-dryrun-2026-09-08.md`;
 `docs/superpowers/plans/2026-09-08-typed-notes-pr1-pr2.md`; `.claude/rules/MODELS.md`
 (`ExperimentNotes`, reporting views); `docs/LOCKED_COMPONENTS.md` footnote ⁶.
+
+## 2026-10-05 — A reactor modification is a `modification` note, not a separate object; the Reactor Modifications tab is retired
+
+**Decision:** a reactor modification is a `modification` note anchored to a
+result OR an `event_date` — not a separate `reactor_change_requests` row, and
+not a separate UI object. `experiment_notes` gains `event_date DATE NULL`
+(indexed); `ck_note_scope` becomes `description` ⇒ `result_id IS NULL`;
+`modification` ⇒ `(result_id IS NOT NULL OR event_date IS NOT NULL)`;
+`result_note` ⇒ `result_id IS NOT NULL`; `observation` ⇒ anything (Alembic
+`e5b2d9c7a1f4`). The dashboard's Reactor Modification card writes a
+`modification` note with `event_date` via `POST /experiments/{id}/notes`; the
+experiment detail page's separate "Reactor Modifications" tab is removed —
+modifications are visible on the experiment's Notes tab like any other typed
+note. `reactor_change_requests` is backfilled into `experiment_notes` by
+`database/data_migrations/migrate_reactor_change_requests_021.py` and is not
+yet dropped (waits for PR-E). (Issue #122 PR-B; Mat Hearl, 2026-09-24.)
+
+**This reverses the 2026-09-23 line** that "the Reactor Modifications tab
+keeps its own name; they are different objects." That line was correct for
+what existed then — the tab's data came from the Notion-era
+`reactor_change_requests` table, genuinely a different object from
+`experiment_notes`. It stops being correct once that data is modeled as a
+typed note: keeping a second tab and a second table around a single underlying
+fact (a dated note about a reactor) would reintroduce the same "two readers,
+two answers" problem issue #118 removed for the experiment description.
+
+**Also recorded here (decisions made 2026-09-23/24, phase-2 spec, not to be
+relitigated):**
+
+- **Dashboard modification saves are append-only.** Each Save on the reactor
+  card creates a NEW `modification` note with `event_date`; it does not
+  upsert an existing note for that date. Corrections are made from the Notes
+  tab, not by re-saving the card. Rejected alternative:
+  `sync_result_note`-style slot semantics keyed on
+  `(result_id, 'modification', created_by)` — it would silently overwrite a
+  modification note the same researcher wrote via Add Results for that
+  timepoint.
+- **No dedicated reactor-modification endpoint.** `POST /experiments/{id}/notes`
+  gained `event_date` rather than adding a new route; the dashboard form is
+  just a caller of the general notes endpoint with `note_type='modification'`.
+  The snapping logic that would have justified a separate route was rejected
+  along with the result-snapping alternative to the `event_date` anchor itself.
+
+**How to apply:**
+
+1. A `modification` note needs `result_id` OR `event_date` (or both) to satisfy
+   `ck_note_scope` — never assume one anchor implies the other is absent.
+2. Do not reintroduce a reactor-modifications-specific table, tab, or endpoint;
+   route new reactor-modification work through `experiment_notes` and the
+   existing notes endpoints.
+3. The three `/change-requests` routes and `ReactorChangeRequest` model are
+   deprecated, not deleted, in PR-B — they stay functional (and
+   `tests/api/test_change_requests.py` stays green) until PR-E drops them.
+
+**Related:** issue #122 PR-B (`feat/reactor-mods-as-notes`);
+`docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md`;
+`.claude/rules/MODELS.md` (`ExperimentNotes`, `event_date`, deletion impact
+counts); the 2026-09-23 entry above this one.

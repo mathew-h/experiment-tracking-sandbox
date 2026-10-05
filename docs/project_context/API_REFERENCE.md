@@ -22,11 +22,11 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), and is_outlier |
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
-| POST | `/api/experiments/{experiment_id}/notes` | Add a typed note. Body: `{"note_text": "...", "note_type": "observation"\|"description"\|"modification"\|"result_note", "result_id": 123}` — `note_type` defaults to `observation`, `result_id` optional. `description` must not carry `result_id`; `modification`/`result_note` must; `observation` may or may not (422 otherwise). `result_id` of another experiment → 422. A second `description` → 409. Response adds `note_type`, `result_id`, `created_by` (caller email), `needs_review`. |
-| PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit a note. Body: any of `note_text`, `note_type`, `needs_review` (at least one). `needs_review: false` resolves a review-queue row. Retyping obeys scope (`description` never result-scoped, `modification`/`result_note` always → 422; second `description` → 409). No-op if nothing changes. Writes ModificationsLog naming the changed fields. |
-| GET | `/api/experiments/{experiment_id}/change-requests` | List reactor modification entries linked to this experiment. Returns `[]` if none. |
-| GET | `/api/experiments/{experiment_id}/change-requests/recent` | Reactor modification entry for `date` (query param, default today) plus the most recent prior entry — both scoped to this experiment only, never another experiment that previously occupied the same reactor. Returns `{"selected": ..., "previous": ...}`, either nullable. |
-| POST | `/api/experiments/{experiment_id}/change-requests` | Create or update a reactor modification for a given reactor + date. Body: `{"reactor_label": "R05", "requested_change": "...", "sync_date": "2026-07-20"}` (`sync_date` optional, defaults to today). Upserts on `(reactor_label, experiment_id, sync_date)`. |
+| POST | `/api/experiments/{experiment_id}/notes` | Add a typed note. Body: `{"note_text": "...", "note_type": "observation"\|"description"\|"modification"\|"result_note", "result_id": 123, "event_date": "2026-09-24"}` — `note_type` defaults to `observation`, `result_id` and `event_date` optional. `description` must not carry `result_id`; `modification` must carry `result_id` OR `event_date` (or both); `result_note` must carry `result_id`; `observation` may carry either, neither, or both (422 otherwise). `result_id` of another experiment → 422. A second `description` → 409. Response adds `note_type`, `result_id`, `event_date`, `created_by` (caller email), `needs_review`. |
+| PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit a note. Body: any of `note_text`, `note_type`, `needs_review`, `event_date` (at least one). `needs_review: false` resolves a review-queue row. `{"event_date": null}` clears the date; if the note is `modification` and clearing it would leave the note with neither `result_id` nor `event_date`, the request 422s with `A 'modification' note must be scoped to a result or carry an event_date.`. Retyping obeys scope (`description` never result-scoped, `modification` needs `result_id` or `event_date`, `result_note` always result-scoped → 422; second `description` → 409). No-op if nothing changes. Writes ModificationsLog naming the changed fields. |
+| GET | `/api/experiments/{experiment_id}/change-requests` | List reactor modification entries linked to this experiment. Returns `[]` if none. **Deprecated 2026-09; removed by PR-E. Data migrated to `experiment_notes` by 021.** |
+| GET | `/api/experiments/{experiment_id}/change-requests/recent` | Reactor modification entry for `date` (query param, default today) plus the most recent prior entry — both scoped to this experiment only, never another experiment that previously occupied the same reactor. Returns `{"selected": ..., "previous": ...}`, either nullable. **Deprecated 2026-09; removed by PR-E. Data migrated to `experiment_notes` by 021.** |
+| POST | `/api/experiments/{experiment_id}/change-requests` | Create or update a reactor modification for a given reactor + date. Body: `{"reactor_label": "R05", "requested_change": "...", "sync_date": "2026-07-20"}` (`sync_date` optional, defaults to today). Upserts on `(reactor_label, experiment_id, sync_date)`. **Deprecated 2026-09; removed by PR-E. Data migrated to `experiment_notes` by 021.** |
 
 ### GET /api/experiments/{experiment_id}/exists
 
@@ -601,7 +601,12 @@ Returns all dashboard data in a single call. Response shape:
       "started_at": "2026-03-01T09:00:00Z",
       "days_running": 18,
       "temperature_c": 200.0,
-      "todays_modification": "Swapped stir shaft; topped up catalyst"
+      "todays_modification": "Swapped stir shaft; topped up catalyst",
+      "latest_modification": {
+        "note_text": "Swapped stir shaft; topped up catalyst",
+        "event_date": "2026-09-24",
+        "created_at": "2026-09-24T14:12:00Z"
+      }
     }
   ],
   "timeline": [
@@ -636,7 +641,7 @@ Returns all dashboard data in a single call. Response shape:
 - Timeline limited to 100 most recent experiments
 - Activity limited to last 20 modification log entries
 - Core Flood experiments use `CF01`/`CF02` labels; all others use `R01`–`R16`
-- `todays_modification` is the `requested_change` of a reactor modification saved for the current UTC day for this card's `(experiment_id, reactor_label)`; `null` if none was saved today. Populated by one batched query — the endpoint remains a single call.
+- `todays_modification` and `latest_modification` are sourced from `experiment_notes` (issue #122 PR-B, re-sourced from the now-deprecated `reactor_change_requests`): `'modification'`-typed notes on the card's experiment, keyed by `experiment_fk`, in one batched query — the endpoint remains a single call. `todays_modification` is the `'; '`-joined `note_text` of every modification note whose `event_date` equals the current UTC day (`null` if none). `latest_modification` is `{"note_text", "event_date", "created_at"}` for the single most recent modification note, ordered by `COALESCE(event_date, created_at::date)` then `id`; `null` if the experiment has no modification notes.
 
 ## Admin
 

@@ -19,7 +19,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_experiment_additives_summary` | `experiment_id`, `additives_summary` |
 | `public.v_experiment_additive_names_summary` | `experiment_id`, `additive_names` |
 | `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `modification_note` |
-| `public.v_notes` | `note_id`, `experiment_id`, `result_id`, `note_type`, `note_text`, `created_at`, `created_by`, `needs_review` |
+| `public.v_notes` | `note_id`, `experiment_id`, `result_id`, `event_date`, `note_type`, `note_text`, `created_at`, `created_by`, `needs_review` |
 | `public.v_experiment_xrd` | `experiment_id`, `time_post_reaction_days`, `mineral_name`, `amount_pct`, `rwp`, `measurement_date` |
 
 ---
@@ -167,6 +167,10 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
   `experiment_id` to `v_experiments` and `result_id` to `v_dim_timepoints`; filter
   `note_type` for one kind, `needs_review = true` for the rows the migration left for a
   researcher to check. Update visuals bound to the two removed/renamed columns by hand.
+- **`event_date` (issue #122 PR-B, 2026-09-24).** Dated reactor modifications are
+  `note_type = 'modification' AND event_date IS NOT NULL` in `v_notes`; this replaces
+  the retired `reactor_change_requests` table as the source for that data (migrated by
+  `migrate_reactor_change_requests_021.py`).
 - `net_ammonium_concentration` in `v_results_scalar` is a computed column: `GREATEST(0, gross - background)` in mM. It is always ≥ 0 — use it instead of computing the difference in Power BI measures.
 - `v_experiment_xrd` covers Aeris time-series XRD data (`experiment_fk IS NOT NULL`).
 - `v_sample_xrd` covers sample characterisation XRD (Mode A + ActLabs reports), where

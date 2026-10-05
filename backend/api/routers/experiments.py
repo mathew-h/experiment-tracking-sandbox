@@ -964,7 +964,12 @@ def list_change_requests(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ChangeRequestResponse]:
-    """List change request entries linked to this experiment. Returns [] if none."""
+    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
+    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
+    through POST /experiments/{id}/notes with note_type='modification' and
+    event_date.
+
+    List change request entries linked to this experiment. Returns [] if none."""
     exp = db.execute(
         select(Experiment.id).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
@@ -985,7 +990,12 @@ def get_recent_change_requests(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> RecentChangeRequestsResponse:
-    """Return this experiment's modification entry for `date` (default today) and the
+    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
+    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
+    through POST /experiments/{id}/notes with note_type='modification' and
+    event_date.
+
+    Return this experiment's modification entry for `date` (default today) and the
     most recent prior entry, both scoped to this experiment_id only — never another
     experiment that previously occupied the same physical reactor.
     """
@@ -1027,7 +1037,12 @@ def upsert_change_request(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ChangeRequestResponse:
-    """Create or update a reactor modification entry for a given reactor + date.
+    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
+    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
+    through POST /experiments/{id}/notes with note_type='modification' and
+    event_date.
+
+    Create or update a reactor modification entry for a given reactor + date.
 
     Upserts on the unique constraint (reactor_label, experiment_id, sync_date): if a
     row already exists for this reactor, experiment, and date, its requested_change
