@@ -61,8 +61,8 @@ class ExperimentListItem(BaseModel):
     reactor_number: Optional[int] = None
     # Derived from additives view
     additives_summary: Optional[str] = None
-    # The note typed 'description' (Experiment.description hybrid, issue #118).
-    # Renamed from `condition_note` in issue #122 PR-C.
+    # The note typed 'description' (Experiment.description hybrid, issue #118;
+    # field name aligned in issue #122 PR-C).
     description: Optional[str] = None
     # Issue #98. What the ID column should render: the group stem in grouped
     # mode, the timepoint-stripped stem in flat mode. `experiment_id` above
