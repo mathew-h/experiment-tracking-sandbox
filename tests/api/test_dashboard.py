@@ -826,11 +826,11 @@ def test_reactor_card_data_schema_todays_modification_defaults_none():
     assert r.latest_modification is None
 
 
-def _card_exp(db, eid, number, reactor):
+def _card_exp(db, eid, number, reactor, status=None):
     from database.models.experiments import Experiment
     from database.models.conditions import ExperimentalConditions
     from database.models.enums import ExperimentStatus
-    exp = Experiment(experiment_id=eid, experiment_number=number, status=ExperimentStatus.ONGOING,
+    exp = Experiment(experiment_id=eid, experiment_number=number, status=status or ExperimentStatus.ONGOING,
                      created_at=datetime.datetime.utcnow())
     db.add(exp)
     db.flush()
@@ -923,6 +923,19 @@ def test_todays_modification_keys_on_experiment_not_reactor(client, db_session):
     assert cards["R09"]["todays_modification"] == "mod B"
     assert cards["R10"]["todays_modification"] is None
     assert cards["R10"]["latest_modification"] is None
+
+
+def test_queued_card_also_gets_todays_and_latest_modification(client, db_session):
+    """Section 2b enriches QUEUED cards the same as ONGOING ones."""
+    from database.models.enums import ExperimentStatus
+    exp = _card_exp(db_session, "MOD_QUEUED_001", 72008, 11, status=ExperimentStatus.QUEUED)
+    _mod(db_session, exp, "queued mod", event_date=_utc_today())
+    db_session.commit()
+    resp = client.get("/api/dashboard/")
+    cards = {c["reactor_label"]: c for c in resp.json()["reactors"]}
+    assert cards["R11"]["status"] == "QUEUED"
+    assert cards["R11"]["todays_modification"] == "queued mod"
+    assert cards["R11"]["latest_modification"]["note_text"] == "queued mod"
 
 
 def test_dashboard_modification_lookup_is_single_batched_query(client, db_session):
