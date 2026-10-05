@@ -13,6 +13,7 @@ import { SamplesPage } from '@/pages/Samples'
 import { SampleDetailPage } from '@/pages/SampleDetail'
 import { ChemicalsPage } from '@/pages/Chemicals'
 import { AnalysisPage } from '@/pages/Analysis'
+import { NotesReviewPage } from '@/pages/NotesReview'
 
 /** Root component: sets up React Query, React Router, and the auth/toast providers. */
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/samples/:sampleId" element={<SampleDetailPage />} />
           <Route path="/chemicals" element={<ChemicalsPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
+          <Route path="/notes/review" element={<NotesReviewPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

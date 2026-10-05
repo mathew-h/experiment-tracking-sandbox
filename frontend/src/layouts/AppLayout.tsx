@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/auth/AuthContext'
+import { experimentsApi } from '@/api/experiments'
 
 interface NavItem {
   path: string
@@ -73,12 +75,32 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
+  {
+    path: '/notes/review',
+    label: 'Notes review',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M3 2.5h10v9l-2.5-2H3v-7z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M5.5 5.5h5M5.5 8h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
 ]
 
 /** Root app shell: sidebar navigation, top bar, and main content outlet. */
 export function AppLayout() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+
+  // Issue #122 PR-A: open review-queue count for the nav badge. Same endpoint
+  // the page uses; the page invalidates the ['notes-review'] prefix after every
+  // bulk action so this refreshes without a dedicated count route.
+  const { data: reviewQueue } = useQuery({
+    queryKey: ['notes-review', 'count'],
+    queryFn: () => experimentsApi.getReviewQueue({ limit: 1 }),
+    staleTime: 60_000,
+  })
+  const reviewCount = reviewQueue?.total ?? 0
 
   const handleSignOut = async () => {
     await signOut()
@@ -114,7 +136,15 @@ export function AppLayout() {
                   ].join(' ')}
                 >
                   <span className="shrink-0">{item.icon}</span>
-                  <span className="truncate">{item.label}</span>
+                  <span className="truncate flex-1">{item.label}</span>
+                  {item.path === '/notes/review' && reviewCount > 0 && (
+                    <span
+                      data-testid="review-count-badge"
+                      className="ml-auto shrink-0 rounded-full bg-status-error/20 text-status-error text-2xs font-semibold px-1.5 py-0.5 font-mono-data"
+                    >
+                      {reviewCount}
+                    </span>
+                  )}
                 </NavLink>
               </li>
             ))}

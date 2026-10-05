@@ -38,11 +38,46 @@ export interface ReviewNoteItem extends ExperimentNote {
   time_post_reaction_days: number | null
 }
 
+/** Issue #122 PR-A: one bar of the review-queue text histogram. */
+export interface DistinctText {
+  text: string
+  count: number
+}
+
 export interface ReviewQueueResponse {
   items: ReviewNoteItem[]
   total: number
   skip: number
   limit: number
+  /** Top 50 distinct note_text values in the current filter, most frequent first. */
+  distinct_texts: DistinctText[]
+}
+
+export type ReviewOrder = 'experiment' | 'created_at' | 'text'
+
+export interface ReviewQueueParams {
+  researcher?: string
+  note_type?: NoteType
+  /** Case-insensitive substring of note_text; `%`/`_` are literal. */
+  q?: string
+  /** Case-insensitive substring of experiment_id. */
+  experiment_id?: string
+  order?: ReviewOrder
+  desc?: boolean
+  skip?: number
+  limit?: number
+}
+
+/** Issue #122 PR-A: body of PATCH /experiments/notes/bulk. Atomic on the server. */
+export interface NotesBulkPatch {
+  ids: number[]
+  needs_review?: boolean
+  note_type?: NoteType
+}
+
+export interface NotesBulkResponse {
+  count: number
+  ids: number[]
 }
 
 export interface ExperimentListItem {
@@ -358,10 +393,20 @@ export const experimentsApi = {
   patchNote: (experimentId: string, noteId: number, patch: NotePatch) =>
     apiClient.patch<ExperimentNote>(`/experiments/${experimentId}/notes/${noteId}`, patch),
 
-  /** Issue #118: notes the backfill flagged needs_review, across all experiments. */
-  getReviewQueue: (params: { researcher?: string; skip?: number; limit?: number } = {}) =>
+  /** Issue #118/#122: notes flagged needs_review, across all experiments, filtered and ordered. */
+  getReviewQueue: (params: ReviewQueueParams = {}) =>
     apiClient
       .get<ReviewQueueResponse>('/experiments/notes/review', { params })
+      .then((r) => r.data),
+
+  /** Issue #122 PR-A: resolve / retype many notes in one atomic call (cap 500). */
+  bulkPatchNotes: (body: NotesBulkPatch) =>
+    apiClient.patch<NotesBulkResponse>('/experiments/notes/bulk', body).then((r) => r.data),
+
+  /** Issue #122 PR-A: delete many notes in one atomic call (cap 500). */
+  bulkDeleteNotes: (ids: number[]) =>
+    apiClient
+      .delete<NotesBulkResponse>('/experiments/notes/bulk', { data: { ids } })
       .then((r) => r.data),
 
   deleteNote: (experimentId: string, noteId: number) =>
