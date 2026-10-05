@@ -11,6 +11,7 @@ import { DeleteExperimentModal } from '@/components/experiments/DeleteExperiment
 import { ConditionsTab } from './ConditionsTab'
 import { ResultsTab } from './ResultsTab'
 import { NotesTab } from './NotesTab'
+import { DescriptionEditor } from './DescriptionEditor'
 import { ModificationsTab } from './ModificationsTab'
 import { AnalysisTab } from './AnalysisTab'
 
@@ -310,12 +311,9 @@ export function ExperimentDetailPage() {
           </p>
         )}
 
-        {/* Issue #118: the description is the note typed 'description'. */}
-        {descriptionNote && (
-          <p className="text-sm text-ink-secondary mt-1" data-testid="experiment-description">
-            {descriptionNote.note_text}
-          </p>
-        )}
+        {/* Issue #118: the description is the note typed 'description';
+            issue #122 PR-C: edited in place, or added when missing. */}
+        <DescriptionEditor experimentId={id!} note={descriptionNote} />
 
         <p className="text-xs text-ink-muted mt-0.5">
           #{experiment.experiment_number}
