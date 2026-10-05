@@ -177,7 +177,10 @@ describe('ExperimentDetailPage header wiring', () => {
         { id: 6, experiment_id: 'SERUM_051', replicate_label: 'b' },
       ],
     } as never)
-    wrap(<ExperimentDetailPage />)
+    const { qc } = wrap(<ExperimentDetailPage />)
+    // The bug only bites when the sibling is already cached: an uncached one
+    // goes through PageSpinner, which unmounts the editor regardless of key.
+    qc.setQueryData(['experiment', 'SERUM_051'], B)
     await user.click(await screen.findByRole('button', { name: /add description/i }))
     await user.type(screen.getByLabelText('Description'), 'draft for A')
     await user.click(screen.getByRole('link', { name: 'b' }))
