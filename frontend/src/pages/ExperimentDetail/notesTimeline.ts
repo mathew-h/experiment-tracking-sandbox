@@ -1,20 +1,36 @@
 import type { ExperimentNote } from '@/api/experiments'
 
-/** Sort key for the Notes timeline (issue #122 PR-C): COALESCE(event_date,
- *  created_at). A dated note sorts at local midnight of its lab calendar day
- *  (the date is a day, not an instant); everything else at the instant it was
- *  written. A missing event_date key behaves like null. */
-export function timelineKey(n: ExperimentNote): number {
+/** A local calendar day as a sortable integer (YYYYMMDD). */
+function localDayNumber(d: Date): number {
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+}
+
+/** The calendar day a note belongs to on the timeline (issue #122 PR-C, Mat
+ *  2026-10-05): its `event_date` when it has one — a dated modification is
+ *  "something done on that day" — otherwise the local day it was written.
+ *  A missing event_date key behaves like null. */
+export function timelineDay(n: ExperimentNote): number {
   if (n.event_date) {
     const [y, m, d] = n.event_date.split('-').map(Number)
-    return new Date(y, m - 1, d).getTime()
+    return localDayNumber(new Date(y, m - 1, d))
   }
+  return localDayNumber(new Date(n.created_at))
+}
+
+/** When the note was recorded, as a timestamp — the only time information a
+ *  dated note has, used to order notes within one day. */
+export function recordedAt(n: ExperimentNote): number {
   return new Date(n.created_at).getTime()
 }
 
-/** Newest first; equal keys → higher id first. Returns a new array. */
+/** Day first, newest day first; within a day, most recently recorded first;
+ *  equal → higher id first. A modification dated today therefore sits above
+ *  the observations written earlier today (a midnight key put it below them),
+ *  and a backdated one still lands on its event day. Returns a new array. */
 export function sortTimeline(notes: ExperimentNote[]): ExperimentNote[] {
-  return [...notes].sort((a, b) => timelineKey(b) - timelineKey(a) || b.id - a.id)
+  return [...notes].sort(
+    (a, b) => timelineDay(b) - timelineDay(a) || recordedAt(b) - recordedAt(a) || b.id - a.id,
+  )
 }
 
 /** `T+7` for a result-scoped note whose result is known; `T+?` when the
