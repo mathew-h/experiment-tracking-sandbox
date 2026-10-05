@@ -105,7 +105,6 @@ class DeleteImpact:
     additives: int = 0
     external_analyses: int = 0
     xrd_phases: int = 0
-    change_requests: int = 0
     # Other experiments that name this one as their ammonium background.
     background_for: list[str] = field(default_factory=list)
     # Experiments whose parent_experiment_fk points at this one. Their
@@ -122,7 +121,7 @@ class DeleteImpact:
         return (
             self.conditions + self.results + self.scalar_results
             + self.icp_results + self.result_files + self.notes + self.additives
-            + self.external_analyses + self.xrd_phases + self.change_requests
+            + self.external_analyses + self.xrd_phases
         )
 
 
@@ -159,8 +158,6 @@ def collect_delete_impact(db: Session, exp: Experiment) -> DeleteImpact:
         xrd_phases=_count(db, select(func.count()).select_from(XRDPhase).where(
             or_(XRDPhase.experiment_fk == exp.id,
                 XRDPhase.experiment_id == exp.experiment_id))),
-        change_requests=_count(db, select(func.count()).select_from(ReactorChangeRequest)
-                               .where(ReactorChangeRequest.experiment_id == exp.experiment_id)),
     )
 
     if result_ids:
@@ -317,8 +314,11 @@ def delete_experiment_cascade(
     )
 
     # 3. Reactor change requests are PURGED, not unlinked (product decision,
-    #    2026-07-29): they belong to this experiment, and change_requests is
-    #    already summed into impact.total, which is documented as rows destroyed.
+    #    2026-07-29): they belong to this experiment, and change_requests was
+    #    summed into impact.total, which is documented as rows destroyed.
+    #    The count left DeleteImpact in #122 PR-B (the data now lives in
+    #    experiment_notes and is counted under notes); the purge stays until
+    #    PR-E removes the model.
     db.execute(
         sql_delete(ReactorChangeRequest)
         .where(ReactorChangeRequest.experiment_id == experiment_id)
@@ -370,7 +370,6 @@ def delete_experiment_cascade(
                 "additives": impact.additives,
                 "external_analyses": impact.external_analyses,
                 "xrd_phases": impact.xrd_phases,
-                "change_requests": impact.change_requests,
                 "total": impact.total,
             },
             "decoupled_background_for": impact.background_for,

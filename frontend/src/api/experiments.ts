@@ -129,7 +129,6 @@ export interface DeleteImpact {
   additives: number
   external_analyses: number
   xrd_phases: number
-  change_requests: number
   total: number
   /** Other experiments that named this one as their ammonium background. */
   background_for: string[]

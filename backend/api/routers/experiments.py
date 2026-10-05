@@ -1415,7 +1415,6 @@ def _impact_to_response(impact: DeleteImpact) -> DeleteImpactResponse:
         additives=impact.additives,
         external_analyses=impact.external_analyses,
         xrd_phases=impact.xrd_phases,
-        change_requests=impact.change_requests,
         total=impact.total,
         background_for=impact.background_for,
         replicate_children=impact.replicate_children,

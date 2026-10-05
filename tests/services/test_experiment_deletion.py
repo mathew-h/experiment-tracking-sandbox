@@ -102,8 +102,15 @@ def test_collect_impact_counts_every_dependent_record(db):
     assert impact.additives == 1
     assert impact.external_analyses == 1
     assert impact.xrd_phases == 1
-    assert impact.change_requests == 1
-    assert impact.total == 10
+    assert impact.total == 9
+
+
+def test_delete_impact_has_no_change_requests_field():
+    from backend.services.experiment_deletion import DeleteImpact
+    impact = DeleteImpact(experiment_id="X", conditions=1, results=2, scalar_results=3, icp_results=4,
+                          result_files=5, notes=6, additives=7, external_analyses=8, xrd_phases=9)
+    assert not hasattr(impact, "change_requests")
+    assert impact.total == 45
 
 
 def test_collect_impact_counts_the_conditions_row(db):

@@ -40,7 +40,7 @@ const EMPTY_IMPACT: DeleteImpact = {
   experiment_id: 'SERUM_050',
   conditions: 0,
   results: 0, scalar_results: 0, icp_results: 0, result_files: 0, notes: 0,
-  additives: 0, external_analyses: 0, xrd_phases: 0, change_requests: 0,
+  additives: 0, external_analyses: 0, xrd_phases: 0,
   total: 0, background_for: [], replicate_children: [],
 }
 

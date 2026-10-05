@@ -283,7 +283,6 @@ class DeleteImpactResponse(BaseModel):
     additives: int = 0
     external_analyses: int = 0
     xrd_phases: int = 0
-    change_requests: int = 0
     total: int = 0
     background_for: list[str] = []
     replicate_children: list[str] = []
