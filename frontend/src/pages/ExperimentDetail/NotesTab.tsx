@@ -4,14 +4,10 @@ import { experimentsApi, type ExperimentNote } from '@/api/experiments'
 import { NOTE_TYPE_LABELS, type NoteType } from '@/api/noteTypes'
 import { Badge, Button, ConfirmModal, useToast } from '@/components/ui'
 import { NoteBadge } from '@/components/experiments/NoteBadge'
+import { NoteComposer } from './NoteComposer'
 import { sortTimeline, timepointLabel } from './notesTimeline'
 
 interface Props { experimentId: string; notes: ExperimentNote[] }
-
-/** Types a researcher can pick when writing an experiment-level note here.
- *  'modification' and 'result_note' are scoped to a timepoint and are written
- *  from the Results tab (Add Results), not from this feed. */
-const ADDABLE_TYPES: NoteType[] = ['observation', 'description']
 
 /** Every type, in the order the timeline's type filter lists them. */
 const ALL_TYPES: NoteType[] = ['description', 'modification', 'observation', 'result_note']
@@ -33,8 +29,6 @@ const CHIP = 'font-mono-data'
  *  with inline add, edit, retype, delete, and the review queue for rows the
  *  backfill could not place with certainty. */
 export function NotesTab({ experimentId, notes }: Props) {
-  const [text, setText] = useState('')
-  const [newType, setNewType] = useState<NoteType>('observation')
   const [reviewOnly, setReviewOnly] = useState(false)
   const [typeFilter, setTypeFilter] = useState<NoteType | 'all'>('all')
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -58,17 +52,6 @@ export function NotesTab({ experimentId, notes }: Props) {
     for (const r of results ?? []) m.set(r.id, r.time_post_reaction_days)
     return m
   }, [results])
-
-  const addNote = useMutation({
-    mutationFn: () => experimentsApi.addNote(experimentId, text, { note_type: newType }),
-    onSuccess: () => {
-      invalidate()
-      success('Note added')
-      setText('')
-      setNewType('observation')
-    },
-    onError: (err: Error) => toastError('Failed to add note', err.message),
-  })
 
   const editNote = useMutation({
     mutationFn: ({ noteId, newText }: { noteId: number; newText: string }) =>
@@ -140,35 +123,7 @@ export function NotesTab({ experimentId, notes }: Props) {
 
   return (
     <div className="p-4 space-y-4">
-      {/* Add note */}
-      <div className="space-y-2">
-        <textarea
-          className="w-full bg-surface-input border border-surface-border rounded px-3 py-2 text-sm text-ink-primary placeholder-ink-muted focus:outline-none focus:ring-1 focus:ring-brand-red/50 resize-none"
-          rows={3}
-          placeholder="Add a note…"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <div className="flex items-center gap-2">
-          <label htmlFor="new-note-type" className="text-xs text-ink-secondary">Type</label>
-          <select
-            id="new-note-type"
-            value={newType}
-            onChange={(e) => setNewType(e.target.value as NoteType)}
-            className="text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50"
-          >
-            {ADDABLE_TYPES.map((t) => (
-              <option key={t} value={t} disabled={t === 'description' && hasDescription}>
-                {NOTE_TYPE_LABELS[t]}{t === 'description' && hasDescription ? ' (already set)' : ''}
-              </option>
-            ))}
-          </select>
-          <Button variant="primary" size="sm" disabled={!text.trim()} loading={addNote.isPending}
-            onClick={() => addNote.mutate()}>
-            Add Note
-          </Button>
-        </div>
-      </div>
+      <NoteComposer experimentId={experimentId} hasDescription={hasDescription} results={results} />
 
       {/* Filters */}
       {notes.length > 0 && (
