@@ -1901,6 +1901,83 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 
 ---
 
+### Task 9: Serialize `event_date` in the experiment detail's `notes[]`
+
+Found by the Chrome DevTools check on the 2026-09-23 mirror (HPHT_229): every
+dated modification showed the MODIFICATION badge but no date chip, and its
+retype select fell back to "Observation" with no Modification option. Cause:
+`GET /api/experiments/{id}` builds `notes_list` by hand in
+`backend/api/routers/experiments.py` (`get_experiment`, the dict comprehension
+over `notes`) and never copied `event_date` — a PR-B gap its tests missed
+because they mocked the notes. `NoteResponse` and `POST`/`PATCH /notes` already
+carry the field; this task makes the detail endpoint match. Additive JSON only;
+no schema change.
+
+**Files:**
+- Modify: `backend/api/routers/experiments.py` (`get_experiment`, the `notes_list` comprehension — currently `"result_id": n.result_id,` is followed directly by `"created_by"`)
+- Modify: `tests/api/test_notes.py` (append one test)
+
+**Interfaces:**
+- Produces: `notes[].event_date` (ISO `YYYY-MM-DD` or `null`) in `GET /api/experiments/{experiment_id}`. The frontend `ExperimentNote.event_date` and `retypeOptions` / `sortTimeline` / the date chip already consume it.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/api/test_notes.py`:
+
+```python
+def test_get_experiment_detail_notes_carry_event_date(client, db_session):
+    """Issue #122 PR-C: the detail endpoint's notes[] must serialize event_date,
+    or the Notes timeline cannot show a date chip or offer Modification on a
+    dated note (found with Chrome DevTools on the 2026-09-23 mirror)."""
+    exp, plain = _make_experiment_with_note(db_session, "NOTE_ED_001", 7901, text="undated")
+    dated = ExperimentNotes(
+        experiment_id=exp.experiment_id, experiment_fk=exp.id,
+        note_text="swapped stir bar", note_type=NoteType.modification,
+        event_date=datetime.date(2026, 9, 24),
+    )
+    db_session.add(dated)
+    db_session.commit()
+    resp = client.get(f"/api/experiments/{exp.experiment_id}")
+    assert resp.status_code == 200
+    by_id = {n["id"]: n for n in resp.json()["notes"]}
+    assert by_id[dated.id]["event_date"] == "2026-09-24"
+    assert "event_date" in by_id[plain.id]
+    assert by_id[plain.id]["event_date"] is None
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `.venv/Scripts/pytest.exe tests/api/test_notes.py -q -k event_date`
+Expected: the new test FAILS with `KeyError: 'event_date'`.
+
+- [ ] **Step 3: Serialize the field**
+
+In `backend/api/routers/experiments.py`, in `get_experiment`'s `notes_list` comprehension, add one line after `"result_id": n.result_id,`:
+
+```python
+            "event_date": n.event_date.isoformat() if n.event_date else None,
+```
+
+- [ ] **Step 4: Run the test file**
+
+Run: `.venv/Scripts/pytest.exe tests/api/test_notes.py tests/api/test_results_typed_notes.py -q`
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```
+[#122] Return event_date on experiment detail notes
+
+- GET /experiments/{id} notes[] omitted the field PR-B added, so the
+  timeline could not show date chips or retype dated notes
+- Tests added: yes
+- Docs updated: no
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+```
+
+---
+
 ## After the tasks (Conductor, not a subagent)
 
 1. Whole-branch review on the most capable model; fix wave if needed.
