@@ -205,7 +205,7 @@ its snapshot `modifications_log` 108066 (`modified_table reactor_change_requests
    `reactor_change_requests` rows without counting them — so **run step 2 the first morning
    after the deploy, and nobody deletes experiments until it has run.**
 2. From the repo root on the lab PC, with the production `.env` (its `DATABASE_URL`):
-   `set PYTHONPATH=.` then `.venv\Scripts\python.exe database\data_migrations\migrate_reactor_change_requests_021.py`
+   in PowerShell `$env:PYTHONPATH = "."` (cmd.exe: `set PYTHONPATH=.`) then `.venv\Scripts\python.exe database\data_migrations\migrate_reactor_change_requests_021.py`
    (dry run). Compare with this report's shape: more than 333 rows is expected; orphaned should
    still read 26 unless rows were deleted; blank/collapsed 0.
 3. `.venv\Scripts\python.exe database\data_migrations\migrate_reactor_change_requests_021.py --apply`
