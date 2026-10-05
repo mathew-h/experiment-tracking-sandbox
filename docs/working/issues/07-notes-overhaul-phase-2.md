@@ -34,7 +34,7 @@ Notion-era change requests" (Mat, 2026-09-24). Written to be sufficient for a
 | PR-A review-queue tooling | `feat/notes-review-queue` | **Merged to develop** (#123, 2026-10-05). |
 | PR-B0 wizard description + retype control | `fix/notes-entry-and-retype` | **Merged to develop** (#124, 2026-10-05). |
 | PR-B reactor modifications become dated notes | `feat/reactor-mods-as-notes` | **Merged to develop** (#125, 2026-10-05). 021 applied on the dev mirror; production run pending (see docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md). |
-| PR-C unified timeline + description editing | `feat/notes-timeline` | Next. |
+| PR-C unified timeline + description editing | `feat/notes-timeline` | **In review (PR #126, 2026-10-05).** Also fixes `GET /experiments/{id}` omitting `event_date` on `notes[]` (PR-B gap). |
 | PR-E remove the Notion sync (absorbs #117) | `chore/remove-notion-sync` | After B (needs the data migrated). Independent of C. |
 | PR-D drop the legacy result columns | `chore/drop-legacy-note-columns` | Last. Gated on production review queue = 0. |
 
