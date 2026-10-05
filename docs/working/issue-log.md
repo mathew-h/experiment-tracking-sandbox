@@ -2564,3 +2564,20 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Final-review fix wave (2026-10-05):** modal renders the live card; 021 idempotency keyed on the snapshot; 021 tests isolated; runbook and decision citation corrected.
 - **Addendum (2026-10-05, same day, Mat's ruling):** "today" for reactor modifications — the card's date default and the server's `todays_modification`/`latest_modification` fallback — moved from UTC to the lab's calendar day (America/New_York, `LAB_TZ`), reversing the "UTC, unchanged" line in the row above and in the phase-2 spec. See `docs/working/decisions.md` addendum.
 - **Tests added:** yes (see Files changed). **Docs updated:** yes.
+
+## 2026-10-05 | issue #122 — #123, #124, #125 merged into develop; integration fixes (`chore/issue-122-integration`)
+- **Merged (in order):** #123 `fb83735`, #124 `1620e8d`, #125 `e3a2dce`.
+- **Files changed:**
+  - `backend/api/routers/experiments.py` — `_check_bulk_retype`'s combined `(modification, result_note)` branch split in two: `modification` now requires `result_id` OR `event_date` (PR-A's bulk retype had not picked up PR-B's relaxed `ck_note_scope`); `result_note` keeps the result-only rule.
+  - `frontend/src/pages/ExperimentDetail/NotesTab.tsx` — `retypeOptions` gains an `event_date` branch (`['observation', 'modification', 'description']`) between the result-anchored and bare-experiment-level cases, so the Notes tab's scoped `<select>` (PR-B0) also recognizes a date anchor as valid for Modification.
+  - `docs/working/issues/07-notes-overhaul-phase-2.md` — §1 status table: PR-A/PR-B0/PR-B marked **Merged to develop** with their PR numbers and merge date; PR-B's row also notes the 021 backfill is applied on the dev mirror only, production run pending. PR-C moved to "Next." §3 decision 1 gains a one-line addendum recording the lab-calendar-day "today" ruling.
+  - `docs/working/issue-log.md` — this entry.
+  - Tests: `tests/api/test_notes_bulk.py` (+1 — `test_bulk_patch_retypes_a_dated_note_to_modification`), `frontend/src/pages/ExperimentDetail/__tests__/TypedNotes.test.tsx` (+1 — a date-anchored note offers Modification while a bare one does not).
+- **Why:** PR-A (`_check_bulk_retype`) and PR-B0 (`retypeOptions`) were both written and merged before PR-B landed `event_date` and the relaxed `ck_note_scope`; neither was rebased onto PR-B's rule, so the bulk-retype endpoint and the Notes-tab menu each still enforced the pre-PR-B "modification needs a result" rule that the single-note PATCH (`patch_note`) had already moved past. A date-anchored note could be retyped to Modification one note at a time but not via the bulk endpoint, and the Notes tab never offered Modification as an option for it at all.
+- **Verification (full suite, fresh `experiments_test`, run on merged `develop` + this branch):**
+  - Backend: `.venv/Scripts/pytest.exe tests/models tests/views tests/api tests/test_icp_handling.py tests/services tests/regression tests/data_migrations -q` → **1426 passed, 0 failed** (1,402 + PR-A's 22 + 2 new).
+  - Frontend: `npx vitest run` → **264 passed, 38 test files, 0 failed**.
+  - `npx eslint src --ext .ts,.tsx` → 5 problems (baseline, all pre-existing, none in files this branch touched).
+  - `npx tsc --noEmit` → 3 errors, all in `ResultsTab.columns.test.tsx` (baseline, pre-existing).
+  - `.venv/Scripts/alembic.exe heads` → single head `e5b2d9c7a1f4`.
+- **Tests added:** yes (+2). **Docs updated:** yes.

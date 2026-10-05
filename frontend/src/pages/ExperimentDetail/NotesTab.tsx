@@ -12,12 +12,13 @@ interface Props { experimentId: string; notes: ExperimentNote[] }
 const ADDABLE_TYPES: NoteType[] = ['observation', 'description']
 
 /** Types a note may be retyped to, given its anchor — the UI mirror of the
- *  ck_note_scope CHECK (issue #122, design decision 8). The DB stays the
- *  authority: an invalid combination is still a 422 from PATCH. */
+ *  ck_note_scope CHECK (issue #122, decisions 1 and 8). A result anchors
+ *  modification and result_note; an event_date anchors modification only;
+ *  description is experiment-level. The DB stays the authority (422 on PATCH). */
 function retypeOptions(n: ExperimentNote): NoteType[] {
-  return n.result_id == null
-    ? ['observation', 'description']
-    : ['observation', 'modification', 'result_note']
+  if (n.result_id != null) return ['observation', 'modification', 'result_note']
+  if (n.event_date != null) return ['observation', 'modification', 'description']
+  return ['observation', 'description']
 }
 
 /** Notes tab (issue #118): typed lab notes with inline add, edit, delete, and

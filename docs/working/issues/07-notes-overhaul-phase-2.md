@@ -31,10 +31,10 @@ Notion-era change requests" (Mat, 2026-09-24). Written to be sufficient for a
 
 | PR | Branch | State |
 |---|---|---|
-| PR-A review-queue tooling | `feat/notes-review-queue` | **Done.** PR #123 open against `develop` (2026-09-24). |
-| PR-B0 wizard description + retype control | `fix/notes-entry-and-retype` | Next. No schema change. |
-| PR-B reactor modifications become dated notes | `feat/reactor-mods-as-notes` | After B0. Schema + backfill (dry run → **STOP**). |
-| PR-C unified timeline + description editing | `feat/notes-timeline` | After B. |
+| PR-A review-queue tooling | `feat/notes-review-queue` | **Merged to develop** (#123, 2026-10-05). |
+| PR-B0 wizard description + retype control | `fix/notes-entry-and-retype` | **Merged to develop** (#124, 2026-10-05). |
+| PR-B reactor modifications become dated notes | `feat/reactor-mods-as-notes` | **Merged to develop** (#125, 2026-10-05). 021 applied on the dev mirror; production run pending (see docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md). |
+| PR-C unified timeline + description editing | `feat/notes-timeline` | Next. |
 | PR-E remove the Notion sync (absorbs #117) | `chore/remove-notion-sync` | After B (needs the data migrated). Independent of C. |
 | PR-D drop the legacy result columns | `chore/drop-legacy-note-columns` | Last. Gated on production review queue = 0. |
 
@@ -199,6 +199,8 @@ Hard gates:
    records a day-5 change as "at the day-3 timepoint", loses the Modification
    type before the first timepoint, and cannot migrate the 294 existing rows
    faithfully.
+   **Addendum:** "Today" for the card and server is the lab's calendar day
+   (America/New_York), not UTC — Mat, 2026-10-05.
 2. **`reactor_label` is not carried onto the note.** The card already knows its
    slot; the backfill writes one `ModificationsLog` snapshot per converted row
    (full original row in `old_values`) so label, Notion status and page id are
