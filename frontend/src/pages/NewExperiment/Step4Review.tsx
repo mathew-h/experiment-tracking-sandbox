@@ -53,7 +53,7 @@ export function Step4Review({
           {kv('Sample', step1.sampleId)}
           {kv('Date', step1.date)}
           {kv('Status', step1.status)}
-          {step1.note && kv('Condition Note', step1.note.slice(0, 80) + (step1.note.length > 80 ? '…' : ''))}
+          {step1.note.trim() && kv('Description', step1.note.slice(0, 80) + (step1.note.length > 80 ? '…' : ''))}
         </div>
       </div>
 

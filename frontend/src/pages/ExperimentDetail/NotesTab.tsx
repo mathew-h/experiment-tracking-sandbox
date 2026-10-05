@@ -11,10 +11,13 @@ interface Props { experimentId: string; notes: ExperimentNote[] }
  *  from the Results tab (Add Results), not from this feed. */
 const ADDABLE_TYPES: NoteType[] = ['observation', 'description']
 
-function typeBadgeVariant(t: NoteType): 'default' | 'warning' | 'info' {
-  if (t === 'modification') return 'warning'
-  if (t === 'description') return 'info'
-  return 'default'
+/** Types a note may be retyped to, given its anchor — the UI mirror of the
+ *  ck_note_scope CHECK (issue #122, design decision 8). The DB stays the
+ *  authority: an invalid combination is still a 422 from PATCH. */
+function retypeOptions(n: ExperimentNote): NoteType[] {
+  return n.result_id == null
+    ? ['observation', 'description']
+    : ['observation', 'modification', 'result_note']
 }
 
 /** Notes tab (issue #118): typed lab notes with inline add, edit, delete, and
@@ -63,6 +66,23 @@ export function NotesTab({ experimentId, notes }: Props) {
       success('Marked as reviewed')
     },
     onError: (err: Error) => toastError('Failed to mark reviewed', err.message),
+  })
+
+  const retypeNote = useMutation({
+    mutationFn: ({ noteId, noteType }: { noteId: number; noteType: NoteType }) =>
+      experimentsApi.patchNote(experimentId, noteId, { note_type: noteType }),
+    onSuccess: (_data, { noteType }) => {
+      success('Note type changed', NOTE_TYPE_LABELS[noteType])
+      // Returned so the row stays pending (and shows the chosen type) until the
+      // refetch lands. To or from 'description' changes the reactor card and
+      // the experiments list's Description column as well as this page.
+      return Promise.all([
+        invalidate(),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['experiments'] }),
+      ])
+    },
+    onError: (err: Error) => toastError('Failed to change note type', err.message),
   })
 
   const deleteNote = useMutation({
@@ -140,14 +160,33 @@ export function NotesTab({ experimentId, notes }: Props) {
         {notes.length > 0 && visible.length === 0 && (
           <p className="text-sm text-ink-muted">Nothing left to review</p>
         )}
-        {visible.map((n, i) => (
+        {visible.map((n, i) => {
+          const isRetyping = retypeNote.isPending && retypeNote.variables?.noteId === n.id
+          return (
           <div
             key={n.id}
             className={`text-xs border-b border-surface-border pb-3 group ${i === visible.length - 1 ? 'border-b-0' : ''}`}
           >
             <div className="flex items-start justify-between gap-2 mb-0.5">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <Badge variant={typeBadgeVariant(n.note_type)}>{NOTE_TYPE_LABELS[n.note_type]}</Badge>
+                <select
+                  aria-label="Note type"
+                  value={isRetyping ? retypeNote.variables!.noteType : n.note_type}
+                  disabled={isRetyping}
+                  onChange={(e) => retypeNote.mutate({ noteId: n.id, noteType: e.target.value as NoteType })}
+                  className="text-xs px-2 py-1 border border-surface-border rounded bg-surface-raised text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand-red/50 disabled:opacity-40"
+                >
+                  {retypeOptions(n).map((t) => {
+                    const taken =
+                      t === 'description' &&
+                      notes.some((m) => m.note_type === 'description' && m.id !== n.id)
+                    return (
+                      <option key={t} value={t} disabled={taken}>
+                        {NOTE_TYPE_LABELS[t]}{taken ? ' (already set)' : ''}
+                      </option>
+                    )
+                  })}
+                </select>
                 {n.result_id != null && (
                   <span className="text-[10px] text-ink-muted">on a timepoint</span>
                 )}
@@ -233,7 +272,8 @@ export function NotesTab({ experimentId, notes }: Props) {
               </>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Delete note confirmation */}
