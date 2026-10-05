@@ -935,10 +935,14 @@ export function NotesTab({ experimentId, notes }: Props) {
               <div className="flex items-center gap-1.5 flex-wrap">
                 <NoteBadge type={n.note_type} />
                 {n.result_id != null && (
-                  <Badge className={CHIP} aria-label="Timepoint">{timepointLabel(daysByResult.get(n.result_id))}</Badge>
+                  <span aria-label="Timepoint" className="inline-flex">
+                    <Badge className={CHIP}>{timepointLabel(daysByResult.get(n.result_id))}</Badge>
+                  </span>
                 )}
                 {n.event_date && (
-                  <Badge className={CHIP} aria-label="Event date">{n.event_date}</Badge>
+                  <span aria-label="Event date" className="inline-flex">
+                    <Badge className={CHIP}>{n.event_date}</Badge>
+                  </span>
                 )}
                 {n.needs_review && (
                   <Badge variant="error" dot>Needs review</Badge>
@@ -1062,7 +1066,7 @@ export function NotesTab({ experimentId, notes }: Props) {
 }
 ```
 
-Note: `Badge` takes `className` but not `aria-label` in its props today — if `npx tsc --noEmit` rejects `aria-label` on `<Badge>`, wrap each chip instead: `<span aria-label="Timepoint" className="inline-flex"><Badge className={CHIP}>…</Badge></span>` (same for `Event date`). The tests query by label text and `toHaveTextContent`, which works with either.
+Note: `Badge` takes `className` but not `aria-label` in its props, which is why each chip is wrapped in a labelled `<span>`. The tests query by label text and `toHaveTextContent`.
 
 - [ ] **Step 8: Run the Notes suites**
 
@@ -1095,7 +1099,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 
 **Interfaces:**
 - Consumes: `labTodayISO` (Task 2), `timepointLabel` (Task 5), `results` and `hasDescription` from `NotesTab` (Task 5).
-- Produces: `NoteComposer({ experimentId: string; hasDescription: boolean; results: ResultWithFlags[] | undefined })`; pure exports `ANCHOR_RULE`, `anchorProblem(type, resultId, eventDate): string | null`, `composerPayload(type, resultId, eventDate): Omit<NoteCreate, 'note_text'>`.
+- Produces: `NoteComposer({ experimentId: string; hasDescription: boolean; results: ResultWithFlags[] | undefined })`. Its anchor controls are labelled **"At timepoint"** and **"On date"** (not "Timepoint"/"Date") so they never collide with the timeline chips' `aria-label="Timepoint"` / `"Event date"` in queries; pure exports `ANCHOR_RULE`, `anchorProblem(type, resultId, eventDate): string | null`, `composerPayload(type, resultId, eventDate): Omit<NoteCreate, 'note_text'>`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1172,7 +1176,7 @@ describe('NoteComposer', () => {
     const add = screen.getByRole('button', { name: /add note/i })
     expect(add).toBeDisabled()
     expect(screen.getByText(/needs a timepoint/i)).toBeInTheDocument()
-    const tp = screen.getByLabelText('Timepoint') as HTMLSelectElement
+    const tp = screen.getByLabelText('At timepoint') as HTMLSelectElement
     expect(within(tp).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose…', 'T+7', 'T+14'])
     await user.selectOptions(tp, '6')
     expect(add).toBeEnabled()
@@ -1185,7 +1189,7 @@ describe('NoteComposer', () => {
     wrap(<NoteComposer experimentId="HPHT_001" hasDescription={false} results={RESULTS} />)
     await user.type(screen.getByPlaceholderText(/add a note/i), 'swapped stir bar')
     await user.selectOptions(screen.getByLabelText('Type'), 'modification')
-    const date = screen.getByLabelText('Date') as HTMLInputElement
+    const date = screen.getByLabelText('On date') as HTMLInputElement
     expect(date.value).toBe(labTodayISO())
     expect(date).toBeEnabled()
     await user.click(screen.getByRole('button', { name: /add note/i }))
@@ -1197,8 +1201,8 @@ describe('NoteComposer', () => {
     wrap(<NoteComposer experimentId="HPHT_001" hasDescription={false} results={RESULTS} />)
     await user.type(screen.getByPlaceholderText(/add a note/i), 'brine replaced')
     await user.selectOptions(screen.getByLabelText('Type'), 'modification')
-    await user.selectOptions(screen.getByLabelText('Timepoint'), '5')
-    const date = screen.getByLabelText('Date') as HTMLInputElement
+    await user.selectOptions(screen.getByLabelText('At timepoint'), '5')
+    const date = screen.getByLabelText('On date') as HTMLInputElement
     expect(date.value).toBe('')
     expect(date).toBeDisabled()
     await user.click(screen.getByRole('button', { name: /add note/i }))
@@ -1210,9 +1214,9 @@ describe('NoteComposer', () => {
     wrap(<NoteComposer experimentId="HPHT_001" hasDescription={false} results={RESULTS} />)
     await user.type(screen.getByPlaceholderText(/add a note/i), 'cloudy')
     await user.selectOptions(screen.getByLabelText('Type'), 'modification')
-    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe(labTodayISO())
+    expect((screen.getByLabelText('On date') as HTMLInputElement).value).toBe(labTodayISO())
     await user.selectOptions(screen.getByLabelText('Type'), 'observation')
-    expect(screen.queryByLabelText('Date')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('On date')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /add note/i }))
     expect(addNote()).toHaveBeenCalledWith('HPHT_001', 'cloudy', { note_type: 'observation' })
   })
@@ -1222,8 +1226,8 @@ describe('NoteComposer', () => {
     const { unmount } = wrap(<NoteComposer experimentId="HPHT_001" hasDescription={false} results={RESULTS} />)
     await user.type(screen.getByPlaceholderText(/add a note/i), 'Pyrite + Cu, 90 °C')
     await user.selectOptions(screen.getByLabelText('Type'), 'description')
-    expect(screen.queryByLabelText('Timepoint')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Date')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('At timepoint')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('On date')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /add note/i }))
     expect(addNote()).toHaveBeenCalledWith('HPHT_001', 'Pyrite + Cu, 90 °C', { note_type: 'description' })
     unmount()
@@ -1415,7 +1419,7 @@ export function NoteComposer({ experimentId, hasDescription, results }: Props) {
         </select>
         {showTimepoint && (
           <>
-            <label htmlFor="new-note-timepoint" className="text-xs text-ink-secondary">Timepoint</label>
+            <label htmlFor="new-note-timepoint" className="text-xs text-ink-secondary">At timepoint</label>
             <select id="new-note-timepoint" value={resultId ?? ''} onChange={(e) => changeTimepoint(e.target.value)} className={SELECT}>
               <option value="">{rule === 'result' ? 'Choose…' : 'None'}</option>
               {timepoints.map((r) => (
@@ -1426,7 +1430,7 @@ export function NoteComposer({ experimentId, hasDescription, results }: Props) {
         )}
         {showDate && (
           <>
-            <label htmlFor="new-note-date" className="text-xs text-ink-secondary">Date</label>
+            <label htmlFor="new-note-date" className="text-xs text-ink-secondary">On date</label>
             <input
               id="new-note-date"
               type="date"
