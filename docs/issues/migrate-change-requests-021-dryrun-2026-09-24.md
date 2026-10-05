@@ -199,10 +199,19 @@ its snapshot `modifications_log` 108066 (`modified_table reactor_change_requests
 307 dated modification rows; source rows 5 and 333 each match exactly one note on
 `(experiment, date, stripped text, tag)`.
 
-**Production runbook (after the branch merges and the nightly `alembic upgrade head` has
-applied `e5b2d9c7a1f4`):** dry run → compare to this report's shape (production will have
-more rows than 333; the orphaned count should still be 26 unless rows were deleted) →
-`--apply` → second dry run must report `convertible 0`.
+**Production runbook (lab PC):**
+1. The nightly `update.ps1` applies `alembic upgrade head` → `e5b2d9c7a1f4`. From that moment the
+   dashboard card reads and writes notes only, and deleting an experiment purges its
+   `reactor_change_requests` rows without counting them — so **run step 2 the first morning
+   after the deploy, and nobody deletes experiments until it has run.**
+2. From the repo root on the lab PC, with the production `.env` (its `DATABASE_URL`):
+   `set PYTHONPATH=.` then `.venv\Scripts\python.exe database\data_migrations\migrate_reactor_change_requests_021.py`
+   (dry run). Compare with this report's shape: more than 333 rows is expected; orphaned should
+   still read 26 unless rows were deleted; blank/collapsed 0.
+3. `.venv\Scripts\python.exe database\data_migrations\migrate_reactor_change_requests_021.py --apply`
+4. Run step 2 again: `convertible 0`, `already converted` = the number applied.
+5. Power BI: `v_notes` has `event_date`; dated reactor modifications are
+   `note_type = 'modification' AND event_date IS NOT NULL`.
 
 ## Questions for Mat (answered 2026-10-05: apply approved; 2 and 3 at defaults)
 

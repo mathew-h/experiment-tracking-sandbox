@@ -70,8 +70,8 @@ Click any occupied reactor slot to open a detail panel showing all card fields i
 
 #### Reactor Modification box (issue #122 PR-B, 2026-09-24)
 
-The detail panel's **Reactor Modification** section shows the most recent prior
-entry for this experiment (date + text, read-only) above an editable date field
+The detail panel's **Reactor Modification** section shows the most recent entry
+(today's included) for this experiment (date + text, read-only) above an editable date field
 (defaults to today) and a text box. Clicking **Save** adds a dated `modification`
 note to the experiment — visible on that experiment's Notes tab — rather than
 writing to a separate reactor-modifications table; saves are append-only, so each

@@ -716,14 +716,17 @@ note. `reactor_change_requests` is backfilled into `experiment_notes` by
 `database/data_migrations/migrate_reactor_change_requests_021.py` and is not
 yet dropped (waits for PR-E). (Issue #122 PR-B; Mat Hearl, 2026-09-24.)
 
-**This reverses the 2026-09-23 line** that "the Reactor Modifications tab
-keeps its own name; they are different objects." That line was correct for
-what existed then — the tab's data came from the Notion-era
-`reactor_change_requests` table, genuinely a different object from
-`experiment_notes`. It stops being correct once that data is modeled as a
-typed note: keeping a second tab and a second table around a single underlying
-fact (a dated note about a reactor) would reintroduce the same "two readers,
-two answers" problem issue #118 removed for the experiment description.
+**This reverses a 2026-09-08 ruling** (Mat, issue #118) that the phase-2 spec
+§3 decision 12 quotes — "the Reactor Modifications tab keeps its own name;
+they are different objects" — and that was never written into this file. The
+2026-09-23 entry above is the related typed-notes decision, not the source of
+that line. That ruling was correct for what existed then — the tab's data
+came from the Notion-era `reactor_change_requests` table, genuinely a
+different object from `experiment_notes`. It stops being correct once that
+data is modeled as a typed note: keeping a second tab and a second table
+around a single underlying fact (a dated note about a reactor) would
+reintroduce the same "two readers, two answers" problem issue #118 removed
+for the experiment description.
 
 **Also recorded here (decisions made 2026-09-23/24, phase-2 spec, not to be
 relitigated):**
@@ -756,4 +759,5 @@ relitigated):**
 **Related:** issue #122 PR-B (`feat/reactor-mods-as-notes`);
 `docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md`;
 `.claude/rules/MODELS.md` (`ExperimentNotes`, `event_date`, deletion impact
-counts); the 2026-09-23 entry above this one.
+counts); the 2026-09-23 entry above this one (the related typed-notes
+decision, not the source of the reversed line).

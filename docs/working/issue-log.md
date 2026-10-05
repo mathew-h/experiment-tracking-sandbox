@@ -2511,7 +2511,7 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Files changed:**
   - `database/models/experiments.py` — `ExperimentNotes.event_date` (Date, nullable, indexed); `ck_note_scope` revised so `modification` needs `result_id` OR `event_date` (was `result_id` only).
   - `alembic/versions/e5b2d9c7a1f4_note_event_date.py` — additive migration: adds `event_date` + index, drops/recreates `ck_note_scope`. Downgrade refuses with a `RuntimeError` while any dated-only `modification` note (an `event_date` with no `result_id`) exists.
-  - `backend/api/schemas/experiments.py` — `event_date` on note create/patch payloads and response; PATCH validator requires at least one of `note_text`/`note_type`/`needs_review`/`event_date`, and rejects clearing `event_date` on a `modification` note that would then have neither anchor (422: `A 'modification' note must be scoped to a result or carry an event_date.`).
+  - `backend/api/schemas/experiments.py` — `event_date` on note create/patch payloads and response; PATCH validator requires at least one of `note_text`/`note_type`/`needs_review`/`event_date`. The router (`backend/api/routers/experiments.py`), not this schema, then rejects clearing `event_date` on a `modification` note that would be left with neither anchor — a post-patch scope check (422: `A 'modification' note must be scoped to a result or carry an event_date.`), not a Pydantic validator.
   - `backend/services/notes.py` — `add_note` accepts `event_date`.
   - `backend/api/routers/experiments.py` — `POST`/`PATCH /experiments/{id}/notes` wire `event_date` through; the three `/change-requests` routes (`list_change_requests`, `get_recent_change_requests`, `upsert_change_request`) get a `DEPRECATED (2026-09, issue #122 PR-B)` docstring prefix naming the replacement path — left functional, unchanged behavior, until PR-E.
   - `backend/api/schemas/dashboard.py` — new `LatestModification` (`note_text`, `event_date`, `created_at`); `ReactorCardData` gains `latest_modification`.
@@ -2534,7 +2534,8 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
   - This reverses the earlier line that the Reactor Modifications tab and typed notes "are different objects" — that was true while the tab read Notion-era data; it stops being true once that data is a typed note.
   - `reactor_change_requests` is deprecated but **not dropped** in this PR — the three `/change-requests` routes and the model stay until PR-E, after the production 021 backfill is confirmed.
 - **Verification (full suite, fresh `experiments_test`):**
-  - Backend: `.venv/Scripts/pytest.exe tests/models tests/views tests/api tests/test_icp_handling.py tests/services tests/regression tests/data_migrations -q` → see exact count in `task-9-report.md`.
-  - Frontend: `npx vitest run`, `npx eslint src --ext .ts,.tsx`, `npx tsc --noEmit` — counts in `task-9-report.md`.
+  - Backend: `.venv/Scripts/pytest.exe tests/models tests/views tests/api tests/test_icp_handling.py tests/services tests/regression tests/data_migrations -q` → 1,402 passed, 0 failed.
+  - Frontend: `npx vitest run` → 237 passed in 34 files; `npx eslint src --ext .ts,.tsx` → 5 problems (#106 baseline); `npx tsc --noEmit` → 3 errors in `ResultsTab.columns.test.tsx` (baseline).
   - `grep -rn "ReactorChangeRequest\|change_requests\|change-requests" backend/api/routers/dashboard.py frontend/src` → only the deprecated client methods/types in `frontend/src/api/experiments.ts` (confirmed no UI path still writes `reactor_change_requests`).
+- **Final-review fix wave (2026-10-05):** modal renders the live card; 021 idempotency keyed on the snapshot; 021 tests isolated; runbook and decision citation corrected.
 - **Tests added:** yes (see Files changed). **Docs updated:** yes.
