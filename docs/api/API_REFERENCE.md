@@ -26,9 +26,6 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | PATCH | `/api/experiments/{experiment_id}/notes/{note_id}` | Edit a note. Body: any of `note_text`, `note_type`, `needs_review`, `event_date` (at least one). `needs_review: false` resolves a review-queue row. `{"event_date": null}` clears the date; if the note is `modification` and clearing it would leave the note with neither `result_id` nor `event_date`, the request 422s with `A 'modification' note must be scoped to a result or carry an event_date.`. Retyping obeys scope (`description` never result-scoped, `modification` needs `result_id` or `event_date`, `result_note` always result-scoped → 422; second `description` → 409). No-op if nothing changes. Writes ModificationsLog naming the changed fields. |
 | PATCH | `/api/experiments/notes/bulk` | Issue #122 PR-A. Body `{"ids": [..≤500], "needs_review"?: bool, "note_type"?: NoteType}` (at least one action). **Atomic**: unknown id → 404 naming ids; scope violation → 422 naming ids; more than one description per experiment → 409 naming experiments; nothing is written on any error. One `ModificationsLog` `update` row per changed note. Response `{count, ids}`; notes already in the requested state are not counted. Registered before `/{experiment_id}`. |
 | DELETE | `/api/experiments/notes/bulk` | Issue #122 PR-A. Body `{"ids": [..≤500]}`. Atomic; unknown id → 404. One `ModificationsLog` `delete` row per note with the full snapshot (`id`, `note_text`, `note_type`, `result_id`, `created_by`, `needs_review`) in `old_values`. Response `{count, ids}`. |
-| GET | `/api/experiments/{experiment_id}/change-requests` | List reactor modification entries linked to this experiment. Returns `[]` if none. **Deprecated 2026-09; removed by PR-E. Data migrated to `experiment_notes` by 021.** |
-| GET | `/api/experiments/{experiment_id}/change-requests/recent` | Reactor modification entry for `date` (query param, default today) plus the most recent prior entry — both scoped to this experiment only, never another experiment that previously occupied the same reactor. Returns `{"selected": ..., "previous": ...}`, either nullable. **Deprecated 2026-09; removed by PR-E. Data migrated to `experiment_notes` by 021.** |
-| POST | `/api/experiments/{experiment_id}/change-requests` | Create or update a reactor modification for a given reactor + date. Body: `{"reactor_label": "R05", "requested_change": "...", "sync_date": "2026-07-20"}` (`sync_date` optional, defaults to today). Upserts on `(reactor_label, experiment_id, sync_date)`. **Deprecated 2026-09; removed by PR-E. Data migrated to `experiment_notes` by 021.** |
 
 ### GET /api/experiments/{experiment_id}/exists
 
@@ -294,7 +291,6 @@ powers the delete confirmation dialog. `404` if the experiment does not exist.
   "additives": 2,
   "external_analyses": 0,
   "xrd_phases": 4,
-  "change_requests": 0,
   "total": 16,
   "background_for": ["SERUM_002a"],
   "replicate_children": []
@@ -321,8 +317,9 @@ approved researcher. `404` if the experiment does not exist.
 
 Purged: the conditions row and its chemical additives, all results (scalar, ICP,
 result files), notes, external analyses **and their `elemental_analysis` rows**,
-XRD phase rows, this experiment's `reactor_change_requests` rows, and its prior
-`ModificationsLog` history.
+XRD phase rows, and its prior `ModificationsLog` history. (`reactor_change_requests`
+rows were purged here until issue #122 PR-E; the service no longer touches that
+table — its `ON DELETE SET NULL` FK unlinks a dangling row — and it is dropped in E2.)
 
 Decoupled but **not** destroyed — a deletion never touches another experiment's
 data: other experiments' `scalar_results` that cite this one as their ammonium

@@ -52,16 +52,17 @@ The central hub for all experimental data.
       level protects it. This is provenance only —
       `background_ammonium_concentration_mM` holds the number the calculation
       engine reads, so no derived field changes and no `recalculate()` is needed.
-    - `reactor_change_requests` rows for this experiment are **PURGED**, not
-      unlinked (product decision, 2026-07-29). They belong to the experiment, and
-      `change_requests` is summed into `total`, which is documented as rows
-      destroyed — nulling instead of deleting made that count overstate
-      destruction. **(issue #122 PR-B, 2026-09-24):** `change_requests` is
-      dropped from `DeleteImpact`/`IMPACT_ROWS` — the data this table held now
-      lives in `experiment_notes` (`note_type='modification'`) and is counted
-      under `notes` instead. The purge above still runs unchanged; only the
-      *count* moved. `reactor_change_requests` and this purge step are removed
-      entirely in PR-E, once the model itself is dropped.
+    - `reactor_change_requests` rows for this experiment were **PURGED** by this
+      service from 2026-07-29 (product decision) until issue #122 PR-E (E1,
+      2026-10-06) removed the purge together with the Notion sync code. The data
+      this table held lives in `experiment_notes` (`note_type='modification'`,
+      migrated by `migrate_reactor_change_requests_021.py`) and is counted under
+      `notes` (PR-B dropped the separate `change_requests` count). The service
+      no longer reads or writes the table; a row still pointing at a deleted
+      experiment is unlinked by the database — the FK is `ondelete="SET NULL"`
+      in both the model and Alembic `9c358174ea54`. The table and
+      `ReactorChangeRequest` are dropped in E2, once the production 021 run is
+      confirmed.
     - `elemental_analysis` rows belonging to this experiment's
       `external_analyses` are **PURGED** before `db.delete(exp)`.
       `ElementalAnalysis.external_analysis_id` is `nullable=False` but its
@@ -89,9 +90,8 @@ The central hub for all experimental data.
     them — the `migrate_reactor_change_requests_021.py` backfill leaves each
     source row in place beside the note it creates (nothing is deleted from
     `reactor_change_requests` until PR-E), not because the dashboard card now
-    writes notes instead of rows. The `reactor_change_requests` purge in the
-    deletion service itself is unaffected and stays until PR-E removes the
-    model.
+    writes notes instead of rows. The `reactor_change_requests` purge itself was
+    removed in PR-E (E1, 2026-10-06); see the deletion-path bullet above.
     `conditions` (the `ExperimentalConditions` setup row — temperature, initial pH,
     rock mass, water volume, reactor number, pressures, `total_ferrous_iron_g`) is
     counted because the ORM cascade hard-deletes it: while it was uncounted, an

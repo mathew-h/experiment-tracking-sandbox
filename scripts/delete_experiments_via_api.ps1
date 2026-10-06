@@ -103,7 +103,7 @@ $report = foreach ($id in $ids) {
     $row = [ordered]@{
         experiment_id = $id; exists = $false; status = ''
         total = 0; results = 0; conditions = 0; notes = 0; additives = 0
-        external_analyses = 0; xrd_phases = 0; change_requests = 0; note = ''
+        external_analyses = 0; xrd_phases = 0; note = ''
     }
     try {
         $detail = Invoke-RestMethod -Method Get -Headers $headers -Uri "$BaseUrl/api/experiments/$id"
@@ -116,7 +116,7 @@ $report = foreach ($id in $ids) {
             $impact = Invoke-RestMethod -Method Get -Headers $headers `
                 -Uri "$BaseUrl/api/experiments/$id/delete-impact"
             foreach ($f in @('total','results','conditions','notes','additives',
-                             'external_analyses','xrd_phases','change_requests')) {
+                             'external_analyses','xrd_phases')) {
                 if ($impact.PSObject.Properties.Name -contains $f) { $row.$f = $impact.$f }
             }
         } catch { $row.note = "delete-impact lookup failed: $($_.Exception.Message)" }
