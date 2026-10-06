@@ -78,13 +78,11 @@ win32-setctime==1.1.0
 python-dotenv
 boto3>=1.37.38
 azure-storage-blob>=12.25.1
-apscheduler>=3.11.0
 openpyxl==3.1.5
 fastapi==0.115.6
 uvicorn[standard]==0.34.2
 pydantic==2.10.4
 pydantic-settings==2.6.1
 python-multipart==0.0.9
-notion-client>=2.2.1,<2.3
 rapidfuzz>=3.0.0
 

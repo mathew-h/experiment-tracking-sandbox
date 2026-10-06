@@ -14,7 +14,7 @@ load_dotenv()
 from backend.config.settings import get_settings
 from backend.api.routers import (
     experiments, conditions, results, samples,
-    chemicals, analysis, dashboard, admin, bulk_uploads, auth, additives, notion_sync,
+    chemicals, analysis, dashboard, admin, bulk_uploads, auth, additives,
 )
 
 settings = get_settings()
@@ -25,28 +25,7 @@ log = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     from database.database import reset_postgres_sequences
     reset_postgres_sequences()
-
-    # Start the Notion sync scheduler if a token is configured.
-    # make_scheduler is called at most once per process — store on app.state
-    # to prevent duplicate schedulers on hot-reload.
-    _scheduler = None
-    _settings = get_settings()
-    if _settings.notion_token:
-        from backend.services.notion_sync.sync import make_scheduler
-        _scheduler = make_scheduler(_settings.notion_sync_hour)
-        app.state.notion_scheduler = _scheduler
-        _scheduler.start()
-        log.info(
-            "notion_sync_scheduler_started",
-            hour=_settings.notion_sync_hour,
-            timezone="America/New_York",
-        )
-
     yield
-
-    if _scheduler is not None:
-        _scheduler.shutdown()
-        log.info("notion_sync_scheduler_stopped")
 
 
 app = FastAPI(
@@ -89,7 +68,6 @@ app.include_router(admin.router)
 app.include_router(bulk_uploads.router)
 app.include_router(auth.router)
 app.include_router(additives.router)
-app.include_router(notion_sync.router)
 
 
 @app.get("/health")
