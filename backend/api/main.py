@@ -2,7 +2,6 @@
 from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
-import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +17,6 @@ from backend.api.routers import (
 )
 
 settings = get_settings()
-log = structlog.get_logger(__name__)
 
 
 @asynccontextmanager

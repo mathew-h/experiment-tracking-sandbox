@@ -21,9 +21,12 @@ def test_settings_have_no_notion_fields():
         assert name not in Settings.model_fields, name
 
 
-def test_settings_ignore_stale_notion_env_keys():
-    """A deployed .env may still carry NOTION_TOKEN=... — Settings is
-    extra="ignore", so it must construct and must not grow the attribute."""
+def test_settings_ignore_stale_notion_env_keys(monkeypatch):
+    """A deployed .env or environment may still carry NOTION_TOKEN=... —
+    Settings is extra="ignore", so it must construct and must not grow the
+    attribute. Exercises both the environment path and the kwargs path."""
+    monkeypatch.setenv("NOTION_TOKEN", "stale-env")
+    monkeypatch.setenv("NOTION_SYNC_HOUR", "notanint")
     s = Settings(_env_file=None, notion_token="stale", notion_sync_hour=6)
     assert not hasattr(s, "notion_token")
     assert not hasattr(s, "notion_sync_hour")

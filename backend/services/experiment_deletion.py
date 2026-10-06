@@ -28,7 +28,7 @@ them have no usable DB-level protection:
      This is a DECOUPLING of another experiment's row: provenance only -- the
      background NUMBER lives in background_ammonium_concentration_mM, which is
      left intact, so no derived value changes and no recalculate() is needed.
-  3. The Notion-era change-request table -- its experiment_id FK is
+  3. The retired change-request table -- its experiment_id FK is
      ondelete="SET NULL" in both the model and Alembic 9c358174ea54. Since
      #122 PR-E (E1) this service neither purges nor counts those rows: the
      data was migrated to experiment_notes by data migration 021 and is
