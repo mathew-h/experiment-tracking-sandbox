@@ -419,7 +419,7 @@ export function BulkUploadsPage() {
                 id="experiment-deletion"
                 title="Delete Experiments"
                 description="Permanently delete every experiment listed in a spreadsheet"
-                helpText="Restricted to the data owner — other accounts are refused by the server. Required column: experiment_id (one per row). Each listed experiment and everything it owns (conditions, results, ICP, files, notes, additives, external analyses, XRD phases, change requests) is permanently destroyed; the only surviving trace is the audit log entry. IDs not found in the database are reported and skipped, and a row that fails to delete does not stop the rest of the batch."
+                helpText="Restricted to the data owner — other accounts are refused by the server. Required column: experiment_id (one per row). Each listed experiment and everything it owns (conditions, results, ICP, files, notes, additives, external analyses, XRD phases) is permanently destroyed; the only surviving trace is the audit log entry. IDs not found in the database are reported and skipped, and a row that fails to delete does not stop the rest of the batch."
                 accept=".xlsx,.xls,.csv"
                 uploadFn={confirmThenDelete}
                 templateType="experiment-deletion"
