@@ -44,7 +44,6 @@ app = FastAPI(
         {"name": "admin", "description": "Recalculation and maintenance endpoints"},
         {"name": "bulk-uploads", "description": "Bulk data upload via Excel/CSV"},
         {"name": "additives", "description": "Per-additive edit and delete by PK"},
-        {"name": "change-requests", "description": "Reactor change request history"},
     ],
 )
 

@@ -28,11 +28,12 @@ them have no usable DB-level protection:
      This is a DECOUPLING of another experiment's row: provenance only -- the
      background NUMBER lives in background_ammonium_concentration_mM, which is
      left intact, so no derived value changes and no recalculate() is needed.
-  3. reactor_change_requests.experiment_id -- ondelete="SET NULL" in both the
-     model and Alembic 9c358174ea54. Since #122 PR-E (E1) this service neither
-     purges nor counts those rows: the data was migrated to experiment_notes
-     by migrate_reactor_change_requests_021.py and is counted under notes, and
-     the database unlinks any row still pointing here. Table dropped in E2.
+  3. The Notion-era change-request table -- its experiment_id FK is
+     ondelete="SET NULL" in both the model and Alembic 9c358174ea54. Since
+     #122 PR-E (E1) this service neither purges nor counts those rows: the
+     data was migrated to experiment_notes by data migration 021 and is
+     counted under notes, and the database unlinks any row still pointing
+     here. The table is dropped in E2.
   4. Replicate children -- parent_experiment_fk is dropped, nothing else. Their
      base_experiment_id and replicate_label stay, because replicate groups are
      addressed by the base-ID string (issue #87). A DECOUPLING, not a purge.
