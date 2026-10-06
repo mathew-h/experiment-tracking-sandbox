@@ -34,3 +34,9 @@ def test_notion_sync_package_is_gone():
     # resolve as a namespace package, so this only passes once the directory is
     # removed entirely, not just its .py files.
     assert importlib.util.find_spec("backend.services.notion_sync") is None
+
+
+def test_change_request_routes_are_unregistered():
+    """The three /experiments/{id}/change-requests routes left with the Notion sync
+    (#122 PR-E). Their data lives in experiment_notes since the 021 backfill."""
+    assert [r.path for r in app.routes if "change-requests" in getattr(r, "path", "")] == []

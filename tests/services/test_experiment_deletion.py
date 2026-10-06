@@ -316,19 +316,39 @@ def test_delete_decouples_background_string_and_fk(db):
     assert scalar.background_ammonium_concentration_mM == 0.2
 
 
-def test_delete_purges_change_requests(db):
-    """Product decision (2026-07-29): change requests are PURGED with the
-    experiment, not unlinked. Purged, no longer counted since #122 PR-B --
-    the migrated data lives in experiment_notes and is counted under notes."""
+def test_delete_no_longer_touches_reactor_change_requests(db):
+    """#122 PR-E (E1): the service-level purge is gone. The table outlives the
+    code until E2, and its FK is ondelete="SET NULL" in BOTH the model and
+    Alembic 9c358174ea54, so a dangling row is unlinked by the database — the
+    service must neither read nor write the table (#117 scope)."""
+    import sqlalchemy
+    from sqlalchemy.engine import Engine
     from backend.services.experiment_deletion import delete_experiment_cascade
 
     exp = _full_experiment(db, "DEL_CR_001", 7207)
-    delete_experiment_cascade(db, exp, modified_by="tester@addisenergy.com")
+    db.add(ReactorChangeRequest(reactor_label="R09", experiment_id="DEL_CR_001",
+                                requested_change="pr-e dangling row", sync_date=date(2026, 7, 29)))
+    db.commit()
 
-    assert db.execute(
-        select(func.count()).select_from(ReactorChangeRequest)
-        .where(ReactorChangeRequest.reactor_label == "R01")
-    ).scalar_one() == 0
+    statements: list[str] = []
+
+    def counter(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sqlalchemy.event.listen(Engine, "before_cursor_execute", counter)
+    try:
+        delete_experiment_cascade(db, exp, modified_by="tester@addisenergy.com")
+    finally:
+        sqlalchemy.event.remove(Engine, "before_cursor_execute", counter)
+
+    assert not any("reactor_change_requests" in s for s in statements), (
+        "the deletion service still touches reactor_change_requests"
+    )
+    row = db.execute(
+        select(ReactorChangeRequest)
+        .where(ReactorChangeRequest.requested_change == "pr-e dangling row")
+    ).scalar_one()
+    assert row.experiment_id is None
 
 
 def test_delete_purges_elemental_analysis_children(db):

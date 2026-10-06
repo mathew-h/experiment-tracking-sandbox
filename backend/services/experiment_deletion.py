@@ -28,10 +28,11 @@ them have no usable DB-level protection:
      This is a DECOUPLING of another experiment's row: provenance only -- the
      background NUMBER lives in background_ammonium_concentration_mM, which is
      left intact, so no derived value changes and no recalculate() is needed.
-  3. reactor_change_requests.experiment_id -- ondelete="SET NULL", but the
-     rows are purged (they belong to the experiment); since #122 PR-B they
-     are no longer counted in DeleteImpact -- the migrated data lives in
-     experiment_notes and is counted under notes.
+  3. reactor_change_requests.experiment_id -- ondelete="SET NULL" in both the
+     model and Alembic 9c358174ea54. Since #122 PR-E (E1) this service neither
+     purges nor counts those rows: the data was migrated to experiment_notes
+     by migrate_reactor_change_requests_021.py and is counted under notes, and
+     the database unlinks any row still pointing here. Table dropped in E2.
   4. Replicate children -- parent_experiment_fk is dropped, nothing else. Their
      base_experiment_id and replicate_label stay, because replicate groups are
      addressed by the base-ID string (issue #87). A DECOUPLING, not a purge.
@@ -77,7 +78,6 @@ from database.models.characterization import ElementalAnalysis
 from database.models.chemicals import ChemicalAdditive, Compound
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
-from database.models.notion_sync import ReactorChangeRequest
 from database.models.results import (
     ExperimentalResults, ICPResults, ResultFiles, ScalarResults,
 )
@@ -311,17 +311,6 @@ def delete_experiment_cascade(
         .where(or_(ScalarResults.background_experiment_id == experiment_id,
                    ScalarResults.background_experiment_fk == exp_pk))
         .values(background_experiment_id=None, background_experiment_fk=None)
-    )
-
-    # 3. Reactor change requests are PURGED, not unlinked (product decision,
-    #    2026-07-29): they belong to this experiment, and change_requests was
-    #    summed into impact.total, which is documented as rows destroyed.
-    #    The count left DeleteImpact in #122 PR-B (the data now lives in
-    #    experiment_notes and is counted under notes); the purge stays until
-    #    PR-E removes the model.
-    db.execute(
-        sql_delete(ReactorChangeRequest)
-        .where(ReactorChangeRequest.experiment_id == experiment_id)
     )
 
     # 3b. elemental_analysis children of THIS experiment's external analyses.
