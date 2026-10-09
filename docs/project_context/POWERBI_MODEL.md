@@ -169,8 +169,9 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
   researcher to check. Update visuals bound to the two removed/renamed columns by hand.
 - **`event_date` (issue #122 PR-B, 2026-09-24).** Dated reactor modifications are
   `note_type = 'modification' AND event_date IS NOT NULL` in `v_notes`; this replaces
-  the retired `reactor_change_requests` table as the source for that data (migrated by
-  `migrate_reactor_change_requests_021.py`).
+  the Notion-era `reactor_change_requests` table as the source for that data (rows
+  migrated by `migrate_reactor_change_requests_021.py`; the table was dropped by Alembic
+  `a7d3e9f1c2b4` on 2026-10-09 — any Power BI query that still names it will fail).
 - `net_ammonium_concentration` in `v_results_scalar` is a computed column: `GREATEST(0, gross - background)` in mM. It is always ≥ 0 — use it instead of computing the difference in Power BI measures.
 - `v_experiment_xrd` covers Aeris time-series XRD data (`experiment_fk IS NOT NULL`).
 - `v_sample_xrd` covers sample characterisation XRD (Mode A + ActLabs reports), where

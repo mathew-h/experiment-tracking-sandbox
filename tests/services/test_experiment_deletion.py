@@ -1,5 +1,4 @@
 from __future__ import annotations
-from datetime import date
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -14,7 +13,6 @@ from database.models.results import ExperimentalResults, ScalarResults, ICPResul
 from database.models.analysis import ExternalAnalysis
 from database.models.characterization import Analyte, ElementalAnalysis
 from database.models.xrd import XRDPhase
-from database.models.notion_sync import ReactorChangeRequest
 from tests.pre_constraint_conditions import without_conditions_unique
 
 TEST_DB_URL = "postgresql://experiments_user:password@localhost:5432/experiments_test"
@@ -79,8 +77,6 @@ def _full_experiment(db: Session, experiment_id="DEL_FULL_001", number=7101) -> 
     db.add(ExternalAnalysis(experiment_fk=exp.id, experiment_id=experiment_id, analysis_type="XRD"))
     db.add(XRDPhase(experiment_fk=exp.id, experiment_id=experiment_id,
                     time_post_reaction_days=7, mineral_name="Magnetite", amount=12.0))
-    db.add(ReactorChangeRequest(reactor_label="R01", experiment_id=experiment_id,
-                                requested_change="swap", sync_date=date(2026, 7, 28)))
     db.commit()
     db.refresh(exp)
     return exp
@@ -314,41 +310,6 @@ def test_delete_decouples_background_string_and_fk(db):
     # Provenance only -- the background NUMBER is untouched, so no derived
     # field changed and no recalculate() was needed.
     assert scalar.background_ammonium_concentration_mM == 0.2
-
-
-def test_delete_no_longer_touches_reactor_change_requests(db):
-    """#122 PR-E (E1): the service-level purge is gone. The table outlives the
-    code until E2, and its FK is ondelete="SET NULL" in BOTH the model and
-    Alembic 9c358174ea54, so a dangling row is unlinked by the database — the
-    service must neither read nor write the table (#117 scope)."""
-    import sqlalchemy
-    from sqlalchemy.engine import Engine
-    from backend.services.experiment_deletion import delete_experiment_cascade
-
-    exp = _full_experiment(db, "DEL_CR_001", 7207)
-    db.add(ReactorChangeRequest(reactor_label="R09", experiment_id="DEL_CR_001",
-                                requested_change="pr-e dangling row", sync_date=date(2026, 7, 29)))
-    db.commit()
-
-    statements: list[str] = []
-
-    def counter(conn, cursor, statement, parameters, context, executemany):
-        statements.append(statement)
-
-    sqlalchemy.event.listen(Engine, "before_cursor_execute", counter)
-    try:
-        delete_experiment_cascade(db, exp, modified_by="tester@addisenergy.com")
-    finally:
-        sqlalchemy.event.remove(Engine, "before_cursor_execute", counter)
-
-    assert not any("reactor_change_requests" in s for s in statements), (
-        "the deletion service still touches reactor_change_requests"
-    )
-    row = db.execute(
-        select(ReactorChangeRequest)
-        .where(ReactorChangeRequest.requested_change == "pr-e dangling row")
-    ).scalar_one()
-    assert row.experiment_id is None
 
 
 def test_delete_purges_elemental_analysis_children(db):

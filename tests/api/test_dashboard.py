@@ -970,7 +970,6 @@ def test_dashboard_modification_lookup_is_single_batched_query(client, db_sessio
     assert len(notes_queries) <= 2, (
         f"Expected the card query plus one batched notes query, got {len(notes_queries)}"
     )
-    assert not any("reactor_change_requests" in s for s in statements)
 
 
 def test_todays_modification_uses_lab_day_not_utc(client, db_session):
@@ -1341,7 +1340,7 @@ def test_dashboard_query_count_not_increased(client, db_session):
     """Net query count for GET /api/dashboard/ must not exceed the pre-issue-85 baseline
     (3 queries removed — summary aggregate, recent-results set, ongoing-ids set — 2 added:
     GC, serum). Extends the existing before_cursor_execute counter pattern used for
-    the reactor_change_requests batching test."""
+    the modification-notes batching test."""
     import sqlalchemy
     from sqlalchemy.engine import Engine
 
