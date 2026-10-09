@@ -52,17 +52,15 @@ The central hub for all experimental data.
       level protects it. This is provenance only —
       `background_ammonium_concentration_mM` holds the number the calculation
       engine reads, so no derived field changes and no `recalculate()` is needed.
-    - `reactor_change_requests` rows for this experiment were **PURGED** by this
-      service from 2026-07-29 (product decision) until issue #122 PR-E (E1,
-      2026-10-06) removed the purge together with the Notion sync code. The data
-      this table held lives in `experiment_notes` (`note_type='modification'`,
-      migrated by `migrate_reactor_change_requests_021.py`) and is counted under
-      `notes` (PR-B dropped the separate `change_requests` count). The service
-      no longer reads or writes the table; a row still pointing at a deleted
-      experiment is unlinked by the database — the FK is `ondelete="SET NULL"`
-      in both the model and Alembic `9c358174ea54`. The table and
-      `ReactorChangeRequest` are dropped in E2, once the production 021 run is
-      confirmed.
+    - The Notion-era reactor change-request rows an experiment once owned were
+      **PURGED** by this service from 2026-07-29 until issue #122 PR-E E1
+      (2026-10-06) removed the purge; E2 (Alembic `a7d3e9f1c2b4`, 2026-10-09)
+      dropped the table itself after the production 021 run converted its rows
+      (357 rows, 331 converted, 26 orphaned). That data now lives in
+      `experiment_notes` (`note_type='modification'`, `event_date`,
+      `created_by='migrate_change_requests_021'`) and is counted under `notes`;
+      each converted row's original is in `modifications_log.old_values`
+      (`modified_table='reactor_change_requests'`).
     - `elemental_analysis` rows belonging to this experiment's
       `external_analyses` are **PURGED** before `db.delete(exp)`.
       `ElementalAnalysis.external_analysis_id` is `nullable=False` but its
@@ -85,13 +83,9 @@ The central hub for all experimental data.
     `scalar_results`, `icp_results`, `result_files`, `notes`, `additives`,
     `external_analyses`, `xrd_phases`; `total` is their sum. `change_requests`
     was dropped from this list in issue #122 PR-B (2026-09-24): reactor
-    modifications are now `experiment_notes` rows and already counted under
-    `notes`, so counting `change_requests` separately would double-report
-    them — the `migrate_reactor_change_requests_021.py` backfill leaves each
-    source row in place beside the note it creates (nothing is deleted from
-    `reactor_change_requests` until PR-E), not because the dashboard card now
-    writes notes instead of rows. The `reactor_change_requests` purge itself was
-    removed in PR-E (E1, 2026-10-06); see the deletion-path bullet above.
+    modifications are `experiment_notes` rows and already counted under
+    `notes`, so a separate count would double-report them. The source table
+    itself was dropped in PR-E E2 (2026-10-09); see the deletion-path bullet above.
     `conditions` (the `ExperimentalConditions` setup row — temperature, initial pH,
     rock mass, water volume, reactor number, pressures, `total_ferrous_iron_g`) is
     counted because the ORM cascade hard-deletes it: while it was uncounted, an
@@ -213,7 +207,7 @@ Typed free text about an experiment, optionally scoped to one result row (issue 
   - `fk_note_result_same_experiment` — composite FK `(experiment_fk, result_id) → experimental_results (experiment_fk, id)`, `ON DELETE CASCADE`, backed by `uq_results_experiment_fk_id` on the results table. A result-scoped note can only name a result of its own experiment. `MATCH SIMPLE`, so a NULL `result_id` (every experiment-level note) is not checked — intended.
   - `ck_note_scope` (revised by Alembic `e5b2d9c7a1f4`, issue #122 PR-B, 2026-09-24) — `description` ⇒ `result_id IS NULL`; `modification` ⇒ `result_id IS NOT NULL OR event_date IS NOT NULL`; `result_note` ⇒ `result_id IS NOT NULL`; `observation` ⇒ either. The downgrade refuses while any dated-only `modification` note (an `event_date` with no `result_id`) exists.
   - Indexes `ix_experiment_notes_result_id`, `ix_experiment_notes_scope (experiment_fk, note_type)`, and an index on `event_date`.
-- **Backfill (issue #122 PR-B, 2026-09-24):** `database/data_migrations/migrate_reactor_change_requests_021.py` converts `reactor_change_requests` rows into `modification` notes (`experiment_fk`, `event_date` from `sync_date`, `note_text` from `requested_change`, `created_by=SOURCE_TAG`). Dry-run report: `docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md` (333 rows, 307 converted, 26 orphaned on rows with no resolvable `experiment_fk`). Applied on the dev mirror 2026-10-05; the three `/change-requests` routes were removed in PR-E E1 (2026-10-06); the `reactor_change_requests` table is not dropped until E2.
+- **Backfill (issue #122 PR-B, 2026-09-24; source table dropped in PR-E E2, 2026-10-09):** `database/data_migrations/migrate_reactor_change_requests_021.py` converted the Notion-era reactor change-request rows into `modification` notes (`experiment_fk`, `event_date` from the row's `sync_date`, `note_text` from `requested_change`, `created_by=SOURCE_TAG`), one `ModificationsLog` snapshot per note. Reports: `docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md` — dev mirror 333 rows / 307 converted / 26 orphaned (applied 2026-10-05); **production 357 / 331 / 26 (applied 2026-10-09)**. The three `/change-requests` routes left in E1 (2026-10-06); the source table was dropped by Alembic `a7d3e9f1c2b4` in E2 and the script is frozen (it refuses to run, exit 3).
 - **Relationships**: `experiment` (back-populates `Experiment.notes`); `result` (viewonly) ↔ `ExperimentalResults.notes` (viewonly, ordered by id). Viewonly because the DB cascade owns deletion and `experiment_fk` is shared with the composite FK.
 - **Write paths go through `backend/services/notes.py`**, the single definition of the legacy → typed mapping: `add_note` (explicit type/scope — the New Experiments `initial_note` is written with it as `description`, since that column has always been what the app showed as the experiment description) and `sync_result_note` (mirrors a legacy result column into one note *slot* per `(result_id, note_type, created_by)` — re-upload updates in place, clearing the column deletes the note).
 - **Dual-write (PR1 of #118, 2026-09-08).** Every legacy write path writes BOTH its old column and a typed note until PR4 drops the columns: `POST /api/results` (`description` → `observation`, `brine_modification_description` → `modification`), the Master Results Dashboard (`Description`/`Observation Note` → `observation`, `Modification`/`Modification Note` → `modification`), Timepoint Modifications (→ `modification`), New Experiments `initial_note` (→ `description`, always), and `POST /experiments/{id}/notes` (optional `note_type`, default `observation`, and `result_id`). `POST /api/results` no longer requires `description` (PR3); a blank gets a server-generated placeholder in the legacy column and no note.

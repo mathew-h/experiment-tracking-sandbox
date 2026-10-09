@@ -213,6 +213,33 @@ its snapshot `modifications_log` 108066 (`modified_table reactor_change_requests
 5. Power BI: `v_notes` has `event_date`; dated reactor modifications are
    `note_type = 'modification' AND event_date IS NOT NULL`.
 
+## Production run (2026-10-09, Mat, lab PC)
+
+`--apply` was run directly (no prior dry run on production); the report it printed was
+compared with this document afterwards. Numbers as pasted by Mat:
+
+| Measure | Dev mirror (2026-10-05) | Production (2026-10-09) |
+|---|---|---|
+| `reactor_change_requests` rows | 333 | **357** (214 dashboard-typed, 143 Notion-imported) |
+| convertible → converted | 307 | **331** |
+| orphaned (`experiment_id` NULL) | 26 | **26** — the same April/May 2026 Notion rows on R03–R09 and AC01–AC03 |
+| blank / already converted / collapsed | 0 / 0 / 0 | 0 / 0 / 0 |
+| `reactor_label` ≠ current `reactor_slot` (informational) | 8 | 8 |
+
+```
+before: modification_notes 180, dated_modification_notes 0, notes_by_021 0, snapshots_by_021 0, notes_total 4317, change_request_rows 357
+after:  modification_notes 511, dated_modification_notes 331, notes_by_021 331, snapshots_by_021 331, notes_total 4648, change_request_rows 357
+Applied. 331 notes created (matches the plan).
+```
+
+The +24 rows over the mirror are dashboard entries written between the 2026-09-04 backup and
+PR-B's deploy; all 24 converted. The post-apply idempotency dry run (runbook step 4) was not
+run; it is moot now — **PR-E E2 (Alembic `a7d3e9f1c2b4`, authorized by Mat 2026-10-09) drops
+`reactor_change_requests`**, so the 26 orphaned rows survive only in backups taken before that
+revision, and the script above is frozen (it exits 3 with a message pointing at
+`git show 32da995:database/data_migrations/migrate_reactor_change_requests_021.py`).
+The runbook steps 1–4 above are therefore historical.
+
 ## Questions for Mat (answered 2026-10-05: apply approved; 2 and 3 at defaults)
 
 1. **Approve `--apply` on the mirror** with the numbers above? (Production follows the
