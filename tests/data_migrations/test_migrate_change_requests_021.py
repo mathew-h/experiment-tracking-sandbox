@@ -45,3 +45,4 @@ def test_refuses_when_the_source_table_is_gone(migration_session):
     assert "2026-10-09" in msg
     assert "331" in msg and "26" in msg
     assert f"git show {LAST_RUNNABLE_COMMIT}:{MIGRATION_PATH}" in msg
+    assert "absent here" in msg

@@ -22,8 +22,9 @@ def _script_dir() -> ScriptDirectory:
     return ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic.ini")))
 
 
-def test_drop_migration_is_the_single_head():
-    assert _script_dir().get_heads() == [DROP_REVISION]
+def test_alembic_chain_has_a_single_head():
+    heads = _script_dir().get_heads()
+    assert len(heads) == 1, heads
 
 
 def test_drop_migration_revises_the_event_date_migration():

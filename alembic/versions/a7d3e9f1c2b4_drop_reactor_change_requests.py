@@ -18,14 +18,17 @@ History of the table, kept here as the shape downgrade() recreates:
 None of the three is deleted.
 
 downgrade() recreates the table EMPTY in that final shape. It restores no data:
-the 26 unconverted rows exist only in a pre-drop backup; the 331 converted ones
+the 26 unconverted rows exist only in a pre-drop backup (pruned after 30 days by backup.ps1); the 331 converted ones
 are experiment_notes rows (created_by = 'migrate_change_requests_021') with
 their originals in modifications_log.old_values.
 
 Upgrade on a database that never had the table (one built by
 Base.metadata.create_all after this revision, then stamped behind it) fails
 with UndefinedTable. That is deliberate: the fresh-install path stamps head and
-never runs this, and a DROP that silently no-ops would hide a stamp mistake.
+never runs this, and a DROP that silently no-ops would hide a stamp mistake. Recovery when the
+table is already gone: `alembic stamp a7d3e9f1c2b4` -- the nightly update.ps1
+aborts at `alembic upgrade head` and retries the same failure every night until
+someone does this.
 
 Revision ID: a7d3e9f1c2b4
 Revises: e5b2d9c7a1f4

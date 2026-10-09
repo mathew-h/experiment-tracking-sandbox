@@ -236,7 +236,7 @@ The +24 rows over the mirror are dashboard entries written between the 2026-09-0
 PR-B's deploy; all 24 converted. The post-apply idempotency dry run (runbook step 4) was not
 run; it is moot now — **PR-E E2 (Alembic `a7d3e9f1c2b4`, authorized by Mat 2026-10-09) drops
 `reactor_change_requests`**, so the 26 orphaned rows survive only in backups taken before that
-revision, and the script above is frozen (it exits 3 with a message pointing at
+revision (which backup.ps1 prunes after 30 days), and the script above is frozen (it exits 3 with a message pointing at
 `git show 32da995:database/data_migrations/migrate_reactor_change_requests_021.py`).
 The runbook steps 1–4 above are therefore historical.
 
