@@ -33,10 +33,10 @@ Notion-era change requests" (Mat, 2026-09-24). Written to be sufficient for a
 |---|---|---|
 | PR-A review-queue tooling | `feat/notes-review-queue` | **Merged to develop** (#123, 2026-10-05). |
 | PR-B0 wizard description + retype control | `fix/notes-entry-and-retype` | **Merged to develop** (#124, 2026-10-05). |
-| PR-B reactor modifications become dated notes | `feat/reactor-mods-as-notes` | **Merged to develop** (#125, 2026-10-05). 021 applied on the dev mirror; production run pending (see docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md). |
+| PR-B reactor modifications become dated notes | `feat/reactor-mods-as-notes` | **Merged to develop** (#125, 2026-10-05). 021 applied on the dev mirror 2026-10-05 and on **production 2026-10-09** (357 source rows, 331 converted, 26 orphaned — the same 26 the dry run flagged; dev-mirror plan was 333/307/26). |
 | PR-C unified timeline + description editing | `feat/notes-timeline` | **Merged to develop** (#126, 2026-10-05). Also fixes `GET /experiments/{id}` omitting `event_date` on `notes[]` (PR-B gap). |
-| PR-E remove the Notion sync (absorbs #117) | `chore/remove-notion-sync` | **E1 in review** (PR #127, opened 2026-10-07; plan `docs/superpowers/plans/2026-10-06-remove-notion-sync-pr-e.md`; DevTools card check passed 2026-10-07). **Merge gated:** the lab PC's `.env` has `NOTION_TOKEN` set — #117's verification step (confirm no readers → blank token → restart → one day) runs first. E2 (`DROP TABLE reactor_change_requests`) still waits for the production 021 run to be confirmed. |
-| PR-D drop the legacy result columns | `chore/drop-legacy-note-columns` | Last. Gated on production review queue = 0. |
+| PR-E remove the Notion sync (absorbs #117) | `chore/remove-notion-sync` (E1) → `chore/drop-reactor-change-requests` (E2) | **E1 merged to develop** (#127, 2026-10-09, merge `a3c2a6a`; promoted to `main` the same day); #117 closed. Lab-PC `NOTION_TOKEN` deleted 2026-10-09. **E2 approved by Mat 2026-10-09 (§7 sign-off given) — Next.** Plan for E1: `docs/superpowers/plans/2026-10-06-remove-notion-sync-pr-e.md`. |
+| PR-D drop the legacy result columns | `chore/drop-legacy-note-columns` | Last. Gated on production review queue = 0 — **40 on 2026-10-09** (Mat), so it does not open yet. The queue is emptied by people via `/notes/review`, never by a script. |
 
 ### Where phase 1 (#118) left things
 
@@ -171,10 +171,12 @@ Given by Mat in-session on 2026-09-23 (still valid; cite them in PR bodies):
 
 Given 2026-09-24: (4) absorb #117 — delete the Notion sync code — as PR-E.
 
-**Not yet authorized** (stop and ask when reached): `DROP TABLE
-reactor_change_requests` and deleting `ReactorChangeRequest`. It is
-non-additive and must wait until the 021 backfill has run on **production**.
-Never delete migration files under `alembic/versions/`.
+**E2 authorized 2026-10-09** (Mat, in chat: "E2 approved", after the production 021
+`--apply` output was compared with the dry-run report — 357 rows, 331 converted, 26
+orphaned, before/after counters consistent): `DROP TABLE reactor_change_requests`
+and deleting `ReactorChangeRequest`. This is the §7 sign-off for that non-additive
+migration; cite it in the E2 PR body. Never delete migration files under
+`alembic/versions/`.
 
 Hard gates:
 - PR-B's backfill (`migrate_reactor_change_requests_021.py`) is dry-run first.
@@ -503,13 +505,46 @@ Before merging E1: check `notion_token` in the lab PC's `.env`. If it is set,
 confirm with the team nobody reads the Notion reactor page, unset it, run one
 day, then merge (this is #117's verification step).
 
-**E2 — table drop (NOT authorized; ask).** After the 021 `--apply` has run on
-production and the post-apply counts match the report: a migration that
-`DROP TABLE reactor_change_requests`, deletion of
-`database/models/notion_sync.py` and `tests/models/test_notion_sync_model.py`,
-MODELS.md cleanup. Requires explicit §7 sign-off for a non-additive migration.
+**E2 — table drop (AUTHORIZED 2026-10-09; see §2).** Branch
+`chore/drop-reactor-change-requests` from `develop` (E1 is merged, so no reader of
+the table remains in `backend/` or `frontend/src`). Scope:
+- One Alembic migration, parent `e5b2d9c7a1f4`, that `DROP TABLE reactor_change_requests`.
+  `downgrade()` recreates the table **empty** with its columns, the FK
+  `experiment_id → experiments.experiment_id ON DELETE SET NULL` and
+  `uq_change_request_reactor_experiment_date` (mirror `9c358174ea54` + `ca5d57c6b272`
+  + `13fc77a07865`); no data restore. `alembic heads` must print one head before the commit.
+  Rehearse upgrade/downgrade on `experiments_test` per memory
+  `migration-rehearsal-on-experiments-test`; the dev DB `experiments` keeps its 357 rows
+  until the migration runs there via `alembic upgrade head` (it is the 2026-09-23 mirror +
+  020 + 021 — do not refresh it).
+- Delete `database/models/notion_sync.py`, its `ReactorChangeRequest` exports and
+  "Notion sync" comments in `database/__init__.py` and `database/models/__init__.py`,
+  `tests/models/test_notion_sync_model.py`, and the root-level
+  `migrate_deduplicate_change_requests.py`.
+- `database/data_migrations/migrate_reactor_change_requests_021.py` and
+  `tests/data_migrations/test_migrate_change_requests_021.py` import the model: keep the
+  script as the record of where the notes came from but make it fail fast with a clear
+  message once the table is gone (the model import must go), and retire or rewrite its
+  test accordingly — Conductor's call, stated in the PR body.
+- `tests/services/test_experiment_deletion.py`: the `ReactorChangeRequest` seed row and
+  `test_delete_no_longer_touches_reactor_change_requests` go (the table no longer exists);
+  keep the statement-capture pattern only if another assertion still needs it.
+- Docs: `.claude/rules/MODELS.md` (remove the `ReactorChangeRequest`/`reactor_change_requests`
+  passages — deletion path, impact counts, `ExperimentNotes` backfill note — leaving one
+  historical sentence that the data came from the 021 backfill), `docs/POWERBI_MODEL.md`
+  if it still names the table as live, `docs/api/API_REFERENCE.md` purge sentence, the 021
+  report gets a "Production run 2026-10-09" section with the pasted counts,
+  `docs/DIRECTORY_STRUCTURE.md` if it lists the deleted script, issue-log entry.
+- Deploy note for the PR body: `update.ps1` runs `alembic upgrade head` nightly; a DROP
+  TABLE cannot refuse, so there is no pre-flight guard, but the lab PC must have run 021
+  first — it has (2026-10-09).
 Its three historical migrations (`9c358174ea54`, `ca5d57c6b272`,
 `13fc77a07865`) are never deleted.
+
+**Acceptance (E2)**
+- [ ] `grep -rn "ReactorChangeRequest\|reactor_change_requests\|notion_sync" backend/ database/ frontend/src tests/ alembic/env.py` returns only the three historical migrations' names where cited in the new migration's docstring and the 021 script's fail-fast message.
+- [ ] `alembic upgrade head` then `alembic downgrade -1` then `alembic upgrade head` clean on `experiments_test`; `alembic heads` = the new revision only.
+- [ ] Full §8 suites pass; `python -c "import database; import backend.api.main"` clean.
 
 **Acceptance (E1)**
 - [ ] `grep -rn "notion" backend/ frontend/src requirements.txt` returns only
