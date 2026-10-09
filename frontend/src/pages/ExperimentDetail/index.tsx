@@ -34,8 +34,6 @@ const PER_EXPERIMENT_QUERY_KEYS = [
   'conditions',
   'additives',
   'experiment-results',
-  'changeRequests',
-  'reactorModificationRecent',
   'xrd',
   'external-analysis',
   'replicate-group',

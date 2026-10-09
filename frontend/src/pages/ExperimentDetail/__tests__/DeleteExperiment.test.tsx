@@ -112,8 +112,7 @@ describe('experiment deletion from the detail page', () => {
     // navigation commits (see onDeleted in ../index.tsx).
     for (const key of [
       'experiment', 'delete-impact', 'conditions', 'additives',
-      'experiment-results', 'changeRequests', 'reactorModificationRecent',
-      'xrd', 'external-analysis', 'replicate-group',
+      'experiment-results', 'xrd', 'external-analysis', 'replicate-group',
     ]) {
       await waitFor(() =>
         expect(removeSpy).toHaveBeenCalledWith({ queryKey: [key, 'SERUM_050'] }),

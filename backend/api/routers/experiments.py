@@ -1,10 +1,8 @@
 from __future__ import annotations
-from datetime import date
 from typing import Literal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, func, text, case, or_
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -34,11 +32,7 @@ from backend.api.schemas.results import (
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
-from database.models.notion_sync import ReactorChangeRequest
 from database.models.samples import SampleInfo
-from backend.api.schemas.notion_sync import (
-    ChangeRequestResponse, ChangeRequestUpsertRequest, RecentChangeRequestsResponse,
-)
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
 from backend.services import notes as notes_service
@@ -1143,145 +1137,6 @@ def check_experiment_id_exists(
         select(Experiment.id).where(Experiment.experiment_id == experiment_id)
     ).scalar_one_or_none()
     return {"exists": exists is not None}
-
-
-@router.get("/{experiment_id}/change-requests", response_model=list[ChangeRequestResponse])
-def list_change_requests(
-    experiment_id: str,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> list[ChangeRequestResponse]:
-    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
-    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
-    through POST /experiments/{id}/notes with note_type='modification' and
-    event_date.
-
-    List change request entries linked to this experiment. Returns [] if none."""
-    exp = db.execute(
-        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-    rows = db.execute(
-        select(ReactorChangeRequest)
-        .where(ReactorChangeRequest.experiment_id == experiment_id)
-        .order_by(ReactorChangeRequest.sync_date.desc())
-    ).scalars().all()
-    return [ChangeRequestResponse.model_validate(r) for r in rows]
-
-
-@router.get("/{experiment_id}/change-requests/recent", response_model=RecentChangeRequestsResponse)
-def get_recent_change_requests(
-    experiment_id: str,
-    on_date: date = Query(default=None, alias="date"),
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> RecentChangeRequestsResponse:
-    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
-    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
-    through POST /experiments/{id}/notes with note_type='modification' and
-    event_date.
-
-    Return this experiment's modification entry for `date` (default today) and the
-    most recent prior entry, both scoped to this experiment_id only — never another
-    experiment that previously occupied the same physical reactor.
-    """
-    exp = db.execute(
-        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-
-    target_date = on_date or date.today()
-
-    selected_row = db.execute(
-        select(ReactorChangeRequest).where(
-            ReactorChangeRequest.experiment_id == experiment_id,
-            ReactorChangeRequest.sync_date == target_date,
-        )
-    ).scalar_one_or_none()
-
-    previous_row = db.execute(
-        select(ReactorChangeRequest)
-        .where(
-            ReactorChangeRequest.experiment_id == experiment_id,
-            ReactorChangeRequest.sync_date < target_date,
-        )
-        .order_by(ReactorChangeRequest.sync_date.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-
-    return RecentChangeRequestsResponse(
-        selected=ChangeRequestResponse.model_validate(selected_row) if selected_row else None,
-        previous=ChangeRequestResponse.model_validate(previous_row) if previous_row else None,
-    )
-
-
-@router.post("/{experiment_id}/change-requests", response_model=ChangeRequestResponse)
-def upsert_change_request(
-    experiment_id: str,
-    payload: ChangeRequestUpsertRequest,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> ChangeRequestResponse:
-    """DEPRECATED (2026-09, issue #122 PR-B): removed by PR-E. Data migrated to
-    experiment_notes by migrate_reactor_change_requests_021.py; new writes go
-    through POST /experiments/{id}/notes with note_type='modification' and
-    event_date.
-
-    Create or update a reactor modification entry for a given reactor + date.
-
-    Upserts on the unique constraint (reactor_label, experiment_id, sync_date): if a
-    row already exists for this reactor, experiment, and date, its requested_change
-    is overwritten. Defaults sync_date to today if omitted. Returns the persisted
-    record. Returns 422 if requested_change is blank; 404 if the experiment does
-    not exist.
-    """
-    if not payload.requested_change.strip():
-        raise HTTPException(status_code=422, detail="requested_change must not be blank")
-
-    exp = db.execute(
-        select(Experiment.id).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-
-    sync_date = payload.sync_date or date.today()
-    stmt = (
-        pg_insert(ReactorChangeRequest)
-        .values(
-            reactor_label=payload.reactor_label,
-            experiment_id=experiment_id,
-            requested_change=payload.requested_change.strip(),
-            sync_date=sync_date,
-            notion_page_id=None,
-            notion_status=None,
-            carried_forward=False,
-        )
-        .on_conflict_do_update(
-            constraint="uq_change_request_reactor_experiment_date",
-            set_={
-                "requested_change": payload.requested_change.strip(),
-            },
-        )
-    )
-    db.execute(stmt)
-    db.commit()
-
-    record = db.execute(
-        select(ReactorChangeRequest).where(
-            ReactorChangeRequest.reactor_label == payload.reactor_label,
-            ReactorChangeRequest.experiment_id == experiment_id,
-            ReactorChangeRequest.sync_date == sync_date,
-        )
-    ).scalar_one()
-    log.info(
-        "change_request_upserted",
-        experiment_id=experiment_id,
-        reactor_label=payload.reactor_label,
-        sync_date=str(sync_date),
-    )
-    return ChangeRequestResponse.model_validate(record)
 
 
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)

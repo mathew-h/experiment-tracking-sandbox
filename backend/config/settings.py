@@ -30,12 +30,6 @@ class Settings(BaseSettings):
     # ActLabs sample ID fuzzy matching threshold (0.0–1.0, default 0.90)
     actlabs_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
 
-    # Notion sync — reactor dashboard
-    notion_token: str = ""
-    notion_database_id: str = ""
-    notion_data_source_id: str = ""
-    notion_sync_hour: int = 6  # Hour of day (24h) in America/New_York to run daily sync
-
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

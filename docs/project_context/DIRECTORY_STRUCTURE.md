@@ -28,8 +28,7 @@ experiment_tracking_sandbox/
 │   └── services/
 │       ├── calculations/              ← calculation engine
 │       ├── bulk_uploads/              ← locked parsers, do not modify logic
-│       ├── database/                  ← query helpers
-│       └── notion_sync/
+│       └── database/                  ← query helpers
 │
 ├── database/
 │   ├── CLAUDE.md

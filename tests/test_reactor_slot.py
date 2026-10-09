@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 
 from database.reactor_slot import (
-    canonical_slot_label,
     derive_reactor_slot,
     is_occupancy_type,
     normalize_experiment_type,
@@ -93,22 +92,3 @@ def test_derive_reactor_slot_tolerates_float_and_string_numbers():
     assert derive_reactor_slot(5.0, "HPHT") == "R05"
     assert derive_reactor_slot("7", "HPHT") == "R07"
     assert derive_reactor_slot("not a number", "HPHT") is None
-
-
-@pytest.mark.parametrize(
-    "label,expected",
-    [
-        ("R01", "R01"),
-        ("R1", "R01"),        # Notion labels are not guaranteed zero-padded
-        ("r5", "R05"),
-        ("CF1", "CF01"),
-        ("cf03", "CF03"),
-        ("R00", None),        # zero is not a slot
-        ("X01", None),
-        ("R", None),
-        ("", None),
-        (None, None),
-    ],
-)
-def test_canonical_slot_label(label, expected):
-    assert canonical_slot_label(label) == expected

@@ -34,7 +34,7 @@ this: the DB is already stamped at `1c1ef9b555e0` (the migration that added and 
 `reactor_slot`), so that migration does not re-run. Consequences, all silent: the reactor
 grid renders empty (`dashboard.py:119` filters `reactor_slot IS NOT NULL`), every occupancy
 demotion no-ops (`experiment_status.py:407-410` returns `(0, [])`), the `PATCH /status` 409
-gate never fires, and the Notion export clears every reactor page to idle. **The slot column
+gate never fires. **The slot column
 must be backfilled manually before the app is trusted after a fresh load** — re-execute the
 `BACKFILL` statement from `alembic/versions/1c1ef9b555e0_add_reactor_slot_to_conditions.py`.
 

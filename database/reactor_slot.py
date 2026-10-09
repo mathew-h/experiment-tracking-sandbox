@@ -12,7 +12,6 @@ This module is the ONLY definition of that mapping. It is imported by:
   - backend/services/bulk_uploads/experiment_status.py
   - backend/services/bulk_uploads/new_experiments.py
   - backend/api/routers/experiments.py, dashboard.py
-  - backend/services/notion_sync/import_.py
 
 It deliberately imports nothing from `database.models` or `backend` so any layer
 can use it. The Alembic backfill in
@@ -24,8 +23,6 @@ slot. That is load-bearing: an occupancy query filtered on `reactor_slot` cannot
 see a Serum vial even if the calling code forgot to check the type.
 """
 from __future__ import annotations
-
-import re
 
 # Occupancy-bearing types only. Autoclave is deliberately absent — decided
 # 2026-07-29 after the audit found AUTO_JW_022-024 carrying historical HPHT
@@ -41,8 +38,6 @@ _SERIES_BY_TYPE: dict[str, str] = {
     "coreflood": "CF",
     "cf": "CF",
 }
-
-_SLOT_LABEL_RE = re.compile(r"(CF|R)0*(\d+)", re.IGNORECASE)
 
 
 def normalize_experiment_type(experiment_type: object | None) -> str:
@@ -99,17 +94,3 @@ def derive_reactor_slot(
     except (TypeError, ValueError):
         return None
     return _format_slot(prefix, number)
-
-
-def canonical_slot_label(label: str | None) -> str | None:
-    """Normalize an externally supplied label ('r5', 'CF1') to canonical form ('R05', 'CF01').
-
-    Used on the Notion sync path, where the reactor label comes from a Notion
-    page title and is not guaranteed to be zero-padded or upper-cased.
-    """
-    if not label:
-        return None
-    match = _SLOT_LABEL_RE.fullmatch(label.strip())
-    if match is None:
-        return None
-    return _format_slot(match.group(1).upper(), int(match.group(2)))

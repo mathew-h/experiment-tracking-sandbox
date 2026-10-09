@@ -76,7 +76,7 @@ class ReactorCardData(BaseModel):
     volume_mL: Optional[int] = None     # reactor hardware spec
     material: Optional[str] = None      # reactor hardware spec
     vendor: Optional[str] = None        # reactor hardware spec
-    # Issue #122 PR-B: both read 'modification' notes, not reactor_change_requests.
+    # Issue #122 PR-B: both read 'modification' notes, not the retired change-request table.
     todays_modification: Optional[str] = None   # notes with event_date == today (UTC), '; '-joined in id order
     latest_modification: Optional[LatestModification] = None
 

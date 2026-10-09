@@ -416,7 +416,7 @@ no need to ask for access — this exists to clean up batches of bad entries.
 
 **This is a permanent, irreversible deletion, not an update.** Each listed experiment
 and everything it owns is destroyed: conditions, all results (scalar, ICP, H₂), result
-files, notes, additives, external analyses, XRD phases and reactor change requests. Two
+files, notes, additives, external analyses and XRD phases. Two
 things belonging to *other* experiments are only unlinked, never deleted: a scalar result
 that used a deleted experiment as its ammonium background keeps its background value and
 loses only the provenance pointer, and replicate siblings keep their group membership and
