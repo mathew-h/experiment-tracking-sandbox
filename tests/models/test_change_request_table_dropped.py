@@ -39,10 +39,21 @@ def test_metadata_has_no_table_for_the_dropped_migration():
     assert dropped not in Base.metadata.tables
 
 
-def test_package_exports_no_change_request_model():
+def test_no_mapped_class_targets_the_dropped_table():
+    import database  # noqa: F401  (registers every model on Base)
+    from database import Base
+
+    dropped = _script_dir().get_revision(DROP_REVISION).module.TABLE
+    offenders = [m.class_.__name__ for m in Base.registry.mappers if m.local_table.name == dropped]
+    assert offenders == []
+
+
+def test_every_package_export_resolves():
+    # A stale export line left behind for a deleted model would make
+    # `from database import *` fail at the first import.
     import database
     import database.models
 
-    assert not hasattr(database, "ReactorChangeRequest")
-    assert "ReactorChangeRequest" not in database.__all__
-    assert "ReactorChangeRequest" not in database.models.__all__
+    for pkg in (database, database.models):
+        for name in pkg.__all__:
+            assert hasattr(pkg, name), f"{pkg.__name__}.__all__ names {name!r} but it is not importable"

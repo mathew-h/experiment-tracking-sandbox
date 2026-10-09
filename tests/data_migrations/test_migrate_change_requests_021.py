@@ -10,11 +10,10 @@ import pytest
 from database.data_migrations.migrate_reactor_change_requests_021 import (
     DROP_REVISION,
     LAST_RUNNABLE_COMMIT,
+    MIGRATION_PATH,
     SOURCE_TAG,
-    check_source_table,
+    refuse_to_run,
 )
-
-MIGRATION_PATH = "database/data_migrations/migrate_reactor_change_requests_021.py"
 
 
 def test_source_tag_is_pinned():
@@ -23,14 +22,16 @@ def test_source_tag_is_pinned():
     assert SOURCE_TAG == "migrate_change_requests_021"
 
 
-def test_drop_revision_matches_the_alembic_chain():
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
+def test_drop_revision_exists_in_the_alembic_chain():
     from pathlib import Path
 
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
     repo_root = Path(__file__).resolve().parents[2]
-    heads = ScriptDirectory.from_config(Config(str(repo_root / "alembic.ini"))).get_heads()
-    assert heads == [DROP_REVISION]
+    rev = ScriptDirectory.from_config(Config(str(repo_root / "alembic.ini"))).get_revision(DROP_REVISION)
+    assert rev is not None
+    assert rev.down_revision == "e5b2d9c7a1f4"
 
 
 def test_refuses_when_the_source_table_is_gone(migration_session):
@@ -38,7 +39,7 @@ def test_refuses_when_the_source_table_is_gone(migration_session):
     # source table does not exist here -- exactly the lab PC's state after the
     # nightly `alembic upgrade head`.
     with pytest.raises(RuntimeError) as excinfo:
-        check_source_table(migration_session)
+        refuse_to_run(migration_session)
     msg = str(excinfo.value)
     assert DROP_REVISION in msg
     assert "2026-10-09" in msg

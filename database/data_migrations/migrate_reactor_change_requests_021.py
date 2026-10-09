@@ -89,8 +89,8 @@ _FROZEN = (
 )
 
 
-def check_source_table(db: Session) -> None:
-    """Raise RuntimeError with the frozen-script message.
+def refuse_to_run(db: Session) -> None:
+    """Always raise RuntimeError with the frozen-script message.
 
     Raised whether or not the table exists: when it is gone (every database
     at or past DROP_REVISION) the message says why; when it is still present
@@ -107,7 +107,7 @@ def main(apply: bool) -> None:  # `apply` is unused: kept so the historical CLI 
 
     db = next(get_db())
     try:
-        check_source_table(db)
+        refuse_to_run(db)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(3)
