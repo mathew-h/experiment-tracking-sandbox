@@ -29,3 +29,20 @@ def test_drop_migration_is_the_single_head():
 def test_drop_migration_revises_the_event_date_migration():
     rev = _script_dir().get_revision(DROP_REVISION)
     assert rev.down_revision == PARENT_REVISION
+
+
+def test_metadata_has_no_table_for_the_dropped_migration():
+    import database  # noqa: F401  (registers every model on Base)
+    from database import Base
+
+    dropped = _script_dir().get_revision(DROP_REVISION).module.TABLE
+    assert dropped not in Base.metadata.tables
+
+
+def test_package_exports_no_change_request_model():
+    import database
+    import database.models
+
+    assert not hasattr(database, "ReactorChangeRequest")
+    assert "ReactorChangeRequest" not in database.__all__
+    assert "ReactorChangeRequest" not in database.models.__all__

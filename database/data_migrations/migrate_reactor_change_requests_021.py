@@ -1,4 +1,14 @@
-"""One-time backfill: convert reactor_change_requests rows into dated
+"""FROZEN (issue #122 PR-E E2, 2026-10-09). The source table was dropped by
+Alembic a7d3e9f1c2b4 after this script's production run on 2026-10-09: 357
+rows, 331 converted, 26 orphaned. The conversion logic was removed with the
+model it depended on; the last runnable version is
+    git show 32da995:database/data_migrations/migrate_reactor_change_requests_021.py
+and only makes sense against a database restored from a backup taken before
+a7d3e9f1c2b4. Running this file now exits 3 with that message. Everything
+below the banner is kept as the record of where the
+created_by = 'migrate_change_requests_021' notes came from.
+
+One-time backfill: convert reactor_change_requests rows into dated
 'modification' notes (issue #122, PR-B; phase-2 spec decisions 1, 2, 9-11).
 
 Background
@@ -47,249 +57,66 @@ Rules, in id order (deterministic; nothing is guessed)
    difference is expected when an experiment moved reactors; it is reported so
    Mat can judge whether the label must be kept (decision 2's open question).
 
-Usage
------
-    # Dry run (default): prints the report, writes nothing
-    PYTHONPATH=. python database/data_migrations/migrate_reactor_change_requests_021.py
+Usage (historical)
+------------------
+    PYTHONPATH=. python database/data_migrations/migrate_reactor_change_requests_021.py          # dry run
+    PYTHONPATH=. python database/data_migrations/migrate_reactor_change_requests_021.py --apply  # after Mat's audit
 
-    # Apply -- ONLY after Mat has audited the dry-run report
-    PYTHONPATH=. python database/data_migrations/migrate_reactor_change_requests_021.py --apply
-
-    # Against a specific database (defaults to $DATABASE_URL, then the dev DB)
-    DATABASE_URL=postgresql://... python database/data_migrations/migrate_reactor_change_requests_021.py
+Reports: docs/issues/migrate-change-requests-021-dryrun-2026-09-24.md (dev-mirror
+dry run and apply, and the production run of 2026-10-09).
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from backend.services.notes import add_note
-from database import get_db  # noqa: E402
-from database.models.conditions import ExperimentalConditions
-from database.models.enums import NoteType
-from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
-from database.models.notion_sync import ReactorChangeRequest
-
 SOURCE_TAG = "migrate_change_requests_021"
-SAMPLE_SIZE = 20
+SOURCE_TABLE = "reactor_change_requests"
+DROP_REVISION = "a7d3e9f1c2b4"
+LAST_RUNNABLE_COMMIT = "32da995"
+MIGRATION_PATH = "database/data_migrations/migrate_reactor_change_requests_021.py"
+
+_FROZEN = (
+    f"migrate_reactor_change_requests_021 is frozen: its source table "
+    f"{SOURCE_TABLE} was dropped by Alembic {DROP_REVISION} (issue #122 PR-E E2) "
+    f"after the production run of 2026-10-09 (357 rows, 331 converted, 26 orphaned). "
+    f"The {SOURCE_TAG} notes and their modifications_log snapshots are the record. "
+    f"The last runnable version is `git show {LAST_RUNNABLE_COMMIT}:{MIGRATION_PATH}` "
+    f"and applies only to a database restored from a backup taken before {DROP_REVISION}."
+)
 
 
-@dataclass
-class Plan:
-    total: int = 0
-    convertible: list[ReactorChangeRequest] = field(default_factory=list)
-    orphaned: list[ReactorChangeRequest] = field(default_factory=list)      # experiment_id IS NULL
-    blank: list[ReactorChangeRequest] = field(default_factory=list)
-    already_converted: list[ReactorChangeRequest] = field(default_factory=list)
-    collapsed: list[ReactorChangeRequest] = field(default_factory=list)     # same (exp, date, text) as an earlier row
-    label_disagreements: int = 0
-    dashboard_typed: int = 0      # notion_page_id IS NULL
-    notion_imported: int = 0      # notion_page_id IS NOT NULL
-    experiments: dict[str, Experiment] = field(default_factory=dict)        # experiment_id -> row (resolved)
+def check_source_table(db: Session) -> None:
+    """Raise RuntimeError with the frozen-script message.
+
+    Raised whether or not the table exists: when it is gone (every database
+    at or past DROP_REVISION) the message says why; when it is still present
+    (a pre-E2 restore) the conversion logic is no longer in this file, so the
+    message points at the commit that holds it.
+    """
+    present = inspect(db.get_bind()).has_table(SOURCE_TABLE)
+    state = "still present here (a pre-E2 restore?)" if present else "absent here"
+    raise RuntimeError(f"{_FROZEN} {SOURCE_TABLE} is {state}.")
 
 
-def _row_dict(row: ReactorChangeRequest) -> dict:
-    """The full original row, JSON-safe, for the ModificationsLog snapshot."""
-    def iso(v):
-        return v.isoformat() if isinstance(v, (date, datetime)) else v
-    return {
-        "id": row.id,
-        "reactor_label": row.reactor_label,
-        "experiment_id": row.experiment_id,
-        "requested_change": row.requested_change,
-        "notion_status": row.notion_status,
-        "carried_forward": row.carried_forward,
-        "sync_date": iso(row.sync_date),
-        "notion_page_id": row.notion_page_id,
-        "created_at": iso(row.created_at),
-    }
+def main(apply: bool) -> None:  # `apply` is unused: kept so the historical CLI shape still parses
+    from database import get_db
 
-
-def build_plan(db: Session) -> Plan:
-    """Read-only. Everything --apply will do is decided here."""
-    plan = Plan()
-    rows = db.execute(select(ReactorChangeRequest).order_by(ReactorChangeRequest.id)).scalars().all()
-    plan.total = len(rows)
-
-    exp_ids = sorted({r.experiment_id for r in rows if r.experiment_id is not None})
-    if exp_ids:
-        for exp in db.execute(select(Experiment).where(Experiment.experiment_id.in_(exp_ids))).scalars():
-            plan.experiments[exp.experiment_id] = exp
-    slots: dict[int, Optional[str]] = {}
-    if plan.experiments:
-        fks = [e.id for e in plan.experiments.values()]
-        for fk, slot in db.execute(
-            select(ExperimentalConditions.experiment_fk, ExperimentalConditions.reactor_slot)
-            .where(ExperimentalConditions.experiment_fk.in_(fks))
-        ).all():
-            slots[fk] = slot
-
-    existing = {
-        (n.experiment_fk, n.event_date, n.note_text)
-        for n in db.execute(
-            select(ExperimentNotes.experiment_fk, ExperimentNotes.event_date, ExperimentNotes.note_text)
-            .where(ExperimentNotes.created_by == SOURCE_TAG, ExperimentNotes.note_type == NoteType.modification)
-        ).all()
-    }
-    converted_ids: set[int] = set()
-    for (old_values,) in db.execute(
-        select(ModificationsLog.old_values)
-        .where(ModificationsLog.modified_table == "reactor_change_requests")
-    ).all():
-        try:
-            converted_ids.add(int((old_values or {}).get("id")))
-        except (TypeError, ValueError):
-            continue
-
-    seen_this_run: set[tuple[int, date, str]] = set()
-
-    for row in rows:
-        if row.notion_page_id is None:
-            plan.dashboard_typed += 1
-        else:
-            plan.notion_imported += 1
-        if row.experiment_id is None:
-            plan.orphaned.append(row)
-            continue
-        exp = plan.experiments.get(row.experiment_id)
-        if exp is None:
-            # Cannot happen while the FK holds; reported rather than raised so a
-            # dry run against a DB with the FK dropped still produces a report.
-            plan.orphaned.append(row)
-            continue
-        text_ = (row.requested_change or "").strip()
-        if not text_:
-            plan.blank.append(row)
-            continue
-        if row.id in converted_ids:
-            plan.already_converted.append(row)
-            continue
-        key = (exp.id, row.sync_date, text_)
-        if key in existing:
-            plan.already_converted.append(row)
-            continue
-        if key in seen_this_run:
-            plan.collapsed.append(row)
-            continue
-        seen_this_run.add(key)
-        plan.convertible.append(row)
-        if slots.get(exp.id) != row.reactor_label:
-            plan.label_disagreements += 1
-    return plan
-
-
-def _sample(items, n=SAMPLE_SIZE):
-    return items[:n]
-
-
-def _short(text_: Optional[str], width: int = 60) -> str:
-    t = (text_ or "").replace("\n", " ")
-    return t if len(t) <= width else t[: width - 1] + "…"
-
-
-def print_report(plan: Plan) -> None:
-    p = print
-    p("== migrate_reactor_change_requests_021 -- dry-run report ==")
-    p(f"reactor_change_requests rows:                    {plan.total}")
-    p(f"  typed on the dashboard (notion_page_id NULL):  {plan.dashboard_typed}")
-    p(f"  imported from Notion:                          {plan.notion_imported}")
-    p(f"convertible (-> one 'modification' note each):   {len(plan.convertible)}")
-    p(f"orphaned (experiment_id NULL; FK ON DELETE SET NULL): {len(plan.orphaned)}")
-    for r in plan.orphaned:
-        p(f"    row {r.id}: {r.reactor_label} {r.sync_date} {'notion' if r.notion_page_id else 'dashboard'} "
-          f"'{_short(r.requested_change)}'")
-    p(f"blank requested_change:                          {len(plan.blank)}")
-    for r in plan.blank:
-        p(f"    row {r.id}: {r.reactor_label} {r.sync_date} exp={r.experiment_id}")
-    p(f"already converted by a prior run (skipped):      {len(plan.already_converted)}")
-    p(f"collapsed under (experiment, date, text):        {len(plan.collapsed)}")
-    for r in plan.collapsed:
-        p(f"    row {r.id}: {r.reactor_label} {r.sync_date} exp={r.experiment_id} '{_short(r.requested_change)}'")
-    p(f"reactor_label != current conditions.reactor_slot: {plan.label_disagreements} of {len(plan.convertible)} (informational)")
-    p(f"-- sample of {min(SAMPLE_SIZE, len(plan.convertible))} convertible rows --")
-    for r in _sample(plan.convertible):
-        p(f"    row {r.id}: {r.reactor_label} {r.sync_date} exp={r.experiment_id} "
-          f"{'notion' if r.notion_page_id else 'dashboard'} '{_short(r.requested_change)}'")
-
-
-def apply_plan(db: Session, plan: Plan) -> list[int]:
-    """Convert every plan.convertible row; return the new note ids in order."""
-    note_ids: list[int] = []
-    for row in plan.convertible:
-        exp = plan.experiments[row.experiment_id]
-        note = add_note(
-            db,
-            exp,
-            (row.requested_change or "").strip(),
-            note_type=NoteType.modification,
-            event_date=row.sync_date,
-            created_by=SOURCE_TAG,
-            created_at=row.created_at,
-        )
-        db.add(ModificationsLog(
-            experiment_id=exp.experiment_id,
-            experiment_fk=exp.id,
-            modified_by=SOURCE_TAG,
-            modification_type="update",
-            modified_table="reactor_change_requests",
-            old_values=_row_dict(row),
-            new_values={"note_id": note.id},
-        ))
-        note_ids.append(note.id)
-    db.flush()
-    return note_ids
-
-
-def after_counts(db: Session) -> dict:
-    def q(sql: str) -> int:
-        from sqlalchemy import text
-        return db.execute(text(sql)).scalar_one()
-    return {
-        "change_request_rows": q("SELECT COUNT(*) FROM reactor_change_requests"),
-        "modification_notes": q("SELECT COUNT(*) FROM experiment_notes WHERE note_type = 'modification'"),
-        "dated_modification_notes": q("SELECT COUNT(*) FROM experiment_notes WHERE note_type = 'modification' AND event_date IS NOT NULL"),
-        "notes_by_021": q(f"SELECT COUNT(*) FROM experiment_notes WHERE created_by = '{SOURCE_TAG}'"),
-        "snapshots_by_021": q("SELECT COUNT(*) FROM modifications_log WHERE modified_table = 'reactor_change_requests'"),
-        "notes_total": q("SELECT COUNT(*) FROM experiment_notes"),
-    }
-
-
-def main(apply: bool) -> None:
     db = next(get_db())
     try:
-        before = after_counts(db)
-        plan = build_plan(db)
-        print_report(plan)
-        print("before:", before)
-        if not apply:
-            print("\nDry run — pass --apply to commit changes.")
-            return
-        ids = apply_plan(db, plan)
-        db.commit()
-        after = after_counts(db)
-        print("after: ", after)
-        expected = before["notes_by_021"] + len(plan.convertible)
-        if after["notes_by_021"] != expected or len(ids) != len(plan.convertible):
-            print(f"WARNING: converted {len(ids)}, expected {len(plan.convertible)}; "
-                  f"notes_by_021 {after['notes_by_021']} vs expected {expected}", file=sys.stderr)
-            sys.exit(2)
-        print(f"\nApplied. {len(ids)} notes created (matches the dry-run plan).")
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
+        check_source_table(db)
+    except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(3)
     finally:
         db.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--apply", action="store_true", help="Commit changes (default: dry run)")
+    parser.add_argument("--apply", action="store_true", help="(historical) commit changes")
     args = parser.parse_args()
     main(apply=args.apply)
