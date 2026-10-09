@@ -2630,3 +2630,4 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **E2 authorized:** Mat, "E2 approved" (2026-10-09) — the §7 sign-off for `DROP TABLE reactor_change_requests`. Scope written into the spec §4 PR-E subsection; branch `chore/drop-reactor-change-requests` from `develop`. Not started.
 - **PR-D gate:** production `SELECT count(*) FROM experiment_notes WHERE needs_review` = **40** (Mat, 2026-10-09). PR-D stays closed until it is 0.
 - **Tests added:** no. **Docs updated:** yes (spec §1/§2/§4). **Decision logged:** no.
+- **Addendum, 2026-10-09 (later):** Mat reports the production review queue at **0** (was 40 that morning; emptied via `/notes/review`). PR-D's count gate is cleared; it still runs after E2 and must confirm the §4 PR-D prerequisites.

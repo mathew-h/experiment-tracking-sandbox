@@ -36,7 +36,7 @@ Notion-era change requests" (Mat, 2026-09-24). Written to be sufficient for a
 | PR-B reactor modifications become dated notes | `feat/reactor-mods-as-notes` | **Merged to develop** (#125, 2026-10-05). 021 applied on the dev mirror 2026-10-05 and on **production 2026-10-09** (357 source rows, 331 converted, 26 orphaned — the same 26 the dry run flagged; dev-mirror plan was 333/307/26). |
 | PR-C unified timeline + description editing | `feat/notes-timeline` | **Merged to develop** (#126, 2026-10-05). Also fixes `GET /experiments/{id}` omitting `event_date` on `notes[]` (PR-B gap). |
 | PR-E remove the Notion sync (absorbs #117) | `chore/remove-notion-sync` (E1) → `chore/drop-reactor-change-requests` (E2) | **E1 merged to develop** (#127, 2026-10-09, merge `a3c2a6a`; promoted to `main` the same day); #117 closed. Lab-PC `NOTION_TOKEN` deleted 2026-10-09. **E2 approved by Mat 2026-10-09 (§7 sign-off given) — Next.** Plan for E1: `docs/superpowers/plans/2026-10-06-remove-notion-sync-pr-e.md`. |
-| PR-D drop the legacy result columns | `chore/drop-legacy-note-columns` | Last. Gated on production review queue = 0 — **40 on 2026-10-09** (Mat), so it does not open yet. The queue is emptied by people via `/notes/review`, never by a script. |
+| PR-D drop the legacy result columns | `chore/drop-legacy-note-columns` | Last, after E2. **Gate cleared:** production review queue was 40 earlier on 2026-10-09 and Mat reported it at **0** later the same day (emptied by people via `/notes/review`). A fresh session re-reads the count if it has read-only psql access; otherwise Mat's report stands. Pre-authorizations 2 and 3 (§2) apply. |
 
 ### Where phase 1 (#118) left things
 
@@ -183,7 +183,9 @@ Hard gates:
   Post the report, **stop**, wait for Mat's audit. Never run `--apply` on your own.
 - PR-D does not open until `SELECT count(*) FROM experiment_notes WHERE
   needs_review` is **0 on production** and every legacy writer mirrors. Tell Mat
-  the count; do not start PR-D on a hope.
+  the count; do not start PR-D on a hope. **Status 2026-10-09:** Mat reported the
+  count at 0 (it was 40 that morning). Still confirm every legacy writer mirrors
+  (the §4 PR-D prerequisites) before the column drops.
 - `alembic heads` must print exactly one head before any commit that adds a
   migration (the current head is `c4d8f1a2b6e7`).
 
