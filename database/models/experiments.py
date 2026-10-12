@@ -135,8 +135,8 @@ class ExperimentNotes(Base):
     result_id = Column(Integer, nullable=True)  # scoped to one experimental_results row; see the composite FK above
     # Issue #122 PR-B: a calendar-date anchor for a 'modification' note that is
     # not tied to a result row (the dashboard's reactor-modification form, and the
-    # 021 backfill of reactor_change_requests). Either anchor satisfies
-    # ck_note_scope for 'modification'; 'result_note' still requires a result.
+    # 021 backfill of the retired reactor change-request table). Either anchor
+    # satisfies ck_note_scope for 'modification'; 'result_note' still requires a result.
     event_date = Column(Date, nullable=True, index=True)
     created_by = Column(String, nullable=True)  # Firebase email on API paths, a source tag on bulk paths
     needs_review = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # the backfill could not place this row with certainty

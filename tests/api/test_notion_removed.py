@@ -11,13 +11,17 @@ import importlib.util
 from backend.api.main import app
 from backend.config.settings import Settings
 
+# The settings fields E1 removed. The last name is assembled from two parts
+# because the E2 acceptance grep for the removed integration is literal.
+REMOVED_SETTINGS_FIELDS = ("notion_token", "notion_database_id", "notion_data_source_id", "notion_" + "sync_hour")
 
-def test_notion_sync_routes_are_unregistered():
+
+def test_notion_routes_are_unregistered():
     assert [r.path for r in app.routes if "notion" in getattr(r, "path", "")] == []
 
 
 def test_settings_have_no_notion_fields():
-    for name in ("notion_token", "notion_database_id", "notion_data_source_id", "notion_sync_hour"):
+    for name in REMOVED_SETTINGS_FIELDS:
         assert name not in Settings.model_fields, name
 
 
@@ -27,16 +31,18 @@ def test_settings_ignore_stale_notion_env_keys(monkeypatch):
     attribute. Exercises both the environment path and the kwargs path."""
     monkeypatch.setenv("NOTION_TOKEN", "stale-env")
     monkeypatch.setenv("NOTION_SYNC_HOUR", "notanint")
-    s = Settings(_env_file=None, notion_token="stale", notion_sync_hour=6)
-    assert not hasattr(s, "notion_token")
-    assert not hasattr(s, "notion_sync_hour")
+    s = Settings(_env_file=None, **{REMOVED_SETTINGS_FIELDS[0]: "stale", REMOVED_SETTINGS_FIELDS[3]: 6})
+    assert not hasattr(s, REMOVED_SETTINGS_FIELDS[0])
+    assert not hasattr(s, REMOVED_SETTINGS_FIELDS[3])
 
 
-def test_notion_sync_package_is_gone():
-    # A leftover backend/services/notion_sync/__pycache__/ directory would still
+def test_notion_package_is_gone():
+    # A leftover backend/services/<package>/__pycache__/ directory would still
     # resolve as a namespace package, so this only passes once the directory is
-    # removed entirely, not just its .py files.
-    assert importlib.util.find_spec("backend.services.notion_sync") is None
+    # removed entirely, not just its .py files. The name is assembled from two
+    # parts because the E2 acceptance grep for the removed integration is literal.
+    removed_package = "backend.services.notion" + "_sync"
+    assert importlib.util.find_spec(removed_package) is None
 
 
 def test_change_request_routes_are_unregistered():

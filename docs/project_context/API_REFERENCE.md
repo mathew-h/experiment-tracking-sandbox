@@ -317,9 +317,9 @@ approved researcher. `404` if the experiment does not exist.
 
 Purged: the conditions row and its chemical additives, all results (scalar, ICP,
 result files), notes, external analyses **and their `elemental_analysis` rows**,
-XRD phase rows, and its prior `ModificationsLog` history. (`reactor_change_requests`
-rows were purged here until issue #122 PR-E; the service no longer touches that
-table — its `ON DELETE SET NULL` FK unlinks a dangling row — and it is dropped in E2.)
+XRD phase rows, and its prior `ModificationsLog` history. (The Notion-era reactor
+change-request rows were purged here until issue #122 PR-E E1; E2 dropped that
+table on 2026-10-09 — reactor modifications are `modification` notes, counted under `notes`.)
 
 Decoupled but **not** destroyed — a deletion never touches another experiment's
 data: other experiments' `scalar_results` that cite this one as their ammonium
@@ -640,7 +640,7 @@ Returns all dashboard data in a single call. Response shape:
 - Timeline limited to 100 most recent experiments
 - Activity limited to last 20 modification log entries
 - Core Flood experiments use `CF01`/`CF02` labels; all others use `R01`–`R16`
-- `todays_modification` and `latest_modification` are sourced from `experiment_notes` (issue #122 PR-B, re-sourced from the now-deprecated `reactor_change_requests`): `'modification'`-typed notes on the card's experiment, keyed by `experiment_fk`, in one batched query — the endpoint remains a single call. `todays_modification` is the `'; '`-joined `note_text` of every modification note whose `event_date` equals the current day in the lab's time zone (America/New_York, `LAB_TZ`) — not UTC (Mat's ruling, 2026-10-05) — (`null` if none). `latest_modification` is `{"note_text", "event_date", "created_at"}` for the single most recent modification note, ordered by `COALESCE(event_date, created_at::date)` then `id`; `null` if the experiment has no modification notes.
+- `todays_modification` and `latest_modification` are sourced from `experiment_notes` (issue #122 PR-B, re-sourced from the Notion-era change-request table, dropped in PR-E E2): `'modification'`-typed notes on the card's experiment, keyed by `experiment_fk`, in one batched query — the endpoint remains a single call. `todays_modification` is the `'; '`-joined `note_text` of every modification note whose `event_date` equals the current day in the lab's time zone (America/New_York, `LAB_TZ`) — not UTC (Mat's ruling, 2026-10-05) — (`null` if none). `latest_modification` is `{"note_text", "event_date", "created_at"}` for the single most recent modification note, ordered by `COALESCE(event_date, created_at::date)` then `id`; `null` if the experiment has no modification notes.
 
 ## Admin
 
