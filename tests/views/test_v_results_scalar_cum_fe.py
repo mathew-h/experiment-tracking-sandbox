@@ -75,7 +75,6 @@ def _make_result(
         time_post_reaction_bucket_days=cumulative_days,
         cumulative_time_post_reaction_days=cumulative_days,
         is_primary_timepoint_result=is_primary,
-        description=f"Result at {cumulative_days}d",
     )
     db.add(er)
     db.flush()

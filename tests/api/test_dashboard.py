@@ -895,7 +895,7 @@ def test_latest_modification_orders_by_event_date_then_id_and_falls_back_to_crea
     from database.models.results import ExperimentalResults
     exp = _card_exp(db_session, "MOD_LATEST_001", 72004, 7)
     r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=1.0,
-                            time_post_reaction_bucket_days=1.0, description="seed")
+                            time_post_reaction_bucket_days=1.0)
     db_session.add(r)
     db_session.flush()
     long_ago = datetime.datetime(2026, 1, 5, 12, 0, tzinfo=datetime.timezone.utc)
@@ -1138,7 +1138,7 @@ def _make_gc_row(db_session, exp_id: str, exp_num: int, gc_run_date):
     exp = Experiment(experiment_id=exp_id, experiment_number=exp_num, status=ExperimentStatus.ONGOING)
     db_session.add(exp)
     db_session.flush()
-    result = ExperimentalResults(experiment_fk=exp.id, description="KPI GC test row")
+    result = ExperimentalResults(experiment_fk=exp.id)
     db_session.add(result)
     db_session.flush()
     scalar = ScalarResults(result_id=result.id, gc_run_date=gc_run_date)
@@ -1184,7 +1184,7 @@ def test_dashboard_gc_count_two_rows_same_experiment(client, db_session):
     db_session.add(exp)
     db_session.flush()
     for i in range(2):
-        result = ExperimentalResults(experiment_fk=exp.id, description=f"KPI GC dup {i}")
+        result = ExperimentalResults(experiment_fk=exp.id)
         db_session.add(result)
         db_session.flush()
         db_session.add(ScalarResults(result_id=result.id, gc_run_date=window_day))
@@ -1207,7 +1207,7 @@ def test_dashboard_gc_count_null_gc_run_date_never_counts(client, db_session):
     exp = Experiment(experiment_id="KPI_GC_NULL", experiment_number=9313, status=ExperimentStatus.ONGOING)
     db_session.add(exp)
     db_session.flush()
-    result = ExperimentalResults(experiment_fk=exp.id, description="KPI GC null test")
+    result = ExperimentalResults(experiment_fk=exp.id)
     db_session.add(result)
     db_session.flush()
     db_session.add(ScalarResults(

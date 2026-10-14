@@ -12,7 +12,6 @@ def _seed(db):
     db.flush()
     result = ExperimentalResults(
         experiment_fk=exp.id,
-        description="T0",
         is_primary_timepoint_result=True,
         time_post_reaction_days=0.0,
         time_post_reaction_bucket_days=0.0,

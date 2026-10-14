@@ -117,7 +117,6 @@ def test_backfill_scalars_computes_grams_per_ton_yield(migration_session):
         experiment_fk=experiment.id,
         time_post_reaction_days=7.0,
         time_post_reaction_bucket_days=7,
-        description="t=7d",
         is_primary_timepoint_result=True,
     )
     migration_session.add(result_entry)

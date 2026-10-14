@@ -39,7 +39,6 @@ def test_ti_column_stores_and_reads_back(db_session):
         time_post_reaction_days=1.0,
         time_post_reaction_bucket_days=1.0,
         is_primary_timepoint_result=True,
-        description="Day 1 results",
     )
     db_session.add(er)
     db_session.flush()

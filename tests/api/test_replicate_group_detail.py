@@ -186,7 +186,7 @@ class TestGroupRollupEndpoint:
             result = ExperimentalResults(
                 experiment_fk=member.id,
                 time_post_reaction_days=7.0, time_post_reaction_bucket_days=7.0,
-                is_primary_timepoint_result=True, description="t=7",
+                is_primary_timepoint_result=True,
             )
             db_session.add(result)
             db_session.flush()

@@ -21,7 +21,7 @@ def _exp(db, eid, num, researcher=None):
 
 def _result(db, exp, day=7.0):
     r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=day,
-                            time_post_reaction_bucket_days=day, description="legacy")
+                            time_post_reaction_bucket_days=day)
     db.add(r)
     db.flush()
     return r

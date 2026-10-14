@@ -4,10 +4,11 @@ from __future__ import annotations
 import datetime as _dt
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from database import Experiment, ExperimentalResults
-from database.models.enums import ExperimentStatus
+from database import Experiment, ExperimentalResults, ExperimentNotes
+from database.models.enums import ExperimentStatus, NoteType
 from backend.services.bulk_uploads.master_bulk_upload import (
     MasterBulkUploadService,
     _COLLECTION_DATE,
@@ -2890,14 +2891,21 @@ def _result_for(db: Session, experiment_id: str) -> ExperimentalResults:
     )
 
 
+def _notes_for(db: Session, result_id: int, note_type: NoteType | None = None):
+    stmt = select(ExperimentNotes).where(ExperimentNotes.result_id == result_id)
+    if note_type is not None:
+        stmt = stmt.where(ExperimentNotes.note_type == note_type)
+    return db.execute(stmt.order_by(ExperimentNotes.id)).scalars().all()
+
+
 def test_blank_description_is_not_stored_as_the_string_nan(db_session: Session):
-    """A blank Description must not be stored as the literal text 'nan'.
+    """A blank Observation Note must not be stored as the literal text 'nan'.
 
     pandas reads an empty cell as float('nan'), which is TRUTHY, so
-    `str(cell or "").strip()` yields 'nan' instead of ''. That made the
-    generated "Master upload â€” day N" fallback unreachable: every blank
-    Description landed as 'nan'. A merged group already routes through
-    _parse_text, so this covers the single-row path.
+    `str(cell or "").strip()` yields 'nan' instead of ''. A merged group already
+    routes through _parse_text, so this covers the single-row path. Since
+    issue #122 PR-D a blank cell writes no note at all: neither 'nan' nor a
+    generated day-N fallback.
     """
     _seed_experiment(db_session, "HPHT_BLANKTEXT01", 8951)
 
@@ -2906,20 +2914,18 @@ def test_blank_description_is_not_stored_as_the_string_nan(db_session: Session):
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
     row = _result_for(db_session, "HPHT_BLANKTEXT01")
-    assert row.description != "nan", "the NaN cell leaked into the stored text"
-    assert row.description.startswith("Master upload"), (
-        f"the generated fallback must be reachable, got: {row.description!r}"
-    )
+    notes = db_session.execute(
+        select(ExperimentNotes).where(ExperimentNotes.result_id == row.id)
+    ).scalars().all()
+    assert notes == [], "a blank Observation Note must write nothing -- not 'nan', not a fallback"
 
 
-def test_blank_modification_does_not_flag_a_brine_modification(db_session: Session):
-    """A blank Modification must not set has_brine_modification.
+def test_blank_modification_writes_no_modification_note(db_session: Session):
+    """A blank Modification Note must write no 'modification' note.
 
-    ExperimentalResults.sync_brine_flag (database/models/results.py:37-41) sets
-    the flag from `bool(value and str(value).strip())`, so storing 'nan' also
-    marked the timepoint as brine-modified. 12 of the 140 flagged rows in the
-    dev DB are false positives from exactly this, and the column is indexed and
-    reported on.
+    The MOD badge reads the result's modification notes, so storing 'nan' (a
+    truthy pandas NaN) would have marked the timepoint as modified. A blank cell
+    writes nothing.
     """
     _seed_experiment(db_session, "HPHT_BLANKTEXT02", 8952)
 
@@ -2928,16 +2934,10 @@ def test_blank_modification_does_not_flag_a_brine_modification(db_session: Sessi
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
     row = _result_for(db_session, "HPHT_BLANKTEXT02")
-    assert row.brine_modification_description is None, (
-        f"a blank cell must store nothing, got: "
-        f"{row.brine_modification_description!r}"
-    )
-    assert row.has_brine_modification is False, (
-        "no modification was recorded, so the flag must stay false"
-    )
+    assert _notes_for(db_session, row.id, NoteType.modification) == []
 
 
-def test_a_real_modification_still_flags_and_stores(db_session: Session):
+def test_a_real_modification_is_stored_as_a_modification_note(db_session: Session):
     """The fix must not silence a genuine Modification entry."""
     _seed_experiment(db_session, "HPHT_BLANKTEXT03", 8953)
 
@@ -2948,8 +2948,10 @@ def test_a_real_modification_still_flags_and_stores(db_session: Session):
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
     row = _result_for(db_session, "HPHT_BLANKTEXT03")
-    assert row.brine_modification_description == "+200ul 1M HCl"
-    assert row.has_brine_modification is True
+    notes = _notes_for(db_session, row.id, NoteType.modification)
+    assert [(n.note_type, n.note_text, n.created_by) for n in notes] == [
+        (NoteType.modification, "+200ul 1M HCl", "master_bulk_upload")
+    ]
 
 
 def test_gc_date_coverage_warning_counts_vial_days(db_session: Session):

@@ -116,11 +116,6 @@ def create_result(
             )
             .values(is_primary_timepoint_result=False)
         )
-    # Issue #122 PR-D: the result row carries no free text. The legacy NOT NULL
-    # column is filled with a placeholder until Alembic b8c4e2d7f9a1 drops it
-    # (Task 3 of the PR-D plan removes these two lines with the column).
-    day = data.get("time_post_reaction_days")
-    data["description"] = f"Day {day} results" if day is not None else "Analysis results"
     result = ExperimentalResults(**data)
     db.add(result)
     db.flush()

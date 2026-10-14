@@ -25,7 +25,6 @@ def _make_result(db: Session, exp: Experiment, time: float) -> ExperimentalResul
         experiment_fk=exp.id,
         time_post_reaction_days=time,
         time_post_reaction_bucket_days=int(time),
-        description=f"t={time}d",
         is_primary_timepoint_result=True,
         cumulative_time_post_reaction_days=None,  # simulate stale/null
     )
@@ -113,7 +112,6 @@ class TestEdgeCases:
             experiment_fk=exp.id,
             time_post_reaction_days=None,
             time_post_reaction_bucket_days=None,
-            description="no time",
             is_primary_timepoint_result=True,
             cumulative_time_post_reaction_days=None,
         )

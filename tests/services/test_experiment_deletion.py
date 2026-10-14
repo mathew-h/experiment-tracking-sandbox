@@ -65,7 +65,6 @@ def _full_experiment(db: Session, experiment_id="DEL_FULL_001", number=7101) -> 
         time_post_reaction_days=7.0,
         time_post_reaction_bucket_days=7.0,
         is_primary_timepoint_result=True,
-        description="t7 sample",
     )
     db.add(result)
     db.flush()
@@ -158,7 +157,7 @@ def test_collect_impact_reports_background_dependents_by_string(db):
     db.flush()
 
     result = ExperimentalResults(experiment_fk=other.id, time_post_reaction_days=0.0,
-                                 is_primary_timepoint_result=True, description="t0")
+                                 is_primary_timepoint_result=True)
     db.add(result)
     db.flush()
     db.add(ScalarResults(result_id=result.id, background_experiment_id="DEL_BG_TARGET"))
@@ -290,7 +289,7 @@ def test_delete_decouples_background_string_and_fk(db):
     db.add_all([target, other])
     db.flush()
     result = ExperimentalResults(experiment_fk=other.id, time_post_reaction_days=0.0,
-                                 is_primary_timepoint_result=True, description="t0")
+                                 is_primary_timepoint_result=True)
     db.add(result)
     db.flush()
     db.add(ScalarResults(result_id=result.id, background_experiment_id="DEL_BG2_TARGET",

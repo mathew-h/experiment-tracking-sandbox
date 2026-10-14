@@ -58,7 +58,7 @@ def _note(db, exp, text_, **kw) -> ExperimentNotes:
 
 def _result(db, exp, day) -> ExperimentalResults:
     r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=day,
-                            time_post_reaction_bucket_days=day, description="legacy", is_primary_timepoint_result=True)
+                            time_post_reaction_bucket_days=day, is_primary_timepoint_result=True)
     db.add(r)
     db.flush()
     return r

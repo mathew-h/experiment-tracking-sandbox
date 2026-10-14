@@ -34,7 +34,7 @@ def _add_primary_scalar(db, exp, bucket, gross_nh4, h2_ppm=None):
     result = ExperimentalResults(
         experiment_fk=exp.id,
         time_post_reaction_days=bucket, time_post_reaction_bucket_days=bucket,
-        is_primary_timepoint_result=True, description=f"t={bucket}",
+        is_primary_timepoint_result=True,
     )
     db.add(result)
     db.flush()
@@ -289,7 +289,7 @@ class TestGroupLettersVsVials:
         db_session.add(ExperimentalResults(
             experiment_fk=vial.id,
             time_post_reaction_days=1.0, time_post_reaction_bucket_days=1.0,
-            is_primary_timepoint_result=True, description="t1",
+            is_primary_timepoint_result=True,
         ))
         db_session.commit()
 
@@ -327,7 +327,7 @@ class TestGroupLettersVsVials:
             db_session.add(ExperimentalResults(
                 experiment_fk=parent.id,
                 time_post_reaction_days=day, time_post_reaction_bucket_days=day,
-                is_primary_timepoint_result=True, description=f"t{day}",
+                is_primary_timepoint_result=True,
             ))
         db_session.commit()
 

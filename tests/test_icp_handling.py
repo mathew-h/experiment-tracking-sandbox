@@ -711,8 +711,7 @@ class TestICPModelMethods:
         exp_obj = test_db.query(Experiment).filter_by(experiment_id='Test_MH_001').first()
         exp_result = ExperimentalResults(
             experiment_fk=exp_obj.id,
-            time_post_reaction_days=1.0,
-            description='Test'
+            time_post_reaction_days=1.0
         )
         test_db.add(exp_result)
         test_db.flush()

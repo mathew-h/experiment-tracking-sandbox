@@ -71,7 +71,6 @@ def _make_result(db: Session, experiment: Experiment, bucket_days: float) -> Exp
         time_post_reaction_bucket_days=bucket_days,
         cumulative_time_post_reaction_days=bucket_days,
         is_primary_timepoint_result=True,
-        description=f"Result at {bucket_days}d",
     )
     db.add(er)
     db.flush()
@@ -207,7 +206,6 @@ class TestRollupCountsAreNotRowCounts:
                 time_post_reaction_days=None,
                 time_post_reaction_bucket_days=None,
                 is_primary_timepoint_result=True,
-                description="duplicate primary on the NULL bucket",
             )
             view_db.add(er)
             view_db.flush()

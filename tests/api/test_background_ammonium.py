@@ -39,7 +39,6 @@ def _make_scalar(db, exp, time_days=7.0, gross_mM=10.0, background_mM=0.2):
         experiment_fk=exp.id,
         time_post_reaction_days=time_days,
         time_post_reaction_bucket_days=time_days,
-        description=f"t={time_days}d",
         is_primary_timepoint_result=True,
     )
     db.add(result)
@@ -159,7 +158,6 @@ def test_scalar_create_default_background_ammonium(client, db_session):
         experiment_fk=exp.id,
         time_post_reaction_days=7.0,
         time_post_reaction_bucket_days=7.0,
-        description="t=7d",
         is_primary_timepoint_result=True,
     )
     db_session.add(result)

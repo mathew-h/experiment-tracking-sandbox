@@ -178,7 +178,6 @@ def test_get_experiment_results_with_flags(client, db_session):
         time_post_reaction_bucket_days=7.0,
         cumulative_time_post_reaction_days=7.0,
         is_primary_timepoint_result=True,
-        description="T7",
     )
     db_session.add(result)
     db_session.flush()
@@ -880,7 +879,6 @@ def test_patch_sample_id_calls_recalculate_on_scalars(client, db_session):
         time_post_reaction_bucket_days=1.0,
         cumulative_time_post_reaction_days=1.0,
         is_primary_timepoint_result=True,
-        description="T1",
     )
     db_session.add(result)
     db_session.flush()
@@ -1506,7 +1504,7 @@ def _experiment_with_dependents(db, experiment_id="IMPACT_001", number=7301):
     db.flush()
     result = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=7.0,
                                  time_post_reaction_bucket_days=7.0,
-                                 is_primary_timepoint_result=True, description="t7")
+                                 is_primary_timepoint_result=True)
     db.add(result)
     db.flush()
     db.add(ScalarResults(result_id=result.id, final_ph=7.2))
@@ -1579,7 +1577,7 @@ def test_delete_succeeds_when_experiment_is_anothers_background(client, db_sessi
     db_session.add_all([target, other])
     db_session.flush()
     result = ExperimentalResults(experiment_fk=other.id, time_post_reaction_days=0.0,
-                                 is_primary_timepoint_result=True, description="t0")
+                                 is_primary_timepoint_result=True)
     db_session.add(result)
     db_session.flush()
     db_session.add(ScalarResults(result_id=result.id,
@@ -1647,7 +1645,7 @@ def test_delete_impact_lists_background_dependents(client, db_session):
     db_session.add_all([target, other])
     db_session.flush()
     result = ExperimentalResults(experiment_fk=other.id, time_post_reaction_days=0.0,
-                                 is_primary_timepoint_result=True, description="t0")
+                                 is_primary_timepoint_result=True)
     db_session.add(result)
     db_session.flush()
     db_session.add(ScalarResults(result_id=result.id,

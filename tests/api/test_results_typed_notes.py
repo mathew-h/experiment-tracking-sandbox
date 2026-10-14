@@ -20,7 +20,7 @@ def _exp(db, eid, num):
 
 def _result(db, exp, day, **kw):
     r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=day,
-                            time_post_reaction_bucket_days=day, description="legacy", **kw)
+                            time_post_reaction_bucket_days=day, **kw)
     db.add(r)
     db.flush()
     return r
@@ -36,7 +36,7 @@ def _note(db, exp, text_, **kw):
 def test_results_list_flags_modification_from_notes_not_legacy_column(client, db_session):
     exp = _exp(db_session, "RTN_001", 7301)
     with_note = _result(db_session, exp, 1.0)
-    legacy_only = _result(db_session, exp, 2.0, brine_modification_description="legacy text, no note")
+    legacy_only = _result(db_session, exp, 2.0)
     neither = _result(db_session, exp, 3.0)
     _note(db_session, exp, "swapped brine", note_type=NoteType.modification, result_id=with_note.id)
     _note(db_session, exp, "cloudy", note_type=NoteType.observation, result_id=with_note.id)

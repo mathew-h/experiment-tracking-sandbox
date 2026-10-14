@@ -98,21 +98,10 @@ def test_master_upload_mirrors_both_text_columns_into_notes(db_session: Session)
         (7.0, "modification", "Replaced 5 mL brine with DI", "master_bulk_upload"),
         (7.0, "observation", "Liquid sample, slightly cloudy", "master_bulk_upload"),
     ]
-    # Legacy columns still written -- Power BI reads them until PR3.
-    day7 = db_session.execute(
-        select(ExperimentalResults).where(
-            ExperimentalResults.experiment_fk == exp.id, ExperimentalResults.time_post_reaction_days == 7.0,
-        )
-    ).scalar_one()
-    assert day7.description == "Liquid sample, slightly cloudy"
-    assert day7.brine_modification_description == "Replaced 5 mL brine with DI"
-    assert day7.has_brine_modification is True
 
 
 def test_master_blank_description_writes_no_note(db_session: Session):
-    """A blank Observation Note writes NO note row. The legacy NOT NULL column
-    keeps its generated fallback until PR3 (readers are unchanged in PR1), and
-    that generated text must never leak into the notes model."""
+    """A blank Observation Note writes NO note row and no placeholder of any kind."""
     exp = _seed_experiment(db_session, "TNM_002", 9118202)
     r = MasterBulkUploadService.from_bytes_ex(db_session, _dashboard(_V3_HEADERS, _rows("TNM_002")))
     assert r.errors == [], r.errors
@@ -121,8 +110,6 @@ def test_master_blank_description_writes_no_note(db_session: Session):
             ExperimentalResults.experiment_fk == exp.id, ExperimentalResults.time_post_reaction_days == 14.0,
         )
     ).scalar_one()
-    assert day14.description.startswith("Master upload"), "legacy fallback still owns the column in PR1"
-    assert day14.brine_modification_description is None
     assert [n for n in _notes(db_session, exp) if n.result_id == day14.id] == []
 
 
@@ -139,14 +126,14 @@ def test_master_v3_and_v4_headers_produce_identical_notes(db_session: Session):
     assert shape3 == shape4
     assert len(shape3) == 2
 
-    def legacy(exp):
+    def rows(exp):
         return sorted(
-            (row.time_post_reaction_days, row.description, row.brine_modification_description)
+            (row.time_post_reaction_days,)
             for row in db_session.execute(
                 select(ExperimentalResults).where(ExperimentalResults.experiment_fk == exp.id)
             ).scalars()
         )
-    assert legacy(a) == legacy(b)
+    assert rows(a) == rows(b)
 
 
 def test_master_reupload_updates_note_slot_instead_of_appending(db_session: Session):
@@ -175,7 +162,7 @@ def test_master_reupload_updates_note_slot_instead_of_appending(db_session: Sess
 
 def _seed_result(db: Session, exp: Experiment, day: float) -> ExperimentalResults:
     r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=day,
-                            time_post_reaction_bucket_days=day, description=f"Day {day}")
+                            time_post_reaction_bucket_days=day)
     db.add(r)
     db.flush()
     return r
@@ -192,8 +179,6 @@ def test_timepoint_modifications_mirror_into_modification_note(db_session: Sessi
         db_session, xlsx, modified_by="tester@addisenergy.com",
     )
     assert errors == [] and updated == 1
-    db_session.refresh(r)
-    assert r.brine_modification_description == "Added 5 g Mg(OH)2"
     notes = _notes(db_session, exp)
     assert [(n.note_type, n.result_id, n.note_text, n.created_by) for n in notes] == [
         (NoteType.modification, r.id, "Added 5 g Mg(OH)2", "tester@addisenergy.com"),
@@ -209,9 +194,9 @@ def test_timepoint_modifications_v4_header_is_accepted(db_session: Session):
     assert [n.note_text for n in _notes(db_session, exp)] == ["swapped brine"]
 
 
-def test_timepoint_modifications_overwrite_blank_clears_column_and_note(db_session: Session):
+def test_timepoint_modifications_overwrite_blank_deletes_the_callers_note(db_session: Session):
     exp = _seed_experiment(db_session, "TNT_003", 9118303)
-    r = _seed_result(db_session, exp, 7.0)
+    _seed_result(db_session, exp, 7.0)
     set_xlsx = make_excel(_TP_HEADERS, [["TNT_003", 7.0, "first", "FALSE"]])
     TimepointModificationsService.bulk_set_from_bytes(db_session, set_xlsx, modified_by="u")
     assert len(_notes(db_session, exp)) == 1
@@ -221,9 +206,6 @@ def test_timepoint_modifications_overwrite_blank_clears_column_and_note(db_sessi
         db_session, clear_xlsx, modified_by="u",
     )
     assert errors == [] and updated == 1
-    db_session.refresh(r)
-    assert r.brine_modification_description is None
-    assert r.has_brine_modification is False
     assert _notes(db_session, exp) == []
 
 
