@@ -4,7 +4,7 @@ import structlog
 from sqlalchemy.orm import Session
 from database import Experiment, ExperimentalResults, ScalarResults, ModificationsLog
 from database.models.enums import NoteType
-from backend.services.notes import sync_result_note
+from backend.services.notes import _clean, sync_result_note
 from backend.services.result_merge_utils import (
     apply_id_timepoint,
     create_experimental_result_row,
@@ -238,11 +238,12 @@ class ScalarResultsService:
         # Touch parent entry and flush IDs if needed
         db.add(experimental_result)
         db.flush()
-        if note_source and observation is not None and str(observation).strip():
+        observation_text = _clean(observation) if isinstance(observation, str) else None
+        if note_source and observation_text is not None:
             # Same slot semantics as the Master parser: text present -> create or
             # update the parser's slot; blank -> no call, an earlier mirror stays.
             sync_result_note(
-                db, experimental_result, NoteType.observation, str(observation),
+                db, experimental_result, NoteType.observation, observation_text,
                 created_by=note_source,
             )
         ensure_primary_result_for_timepoint(
