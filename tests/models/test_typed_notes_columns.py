@@ -28,7 +28,6 @@ def _result(db, exp, day):
         experiment_fk=exp.id,
         time_post_reaction_days=day,
         time_post_reaction_bucket_days=day,
-        description="seed",
     )
     db.add(r)
     db.flush()

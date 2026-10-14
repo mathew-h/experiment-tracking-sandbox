@@ -15,13 +15,12 @@ for one deprecation window via _HEADER_ALIASES (internally the v3 names are
 canonical), and a v3 and a v4 workbook of the same data produce identical
 result rows and identical note rows.
 
-Typed notes (issue #118): both text columns are written twice during the
-transition -- to the legacy experimental_results columns Power BI still reads,
-and as experiment_notes rows (Observation Note -> 'observation', Modification
-Note -> 'modification', both scoped to the result) via
-backend.services.notes.sync_result_note, one slot per result so a re-upload
-updates rather than duplicates. A blank Observation Note writes NO note; the
-legacy column keeps its generated 'Master upload — day N' fallback until PR3.
+Typed notes (issue #118; column writes ended by issue #122 PR-D): the two text
+columns are experiment_notes rows scoped to the result -- Observation Note ->
+'observation' through ScalarResultsService's `_note_source` mirror, Modification
+Note -> 'modification' through sync_result_note here -- one slot per
+(result, type, created_by='master_bulk_upload') so a re-upload updates rather
+than duplicates. A blank cell writes NO note and leaves an earlier one in place.
 
 Several rows may describe one vial-day. Gas is drawn and run on one date and the
 liquid/solid fraction is collected later, so each fraction gets its own row;
@@ -990,12 +989,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
 
         result_data: Dict[str, Any] = {
             "time_post_reaction": time_post_reaction,
-            # Legacy NOT NULL column. The generated fallback stays until PR3 of
-            # issue #118 removes the column from v_results_scalar (deleting it
-            # earlier would change what Power BI shows for a blank cell, and
-            # PR1 changes nothing a reader sees). The typed-note mirror below
-            # writes NO note for a blank cell -- a blank note is legal there.
-            "description": description or f"Master upload — day {time_post_reaction}",
+            # PR-D: the Observation Note is mirrored by create_scalar_result_ex
+            # into the 'observation' slot signed _NOTE_SOURCE; None -> no note.
+            "description": description,
+            "_note_source": _NOTE_SOURCE,
             "measurement_date": sample_date,
             "nmr_run_date": nmr_run_date,
             "icp_run_date": icp_run_date,
@@ -1035,19 +1032,7 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             upsert = ScalarResultsService.create_scalar_result_ex(db, exp_id, result_data)
             exp_result = upsert.experimental_result
 
-            # Apply modification description if provided
-            if modification:
-                exp_result.brine_modification_description = modification
-
-            # Issue #118 dual-write, inside the same SAVEPOINT so a note
-            # failure rolls back only this vial-day. The legacy columns above
-            # remain what Power BI reads until PR3; the same text is mirrored
-            # into one typed-note slot per (result, type) so both sides agree
-            # after a re-upload, not just the first one. Blank -> no note.
-            if description:
-                sync_result_note(
-                    db, exp_result, NoteType.observation, description, created_by=_NOTE_SOURCE,
-                )
+            # The Modification Note is this parser's own 'modification' slot (inside the vial-day's SAVEPOINT).
             if modification:
                 sync_result_note(
                     db, exp_result, NoteType.modification, modification, created_by=_NOTE_SOURCE,

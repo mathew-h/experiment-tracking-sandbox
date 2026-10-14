@@ -1,8 +1,10 @@
 from typing import Optional, Dict, Any, List, Tuple
 
 import structlog
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from database import Experiment, ExperimentalResults, ScalarResults, ModificationsLog
+from database.models.enums import NoteType
+from backend.services.notes import _clean, sync_result_note
 from backend.services.result_merge_utils import (
     apply_id_timepoint,
     create_experimental_result_row,
@@ -86,6 +88,14 @@ class ScalarResultsService:
         # not opted in. See the overwrite branch below for why this matters.
         sheet_fields = result_data.pop('_sheet_fields', None)
 
+        # Issue #122 PR-D: a parser's free-text Description column is an
+        # 'observation' note on the result, not a result column. `_note_source`
+        # names the parser (the note's created_by, which is also its slot key in
+        # sync_result_note) and `description` is the text. Without `_note_source`
+        # the text is dropped: no caller may write a note it did not sign.
+        note_source = result_data.pop('_note_source', None)
+        observation = result_data.pop('description', None)
+
         # Ensure h2_concentration_unit defaults to ppm if concentration is present
         if result_data.get('h2_concentration') is not None:
             if not result_data.get('h2_concentration_unit'):
@@ -96,10 +106,11 @@ class ScalarResultsService:
         if not experiment:
             # Try to auto-create if this is a treatment variant with existing parent
             from database.lineage_utils import auto_create_treatment_experiment
+            # PR-D: an auto-created treatment experiment gets no filler description note.
             experiment = auto_create_treatment_experiment(
                 db=db,
                 experiment_id=experiment_id,
-                initial_note=result_data.get('description', 'Auto-created from scalar results upload')
+                initial_note=None,
             )
             if not experiment:
                 raise ValueError(f"Experiment with ID '{experiment_id}' not found and could not be auto-created.")
@@ -123,7 +134,6 @@ class ScalarResultsService:
             db=db,
             experiment=experiment,
             time_post_reaction=time_post_reaction,
-            description=result_data.get('description'),
             incoming_data_type="scalar",
         )
         
@@ -228,6 +238,14 @@ class ScalarResultsService:
         # Touch parent entry and flush IDs if needed
         db.add(experimental_result)
         db.flush()
+        observation_text = _clean(observation) if observation is not None else None
+        if note_source and observation_text is not None:
+            # Same slot semantics as the Master parser: text present -> create or
+            # update the parser's slot; blank -> no call, an earlier mirror stays.
+            sync_result_note(
+                db, experimental_result, NoteType.observation, observation_text,
+                created_by=note_source,
+            )
         ensure_primary_result_for_timepoint(
             db=db,
             experiment_fk=experiment.id,
@@ -295,14 +313,6 @@ class ScalarResultsService:
                     errors.append(f"Row {row_num}: Missing experiment_id.")
                     feedbacks.append(fb)
                     continue
-
-                # Auto-generate description when not provided
-                if not row_data.get('description'):
-                    time_val = row_data.get('time_post_reaction')
-                    if time_val is not None:
-                        row_data['description'] = f"Day {time_val} results"
-                    else:
-                        row_data['description'] = "Analysis results"
 
                 # Use a savepoint so a failed row doesn't poison the session
                 savepoint = db.begin_nested()
@@ -373,22 +383,25 @@ class ScalarResultsService:
     
     @staticmethod
     def _find_or_create_experimental_result(
-        db: Session, 
-        experiment: Experiment, 
-        time_post_reaction: float = None, 
-        description: str = None,
+        db: Session,
+        experiment: Experiment,
+        time_post_reaction: float = None,
         incoming_data_type: str = "scalar",
     ) -> ExperimentalResults:
         """
         Find existing ExperimentalResults or create new one.
         Reuses any existing result for the same time point (Scalar service handles updates/merges).
-        
+
+        A legacy NULL-time row is never adopted: a re-upload with a time creates
+        or updates the timed row and leaves the NULL-time row to the NULL-bucket
+        cleanup (issue #122 PR-D, Mat's ruling 2026-10-12 -- the description-keyed
+        fallback that used to fill such rows went with the description column).
+
         Args:
             db: Database session
             experiment: Experiment object
             time_post_reaction: Time point in days (optional)
-            description: Optional description
-            
+
         Returns:
             ExperimentalResults object (new or existing)
         """
@@ -399,49 +412,13 @@ class ScalarResultsService:
         )
         existing = choose_parent_candidate(candidates, incoming_data_type=incoming_data_type)
         if existing:
-            # User-provided scalar descriptions take priority over auto-generated ones
-            if description:
-                existing.description = description
             return existing
-
-        # Fallback: match a NULL-time row for the same experiment by description.
-        # This handles re-uploads that restore missing time values.
-        if time_post_reaction is not None and description:
-            from backend.services.result_merge_utils import normalize_timepoint as _norm_tp
-            null_time_match = (
-                db.query(ExperimentalResults)
-                .options(
-                    joinedload(ExperimentalResults.scalar_data),
-                    joinedload(ExperimentalResults.icp_data),
-                )
-                .filter(
-                    ExperimentalResults.experiment_fk == experiment.id,
-                    ExperimentalResults.time_post_reaction_days.is_(None),
-                    ExperimentalResults.description == description,
-                )
-                .first()
-            )
-            if null_time_match:
-                null_time_match.time_post_reaction_days = time_post_reaction
-                null_time_match.time_post_reaction_bucket_days = _norm_tp(time_post_reaction)
-                if description:
-                    null_time_match.description = description
-                return null_time_match
-
-        # Create new parent result row when no timepoint candidate exists.
-        description_text = description
-        if not description_text:
-            if time_post_reaction is not None:
-                description_text = f"Analysis results for Day {time_post_reaction}"
-            else:
-                description_text = "Analysis results"
         return create_experimental_result_row(
             db=db,
             experiment=experiment,
             time_post_reaction=time_post_reaction,
-            description=description_text,
         )
-    
+
     @staticmethod
     def get_scalar_results_for_experiment(db: Session, experiment_id: str) -> List[ScalarResults]:
         """

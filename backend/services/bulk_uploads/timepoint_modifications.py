@@ -1,11 +1,9 @@
-"""Bulk-set brine_modification_description on ExperimentalResults rows.
+"""Bulk-add 'modification' notes to existing result timepoints.
 
-Issue #118 (typed notes): every write here is mirrored into the result's
-'modification' note slot through backend.services.notes.sync_result_note --
-set the column, set the note; clear the column, delete the note -- so the
-legacy column Power BI still reads and the notes model never disagree during
-the transition. `created_by` on the mirrored note is this call's
-`modified_by`, which is also the slot key, so a researcher's hand-written
+Issue #118 introduced the typed-note slot; issue #122 PR-D dropped the legacy
+column this upload used to set, so a row writes only the note. The note's
+`created_by` is this call's `modified_by`, which is also the slot key in
+backend.services.notes.sync_result_note, so a researcher's hand-written
 modification note on the same result is never overwritten by an upload.
 """
 from __future__ import annotations
@@ -14,9 +12,10 @@ import io
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from database import Experiment, ExperimentalResults, ModificationsLog
+from database import Experiment, ExperimentalResults, ExperimentNotes, ModificationsLog
 from database.models.enums import NoteType
 from backend.services.notes import sync_result_note
 from backend.services.result_merge_utils import find_timepoint_candidates
@@ -27,7 +26,6 @@ _EXPERIMENT_ID_ALIASES = {"experiment_id", "experiment id", "exp_id", "exp id"}
 _TIME_POINT_ALIASES = {"time_point", "time (days)", "time(days)", "duration (days)", "days"}
 _MODIFICATION_ALIASES = {
     "modification_description", "experiment_modification", "modification", "description",
-    "brine_modification_description",
     "modification note",  # Dashboard template v4 spelling (issue #118)
 }
 _OVERWRITE_ALIASES = {"overwrite_existing", "overwrite"}
@@ -50,6 +48,15 @@ def _parse_bool(val: Any) -> bool:
     return False
 
 
+def _modification_notes(db: Session, result: ExperimentalResults) -> List[ExperimentNotes]:
+    """Every 'modification' note scoped to this result, any author, id order."""
+    return list(db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.result_id == result.id, ExperimentNotes.note_type == NoteType.modification)
+        .order_by(ExperimentNotes.id)
+    ).scalars())
+
+
 class TimepointModificationsService:
     @staticmethod
     def bulk_set_from_bytes(
@@ -59,11 +66,8 @@ class TimepointModificationsService:
         modified_by: str = "bulk_upload",
     ) -> Tuple[int, int, List[str], List[Dict[str, Any]]]:
         """
-        Read an Excel/CSV file and set brine_modification_description on
-        matching ExperimentalResults rows.
-
-        The model @validates('brine_modification_description') automatically
-        syncs has_brine_modification.
+        Read an Excel/CSV file and set the 'modification' note on matching
+        ExperimentalResults rows (one slot per modified_by).
 
         Returns (updated, skipped, errors, feedbacks).
         """
@@ -189,35 +193,33 @@ class TimepointModificationsService:
 
             target: ExperimentalResults = candidates[0]
 
-            # --- Overwrite guard ---
-            if target.brine_modification_description and not row_overwrite:
+            # --- Overwrite guard: any existing modification note, any author ---
+            existing_notes = _modification_notes(db, target)
+            if existing_notes and not row_overwrite:
                 skipped += 1
                 feedbacks.append({
                     "row": row_num,
                     "experiment_id": canonical_exp_id,
                     "time_point": tp,
                     "status": "skipped",
-                    "reason": "modification already set; pass overwrite_existing=true to replace",
+                    "reason": "a modification note already exists on this timepoint; "
+                              "pass overwrite_existing=true to write yours",
                 })
                 continue
 
-            # --- Apply ---
-            old_val = target.brine_modification_description
-            target.brine_modification_description = modification or None
-            # Issue #118 dual-write: mirror the column into the typed-note slot.
-            sync_result_note(
-                db, target, NoteType.modification, modification or None, created_by=modified_by,
-            )
+            # --- Apply: this caller's own slot only; other authors' notes stay ---
+            old_text = next((n.note_text for n in existing_notes if n.created_by == modified_by), None)
+            new_text = modification or None
+            sync_result_note(db, target, NoteType.modification, new_text, created_by=modified_by)
 
-            # Audit log
             db.add(ModificationsLog(
                 experiment_id=canonical_exp_id,
                 experiment_fk=experiment.id,
                 modified_by=modified_by,
                 modification_type="update",
-                modified_table="experimental_results",
-                old_values={"brine_modification_description": old_val},
-                new_values={"brine_modification_description": modification or None},
+                modified_table="experiment_notes",
+                old_values={"result_id": target.id, "note_text": old_text},
+                new_values={"result_id": target.id, "note_text": new_text},
             ))
             updated += 1
             feedbacks.append({
@@ -274,14 +276,15 @@ class TimepointModificationsService:
             ["time_point", "Yes",
              "Time post-reaction in days (float). Matched with ±0.0001 day tolerance."],
             ["modification_description", "Yes",
-             "Free-text description of the modification at this timepoint."],
+             "Free text stored as a modification note on this timepoint (shows the MOD badge)."],
             ["overwrite_existing", "No",
-             "Set TRUE to overwrite an existing modification. Default: FALSE."],
+             "Set TRUE to write your own note when a modification note by anyone already exists (other authors' notes are never changed). Default: FALSE."],
             [""],
             ["Notes:"],
             ["- Yellow headers are required. Green headers are optional."],
-            ["- If a matching result row already has a modification description,"],
-            ["  the row will be skipped unless overwrite_existing=TRUE."],
+            ["- If the timepoint already has a modification note (by anyone),"],
+            ["  the row is skipped unless overwrite_existing=TRUE; overwrite only"],
+            ["  writes or replaces your own note, never someone else's."],
             ["- Duplicate (experiment_id, time_point) pairs in a single file are rejected."],
         ]
         for r in rows:

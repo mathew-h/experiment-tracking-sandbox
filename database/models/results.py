@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text, Index, Boolean, UniqueConstraint, text
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Index, Boolean, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
@@ -30,20 +30,12 @@ class ExperimentalResults(Base):
     time_post_reaction_bucket_days = Column(Float, nullable=True, index=True) # Normalized bucket for tolerant matching
     cumulative_time_post_reaction_days = Column(Float, nullable=True, index=True) # Cumulative time across lineage chain (days)
     is_primary_timepoint_result = Column(Boolean, nullable=False, default=True, server_default=text("true"), index=True)
-    description = Column(Text, nullable=False)
-
-    # Brine modification tracking — operational metadata about what happened at this timepoint
-    brine_modification_description = Column(Text, nullable=True)
-    has_brine_modification = Column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
+    # Free text about a timepoint lives in experiment_notes (issue #118):
+    # the legacy description / brine-modification columns were dropped by
+    # Alembic b8c4e2d7f9a1 (issue #122 PR-D, 2026-10-14).
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    @validates('brine_modification_description')
-    def sync_brine_flag(self, key, value):
-        """Auto-sync has_brine_modification whenever brine_modification_description is set."""
-        self.has_brine_modification = bool(value and str(value).strip())
-        return value
 
     # Relationship
     experiment = relationship("Experiment", back_populates="results", foreign_keys=[experiment_fk])

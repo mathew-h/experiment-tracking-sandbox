@@ -297,9 +297,9 @@ def quick_upload_from_excel(
                 except (ValueError, TypeError):
                     pass
 
-        # Auto-generate description
-        if not clean.get("description"):
-            clean["description"] = f"Day {clean['time_post_reaction']} results"
+        # PR-D: the Description column is an 'observation' note signed by
+        # this parser; create_scalar_result_ex mirrors it (blank -> no note).
+        clean["_note_source"] = "quick_upload"
 
         clean["_overwrite"] = overwrite_all
 
@@ -316,7 +316,7 @@ def quick_upload_from_excel(
             fb.fields_updated = [
                 f for f in row_data
                 if f not in ("experiment_id", "time_post_reaction", "description",
-                             "_overwrite", "measurement_date")
+                             "_overwrite", "_note_source", "measurement_date")
             ]
             feedbacks.append(fb.to_dict())
             continue
@@ -341,7 +341,7 @@ def quick_upload_from_excel(
                 # Report which fields were provided
                 data_fields = {
                     f for f in row_data
-                    if f not in ("_overwrite", "description", "time_post_reaction")
+                    if f not in ("_overwrite", "_note_source", "description", "time_post_reaction")
                     and row_data.get(f) is not None
                 }
                 fb.fields_updated = sorted(data_fields)

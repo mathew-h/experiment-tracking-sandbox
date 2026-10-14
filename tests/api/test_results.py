@@ -12,7 +12,6 @@ def _seed(db):
     db.flush()
     result = ExperimentalResults(
         experiment_fk=exp.id,
-        description="T0",
         is_primary_timepoint_result=True,
         time_post_reaction_days=0.0,
         time_post_reaction_bucket_days=0.0,
@@ -34,14 +33,13 @@ def test_create_result(client, db_session):
     exp, _ = _seed(db_session)
     payload = {
         "experiment_fk": exp.id,
-        "description": "Day 7",
         "time_post_reaction_days": 7.0,
         "time_post_reaction_bucket_days": 7.0,
         "is_primary_timepoint_result": False,
     }
     resp = client.post("/api/results", json=payload)
     assert resp.status_code == 201
-    assert resp.json()["description"] == "Day 7"
+    assert "description" not in resp.json()
 
 
 def test_create_scalar_triggers_calculation(client, db_session):
@@ -72,7 +70,6 @@ def test_create_result_rejects_nonexistent_fk(client):
     """
     payload = {
         "experiment_fk": 999999,  # no experiment with this integer PK
-        "description": "Should fail",
         "is_primary_timepoint_result": False,
     }
     resp = client.post("/api/results", json=payload)
@@ -89,7 +86,6 @@ def test_create_result_rejects_nonnumeric_string_fk(client):
     """
     payload = {
         "experiment_fk": "HPHT_001",  # the string experiment_id — wrong field
-        "description": "Should fail",
     }
     resp = client.post("/api/results", json=payload)
     assert resp.status_code == 422
@@ -103,7 +99,6 @@ def test_create_result_rejects_numeric_string_fk(client):
     """
     payload = {
         "experiment_fk": "42",  # a numeric string — should be rejected by strict mode
-        "description": "Should fail",
     }
     resp = client.post("/api/results", json=payload)
     assert resp.status_code == 422
@@ -111,7 +106,7 @@ def test_create_result_rejects_numeric_string_fk(client):
 
 def test_create_result_404_message_guides_caller(client):
     """404 detail message must mention 'experiment' and the bad PK value."""
-    payload = {"experiment_fk": 888888, "description": "x"}
+    payload = {"experiment_fk": 888888}
     resp = client.post("/api/results", json=payload)
     assert resp.status_code == 404
     detail = resp.json()["detail"].lower()
@@ -302,7 +297,6 @@ def test_create_result_omitted_time_filled_from_id(client, db_session):
     exp = _seed_timepoint_exp(db_session, "SERUM_070a-t7", 6070)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "auto-filled",
         "is_primary_timepoint_result": True,
     })
     assert resp.status_code == 201
@@ -313,7 +307,6 @@ def test_create_result_matching_time_accepted(client, db_session):
     exp = _seed_timepoint_exp(db_session, "SERUM_071a-t7", 6071)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "match",
         "time_post_reaction_days": 7.0,
         "is_primary_timepoint_result": True,
     })
@@ -324,7 +317,6 @@ def test_create_result_conflicting_time_422(client, db_session):
     exp = _seed_timepoint_exp(db_session, "SERUM_072a-t7", 6072)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "conflict",
         "time_post_reaction_days": 3.0,
         "is_primary_timepoint_result": True,
     })
@@ -336,7 +328,6 @@ def test_create_result_untimed_experiment_unaffected(client, db_session):
     exp = _seed_timepoint_exp(db_session, "SERUM_073a", 6073)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "free",
         "time_post_reaction_days": 3.0,
         "is_primary_timepoint_result": True,
     })
@@ -351,7 +342,6 @@ def test_create_result_sets_bucket_from_days(client, db_session):
     exp, _ = _seed(db_session)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "Day 7",
         "time_post_reaction_days": 7.0,
     })
     assert resp.status_code == 201
@@ -362,7 +352,6 @@ def test_create_result_bucket_rounds_to_4_decimals(client, db_session):
     exp, _ = _seed(db_session)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "odd time",
         "time_post_reaction_days": 7.123456,
     })
     assert resp.status_code == 201
@@ -375,7 +364,6 @@ def test_create_result_overrides_client_supplied_bucket(client, db_session):
     exp, _ = _seed(db_session)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "lying client",
         "time_post_reaction_days": 7.0,
         "time_post_reaction_bucket_days": 99.0,
     })
@@ -388,7 +376,6 @@ def test_create_result_null_days_null_bucket(client, db_session):
     exp, _ = _seed(db_session)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "no time yet",
         "is_primary_timepoint_result": False,
     })
     assert resp.status_code == 201
@@ -407,7 +394,6 @@ def test_create_result_bucket_from_id_timepoint_token(client, db_session):
     assert exp.id_timepoint_days == 7.0
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "token vial",
     })
     assert resp.status_code == 201
     body = resp.json()
@@ -421,7 +407,6 @@ def test_create_result_same_day_newest_wins(client, db_session):
     exp, first = _seed(db_session)  # first: day 0.0, bucket 0.0, primary
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "corrected day-0 entry",
         "time_post_reaction_days": 0.0,
     })
     assert resp.status_code == 201
@@ -436,7 +421,6 @@ def test_create_result_nonprimary_leaves_existing_primary(client, db_session):
     exp, first = _seed(db_session)
     resp = client.post("/api/results", json={
         "experiment_fk": exp.id,
-        "description": "extra vial draw",
         "time_post_reaction_days": 0.0,
         "is_primary_timepoint_result": False,
     })
@@ -460,7 +444,10 @@ def _notes_for(db, result_id):
     ).scalars().all()
 
 
-def test_create_result_mirrors_description_and_modification_into_notes(client, db_session):
+def test_create_result_ignores_legacy_text_fields_and_writes_no_notes(client, db_session):
+    """Issue #122 PR-D: the result row carries no free text. An old client that
+    still sends the two legacy keys is not broken (unknown keys are ignored),
+    but nothing is written for them -- notes go through POST /experiments/{id}/notes."""
     exp, _ = _seed(db_session)
     payload = {
         "experiment_fk": exp.id,
@@ -472,38 +459,6 @@ def test_create_result_mirrors_description_and_modification_into_notes(client, d
     resp = client.post("/api/results", json=payload)
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    # Legacy columns still written -- readers are unchanged in PR1.
-    assert body["description"] == payload["description"]
-    row = db_session.get(ExperimentalResults, body["id"])
-    assert row.brine_modification_description == payload["brine_modification_description"]
-    assert row.has_brine_modification is True
-    # ...and mirrored as typed notes with matching text.
-    notes = _notes_for(db_session, body["id"])
-    got = {n.note_type: n for n in notes}
-    assert set(got) == {NoteType.observation, NoteType.modification}
-    assert got[NoteType.observation].note_text == payload["description"]
-    assert got[NoteType.modification].note_text == payload["brine_modification_description"]
-    assert all(n.created_by == "test@addisenergy.com" for n in notes)
-    assert all(n.experiment_fk == exp.id and n.experiment_id == exp.experiment_id for n in notes)
-
-
-def test_create_result_without_modification_writes_only_observation(client, db_session):
-    exp, _ = _seed(db_session)
-    resp = client.post("/api/results", json={
-        "experiment_fk": exp.id, "description": "Day 7", "time_post_reaction_days": 7.0,
-    })
-    assert resp.status_code == 201, resp.text
-    notes = _notes_for(db_session, resp.json()["id"])
-    assert [(n.note_type, n.note_text) for n in notes] == [(NoteType.observation, "Day 7")]
-
-
-def test_create_result_blank_texts_write_no_notes(client, db_session):
-    """Nothing is required at entry and blank text carries no information: the
-    legacy column stores what it always did, the notes side stays empty."""
-    exp, _ = _seed(db_session)
-    resp = client.post("/api/results", json={
-        "experiment_fk": exp.id, "description": "   ",
-        "brine_modification_description": "", "time_post_reaction_days": 7.0,
-    })
-    assert resp.status_code == 201, resp.text
-    assert _notes_for(db_session, resp.json()["id"]) == []
+    assert "description" not in body
+    assert "brine_modification_description" not in body
+    assert _notes_for(db_session, body["id"]) == []

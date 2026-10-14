@@ -117,7 +117,7 @@ from database.models.results import ExperimentalResults  # noqa: E402
 
 def _make_result(db, exp, day=1.0):
     r = ExperimentalResults(
-        experiment_fk=exp.id, description="seed",
+        experiment_fk=exp.id,
         time_post_reaction_days=day, time_post_reaction_bucket_days=day,
     )
     db.add(r)

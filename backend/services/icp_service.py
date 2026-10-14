@@ -644,10 +644,11 @@ class ICPService:
         if not experiment:
             # Keep behavior aligned with scalar uploads for treatment-variant IDs.
             from database.lineage_utils import auto_create_treatment_experiment
+            # PR-D: an auto-created treatment experiment gets no filler description note.
             experiment = auto_create_treatment_experiment(
                 db=db,
                 experiment_id=experiment_id,
-                initial_note=result_data.get('description', 'Auto-created from ICP upload')
+                initial_note=None,
             )
             if not experiment:
                 raise ValueError(f"Experiment with ID '{experiment_id}' not found and could not be auto-created.")
@@ -657,7 +658,6 @@ class ICPService:
             db=db,
             experiment=experiment,
             time_post_reaction=result_data['time_post_reaction'],
-            description=f"Day {result_data['time_post_reaction']} results"
         )
         
         # Separate fixed columns from all elemental data
@@ -942,7 +942,6 @@ class ICPService:
         db: Session, 
         experiment: Experiment, 
         time_post_reaction: float = None, 
-        description: str = None,
         incoming_data_type: str = "icp",
     ) -> ExperimentalResults:
         """
@@ -953,7 +952,6 @@ class ICPService:
             db: Database session
             experiment: Experiment object
             time_post_reaction: Time point in days (optional)
-            description: Optional description
             
         Returns:
             ExperimentalResults object (new or existing)
@@ -965,23 +963,10 @@ class ICPService:
         )
         existing = choose_parent_candidate(candidates, incoming_data_type=incoming_data_type)
         if existing:
-            # ICP metadata (raw_label) is stored on the ICP record itself;
-            # don't pollute the parent description with auto-generated ICP text.
+            # ICP metadata (raw_label) is stored on the ICP record itself.
             return existing
 
-        # Create new parent result row when no candidate exists for the time bucket.
-        description_text = description
-        if not description_text:
-            if time_post_reaction is not None:
-                description_text = f"Analysis results for Day {time_post_reaction}"
-            else:
-                description_text = "Analysis results"
-        return create_experimental_result_row(
-            db=db,
-            experiment=experiment,
-            time_post_reaction=time_post_reaction,
-            description=description_text,
-        )
+        return create_experimental_result_row(db=db, experiment=experiment, time_post_reaction=time_post_reaction)
     
     @staticmethod
     def validate_icp_data(processed_data: List[Dict[str, Any]]) -> List[str]:

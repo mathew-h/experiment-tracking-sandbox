@@ -54,7 +54,7 @@ def _make_experiment(db, experiment_id, number):
 def _add_result(db, exp, days, bucket, primary,
                 with_scalar=False, with_icp=False):
     row = ExperimentalResults(
-        experiment_fk=exp.id, description=f"t={days}",
+        experiment_fk=exp.id,
         time_post_reaction_days=days, time_post_reaction_bucket_days=bucket,
         is_primary_timepoint_result=primary,
     )

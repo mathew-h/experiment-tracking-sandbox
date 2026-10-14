@@ -13,8 +13,6 @@ from backend.api.schemas.results import (
     ResultCreate, ResultResponse, ScalarCreate, ScalarUpdate,
     ScalarResponse, ICPCreate, ICPResponse,
 )
-from backend.services.notes import add_note
-from database.models.enums import NoteType
 from backend.services.result_merge_utils import (
     apply_id_timepoint,
     normalize_timepoint,
@@ -118,29 +116,9 @@ def create_result(
             )
             .values(is_primary_timepoint_result=False)
         )
-    # Issue #118 PR3: description is optional at entry. The legacy column is
-    # NOT NULL until PR4 drops it, so a blank gets a generated placeholder that
-    # is never mirrored (the 020 backfill treats such text as filler).
-    description = (data.get("description") or "").strip()
-    if not description:
-        day = data.get("time_post_reaction_days")
-        data["description"] = f"Day {day} results" if day is not None else "Analysis results"
     result = ExperimentalResults(**data)
     db.add(result)
     db.flush()
-    # Issue #118 dual-write: researcher-supplied text is mirrored as typed
-    # notes; the legacy columns are written too until PR4. Blank -> no note.
-    if description:
-        add_note(
-            db, exp, description,
-            note_type=NoteType.observation, result_id=result.id, created_by=current_user.email,
-        )
-    modification = (data.get("brine_modification_description") or "").strip()
-    if modification:
-        add_note(
-            db, exp, modification,
-            note_type=NoteType.modification, result_id=result.id, created_by=current_user.email,
-        )
     db.commit()
     db.refresh(result)
     log.info("result_created", experiment_fk=result.experiment_fk, result_id=result.id)

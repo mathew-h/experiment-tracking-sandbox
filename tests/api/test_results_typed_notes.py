@@ -20,7 +20,7 @@ def _exp(db, eid, num):
 
 def _result(db, exp, day, **kw):
     r = ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=day,
-                            time_post_reaction_bucket_days=day, description="legacy", **kw)
+                            time_post_reaction_bucket_days=day, **kw)
     db.add(r)
     db.flush()
     return r
@@ -36,7 +36,7 @@ def _note(db, exp, text_, **kw):
 def test_results_list_flags_modification_from_notes_not_legacy_column(client, db_session):
     exp = _exp(db_session, "RTN_001", 7301)
     with_note = _result(db_session, exp, 1.0)
-    legacy_only = _result(db_session, exp, 2.0, brine_modification_description="legacy text, no note")
+    legacy_only = _result(db_session, exp, 2.0)
     neither = _result(db_session, exp, 3.0)
     _note(db_session, exp, "swapped brine", note_type=NoteType.modification, result_id=with_note.id)
     _note(db_session, exp, "cloudy", note_type=NoteType.observation, result_id=with_note.id)
@@ -71,15 +71,16 @@ def test_experiment_detail_notes_carry_their_type(client, db_session):
     ]
 
 
-def test_create_result_without_description_uses_placeholder_and_writes_no_note(client, db_session):
+def test_create_result_returns_no_description_and_writes_no_note(client, db_session):
     exp = _exp(db_session, "RTN_003", 7303)
     db_session.commit()
     resp = client.post("/api/results", json={"experiment_fk": exp.id, "time_post_reaction_days": 7.0})
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["description"] == "Day 7.0 results"
+    assert "description" not in resp.json()
     listed = client.get(f"/api/experiments/{exp.experiment_id}/results").json()
     assert listed[0]["notes"] == []
+    assert "description" not in listed[0]
+    assert "brine_modification_description" not in listed[0]
 
 
 def test_list_item_description_is_the_typed_description(client, db_session):

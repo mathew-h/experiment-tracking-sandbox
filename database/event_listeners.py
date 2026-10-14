@@ -461,7 +461,7 @@ _VIEWS = [
     # experiment.  Sits between v_experiments and the result fact views
     # (v_results_scalar, v_results_h2, v_results_icp) so PowerBI report
     # authors have a single authoritative source for time-axis fields.
-    # modification_note (issue #118 PR3) replaces brine_modification_description:
+    # modification_note (issue #118 PR3) replaced the legacy per-result modification column (dropped by issue #122 PR-D):
     # it is read from the 'modification' notes on the result, joined with '; '
     # in id order when there is more than one (an upload's mirror and a
     # hand-written one can coexist -- different created_by).

@@ -167,6 +167,7 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
   `experiment_id` to `v_experiments` and `result_id` to `v_dim_timepoints`; filter
   `note_type` for one kind, `needs_review = true` for the rows the migration left for a
   researcher to check. Update visuals bound to the two removed/renamed columns by hand.
+- **Legacy columns dropped (issue #122 PR-D, 2026-10-14).** `experimental_results.description`, `brine_modification_description` and `has_brine_modification` no longer exist; any custom query naming them fails. Read `v_notes` (`note_type = 'observation'` / `'modification'`, `result_id` → `v_dim_timepoints`) and `v_dim_timepoints.modification_note`.
 - **`event_date` (issue #122 PR-B, 2026-09-24).** Dated reactor modifications are
   `note_type = 'modification' AND event_date IS NOT NULL` in `v_notes`; this replaces
   the Notion-era `reactor_change_requests` table as the source for that data (rows

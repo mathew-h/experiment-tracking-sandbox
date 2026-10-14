@@ -55,7 +55,6 @@ def test_create_result_row_rejects_none_time(test_db: Session):
             db=test_db,
             experiment=experiment,
             time_post_reaction=None,
-            description="should fail",
         )
 
 
@@ -70,7 +69,7 @@ def test_scalar_service_rejects_none_time(test_db: Session):
         ScalarResultsService.create_scalar_result_ex(
             db=test_db,
             experiment_id="SCALAR_TIME_TEST",
-            result_data={"description": "no time provided"},
+            result_data={},
         )
 
 
@@ -86,7 +85,6 @@ def test_scalar_result_has_time_fields(test_db: Session):
         experiment_id="TIME_FIELDS_TEST",
         result_data={
             "time_post_reaction": 5.0,
-            "description": "Day 5 results",
             "final_ph": 7.2,
         },
     )
@@ -101,25 +99,21 @@ def test_scalar_result_has_time_fields(test_db: Session):
 # Test 5: Re-upload fills NULL-time row in-place (no duplicate created)
 # ---------------------------------------------------------------------------
 
-def test_reupload_fills_null_time_row(test_db: Session):
-    """Re-uploading data for a NULL-time row must update it in-place."""
+def test_reupload_with_time_leaves_legacy_null_time_row_alone(test_db: Session):
+    """Issue #122 PR-D (Mat, 2026-10-12): the description-keyed NULL-time
+    fallback is gone. A re-upload that carries a time creates (or updates) the
+    timed row; a legacy NULL-time row is never adopted -- it belongs to the
+    NULL-bucket cleanup, not to an upload."""
     experiment = _make_experiment(test_db, "REUPLOAD_TEST")
 
-    # Simulate a legacy NULL-time row with scalar data
     null_time_row = ExperimentalResults(
         experiment_fk=experiment.id,
         time_post_reaction_days=None,
         time_post_reaction_bucket_days=None,
-        description="Day 5 results",
     )
     test_db.add(null_time_row)
     test_db.flush()
-
-    scalar = ScalarResults(
-        result_id=null_time_row.id,
-        final_ph=6.8,
-    )
-    test_db.add(scalar)
+    test_db.add(ScalarResults(result_id=null_time_row.id, final_ph=6.8))
     test_db.commit()
     test_db.refresh(null_time_row)
 
@@ -129,27 +123,25 @@ def test_reupload_fills_null_time_row(test_db: Session):
         .count()
     )
 
-    # Re-upload with time provided and matching description
     upsert = ScalarResultsService.create_scalar_result_ex(
         db=test_db,
         experiment_id="REUPLOAD_TEST",
-        result_data={
-            "time_post_reaction": 5.0,
-            "description": "Day 5 results",
-            "final_ph": 7.0,
-        },
+        result_data={"time_post_reaction": 5.0, "final_ph": 7.0},
     )
+    test_db.flush()
 
     rows_after = (
         test_db.query(ExperimentalResults)
         .filter(ExperimentalResults.experiment_fk == experiment.id)
         .count()
     )
-
-    assert rows_after == rows_before, "Re-upload should not create a duplicate row"
-    assert upsert.experimental_result.id == null_time_row.id
+    assert rows_after == rows_before + 1, "the timed row is new; the NULL-time row is not reused"
+    assert upsert.experimental_result.id != null_time_row.id
     assert upsert.experimental_result.time_post_reaction_days == 5.0
     assert upsert.experimental_result.time_post_reaction_bucket_days == normalize_timepoint(5.0)
+    test_db.refresh(null_time_row)
+    assert null_time_row.time_post_reaction_days is None
+    assert null_time_row.scalar_data.final_ph == 6.8
 
 
 # ---------------------------------------------------------------------------
@@ -163,5 +155,5 @@ def test_icp_service_rejects_none_time(test_db: Session):
         ICPService.create_icp_result(
             db=test_db,
             experiment_id="ICP_TIME_TEST",
-            result_data={"description": "no time"},
+            result_data={},
         )

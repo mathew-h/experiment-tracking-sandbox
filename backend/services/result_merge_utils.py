@@ -168,7 +168,6 @@ def create_experimental_result_row(
     db: Session,
     experiment: Experiment,
     time_post_reaction: Optional[float],
-    description: str,
 ) -> ExperimentalResults:
     """Create an ExperimentalResults row with normalized bucket metadata."""
     if time_post_reaction is None:
@@ -179,7 +178,6 @@ def create_experimental_result_row(
         time_post_reaction_days=time_post_reaction,
         time_post_reaction_bucket_days=normalized,
         is_primary_timepoint_result=True,
-        description=description,
     )
     db.add(new_result)
     db.flush()

@@ -308,6 +308,10 @@ class ScalarResultsUploadService:
             if 'background_ammonium_concentration_mM' not in clean:
                 clean['background_ammonium_concentration_mM'] = 0.2
 
+            # PR-D: the Description column is an 'observation' note signed by
+            # this parser; create_scalar_result_ex mirrors it (blank -> no note).
+            clean['_note_source'] = 'scalar_results'
+
             cleaned_records.append(clean)
 
         # --- Dry run: validate only, no persist ---
@@ -317,7 +321,7 @@ class ScalarResultsUploadService:
                 row_num = idx + 2
                 data_fields = sorted(
                     f for f in rec
-                    if f not in ("_overwrite", "description", "time_post_reaction",
+                    if f not in ("_overwrite", "_note_source", "description", "time_post_reaction",
                                  "experiment_id", "measurement_date")
                     and rec.get(f) is not None
                 )

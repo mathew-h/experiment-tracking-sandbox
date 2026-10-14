@@ -185,7 +185,6 @@ export interface ResultWithFlags {
   time_post_reaction_bucket_days: number | null
   cumulative_time_post_reaction_days: number | null
   is_primary_timepoint_result: boolean
-  description: string
   created_at: string
   has_scalar: boolean
   has_icp: boolean
@@ -193,8 +192,6 @@ export interface ResultWithFlags {
   has_modification_note: boolean
   /** Every typed note scoped to this result, in id order. */
   notes: ExperimentNote[]
-  /** Legacy column, dropped in #118 PR4. Read `notes` instead. */
-  brine_modification_description: string | null
   grams_per_ton_yield: number | null
   h2_concentration: number | null
   h2_grams_per_ton_yield: number | null

@@ -22,9 +22,9 @@ function wrap(ui: React.ReactElement) {
 
 const result = (id: number, days: number | null): ResultWithFlags => ({
   id, experiment_fk: 10, time_post_reaction_days: days, time_post_reaction_bucket_days: days,
-  cumulative_time_post_reaction_days: days, is_primary_timepoint_result: true, description: 'legacy',
+  cumulative_time_post_reaction_days: days, is_primary_timepoint_result: true,
   created_at: '2026-04-01T00:00:00Z', has_scalar: false, has_icp: false, has_modification_note: false,
-  notes: [], brine_modification_description: null, grams_per_ton_yield: null, h2_concentration: null,
+  notes: [], grams_per_ton_yield: null, h2_concentration: null,
   h2_grams_per_ton_yield: null, h2_micromoles: null, gross_ammonium_concentration_mM: null,
   background_ammonium_concentration_mM: null, final_conductivity_mS_cm: null, final_ph: null,
   scalar_measurement_date: null, ferrous_iron_yield_h2_pct: null, ferrous_iron_yield_nh3_pct: null,

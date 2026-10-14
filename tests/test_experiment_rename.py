@@ -312,8 +312,7 @@ class TestRenamePreservesRelationships:
         
         result = ExperimentalResults(
             experiment_fk=exp.id,
-            time_post_reaction_days=1.0,
-            description="Test result"
+            time_post_reaction_days=1.0
         )
         db_session.add(result)
         db_session.flush()  # Flush to get result.id before using it

@@ -23,7 +23,6 @@ export interface ExperimentResult {
   time_post_reaction_bucket_days: number | null
   cumulative_time_post_reaction_days: number | null
   is_primary_timepoint_result: boolean
-  description: string
   created_at: string
 }
 
@@ -31,14 +30,10 @@ export interface ExperimentResult {
 export interface ResultCreate {
   /** experiments.id integer PK — resolve via experimentsApi.get(), never pass the URL string param */
   experiment_fk: number
-  /** Issue #118: optional. Researcher text becomes an observation note on the
-   *  result; blank gets a server-side placeholder in the legacy column. */
-  description?: string | null
   time_post_reaction_days?: number | null
   time_post_reaction_bucket_days?: number | null
   cumulative_time_post_reaction_days?: number | null
   is_primary_timepoint_result?: boolean
-  brine_modification_description?: string | null
   measurement_date?: string | null
 }
 

@@ -124,7 +124,7 @@ and an overwrite upload leaves them exactly as they were.
 > error shown. If you ran an `OVERWRITE = TRUE` Master Results upload before that
 > date, check those fields on the affected timepoints.
 
-**Notes are typed (template v4, 2026-09-08).** The two free-text columns land in the experiment's Notes as an *observation* and a *modification* respectively, tagged as coming from the Master upload. Re-uploading the same workbook with edited text updates those notes rather than adding duplicates. Template v3 workbooks with the old `Description` / `Modification` headers upload identically for now; please move to the v4 headers.
+**Notes are typed (template v4, 2026-09-08).** The two free-text columns land in the experiment's Notes as an *observation* and a *modification* respectively, tagged as coming from the Master upload. Re-uploading the same workbook with edited text updates those notes rather than adding duplicates. Template v3 workbooks with the old `Description` / `Modification` headers upload identically **until 2026-12-31**, after which only the v4 headers are accepted — please move to the v4 headers before then.
 
 **Replicates:** rows may carry either a full lettered ID (`SERUM_001a`) in Experiment ID, or the bare base ID plus the optional `Replicate` column (`a`–`z`; `0` or blank = the group parent). Base + letter is resolved to the sibling experiment before upsert. Unresolved or conflicting rows are skipped with a per-row error — the rest of the file still uploads. See the [Replicates guide](REPLICATES.md#uploading-replicate-results).
 
@@ -184,7 +184,7 @@ Bulk-creates or updates `ScalarResults` rows (solution chemistry measurements).
 |--------|----------|-------|
 | experiment_id | ✓ | Must match an existing experiment |
 | time_post_reaction_days | ✓ | Float |
-| description | ✓ | Short label for the timepoint |
+| description | | Optional. Stored as an **observation note** on the timepoint (tagged `scalar_results`; one per result — a re-upload updates it, a blank cell leaves it unchanged) |
 | final_ph | | |
 | final_conductivity_mS_cm | | |
 | gross_ammonium_concentration_mM | | |
@@ -248,14 +248,14 @@ so you can fill the template with the correct experiment IDs before uploading.
 **Endpoint:** `POST /api/bulk-uploads/timepoint-modifications`
 **Template:** available
 
-Bulk-sets the brine modification description on existing result rows.
+Bulk-adds a modification note to existing result timepoints.
 Use this when you added or replaced chemicals mid-experiment at a specific sampling point.
 
 | Column | Required | Notes |
 |--------|----------|-------|
 | experiment_id | ✓ | Must match an existing experiment |
 | time_point | ✓ | Days (float); must match an existing result row within ±0.0001 day |
-| modification_description | ✓ | Text to set as `brine_modification_description`. Also accepted: `Modification Note`. The same text is stored as a **modification note** on the timepoint, so it appears in the experiment's Notes with the MOD badge |
+| modification_description | ✓ | Stored as a **modification note** on the timepoint (shows in the experiment's Notes with the MOD badge). Also accepted: `Modification Note`. A timepoint that already has a modification note by anyone is skipped unless `overwrite_existing=TRUE`; overwrite writes or replaces **your** note only |
 
 Validation rules:
 - Duplicate `(experiment_id, time_point)` pairs in one file are rejected — the whole file

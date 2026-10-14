@@ -4,8 +4,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.orm import Session
 
-from database import Experiment, ExperimentalResults, ModificationsLog
-from database.models.enums import ExperimentStatus
+from database import Experiment, ExperimentalResults, ExperimentNotes, ModificationsLog
+from database.models.enums import ExperimentStatus, NoteType
+from backend.services.notes import add_note
 from backend.services.bulk_uploads.timepoint_modifications import TimepointModificationsService
 
 from .excel_helpers import make_excel
@@ -32,7 +33,6 @@ def _seed_experiment_with_result(
     result = ExperimentalResults(
         experiment_fk=exp.id,
         time_post_reaction_days=time_days,
-        description=f"Day {time_days}",
     )
     db.add(result)
     db.flush()
@@ -44,7 +44,7 @@ def _seed_experiment_with_result(
 # ---------------------------------------------------------------------------
 
 def test_valid_upload_sets_modification(db_session: Session):
-    """Valid file sets brine_modification_description on the matched result row."""
+    """Valid file writes a modification note on the matched result row."""
     _seed_experiment_with_result(db_session, "HPHT_MOD001", 7.0, 9901)
 
     xlsx = make_excel(
@@ -67,8 +67,10 @@ def test_valid_upload_sets_modification(db_session: Session):
         .first()
     )
     assert result is not None
-    assert result.brine_modification_description == "Added Mg(OH)2 after sampling"
-    assert result.has_brine_modification is True
+    notes = db_session.query(ExperimentNotes).filter(ExperimentNotes.result_id == result.id).all()
+    assert [(n.note_type, n.note_text, n.created_by) for n in notes] == [
+        (NoteType.modification, "Added Mg(OH)2 after sampling", "bulk_upload")
+    ]
 
 
 def test_missing_required_columns_returns_error(db_session: Session):
@@ -107,8 +109,8 @@ def test_duplicate_pairs_in_file_rejected(db_session: Session):
 def test_overwrite_false_skips_existing_modification(db_session: Session):
     """Existing modification is not overwritten when overwrite_existing=False."""
     exp, result = _seed_experiment_with_result(db_session, "HPHT_MOD003", 3.0, 9903)
-    result.brine_modification_description = "Original note"
-    db_session.flush()
+    add_note(db_session, exp, "Original note", note_type=NoteType.modification,
+             result_id=result.id, created_by="someone@addisenergy.com")
 
     xlsx = make_excel(
         ["experiment_id", "time_point", "modification_description"],
@@ -123,15 +125,15 @@ def test_overwrite_false_skips_existing_modification(db_session: Session):
     assert skipped == 1
     assert feedbacks[0]["status"] == "skipped"
 
-    db_session.refresh(result)
-    assert result.brine_modification_description == "Original note"
+    notes = db_session.query(ExperimentNotes).filter(ExperimentNotes.result_id == result.id).all()
+    assert [(n.note_text, n.created_by) for n in notes] == [("Original note", "someone@addisenergy.com")]
 
 
 def test_overwrite_true_replaces_existing_modification(db_session: Session):
     """Existing modification IS replaced when overwrite_existing=True."""
     exp, result = _seed_experiment_with_result(db_session, "HPHT_MOD004", 5.0, 9904)
-    result.brine_modification_description = "Old note"
-    db_session.flush()
+    add_note(db_session, exp, "Old note", note_type=NoteType.modification,
+             result_id=result.id, created_by="bulk_upload")
 
     xlsx = make_excel(
         ["experiment_id", "time_point", "modification_description"],
@@ -146,13 +148,43 @@ def test_overwrite_true_replaces_existing_modification(db_session: Session):
     assert skipped == 0
 
     db_session.flush()
-    db_session.refresh(result)
-    assert result.brine_modification_description == "Replaced note"
+    notes = db_session.query(ExperimentNotes).filter(ExperimentNotes.result_id == result.id).all()
+    assert [(n.note_text, n.created_by) for n in notes] == [("Replaced note", "bulk_upload")]
+
+
+def test_overwrite_true_writes_own_slot_and_leaves_another_authors_note(db_session: Session):
+    """The guard trips on anyone's note; overwrite writes only the caller's slot."""
+    exp, result = _seed_experiment_with_result(db_session, "HPHT_MOD006", 9.0, 9906)
+    add_note(db_session, exp, "Hand-written by a researcher", note_type=NoteType.modification,
+             result_id=result.id, created_by="researcher@addisenergy.com")
+    xlsx = make_excel(
+        ["experiment_id", "time_point", "modification_description"],
+        [["HPHT_MOD006", 9.0, "Upload note"]],
+    )
+    updated, skipped, errors, feedbacks = TimepointModificationsService.bulk_set_from_bytes(
+        db_session, xlsx, overwrite_existing=False, modified_by="uploader@addisenergy.com",
+    )
+    assert (updated, skipped, errors) == (0, 1, [])
+    assert "modification note already exists" in feedbacks[0]["reason"]
+
+    updated, skipped, errors, _ = TimepointModificationsService.bulk_set_from_bytes(
+        db_session, xlsx, overwrite_existing=True, modified_by="uploader@addisenergy.com",
+    )
+    assert (updated, skipped, errors) == (1, 0, [])
+    notes = sorted(
+        (n.created_by, n.note_text)
+        for n in db_session.query(ExperimentNotes).filter(ExperimentNotes.result_id == result.id)
+    )
+    assert notes == [
+        ("researcher@addisenergy.com", "Hand-written by a researcher"),
+        ("uploader@addisenergy.com", "Upload note"),
+    ]
 
 
 def test_audit_log_entry_written(db_session: Session):
     """A ModificationsLog row is written for each updated result."""
-    _seed_experiment_with_result(db_session, "HPHT_MOD005", 21.0, 9905)
+    _exp, seeded = _seed_experiment_with_result(db_session, "HPHT_MOD005", 21.0, 9905)
+    log_result_id = seeded.id
 
     xlsx = make_excel(
         ["experiment_id", "time_point", "modification_description"],
@@ -169,8 +201,10 @@ def test_audit_log_entry_written(db_session: Session):
     )
     assert log is not None
     assert log.modified_by == "testuser@addisenergy.com"
-    assert log.modified_table == "experimental_results"
+    assert log.modified_table == "experiment_notes"
     assert log.modification_type == "update"
+    assert log.new_values == {"result_id": log_result_id, "note_text": "Audit test note"}
+    assert log.old_values == {"result_id": log_result_id, "note_text": None}
 
 
 def test_unknown_experiment_id_recorded_as_error(db_session: Session):

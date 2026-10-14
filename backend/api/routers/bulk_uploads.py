@@ -514,7 +514,7 @@ async def upload_timepoint_modifications(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
-    """Bulk-set brine modification descriptions on existing result rows."""
+    """Bulk-add 'modification' notes to existing result timepoints (one slot per uploader; writes audit log)."""
     from backend.services.bulk_uploads.timepoint_modifications import TimepointModificationsService  # noqa: PLC0415
     file_bytes = await file.read()
     try:

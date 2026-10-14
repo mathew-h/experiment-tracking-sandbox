@@ -55,7 +55,6 @@ def test_v_results_icp_exposes_ti_ppm(view_db):
         time_post_reaction_days=7.0,
         time_post_reaction_bucket_days=7.0,
         is_primary_timepoint_result=True,
-        description="Day 7 results",
     )
     view_db.add(er)
     view_db.flush()
@@ -83,7 +82,6 @@ def test_v_results_icp_ti_ppm_null_when_unset(view_db):
         time_post_reaction_days=7.0,
         time_post_reaction_bucket_days=7.0,
         is_primary_timepoint_result=True,
-        description="Day 7 results",
     )
     view_db.add(er)
     view_db.flush()

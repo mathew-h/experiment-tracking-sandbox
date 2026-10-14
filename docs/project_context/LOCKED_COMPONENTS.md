@@ -62,7 +62,7 @@ These parsers handle real instrument output formats with edge cases accumulated 
 | `quick_upload.py` | Metric-specific mini-templates |
 | `long_format.py` | Long-format LIMS-compatible data |
 | `metric_groups.py` | Grouped metric upload templates |
-| `timepoint_modifications.py` | Timepoint-level record modifications |⁶
+| `timepoint_modifications.py` | Timepoint-level modification notes |⁶
 | `master_bulk_upload.py` | Master Results Dashboard sheet parser |² ⁵ ⁶
 
 ¹ **Rename-path ordering contract (issue #86, changed with explicit sign-off).** The experiments-sheet loop now (a) flushes a rename's new `experiment_id` **before** recomputing lineage, so the group-parent lookup resolves against the new ID rather than the row's stale old ID (which could otherwise self-match and raise `CircularDependencyError` under the production `autoflush=False` session), and (b) wraps each row in a `db.begin_nested()` SAVEPOINT so a single failed row rolls back only itself instead of poisoning the whole batch with cascading `PendingRollbackError`. Preserve both properties when touching this loop. See the lineage-section note in `MODELS.md` and `tests/services/bulk_uploads/test_new_experiments_rename_lineage.py`.
@@ -185,13 +185,14 @@ report "Merged 72 rows into 36 vial-days" and exactly four conflicts (rows
 `_merge_group` tests in `tests/services/bulk_uploads/test_master_bulk_upload.py`.
 
 ⁶ **Typed-notes mirror (issue #118 PR1, changed 2026-09-08 with explicit sign-off
-from Mat Hearl covering all three parsers).** Each free-text write is now made
-twice: to the legacy column Power BI still reads, and to an `experiment_notes`
-row through `backend/services/notes.py`. The mapping is defined once, there, not
+from Mat Hearl covering all three parsers).** From 2026-09-08 to 2026-10-14 each
+free-text write was made twice: to the legacy column Power BI then read, and to an
+`experiment_notes` row through `backend/services/notes.py`; since PR-D (below) only
+the note is written. The mapping is defined once, there, not
 in the parsers: `master_bulk_upload.py` mirrors `Description` → `observation`
 and `Modification` → `modification` (one slot per result via `sync_result_note`,
 inside the row's SAVEPOINT so a note failure rolls back only that vial-day);
-`timepoint_modifications.py` mirrors its column into the `modification` slot
+`timepoint_modifications.py` wrote its column and the `modification` slot
 keyed on `modified_by`; `new_experiments.py` writes `initial_note` as the experiment's `description`
 note through `add_note`. Dashboard template v4's `Observation Note` /
 `Modification Note` spellings are aliases onto the v3 names, which remain the
@@ -199,10 +200,17 @@ internal canonical names so the `_merge_group` contract in ⁵ is untouched.
 Two blank-cell bugs were fixed alongside: `initial_note` and the timepoint
 `modification` cell both stringified pandas' NaN to the text `'nan'`; both now
 parse blank to empty, and an `overwrite=TRUE` New Experiments row with a blank
-`initial_note` leaves the notes alone (previously it wiped them). The mirror is
-transitional — PR3 switches readers to the notes model and PR4 drops the legacy
-columns. Preserve the dual-write until PR4 lands; removing one side early makes
-Power BI and the app disagree.
+`initial_note` leaves the notes alone (previously it wiped them). **PR-D (issue
+#122, 2026-10-14, pre-authorization 2 plus Mat's 'proceed' on editing this sixth
+parser) dropped the legacy columns; the mirror is now the only write.**
+`master_bulk_upload.py` passes `description` + `_note_source='master_bulk_upload'`
+to `create_scalar_result_ex` (observation) and calls `sync_result_note` itself for
+the modification; `timepoint_modifications.py` writes the uploader's `modification`
+slot only — the overwrite guard is any modification note on the timepoint, and
+overwrite never touches another author's note; `scalar_results.py` and
+`quick_upload.py` sign their `Description` column `scalar_results` / `quick_upload`;
+`long_format.py` writes no note. v3 `Description`/`Modification` headers stay
+accepted until 2026-12-31.
 
 ## Alembic Migration History
 

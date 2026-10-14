@@ -281,7 +281,6 @@ def long_format_upload_from_excel(
         try:
             row_data = dict(field_dict)
             row_data["time_post_reaction"] = time_val
-            row_data["description"] = f"Day {time_val} results"
             row_data["_overwrite"] = False  # Long format always uses partial update
 
             upsert = ScalarResultsService.create_scalar_result_ex(
