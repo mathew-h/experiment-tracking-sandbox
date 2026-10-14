@@ -12,7 +12,7 @@ $PgBin       = "C:\Program Files\PostgreSQL\18\bin"
 $DbName      = "experiments"
 $DbUser      = "postgres"
 $BackupDir   = "C:\Backups\experiments"
-$PublicDir   = "C:\Users\LabPC\Addis Energy\All Company - Addis Energy\01_R&D\11_Modeling\01_Internal Database\03_Backups"
+$PublicDir   = "C:\Users\LabPC\Addis Energy\All Company - Documents\Addis Energy\01_R&D\11_Modeling\01_Internal Database\03_Backups"
 $LogFile     = "C:\Logs\experiment-tracker\backup.log"
 $RetainDays  = 30    # Delete backups older than this
 
