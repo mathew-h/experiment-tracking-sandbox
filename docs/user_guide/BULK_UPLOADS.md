@@ -184,7 +184,7 @@ Bulk-creates or updates `ScalarResults` rows (solution chemistry measurements).
 |--------|----------|-------|
 | experiment_id | ✓ | Must match an existing experiment |
 | time_post_reaction_days | ✓ | Float |
-| description | ✓ | Short label for the timepoint |
+| description | | Optional. Stored as an **observation note** on the timepoint (tagged `scalar_results`; one per result — a re-upload updates it, a blank cell leaves it unchanged) |
 | final_ph | | |
 | final_conductivity_mS_cm | | |
 | gross_ammonium_concentration_mM | | |

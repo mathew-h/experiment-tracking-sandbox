@@ -278,7 +278,7 @@ class TimepointModificationsService:
             ["modification_description", "Yes",
              "Free text stored as a modification note on this timepoint (shows the MOD badge)."],
             ["overwrite_existing", "No",
-             "Set TRUE to write your note when a modification note already exists. Default: FALSE."],
+             "Set TRUE to write your own note when a modification note by anyone already exists (other authors' notes are never changed). Default: FALSE."],
             [""],
             ["Notes:"],
             ["- Yellow headers are required. Green headers are optional."],

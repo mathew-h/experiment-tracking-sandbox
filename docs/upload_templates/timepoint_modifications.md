@@ -33,7 +33,7 @@ Supports flexible header naming:
 - **Duplicate Handling:** Scans for duplicate `(experiment_id, time_point)` pairs within the upload. The batch is rejected if duplicates exist without `overwrite_existing=true`. If all duplicate rows have overwrite enabled, a "last-row-wins" policy is applied.
 
 ## Write Logic
-- Blank modification + `overwrite_existing=False` → Row is skipped.
+- Blank modification + `overwrite_existing=False` → skipped when a modification note already exists; with no note nothing is written (the row still counts as updated — a pre-existing quirk).
 - Blank modification + `overwrite_existing=True` → Deletes the uploader's own note on that timepoint (a blank Excel cell parses to empty, not `nan`).
 - Non-blank modification → Creates or updates the uploader's note; a `ModificationsLog` row (`modified_table='experiment_notes'`) records the old and new text and the result id.
 - **Guard:** a timepoint with any existing modification note (any author) is skipped unless `overwrite_existing=true`; overwrite writes only the uploader's slot and never alters another author's note.

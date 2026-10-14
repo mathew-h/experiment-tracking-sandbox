@@ -238,7 +238,7 @@ class ScalarResultsService:
         # Touch parent entry and flush IDs if needed
         db.add(experimental_result)
         db.flush()
-        observation_text = _clean(observation) if isinstance(observation, str) else None
+        observation_text = _clean(observation) if observation is not None else None
         if note_source and observation_text is not None:
             # Same slot semantics as the Master parser: text present -> create or
             # update the parser's slot; blank -> no call, an earlier mirror stays.

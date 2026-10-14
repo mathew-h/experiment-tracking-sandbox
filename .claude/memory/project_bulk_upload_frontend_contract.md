@@ -29,8 +29,8 @@ The primary data entry path for results is `master_bulk_upload.py` + `scalar_res
 | `GC Run Date` | `gc_run_date` |
 
 **Other columns:**
-- `Description` → `description` (auto-generated as "Day N results" if missing)
-- `Modification` → `brine_modification_description` (on `ExperimentalResults`, not `ScalarResults`)
+- `Description` → `experiment_notes` (`note_type='observation'`, scoped to the result, `created_by='master_bulk_upload'`; blank writes no note)
+- `Modification` → `experiment_notes` (`note_type='modification'`, scoped to the result, `created_by='master_bulk_upload'`)
 - `Overwrite` → `_overwrite` bool — controls merge behaviour
 
 **Fields in `SCALAR_UPDATABLE_FIELDS` NOT in the bulk upload CSV** (set via API/manual entry only):

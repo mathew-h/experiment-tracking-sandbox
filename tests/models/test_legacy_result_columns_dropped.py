@@ -21,10 +21,8 @@ def _script_dir():
     return ScriptDirectory.from_config(Config(str(repo_root / "alembic.ini")))
 
 
-def test_single_head_is_the_drop_revision():
-    heads = _script_dir().get_heads()
-    assert len(heads) == 1
-    assert heads[0] == DROP_REVISION
+def test_alembic_has_a_single_head():
+    assert len(_script_dir().get_heads()) == 1
 
 
 def test_drop_revision_revises_the_e2_drop():

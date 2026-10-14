@@ -4,9 +4,10 @@ Issue #118, PR1. Free text about an experiment used to live in four places
 (the positional "first note", the two free-text result columns dropped by
 issue #122 PR-D, and ordinary notes) with nothing declaring what
 each was for. experiment_notes now carries a note_type and an optional
-result_id, and during the transition every legacy write path writes BOTH its
-old column and a typed note row through the helpers here, so Power BI (still
-reading the old columns) and the new model always agree.
+result_id, and until issue #122 PR-D (Alembic b8c4e2d7f9a1, 2026-10-14) every legacy
+write path wrote both its old column and a typed note through the helpers
+here. The columns are gone and the note is the only record; this module stays
+the single definition of the mapping.
 
 Two helpers, two situations:
 
@@ -19,10 +20,10 @@ Two helpers, two situations:
   raises if a second description is ever attempted; the New Experiments parser
   only reaches this call for a brand-new experiment or after an overwrite row
   has cleared the old notes, so that cannot happen through the upload.
-* sync_result_note -- mirror a legacy result COLUMN into a note SLOT. A column
-  holds one value, so the mirror is one note per (result, type, created_by):
-  re-uploading a workbook updates the note's text in place rather than
-  appending a duplicate, and clearing the column deletes the note. This is what
+* sync_result_note -- mirror a caller's text (a parser's free-text column, a
+  Timepoint Modifications row) into one note SLOT per (result, type,
+  created_by): a re-upload updates the slot in place rather than appending a
+  duplicate; blank text deletes the caller's own note. This is what
   makes "both sides match" true after the second upload, not just the first.
 
 Nothing here validates content. Nothing is required; a blank value simply
@@ -98,12 +99,12 @@ def sync_result_note(
     *,
     created_by: str,
 ) -> Optional[ExperimentNotes]:
-    """Mirror a legacy result column into its typed-note slot.
+    """Mirror a caller's text into its typed-note slot.
 
     Exactly one note exists per (result.id, note_type, created_by):
       * text present, no slot   -> create the note
       * text present, slot held -> update note_text in place (same row id)
-      * text blank/None, slot   -> delete the note (the column was cleared)
+      * text blank/None, slot held -> delete the note (the caller cleared it)
       * text blank/None, none   -> no-op
 
     ``created_by`` is part of the slot key on purpose: a researcher's

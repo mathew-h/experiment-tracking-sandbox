@@ -119,3 +119,14 @@ def test_long_format_writes_no_note(db_session: Session):
     assert errors == [], errors
     assert _result_ids(db_session, exp) != []
     assert _notes(db_session, exp) == []
+
+
+def test_scalar_numeric_description_cell_becomes_an_observation_note(db_session: Session):
+    exp = _seed(db_session, "PON_007", 9122407)
+    created, updated, skipped, errors, _fb = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
+        db_session, make_excel(_SCALAR_HEADERS, [["PON_007", 7.0, 5, 1.2]]),
+    )
+    assert errors == [] and created == 1
+    assert [(n.note_type, n.note_text, n.created_by) for n in _notes(db_session, exp)] == [
+        (NoteType.observation, "5", "scalar_results"),
+    ]
