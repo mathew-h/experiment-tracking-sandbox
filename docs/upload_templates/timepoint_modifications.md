@@ -3,7 +3,7 @@
 **Source:** [backend/services/bulk_uploads/timepoint_modifications.py](../../backend/services/bulk_uploads/timepoint_modifications.py)
 
 ## Overview
-Bulk populates the `brine_modification_description` text field on existing `experimental_results` database rows corresponding to specific timepoints.
+Bulk-adds a `modification` note (`experiment_notes`, scoped to the result, `created_by` = the uploader) to existing `experimental_results` rows at specific timepoints. The legacy per-result column it once set was dropped by issue #122 PR-D.
 
 ## File Format
 - **Format:** CSV or Excel.
@@ -24,7 +24,7 @@ Bulk populates the `brine_modification_description` text field on existing `expe
 Supports flexible header naming:
 - **Experiment ID:** `experiment_id`, `experiment id`
 - **Time Point:** `time_point`, `time (days)`
-- **Modification:** `experiment_modification`, `description`, `modification`, `modification_description`, `brine_modification_description`, `Modification Note` (Dashboard template v4 spelling)
+- **Modification:** `experiment_modification`, `description`, `modification`, `modification_description`, `Modification Note` (Dashboard template v4 spelling)
 - **Overwrite:** `overwrite_existing`, `overwrite`
 
 ## Parsing Logic
@@ -34,9 +34,9 @@ Supports flexible header naming:
 
 ## Write Logic
 - Blank modification + `overwrite_existing=False` → Row is skipped.
-- Blank modification + `overwrite_existing=True` → Clears the existing field. (A blank Excel cell now parses to empty; before issue #118 it was stringified to the literal text `nan` and stored, the same defect `fix_nan_text_fields_019.py` cleaned up for the Master sheet.)
-- Non-blank modification → Sets the description and automatically generates an audit entry in the `ModificationsLog` detailing the old value, new value, and source filename.
-- **Typed-note mirror (issue #118):** every write above is also applied to the result's `modification` note slot (`experiment_notes` with `note_type='modification'`, `result_id` = the matched result, `created_by` = the call's `modified_by`): set the column → set/update the note; clear the column → delete the note. The slot is keyed on `created_by`, so a researcher's hand-written modification note on the same timepoint is never overwritten by an upload.
+- Blank modification + `overwrite_existing=True` → Deletes the uploader's own note on that timepoint (a blank Excel cell parses to empty, not `nan`).
+- Non-blank modification → Creates or updates the uploader's note; a `ModificationsLog` row (`modified_table='experiment_notes'`) records the old and new text and the result id.
+- **Guard:** a timepoint with any existing modification note (any author) is skipped unless `overwrite_existing=true`; overwrite writes only the uploader's slot and never alters another author's note.
 
 ## Template Generation
 The service provides a `generate_template_bytes()` method which dynamically constructs an Excel template highlighting required headers (with specific background colors and asterisks) and includes an `INSTRUCTIONS` sheet.

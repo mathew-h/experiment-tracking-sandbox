@@ -1,8 +1,8 @@
 """Typed experiment notes: the single definition of how text becomes a note row.
 
 Issue #118, PR1. Free text about an experiment used to live in four places
-(the positional "first note", experimental_results.description,
-brine_modification_description, and ordinary notes) with nothing declaring what
+(the positional "first note", the two free-text result columns dropped by
+issue #122 PR-D, and ordinary notes) with nothing declaring what
 each was for. experiment_notes now carries a note_type and an optional
 result_id, and during the transition every legacy write path writes BOTH its
 old column and a typed note row through the helpers here, so Power BI (still

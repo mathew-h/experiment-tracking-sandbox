@@ -426,7 +426,7 @@ Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/results/{experiment_id}` | List all result timepoints for an experiment |
-| POST | `/api/results` | Create result entry. `description` is optional (#118 PR3): researcher text becomes an `observation` note on the result, a blank gets a server-generated placeholder in the legacy column. `brine_modification_description` becomes a `modification` note. |
+| POST | `/api/results` | Create result entry (time, bucket, primary flag). Carries no free text since #122 PR-D: observations and modifications are notes via `POST /api/experiments/{id}/notes` with `result_id`. |
 | GET | `/api/results/scalar/{result_id}` | Get scalar result |
 | POST | `/api/results/scalar` | Create scalar (triggers H2 + ammonium yield calc) |
 | PATCH | `/api/results/scalar/{scalar_id}` | Update scalar (recalculates) |
@@ -734,7 +734,7 @@ POST /api/bulk-uploads/experiment-deletion   file=<xlsx with experiment_id colum
 | POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. Returns a structured `plan` + `plan_hash` (see above). Any conflict in the plan rejects the whole file; optional `plan_hash` form field enforces the preview→commit handshake. |
 | POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. |
 | POST | `/api/bulk-uploads/xrd-mineralogy` | Unified XRD upload — auto-detects Aeris or ActLabs format. |
-| POST | `/api/bulk-uploads/timepoint-modifications` | Bulk-set `brine_modification_description` on result rows. Writes audit log. |
+| POST | `/api/bulk-uploads/timepoint-modifications` | Bulk-add `modification` notes to result timepoints (one slot per uploader). Writes audit log (`modified_table='experiment_notes'`). |
 | POST | `/api/bulk-uploads/rock-inventory` | Create/update `SampleInfo` records. Normalises sample IDs to uppercase, no underscores. |
 | POST | `/api/bulk-uploads/chemical-inventory` | Create/update `Compound` (reagent) records. |
 | POST | `/api/bulk-uploads/elemental-composition` | Import wide-format elemental composition into `ElementalAnalysis`. Query param: `default_unit` (auto-creates unknown analytes). |

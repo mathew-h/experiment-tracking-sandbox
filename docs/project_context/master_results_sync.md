@@ -41,7 +41,7 @@ read-from-configured-path sync mode was removed.
 | `Sample pH` | No | `ScalarResults.final_ph` | Float |
 | `Sample Conductivity (mS/cm)` | No | `ScalarResults.final_conductivity_mS_cm` | Float |
 | `Sampled Solution Volume (mL)` | No | `ScalarResults.sampling_volume_mL` | Float; mL; optional; absent column treated as blank |
-| `Modification` | No | `ExperimentalResults.brine_modification_description` | Free text |
+| `Modification` | No | `experiment_notes` (`note_type='modification'`, scoped to the result, `created_by='master_bulk_upload'`) | Free text |
 | `NMR Run Date` | No | Stored as metadata on result | Date |
 | `ICP Run Date` | No | Stored as metadata on result | Date |
 | `GC Run Date`  | No | Stored as metadata on result | Date |

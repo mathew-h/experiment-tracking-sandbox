@@ -126,8 +126,8 @@ class ResultWithFlagsResponse(BaseModel):
     has_scalar: bool = False
     has_icp: bool = False
     # Issue #118 PR3: the MOD badge is now "this timepoint has a 'modification'
-    # note" (EXISTS over experiment_notes), not the legacy has_brine_modification
-    # column. Not a calculation-engine field -- nothing in
+    # note" (EXISTS over experiment_notes); the legacy per-result flag column was
+    # dropped by issue #122 PR-D. Not a calculation-engine field -- nothing in
     # backend/services/calculations/ references notes and it must stay that way.
     has_modification_note: bool = False
     # Every typed note scoped to this result, in id order.

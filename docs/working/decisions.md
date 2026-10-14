@@ -797,3 +797,20 @@ event day, not on the day it was typed.
 **Related:** issue #122 PR-C (`feat/notes-timeline`, PR #126); the 2026-10-05
 entry above (event_date anchor); `docs/superpowers/plans/2026-10-05-notes-timeline-pr-c.md`
 gap call 2.
+
+## 2026-10-14 — A parser signs the notes it writes (issue #122 PR-D)
+
+**Decision:** free text about a result timepoint is stored only as `experiment_notes`
+rows. A scalar-pipeline caller writes an `observation` note by passing
+`_note_source=<its tag>` with `description` to `ScalarResultsService.create_scalar_result_ex`;
+`description` without `_note_source` is dropped. The tag is the note's `created_by`
+and its slot key (`sync_result_note`), so every parser owns one note per result and a
+researcher's hand-written note is never overwritten by an upload. A blank cell writes
+nothing and leaves an earlier note in place (same as the Master parser since PR1).
+
+**Also decided:** the description-keyed NULL-time fallback is gone (Mat, 2026-10-12) —
+an upload never adopts a legacy NULL-time row; Timepoint Modifications' overwrite guard
+is "any modification note on the timepoint" and overwrite writes the uploader's slot only.
+
+**Related:** `docs/superpowers/plans/2026-10-14-drop-legacy-note-columns-pr-d.md`;
+Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
