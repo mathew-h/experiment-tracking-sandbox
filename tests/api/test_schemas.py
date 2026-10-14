@@ -82,7 +82,6 @@ def test_result_with_flags_response():
         time_post_reaction_bucket_days=7.0,
         cumulative_time_post_reaction_days=7.0,
         is_primary_timepoint_result=True,
-        description="T7",
         created_at=datetime.now(),
         has_scalar=True, has_icp=False,
         grams_per_ton_yield=50.0, h2_grams_per_ton_yield=None, final_ph=7.2,
@@ -175,7 +174,7 @@ def test_result_create_requires_integer_fk():
     from pydantic import ValidationError
     import pytest
     with pytest.raises(ValidationError):
-        ResultCreate(experiment_fk="HPHT_001", description="Day 7")
+        ResultCreate(experiment_fk="HPHT_001")
 
 
 def test_result_create_rejects_numeric_string_fk():
@@ -183,12 +182,12 @@ def test_result_create_rejects_numeric_string_fk():
     from pydantic import ValidationError
     import pytest
     with pytest.raises(ValidationError):
-        ResultCreate(experiment_fk="42", description="Day 7")
+        ResultCreate(experiment_fk="42")
 
 
 def test_result_create_valid_integer_fk():
     """A real integer must be accepted."""
-    r = ResultCreate(experiment_fk=42, description="Day 7")
+    r = ResultCreate(experiment_fk=42)
     assert r.experiment_fk == 42
     assert isinstance(r.experiment_fk, int)
 
@@ -201,13 +200,16 @@ def test_result_create_fk_field_has_description():
     assert "integer" in desc_lower or "pk" in desc_lower
 
 
-def test_result_create_description_is_optional():
-    """Issue #118 PR3: nothing is required at entry. A blank/missing description
-    is legal; the router fills the legacy NOT NULL column with a generated
-    placeholder and mirrors only researcher text into a note."""
+def test_result_create_carries_no_free_text():
+    """Issue #122 PR-D: the result row has no description or modification text;
+    notes go through POST /experiments/{id}/notes. The fields are gone from the
+    schema, not merely optional."""
+    assert "description" not in ResultCreate.model_fields
+    assert "brine_modification" + "_description" not in ResultCreate.model_fields
     r = ResultCreate(experiment_fk=42)
-    assert r.description is None
-    assert ResultCreate(experiment_fk=42, description="Day 7").description == "Day 7"
+    assert not hasattr(r, "description")
+
+
 def test_additive_update_method_at_max_length_accepted():
     from backend.api.schemas.chemicals import AdditiveUpdate
     from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
