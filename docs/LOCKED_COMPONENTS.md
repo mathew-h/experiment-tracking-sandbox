@@ -185,13 +185,14 @@ report "Merged 72 rows into 36 vial-days" and exactly four conflicts (rows
 `_merge_group` tests in `tests/services/bulk_uploads/test_master_bulk_upload.py`.
 
 ⁶ **Typed-notes mirror (issue #118 PR1, changed 2026-09-08 with explicit sign-off
-from Mat Hearl covering all three parsers).** Each free-text write is now made
-twice: to the legacy column Power BI still reads, and to an `experiment_notes`
-row through `backend/services/notes.py`. The mapping is defined once, there, not
+from Mat Hearl covering all three parsers).** From 2026-09-08 to 2026-10-14 each
+free-text write was made twice: to the legacy column Power BI then read, and to an
+`experiment_notes` row through `backend/services/notes.py`; since PR-D (below) only
+the note is written. The mapping is defined once, there, not
 in the parsers: `master_bulk_upload.py` mirrors `Description` → `observation`
 and `Modification` → `modification` (one slot per result via `sync_result_note`,
 inside the row's SAVEPOINT so a note failure rolls back only that vial-day);
-`timepoint_modifications.py` mirrors its column into the `modification` slot
+`timepoint_modifications.py` wrote its column and the `modification` slot
 keyed on `modified_by`; `new_experiments.py` writes `initial_note` as the experiment's `description`
 note through `add_note`. Dashboard template v4's `Observation Note` /
 `Modification Note` spellings are aliases onto the v3 names, which remain the
