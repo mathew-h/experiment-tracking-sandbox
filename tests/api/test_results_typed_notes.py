@@ -71,15 +71,16 @@ def test_experiment_detail_notes_carry_their_type(client, db_session):
     ]
 
 
-def test_create_result_without_description_uses_placeholder_and_writes_no_note(client, db_session):
+def test_create_result_returns_no_description_and_writes_no_note(client, db_session):
     exp = _exp(db_session, "RTN_003", 7303)
     db_session.commit()
     resp = client.post("/api/results", json={"experiment_fk": exp.id, "time_post_reaction_days": 7.0})
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["description"] == "Day 7.0 results"
+    assert "description" not in resp.json()
     listed = client.get(f"/api/experiments/{exp.experiment_id}/results").json()
     assert listed[0]["notes"] == []
+    assert "description" not in listed[0]
+    assert "brine_modification_description" not in listed[0]
 
 
 def test_list_item_description_is_the_typed_description(client, db_session):

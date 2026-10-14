@@ -7,12 +7,10 @@ import type { ResultCreate, ScalarCreate } from './results'
 
 const _validCreate: ResultCreate = {
   experiment_fk: 42,    // integer PK ✓
-  description: 'Day 7',
 }
 
 const _withOptionals: ResultCreate = {
   experiment_fk: 1,
-  description: 'Day 14',
   time_post_reaction_days: 14,
   is_primary_timepoint_result: false,
 }

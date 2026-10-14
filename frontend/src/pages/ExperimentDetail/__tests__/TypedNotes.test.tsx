@@ -69,13 +69,11 @@ const baseResult: ResultWithFlags = {
   time_post_reaction_bucket_days: 7,
   cumulative_time_post_reaction_days: 7,
   is_primary_timepoint_result: true,
-  description: 'legacy',
   created_at: '2026-04-01T00:00:00Z',
   has_scalar: false,
   has_icp: false,
   has_modification_note: false,
   notes: [],
-  brine_modification_description: null,
   grams_per_ton_yield: null,
   h2_concentration: null,
   h2_grams_per_ton_yield: null,
@@ -301,8 +299,7 @@ describe('AddResultsModal — typed note composer', () => {
 
     await vi.waitFor(() => expect(resultsApiModule.resultsApi.createResult).toHaveBeenCalled())
     const payload = vi.mocked(resultsApiModule.resultsApi.createResult).mock.calls[0][0]
-    expect(payload).not.toHaveProperty('description')
-    expect(payload).not.toHaveProperty('brine_modification_description')
+    expect(Object.keys(payload).filter((k) => /description/.test(k))).toEqual([])
     await vi.waitFor(() => expect(experimentsApiModule.experimentsApi.addNote).toHaveBeenCalledTimes(2))
     expect(experimentsApiModule.experimentsApi.addNote).toHaveBeenCalledWith(
       'HPHT_001', 'brine replaced with DI', { note_type: 'modification', result_id: 77 },

@@ -19,11 +19,6 @@ class ResultCreate(BaseModel):
     time_post_reaction_bucket_days: Optional[float] = None
     cumulative_time_post_reaction_days: Optional[float] = None
     is_primary_timepoint_result: bool = True
-    # Issue #118 PR3: no longer required. The legacy NOT NULL column is filled
-    # server-side when blank; researcher text is mirrored to an 'observation'
-    # note on the result. Dropped with the column in PR4.
-    description: Optional[str] = None
-    brine_modification_description: Optional[str] = None
 
 
 class ResultResponse(BaseModel):
@@ -35,7 +30,6 @@ class ResultResponse(BaseModel):
     time_post_reaction_bucket_days: Optional[float] = None
     cumulative_time_post_reaction_days: Optional[float] = None
     is_primary_timepoint_result: bool
-    description: str
     created_at: datetime
 
 
@@ -128,7 +122,6 @@ class ResultWithFlagsResponse(BaseModel):
     time_post_reaction_bucket_days: Optional[float] = None
     cumulative_time_post_reaction_days: Optional[float] = None
     is_primary_timepoint_result: bool
-    description: str
     created_at: datetime
     has_scalar: bool = False
     has_icp: bool = False
@@ -139,8 +132,6 @@ class ResultWithFlagsResponse(BaseModel):
     has_modification_note: bool = False
     # Every typed note scoped to this result, in id order.
     notes: list[NoteResponse] = []
-    # Legacy column, still populated by the dual-write until PR4 drops it.
-    brine_modification_description: Optional[str] = None
     # Key scalar values for the list (None if no scalar)
     grams_per_ton_yield: Optional[float] = None
     h2_concentration: Optional[float] = None

@@ -350,8 +350,8 @@ export function BulkUploadsPage() {
               <UploadRow
                 id="timepoint-modifications"
                 title="Timepoint Modifications"
-                description="Bulk-set modification descriptions on existing result rows"
-                helpText="Required columns: experiment_id, time_point, modification_description. Set overwrite_existing=TRUE to replace existing descriptions. Time is matched with ±0.0001 day tolerance."
+                description="Bulk-add modification notes to existing result timepoints"
+                helpText="Required columns: experiment_id, time_point, modification_description. Set overwrite_existing=TRUE to replace your own existing modification note on that timepoint. Time is matched with ±0.0001 day tolerance."
                 accept=".xlsx,.xls,.csv"
                 uploadFn={(file) => bulkUploadsApi.uploadTimepointModifications(file)}
                 templateType="timepoint-modifications"
