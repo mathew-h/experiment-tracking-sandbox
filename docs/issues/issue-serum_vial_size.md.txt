@@ -1,0 +1,119 @@
+# feat: Track nominal serum vial size (`serum_vial_size_mL`) on experimental conditions
+
+**Type:** feat
+**Area:** `database/models/conditions.py`
+**Priority:** medium
+
+---
+
+## Problem
+
+`ExperimentalConditions` (`database/models/conditions.py:6-92`) has no field for the size of the serum vial a Serum experiment runs in. Because there's no column, vial size can't be entered in the New Experiment wizard, the new-experiments bulk upload, or the Conditions tab edit modal. It also isn't available to Power BI. This issue is tracking only: no calculation reads the value. A later change may use it to compute headspace.
+
+## Impact
+
+Researchers can't record vial size or filter and group serum experiments by it in Power BI. When headspace calcs arrive, any serum experiment created before this lands will need a manual backfill, and every week without the field adds to that backlog.
+
+## Fix
+
+Add one nullable `Integer` column, `serum_vial_size_mL`, holding the **nominal** vial size in whole mL (20, 60, 120, 160, ...). The name follows the `water_volume_mL` convention (`conditions.py:27`), so raw SQL must quote it: `ec."serum_vial_size_mL"`. Existing rows stay NULL; no backfill.
+
+Settled decisions:
+
+- "Serum only" is enforced in the UI only. The API and bulk upload accept the field on any experiment type. Do **not** add a type check like `_validate_reactor_number` (`backend/api/routers/conditions.py:20-26`).
+- Positive-integer validation lives in the API schema and the UI. No DB `CHECK` constraint (reason in Notes).
+- The column goes into `v_experiment_conditions` only, not `v_experiments`.
+
+### 1. Model (locked, additive)
+
+Add after `water_volume_mL` (`database/models/conditions.py:27`):
+
+    serum_vial_size_mL = Column(Integer, nullable=True)  # Nominal serum vial size, whole mL. Tracking only; no calc reads it yet.
+
+`Integer` is already imported (line 1). No existing field, type, or relationship changes. This is the only change to a locked component, and this issue is the authorization for it.
+
+### 2. Migration
+
+Create a new revision off develop's head: `b8c4e2d7f9a1` as of `37ae701`, but confirm with `alembic heads`. Autogenerate adds the column; the view handling must be written by hand.
+
+- `upgrade()`: `op.add_column("experimental_conditions", sa.Column("serum_vial_size_mL", sa.Integer(), nullable=True))`, then recreate `v_experiment_conditions` with the new column.
+- `downgrade()`: recreate `v_experiment_conditions` with the **old** definition first, then `op.drop_column(...)`.
+
+The order matters. `database/event_listeners.py:714-731` drops and recreates every view when the API imports. Once the service has started on the new code, the view depends on the column, and a plain `drop_column` downgrade fails with "cannot drop column ... because other objects depend on it." Follow the `_recreate()` helper and old/new SQL constants in `alembic/versions/c4d8f1a2b6e7_typed_notes_reporting_views.py:163-179`. Recreating the view in `upgrade()` also means Power BI sees the column right after the nightly `alembic upgrade head` (`update.ps1:228`), before the service restarts. No other view selects from `v_experiment_conditions`, so `CASCADE` drops nothing else.
+
+### 3. Reporting view
+
+In `database/event_listeners.py:151-182`, add `ec."serum_vial_size_mL",` after `ec."water_volume_mL",` (line 160). The migration's new view SQL must match this string exactly.
+
+### 4. API schemas
+
+In `backend/api/schemas/conditions.py`:
+
+- `ConditionsCreate` (7-32) and `ConditionsUpdate` (35-57): add `serum_vial_size_mL: Optional[int] = Field(default=None, gt=0)`, and add `Field` to the import on line 4.
+- `ConditionsResponse` (60-91): add `serum_vial_size_mL: Optional[int] = None`.
+
+With pydantic 2.10.4 (`requirements.txt:84`), the API then returns 422 for `0`, `-5`, and `120.5`, and coerces `120.0` to `120`. The router needs no change. Create (`routers/conditions.py:100`) and patch (`:121-122`) pass the field through. Both already call `recalculate()` (`:103`, `:125`), which ignores this field.
+
+### 5. Bulk upload template (no parser change)
+
+The parser in `backend/services/bulk_uploads/new_experiments.py` builds its conditions-sheet column map from the model (`:857-863`, case-insensitive). A `serum_vial_size_mL` header therefore maps without any parser edit. Parent auto-copy (`:918-921`, `:1057-1064`) picks up the new column the same way. Only the template in `backend/api/routers/bulk_uploads.py::_get_template_bytes` (line 882) changes:
+
+- Add `"serum_vial_size_mL"` to the conditions headers (`:948-969`) and a matching `None` in the HPHT example row (`:972`).
+- Add an INSTRUCTIONS row after `feedstock` (`:1020`): `("serum_vial_size_mL", "Serum experiments only. Nominal vial size in whole mL (e.g. 20, 60, 120, 160). Leave blank for other types.")`.
+
+### 6. Frontend
+
+- `frontend/src/api/conditions.ts:3-23`: add `serum_vial_size_mL?: number` to `ConditionsPayload`. `ConditionsResponse` extends it, so it picks the field up too.
+- `frontend/src/pages/NewExperiment/fieldVisibility.ts`: add `'serum_vial_size_mL'` to the `ConditionField` union (3-8) and to the `Serum` set only (11-14). Step 4 review then shows it automatically through `FIELD_VISIBILITY` (`Step4Review.tsx:39,63`).
+- `Step2Conditions.tsx`:
+  - Add the key to `Step2Data` (11-28).
+  - Render "Serum Vial Size (mL)" next to Water Volume (line 73) with `step={1} min={1}`. The `field()` helper (38-57) doesn't pass extra input props through, so either extend it or render the `Input` directly.
+  - When the value is non-blank and not a positive integer, show an inline `error` and disable Next. This is required because the wizard creates the experiment (`index.tsx:124`) *before* its conditions (`:141`). A 422 at that point would leave an experiment with no conditions row.
+- `NewExperiment/index.tsx`:
+  - Add `serum_vial_size_mL: ''` to `defaultStep2` (26-32).
+  - Add `numToStr(conditions.serum_vial_size_mL)` to the copy-from block (74-92).
+  - Use a strict integer parse in the create payload (141-161). Don't copy the `parseInt` from line 151, which silently truncates `120.5` to `120`.
+- `ExperimentDetail/ConditionsTab.tsx`:
+  - Read view: add `<Row label="Serum Vial Size" value={conditions.serum_vial_size_mL} unit="mL" />` after Water Volume (line 237). `Row` already hides nulls (36-37), so non-Serum experiments show nothing.
+  - `openEdit` (165-185): seed `serum_vial_size_mL` from the stored conditions.
+  - Edit modal (310-333): render the input when `form.experiment_type === 'Serum' || conditions?.serum_vial_size_mL != null`. Key the second check on the stored value, not the form value, so the input doesn't disappear while the user is clearing it. Today this modal ignores `fieldVisibility.ts` and shows every field for every type, so this is its first type-conditional field.
+  - A fractional or non-positive value is rejected by the API and surfaces through the existing "Update failed" toast (161-162). PATCH is a single request, so a rejected save leaves nothing half-written.
+
+### 7. Docs
+
+- `.claude/rules/MODELS.md:226-239`: add the field under `ExperimentalConditions` key fields. Note that it is nominal, whole mL, nullable, tracking only, and limited to Serum in the UI only.
+- `docs/POWERBI_MODEL.md:17`: add `serum_vial_size_mL` to the `v_experiment_conditions` column list.
+- `docs/upload_templates/new_experiments.md:16`: mention the new conditions column.
+- `docs/api/API_REFERENCE.md` (conditions section, 403-412): document the field and its 422 rule.
+- `docs/CALCULATIONS.md`: no change, since this is not a derived field.
+
+## Acceptance criteria
+
+- [ ] `experimental_conditions."serum_vial_size_mL"` exists as a nullable `integer`. Immediately after upgrade, `SELECT count(*) FROM experimental_conditions WHERE "serum_vial_size_mL" IS NOT NULL` returns 0.
+- [ ] After the API has started at least once on the new code (so the view references the column), `alembic downgrade -1` succeeds and restores the old `v_experiment_conditions`, and `alembic upgrade head` re-applies cleanly.
+- [ ] `SELECT experiment_id, "serum_vial_size_mL" FROM v_experiment_conditions` works. Refreshing the Power BI dataset shows the new column, and existing visuals are unaffected.
+- [ ] Wizard: the field is visible in Step 2 for Serum only and hidden for HPHT, Autoclave, and Core Flood. It appears in the Step 4 review, the value is saved, and "copy from experiment" carries it over.
+- [ ] Wizard: entering `0`, `-1`, or `120.5` shows an inline error and blocks Next, and no experiment row is created.
+- [ ] Conditions tab shows "Serum Vial Size 120 mL" when the value is set and nothing when it is null. The edit modal shows the input for Serum experiments, and for non-Serum experiments only when a value is already stored.
+- [ ] `POST`/`PATCH /api/conditions` return 422 for `0`, `-1`, and `120.5`, and 201/200 for `120`. An HPHT payload with a value is accepted (UI-only scoping is intentional).
+- [ ] The downloaded new-experiments template has the `serum_vial_size_mL` conditions header and its INSTRUCTIONS row.
+- [ ] Bulk upload: a conditions row with `120` stores the integer `120`, and a `-2` sequential child with no conditions row inherits the parent's value.
+- [ ] Replicates created through the wizard copy the value (`database/lineage_utils.py:428-432`, called from `create_replicate_experiments`).
+- [ ] `git diff --stat develop` touches nothing under `backend/services/bulk_uploads/`, `database/models/enums.py`, `auth/`, or any existing file in `alembic/versions/`. `database/models/conditions.py` is the only model file changed.
+- [ ] Tests added:
+  - `tests/api/test_conditions.py`: the POST/PATCH accept and reject cases above. Follow the pattern of `test_create_conditions_rejects_reactor_number_for_serum` (line 156).
+  - `tests/api/test_bulk_uploads.py`: `test_new_experiments_template_conditions_sheet_headers`, next to the existing experiments and additives header tests (1013, 1028).
+  - `tests/services/bulk_uploads/test_new_experiments.py`: the value is stored as an int, a mixed-case header still maps, and a sequential child inherits the value.
+  - `tests/test_replicate_creation_service.py`: a replicate copies the value.
+  - `tests/views/`: assert that `ec."serum_vial_size_mL"` is in `dict(_VIEWS)["v_experiment_conditions"]`, following `tests/models/test_icp_ti_column.py:71-80`.
+  - Frontend: Step 2 visibility by experiment type and the invalid-value block on Next; the edit-modal visibility rule in `ConditionsTab.buttons.test.tsx`.
+- [ ] These pass: `.venv/Scripts/pytest tests/services/ tests/regression/ tests/api/ tests/views/ tests/models/ -v` and `cd frontend && npm run test && npm run lint && npm run build`.
+
+## Notes
+
+- **Nominal size, not true volume.** A "120 mL" serum vial holds noticeably more than 120 mL when filled to the brim. Headspace is total vial volume minus liquid volume, so the future calc will need the true total volume, either from a lookup by nominal size or from a measured column. State this in the MODELS.md entry so nobody later uses this column as the total volume.
+- **Why no DB `CHECK (> 0)`.** The conditions-sheet loop (`new_experiments.py:864-1007`) has no per-row SAVEPOINT, unlike the experiments sheet (`:388`) and the additives sheet (`:1177`). A constraint violation would abort the transaction at the flush on line 954 and break every remaining row in the sheet. As specced, bulk upload doesn't validate this column, which matches how `reactor_number` behaves today. PostgreSQL silently rounds a fractional cell to an integer, and a non-numeric cell fails at flush and breaks the rest of the sheet the same way. That already applies to every numeric conditions column and is out of scope here.
+- **Existing bug: the edit modal can't clear a field.** `set()` (`ConditionsTab.tsx:213-214`) turns an empty input into `undefined`. JSON serialization drops it, and `PATCH` uses `exclude_unset=True` (`routers/conditions.py:121`), so the old value survives. This affects the new field too: a mistaken vial size can't be removed from the UI. It deserves its own issue.
+- Other code that loops over the model's columns picks up the new column with no change: `replicate_groups.py:50` (shared vs. divergent conditions in replicate groups), `experiment_deletion.py:213` (row snapshot), and `database/data_migrations/dedupe_conditions_and_backfill_ids_018.py:100`.
+- Step 4 review labels each condition by its raw key (`Step4Review.tsx:63`), so this field appears as `serum_vial_size_mL`, like every other field there.
+- Branch: `feat/serum-vial-size`, cut from `develop`. Open the PR with `gh pr create --base develop`.
