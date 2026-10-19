@@ -92,3 +92,53 @@ describe('ConditionsTab additives action buttons', () => {
     expect(deleteFn).not.toHaveBeenCalled()
   })
 })
+
+describe('ConditionsTab — serum vial size', () => {
+  const serum = { ...mockConditions, experiment_type: 'Serum', serum_vial_size_mL: 120 }
+
+  it('shows the read row when set', () => {
+    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    expect(screen.getByText('Serum Vial Size')).toBeInTheDocument()
+    expect(screen.getByText('120 mL')).toBeInTheDocument()
+  })
+
+  it('shows no read row when null', () => {
+    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    expect(screen.queryByText('Serum Vial Size')).not.toBeInTheDocument()
+  })
+
+  async function openEditModal() {
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+  }
+
+  it('edit modal shows the input for Serum, seeded with the stored value', async () => {
+    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(120)
+  })
+
+  it('edit modal shows the input for a Serum with no stored value', async () => {
+    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(null)
+  })
+
+  it('edit modal hides the input for HPHT with no stored value', async () => {
+    wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.queryByLabelText('Serum Vial Size (mL)')).not.toBeInTheDocument()
+  })
+
+  it('edit modal shows the input for HPHT when a value is already stored', async () => {
+    wrap(<ConditionsTab conditions={{ ...mockConditions, serum_vial_size_mL: 60 }} experimentId="HPHT_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(60)
+  })
+
+  it('keeps the input visible while the user clears a stored value', async () => {
+    wrap(<ConditionsTab conditions={{ ...mockConditions, serum_vial_size_mL: 60 }} experimentId="HPHT_001" experimentFk={1} />)
+    await openEditModal()
+    await userEvent.clear(screen.getByLabelText('Serum Vial Size (mL)'))
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toBeInTheDocument()
+  })
+})
