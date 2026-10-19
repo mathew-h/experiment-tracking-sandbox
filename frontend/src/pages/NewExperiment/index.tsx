@@ -11,6 +11,7 @@ import { Step3Additives, generateId, type AdditiveRow } from './Step3Additives'
 import { Step4Review } from './Step4Review'
 import { CopyFromExisting } from './CopyFromExisting'
 import type { ExperimentType } from './fieldVisibility'
+import { vialSizeForPayload } from './vialSize'
 
 const STEPS = ['Basic Info', 'Conditions', 'Additives', 'Review']
 
@@ -24,7 +25,7 @@ const defaultStep1 = (): Step1Data => ({
 })
 
 const defaultStep2 = (): Step2Data => ({
-  temperature_c: '', initial_ph: '', rock_mass_g: '', water_volume_mL: '',
+  temperature_c: '', initial_ph: '', rock_mass_g: '', water_volume_mL: '', serum_vial_size_mL: '',
   particle_size: '', feedstock: '', reactor_number: '', stir_speed_rpm: '',
   initial_conductivity_mS_cm: '', room_temp_pressure_psi: '', rxn_temp_pressure_psi: '',
   co2_partial_pressure_MPa: '', core_height_cm: '', core_width_cm: '',
@@ -77,6 +78,7 @@ export function NewExperimentPage() {
           initial_ph: numToStr(conditions.initial_ph),
           rock_mass_g: numToStr(conditions.rock_mass_g),
           water_volume_mL: numToStr(conditions.water_volume_mL),
+          serum_vial_size_mL: numToStr(conditions.serum_vial_size_mL),
           particle_size: conditions.particle_size ?? '',
           feedstock: conditions.feedstock ?? '',
           reactor_number: conditions.reactor_number != null ? String(conditions.reactor_number) : '',
@@ -120,6 +122,10 @@ export function NewExperimentPage() {
 
   const mutation = useMutation({
     mutationFn: async () => {
+      // Validate before creating anything: the experiment is created before its
+      // conditions, so a late 422 would strand an experiment with no conditions row.
+      const serumVialSize = vialSizeForPayload(step1.experimentType, step2.serum_vial_size_mL)
+
       // 1. Create experiment
       const exp = await experimentsApi.create({
         experiment_id: step1.experimentId,
@@ -146,6 +152,7 @@ export function NewExperimentPage() {
         initial_ph: toFloat(step2.initial_ph),
         rock_mass_g: toFloat(step2.rock_mass_g),
         water_volume_mL: toFloat(step2.water_volume_mL),
+        serum_vial_size_mL: serumVialSize,
         particle_size: step2.particle_size || undefined,
         feedstock: step2.feedstock || undefined,
         reactor_number: step2.reactor_number ? parseInt(step2.reactor_number) : undefined,

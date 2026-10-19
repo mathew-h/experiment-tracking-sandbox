@@ -1,6 +1,7 @@
 import { Input, Select, Button } from '@/components/ui'
 import { isVisible } from './fieldVisibility'
 import type { ExperimentType } from './fieldVisibility'
+import { parseVialSize } from './vialSize'
 
 const FEEDSTOCK_OPTIONS = [
   { value: 'Nitrogen', label: 'Nitrogen' },
@@ -13,6 +14,7 @@ export interface Step2Data {
   initial_ph: string
   rock_mass_g: string
   water_volume_mL: string
+  serum_vial_size_mL: string
   particle_size: string
   feedstock: string
   reactor_number: string
@@ -63,6 +65,9 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
   const wtr = (!isNaN(rockMass) && !isNaN(waterVol) && rockMass > 0)
     ? (waterVol / rockMass).toFixed(2)
     : null
+  // The field() helper can't carry step/min/error, so this input is rendered directly.
+  const vialVisible = isVisible('serum_vial_size_mL', experimentType)
+  const vialError = vialVisible ? parseVialSize(data.serum_vial_size_mL).error : undefined
 
   return (
     <div className="space-y-4">
@@ -71,6 +76,18 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
         {field('Initial pH', 'initial_ph', experimentType, data, onChange)}
         {field('Rock Mass', 'rock_mass_g', experimentType, data, onChange, 'g')}
         {field('Water Volume', 'water_volume_mL', experimentType, data, onChange, 'mL')}
+        {vialVisible && (
+          <Input
+            key="serum_vial_size_mL"
+            label="Serum Vial Size (mL)"
+            type="number"
+            step={1}
+            min={1}
+            value={data.serum_vial_size_mL}
+            error={vialError}
+            onChange={(e) => onChange({ serum_vial_size_mL: e.target.value })}
+          />
+        )}
         {wtr && (
           <div className="col-span-2 flex items-center gap-2 p-2 bg-surface-raised rounded text-xs text-ink-secondary">
             <span className="text-ink-muted">Water : Rock Ratio</span>
@@ -100,7 +117,7 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
       </div>
       <div className="flex justify-between pt-2">
         <Button variant="ghost" onClick={onBack}>← Back</Button>
-        <Button variant="primary" onClick={onNext}>Next: Additives →</Button>
+        <Button variant="primary" onClick={onNext} disabled={!!vialError}>Next: Additives →</Button>
       </div>
     </div>
   )

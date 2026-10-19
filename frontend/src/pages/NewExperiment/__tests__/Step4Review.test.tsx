@@ -22,6 +22,7 @@ const step2: Step2Data = {
   initial_ph: '',
   rock_mass_g: '',
   water_volume_mL: '',
+  serum_vial_size_mL: '',
   particle_size: '',
   feedstock: '',
   reactor_number: '',
@@ -36,11 +37,11 @@ const step2: Step2Data = {
   pore_pressure: '',
 }
 
-function renderStep4(step1: Step1Data) {
+function renderStep4(step1: Step1Data, s2: Step2Data = step2) {
   return render(
     <Step4Review
       step1={step1}
-      step2={step2}
+      step2={s2}
       additives={[]}
       replicateCount={0}
       onReplicateCountChange={vi.fn()}
@@ -62,5 +63,18 @@ describe('Step4Review — description label', () => {
     renderStep4(makeStep1({ note: '   ' }))
     expect(screen.queryByText('Description')).not.toBeInTheDocument()
     expect(screen.queryByText('Condition Note')).not.toBeInTheDocument()
+  })
+})
+
+describe('Step4Review — serum vial size', () => {
+  it('lists serum_vial_size_mL for Serum', () => {
+    renderStep4(makeStep1({ experimentType: 'Serum' }), { ...step2, serum_vial_size_mL: '120' })
+    expect(screen.getByText('serum_vial_size_mL')).toBeInTheDocument()
+    expect(screen.getByText('120')).toBeInTheDocument()
+  })
+
+  it('does not list it for HPHT', () => {
+    renderStep4(makeStep1({ experimentType: 'HPHT' }), { ...step2, serum_vial_size_mL: '120' })
+    expect(screen.queryByText('serum_vial_size_mL')).not.toBeInTheDocument()
   })
 })

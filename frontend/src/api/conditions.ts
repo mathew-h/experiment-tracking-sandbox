@@ -8,6 +8,7 @@ export interface ConditionsPayload {
   initial_ph?: number
   rock_mass_g?: number
   water_volume_mL?: number
+  serum_vial_size_mL?: number
   particle_size?: string
   feedstock?: string
   reactor_number?: number
