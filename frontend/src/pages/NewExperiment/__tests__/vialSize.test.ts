@@ -10,9 +10,10 @@ describe('parseVialSize', () => {
   it('accepts positive whole numbers', () => {
     expect(parseVialSize('120')).toEqual({ value: 120 })
     expect(parseVialSize(' 20 ')).toEqual({ value: 20 })
+    expect(parseVialSize('10000')).toEqual({ value: 10000 })
   })
 
-  it.each(['0', '-1', '120.5', '120.0', '1e2', 'abc'])('rejects %s', (raw) => {
+  it.each(['0', '-1', '120.5', '120.0', '1e2', 'abc', '10001', '120000000000'])('rejects %s', (raw) => {
     expect(parseVialSize(raw)).toEqual({ error: VIAL_SIZE_ERROR })
   })
 })

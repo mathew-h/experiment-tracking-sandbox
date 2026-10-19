@@ -13,7 +13,7 @@ Requires a multi-sheet workbook with specific (case-insensitive) sheet names.
 | Sheet | Required | Columns |
 |-------|----------|---------|
 | `experiments` | Yes | experiment_id*, old_experiment_id (optional, for renames), sample_id, date, status, initial_note, overwrite, researcher |
-| `conditions` | No | experiment_id*, columns matching ExperimentalConditions (e.g., particle_size, rock_mass_g, water_volume_mL, reactor_number, serum_vial_size_mL — Serum only, nominal whole mL, blank for other types) |
+| `conditions` | No | experiment_id*, columns matching ExperimentalConditions (e.g., particle_size, rock_mass_g, water_volume_mL, reactor_number, serum_vial_size_mL — Serum only, nominal whole mL, leave blank for other types (advisory — not enforced)) |
 | `additives` | No | experiment_id*, compound*, amount*, unit*, order, method |
 
 ## Experiment ID Format

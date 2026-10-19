@@ -1,7 +1,7 @@
 import { Input, Select, Button } from '@/components/ui'
 import { isVisible } from './fieldVisibility'
 import type { ExperimentType } from './fieldVisibility'
-import { parseVialSize } from './vialSize'
+import { parseVialSize, VIAL_SIZE_MAX_ML } from './vialSize'
 
 const FEEDSTOCK_OPTIONS = [
   { value: 'Nitrogen', label: 'Nitrogen' },
@@ -78,11 +78,11 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
         {field('Water Volume', 'water_volume_mL', experimentType, data, onChange, 'mL')}
         {vialVisible && (
           <Input
-            key="serum_vial_size_mL"
             label="Serum Vial Size (mL)"
             type="number"
             step={1}
             min={1}
+            max={VIAL_SIZE_MAX_ML}
             value={data.serum_vial_size_mL}
             error={vialError}
             onChange={(e) => onChange({ serum_vial_size_mL: e.target.value })}

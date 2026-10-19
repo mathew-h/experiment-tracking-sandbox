@@ -377,6 +377,8 @@ def _vial_loc_in_detail(resp) -> bool:
     (0, "COND_SLOT_VIAL_P0", 38201),
     (-1, "COND_SLOT_VIAL_PM1", 38202),
     (120.5, "COND_SLOT_VIAL_PFRAC", 38203),
+    (10_001, "COND_SLOT_VIAL_PCAP", 38221),
+    (3_000_000_000, "COND_SLOT_VIAL_PINT4", 38222),
 ])
 def test_create_conditions_rejects_invalid_serum_vial_size(client, db_session, bad, eid, num):
     exp = _make_experiment(db_session, eid=eid, num=num)
@@ -400,6 +402,18 @@ def test_create_conditions_accepts_serum_vial_size(client, db_session):
     })
     assert resp.status_code == 201
     assert resp.json()["serum_vial_size_mL"] == 120
+
+
+def test_create_conditions_accepts_serum_vial_size_at_cap(client, db_session):
+    exp = _make_experiment(db_session, eid="COND_SLOT_VIAL_CAPOK", num=38224)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Serum",
+        "serum_vial_size_mL": 10_000,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["serum_vial_size_mL"] == 10_000
 
 
 def test_create_conditions_coerces_whole_float_vial_size(client, db_session):
@@ -454,6 +468,7 @@ def _create_serum_conditions(client, db_session, eid, num, vial=None):
     (0, "COND_SLOT_VIAL_X0", 38211),
     (-1, "COND_SLOT_VIAL_XM1", 38212),
     (120.5, "COND_SLOT_VIAL_XFRAC", 38213),
+    (10_001, "COND_SLOT_VIAL_XCAP", 38223),
 ])
 def test_patch_conditions_rejects_invalid_serum_vial_size(client, db_session, bad, eid, num):
     cid = _create_serum_conditions(client, db_session, eid, num)
