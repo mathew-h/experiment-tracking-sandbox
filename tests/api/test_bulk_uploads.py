@@ -1039,6 +1039,35 @@ def test_new_experiments_template_additives_sheet_headers(client):
         assert required in headers, f"Missing column '{required}' in additives sheet"
 
 
+def test_new_experiments_template_conditions_sheet_headers(client):
+    """conditions sheet carries serum_vial_size_mL, the HPHT example row stays
+    aligned (blank under the new column, later columns not shifted), and the
+    INSTRUCTIONS sheet documents it."""
+    import openpyxl, io as _io
+    resp = client.get("/api/bulk-uploads/templates/new-experiments")
+    assert resp.status_code == 200
+    wb = openpyxl.load_workbook(_io.BytesIO(resp.content))
+    ws = next((s for s in wb.worksheets if s.title.lower() == "conditions"), None)
+    assert ws is not None, "Sheet 'conditions' not found in template"
+    raw = [c.value for c in ws[1]]
+    headers = [str(v).replace("*", "").split("(")[0].strip() for v in raw if v]
+    for required in ("experiment_id", "experiment_type", "water_volume_mL",
+                     "feedstock", "serum_vial_size_mL", "initial_conductivity_mS_cm"):
+        assert required in headers, f"Missing column '{required}' in conditions sheet"
+
+    example = {h: ws.cell(row=2, column=i + 1).value for i, h in enumerate(headers)}
+    assert example["experiment_type"] == "HPHT"
+    assert example["feedstock"] == "Nitrogen"
+    assert example["serum_vial_size_mL"] is None
+    assert example["initial_conductivity_mS_cm"] is None
+    assert ws.cell(row=2, column=len(headers) + 1).value is None, "example row longer than headers"
+
+    inst = next(s for s in wb.worksheets if s.title.upper() == "INSTRUCTIONS")
+    notes = {r[0].value: r[1].value for r in inst.iter_rows(min_row=1) if r[0].value}
+    assert "serum_vial_size_mL" in notes
+    assert "Serum experiments only" in notes["serum_vial_size_mL"]
+
+
 def test_experiment_status_template_has_four_columns_and_instructions(client):
     import openpyxl
 

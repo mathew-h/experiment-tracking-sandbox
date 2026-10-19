@@ -474,3 +474,81 @@ def test_auto_copied_conditions_from_parent_demotes_hpht_occupant(db_session: Se
     assert any("R05" in m for m in info), (
         f"the auto-completion message should name the slot, got: {info}"
     )
+
+
+# --- serum_vial_size_mL pass-through (docs/issues/issue-serum_vial_size.md.txt) ---
+# The parser maps conditions columns from the model, so these pin behavior that
+# needs no parser change. If one fails, escalate -- do not edit the locked parser.
+
+
+def _vial_of(db: Session, experiment_id: str):
+    db.flush()
+    db.expire_all()
+    exp = db.query(Experiment).filter_by(experiment_id=experiment_id).one()
+    return exp.conditions.serum_vial_size_mL if exp.conditions else "NO CONDITIONS ROW"
+
+
+def test_conditions_sheet_stores_serum_vial_size_as_int(db_session: Session):
+    """The blank second row forces pandas to read the column as float64, so the
+    first value arrives as 120.0 -- it must still land as integer 120."""
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [
+                ["SERUM_9761", None, None, None, None, "ONGOING", None, False],
+                ["SERUM_9762", None, None, None, None, "ONGOING", None, False],
+            ],
+        ),
+        "conditions": (
+            ["experiment_id", "experiment_type", "serum_vial_size_mL"],
+            [["SERUM_9761", "Serum", 120], ["SERUM_9762", "Serum", None]],
+        ),
+    })
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 2
+
+    value = _vial_of(db_session, "SERUM_9761")
+    assert value == 120 and type(value) is int
+    assert _vial_of(db_session, "SERUM_9762") is None
+
+
+def test_conditions_sheet_vial_size_header_is_case_insensitive(db_session: Session):
+    xlsx = make_excel_multisheet({
+        "experiments": (
+            _EXP_HEADERS,
+            [["SERUM_9763", None, None, None, None, "ONGOING", None, False]],
+        ),
+        "conditions": (
+            ["experiment_id", "experiment_type", "Serum_Vial_Size_ML"],
+            [["SERUM_9763", "Serum", 60]],
+        ),
+    })
+    *_, errors, _warnings, _info = NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert _vial_of(db_session, "SERUM_9763") == 60
+
+
+def test_sequential_child_inherits_parent_serum_vial_size(db_session: Session):
+    """SERUM_9765-2 has no conditions row (no conditions sheet at all), so it can
+    only get a vial size via the auto-copy-from-parent branch."""
+    parent = _seed_experiment(db_session, "SERUM_9765", 97611, status=ExperimentStatus.COMPLETED)
+    db_session.add(ExperimentalConditions(
+        experiment_id=parent.experiment_id,
+        experiment_fk=parent.id,
+        experiment_type="Serum",
+        serum_vial_size_mL=160,
+    ))
+    db_session.flush()
+
+    xlsx = _experiments_excel([
+        ["SERUM_9765-2", None, None, None, None, "ONGOING", None, False],
+    ])
+    created, updated, skipped, errors, warnings, info = (
+        NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+    )
+    assert errors == [], f"Unexpected errors: {errors}"
+    assert created == 1
+    assert _vial_of(db_session, "SERUM_9765-2") == 160
