@@ -158,6 +158,7 @@ _VIEWS = [
             ec.initial_ph,
             ec.rock_mass_g,
             ec."water_volume_mL",
+            ec."serum_vial_size_mL",
             ec.water_to_rock_ratio,
             ec.reactor_number,
             ec.feedstock,

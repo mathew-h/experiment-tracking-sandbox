@@ -1,7 +1,11 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+# Upper bound for serum_vial_size_mL. The column is int4; an unbounded value would
+# pass validation and 500 at flush. App-layer cap only (no DB CHECK).
+SERUM_VIAL_SIZE_MAX_ML = 10_000
 
 
 class ConditionsCreate(BaseModel):
@@ -11,6 +15,10 @@ class ConditionsCreate(BaseModel):
     initial_ph: Optional[float] = None
     rock_mass_g: Optional[float] = None
     water_volume_mL: Optional[float] = None
+    # Nominal serum vial size, whole mL. Positive integer, capped at
+    # SERUM_VIAL_SIZE_MAX_ML (10,000); 120.0 coerces to 120, 120.5 is rejected. Accepted on any experiment type -- "Serum only" is
+    # a UI rule, not an API rule.
+    serum_vial_size_mL: Optional[int] = Field(default=None, gt=0, le=SERUM_VIAL_SIZE_MAX_ML)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
     feedstock: Optional[str] = None
@@ -37,6 +45,7 @@ class ConditionsUpdate(BaseModel):
     initial_ph: Optional[float] = None
     rock_mass_g: Optional[float] = None
     water_volume_mL: Optional[float] = None
+    serum_vial_size_mL: Optional[int] = Field(default=None, gt=0, le=SERUM_VIAL_SIZE_MAX_ML)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
     feedstock: Optional[str] = None
@@ -67,6 +76,7 @@ class ConditionsResponse(BaseModel):
     initial_ph: Optional[float] = None
     rock_mass_g: Optional[float] = None
     water_volume_mL: Optional[float] = None
+    serum_vial_size_mL: Optional[int] = None
     water_to_rock_ratio: Optional[float] = None
     total_ferrous_iron_g: Optional[float] = None
     experiment_type: Optional[str] = None

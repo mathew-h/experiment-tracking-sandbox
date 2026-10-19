@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
 import { ConditionsTab } from '../ConditionsTab'
 import * as chemicalsApi from '@/api/chemicals'
+import { conditionsApi } from '@/api/conditions'
 
 // Minimal stubs
 vi.mock('@/api/chemicals', () => ({
@@ -19,6 +20,7 @@ vi.mock('@/api/chemicals', () => ({
 vi.mock('@/api/conditions', () => ({
   conditionsApi: {
     getByExperiment: vi.fn(() => Promise.resolve(null)),
+    patch: vi.fn(() => Promise.resolve({})),
   },
 }))
 vi.mock('@/components/ui', async () => {
@@ -90,5 +92,68 @@ describe('ConditionsTab additives action buttons', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(deleteFn).not.toHaveBeenCalled()
+  })
+})
+
+describe('ConditionsTab — serum vial size', () => {
+  const serum = { ...mockConditions, experiment_type: 'Serum', serum_vial_size_mL: 120 }
+
+  it('shows the read row when set', () => {
+    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    expect(screen.getByText('Serum Vial Size')).toBeInTheDocument()
+    expect(screen.getByText('120 mL')).toBeInTheDocument()
+  })
+
+  it('shows no read row when null', () => {
+    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    expect(screen.queryByText('Serum Vial Size')).not.toBeInTheDocument()
+  })
+
+  async function openEditModal() {
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+  }
+
+  it('edit modal shows the input for Serum, seeded with the stored value', async () => {
+    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(120)
+  })
+
+  it('edit modal shows the input for a Serum with no stored value', async () => {
+    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(null)
+  })
+
+  it('edit modal hides the input for HPHT with no stored value', async () => {
+    wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.queryByLabelText('Serum Vial Size (mL)')).not.toBeInTheDocument()
+  })
+
+  it('edit modal shows the input for HPHT when a value is already stored', async () => {
+    wrap(<ConditionsTab conditions={{ ...mockConditions, serum_vial_size_mL: 60 }} experimentId="HPHT_001" experimentFk={1} />)
+    await openEditModal()
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(60)
+  })
+
+  it('keeps the input visible while the user clears a stored value', async () => {
+    wrap(<ConditionsTab conditions={{ ...mockConditions, serum_vial_size_mL: 60 }} experimentId="HPHT_001" experimentFk={1} />)
+    await openEditModal()
+    await userEvent.clear(screen.getByLabelText('Serum Vial Size (mL)'))
+    expect(screen.getByLabelText('Serum Vial Size (mL)')).toBeInTheDocument()
+  })
+
+  it('omits a hidden vial size from the save payload after switching to HPHT', async () => {
+    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    await openEditModal()
+    await userEvent.type(screen.getByLabelText('Serum Vial Size (mL)'), '120')
+    await userEvent.selectOptions(screen.getByLabelText('Experiment Type'), 'HPHT')
+    expect(screen.queryByLabelText('Serum Vial Size (mL)')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => expect(conditionsApi.patch).toHaveBeenCalled())
+    const payload = vi.mocked(conditionsApi.patch).mock.calls[0][1]
+    expect(payload).not.toHaveProperty('serum_vial_size_mL')
+    expect(payload).toHaveProperty('experiment_type', 'HPHT')
   })
 })

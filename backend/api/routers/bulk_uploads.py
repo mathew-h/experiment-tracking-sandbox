@@ -961,6 +961,7 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
                 "rxn_temp_pressure_psi",
                 "particle_size",
                 "feedstock",
+                "serum_vial_size_mL",
                 "initial_conductivity_mS_cm",
                 "co2_partial_pressure_MPa",
                 "initial_nitrate_concentration",
@@ -970,7 +971,7 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             required={"experiment_id*"},
             example_row=[
                 "HPHT_001", "HPHT", 200.0, 7.0, 5.0, 50.0, 3, 300,
-                100.0, 1450.0, "< 150 μm", "Nitrogen", None, None, None, None, None,
+                100.0, 1450.0, "< 150 μm", "Nitrogen", None, None, None, None, None, None,
             ],
         )
 
@@ -1018,6 +1019,7 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("rxn_temp_pressure_psi", "Headspace pressure at reaction temperature (psi)."),
             ("particle_size", "Rock particle size description (e.g. '< 150 μm')."),
             ("feedstock", "Nitrogen, Nitrate, or Blank."),
+            ("serum_vial_size_mL", "Serum experiments only. Nominal vial size in whole mL (e.g. 20, 60, 120, 160). Leave blank for other types."),
             ("--- additives sheet ---", ""),
             ("experiment_id*", "REQUIRED. Must match an experiment in the experiments sheet or exist in database."),
             ("compound*", "REQUIRED. Chemical compound name. Auto-created in compound inventory if not found."),

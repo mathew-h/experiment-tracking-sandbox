@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { VIAL_SIZE_MAX_ML } from '@/pages/NewExperiment/vialSize'
 import { conditionsApi, type ConditionsResponse, type ConditionsPayload } from '@/api/conditions'
 import { chemicalsApi, type Compound, type ChemicalAdditive, type AdditiveUpdatePayload } from '@/api/chemicals'
 import { Button, Input, Select, Modal, ConfirmModal, useToast } from '@/components/ui'
@@ -141,16 +142,23 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
     onError: (err: Error) => toastError('Failed to update additive', err.message),
   })
 
+  // Single source of truth for the input's visibility AND the save payload, so a
+  // hidden (stale) value is never sent. Keyed on the STORED value (not form) so the
+  // input does not vanish while the user clears it.
+  const showVialSize = form.experiment_type === 'Serum' || conditions?.serum_vial_size_mL != null
+
   const saveMutation = useMutation({
     mutationFn: () => {
+      const body = { ...form }
+      if (!showVialSize) delete body.serum_vial_size_mL
       if (!conditions) {
         return conditionsApi.create({
-          ...form,
+          ...body,
           experiment_fk: experimentFk,
           experiment_id: experimentId,
         })
       }
-      return conditionsApi.patch(conditions.id, form)
+      return conditionsApi.patch(conditions.id, body)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] })
@@ -169,6 +177,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
       initial_ph: conditions?.initial_ph ?? undefined,
       rock_mass_g: conditions?.rock_mass_g ?? undefined,
       water_volume_mL: conditions?.water_volume_mL ?? undefined,
+      serum_vial_size_mL: conditions?.serum_vial_size_mL ?? undefined,
       feedstock: conditions?.feedstock ?? undefined,
       stir_speed_rpm: conditions?.stir_speed_rpm ?? undefined,
       reactor_number: conditions?.reactor_number ?? undefined,
@@ -235,6 +244,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
         <Row label="Initial pH" value={conditions.initial_ph} />
         <Row label="Rock Mass" value={conditions.rock_mass_g} unit="g" />
         <Row label="Water Volume" value={conditions.water_volume_mL} unit="mL" />
+        <Row label="Serum Vial Size" value={conditions.serum_vial_size_mL} unit="mL" />
         {conditions.water_to_rock_ratio != null && (
           <div className="flex items-baseline gap-4 py-1 border-b border-surface-border/50">
             <span className="text-xs text-ink-secondary font-semibold w-44 shrink-0">Water : Rock Ratio</span>
@@ -320,6 +330,11 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
             <Input label="Initial pH" type="number" value={form.initial_ph ?? ''} onChange={set('initial_ph')} />
             <Input label="Rock Mass (g)" type="number" value={form.rock_mass_g ?? ''} onChange={set('rock_mass_g')} />
             <Input label="Water Volume (mL)" type="number" value={form.water_volume_mL ?? ''} onChange={set('water_volume_mL')} />
+            {/* First type-conditional field in this modal. Keyed on the STORED value
+                (not form) so the input does not vanish while the user clears it. */}
+            {showVialSize && (
+              <Input label="Serum Vial Size (mL)" type="number" step={1} min={1} max={VIAL_SIZE_MAX_ML} value={form.serum_vial_size_mL ?? ''} onChange={set('serum_vial_size_mL')} />
+            )}
             <Select label="Feedstock" options={FEEDSTOCK_OPTIONS} value={form.feedstock ?? ''} onChange={set('feedstock')} placeholder="Select…" />
             <Input label="Stir Speed (RPM)" type="number" value={form.stir_speed_rpm ?? ''} onChange={set('stir_speed_rpm')} />
             <Input label="Reactor #" type="number" value={form.reactor_number ?? ''} onChange={set('reactor_number')} />

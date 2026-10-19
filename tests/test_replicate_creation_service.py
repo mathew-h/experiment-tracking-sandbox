@@ -82,3 +82,12 @@ class TestCreateReplicateExperiments:
         assert len(created) == 2
         assert all(e.conditions is None for e in created)
         assert skipped == []
+
+    def test_replicates_copy_serum_vial_size(self, test_db):
+        parent = _make_parent(test_db, "CRS_VIAL_001", 9850, with_additive=False)
+        parent.conditions.serum_vial_size_mL = 120
+        test_db.flush()
+        created, skipped = create_replicate_experiments(test_db, "CRS_VIAL_001", count=2)
+        test_db.flush()
+        assert skipped == []
+        assert [e.conditions.serum_vial_size_mL for e in created] == [120, 120]

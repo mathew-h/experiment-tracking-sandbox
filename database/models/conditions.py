@@ -25,6 +25,7 @@ class ExperimentalConditions(Base):
     initial_ph = Column(Float)
     rock_mass_g = Column(Float)
     water_volume_mL = Column(Float)
+    serum_vial_size_mL = Column(Integer, nullable=True)  # Nominal serum vial size, whole mL. Tracking only; no calc reads it yet. NOT the true total vial volume.
     temperature_c = Column(Float)
     experiment_type = Column(String)
     reactor_number = Column(Integer, nullable=True)
