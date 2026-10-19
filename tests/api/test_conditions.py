@@ -364,3 +364,113 @@ def test_post_conditions_409_does_not_insert(client, db_session):
         ExperimentalConditions.experiment_fk == exp.id
     ).all()
     assert len(rows) == 1
+
+
+# --- serum_vial_size_mL validation (docs/issues/issue-serum_vial_size.md.txt) ---
+
+
+def _vial_loc_in_detail(resp) -> bool:
+    return any("serum_vial_size_mL" in err.get("loc", []) for err in resp.json()["detail"])
+
+
+@pytest.mark.parametrize("bad, eid, num", [
+    (0, "COND_SLOT_VIAL_P0", 38201),
+    (-1, "COND_SLOT_VIAL_PM1", 38202),
+    (120.5, "COND_SLOT_VIAL_PFRAC", 38203),
+])
+def test_create_conditions_rejects_invalid_serum_vial_size(client, db_session, bad, eid, num):
+    exp = _make_experiment(db_session, eid=eid, num=num)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Serum",
+        "serum_vial_size_mL": bad,
+    })
+    assert resp.status_code == 422
+    assert _vial_loc_in_detail(resp)
+
+
+def test_create_conditions_accepts_serum_vial_size(client, db_session):
+    exp = _make_experiment(db_session, eid="COND_SLOT_VIAL_OK", num=38204)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Serum",
+        "serum_vial_size_mL": 120,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["serum_vial_size_mL"] == 120
+
+
+def test_create_conditions_coerces_whole_float_vial_size(client, db_session):
+    exp = _make_experiment(db_session, eid="COND_SLOT_VIAL_WHOLE", num=38205)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Serum",
+        "serum_vial_size_mL": 120.0,
+    })
+    assert resp.status_code == 201
+    body = resp.json()["serum_vial_size_mL"]
+    assert body == 120 and isinstance(body, int)
+
+
+def test_create_conditions_allows_vial_size_on_hpht(client, db_session):
+    """UI-only scoping is intentional: the API takes the field on any type."""
+    exp = _make_experiment(db_session, eid="COND_SLOT_VIAL_HPHT", num=38206)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "HPHT",
+        "serum_vial_size_mL": 60,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["serum_vial_size_mL"] == 60
+
+
+def test_conditions_response_vial_size_defaults_to_null(client, db_session):
+    exp = _make_experiment(db_session, eid="COND_SLOT_VIAL_NULL", num=38207)
+    resp = client.post("/api/conditions", json={
+        "experiment_fk": exp.id,
+        "experiment_id": exp.experiment_id,
+        "experiment_type": "Serum",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["serum_vial_size_mL"] is None
+
+
+def _create_serum_conditions(client, db_session, eid, num, vial=None):
+    exp = _make_experiment(db_session, eid=eid, num=num)
+    payload = {"experiment_fk": exp.id, "experiment_id": exp.experiment_id,
+               "experiment_type": "Serum"}
+    if vial is not None:
+        payload["serum_vial_size_mL"] = vial
+    resp = client.post("/api/conditions", json=payload)
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+@pytest.mark.parametrize("bad, eid, num", [
+    (0, "COND_SLOT_VIAL_X0", 38211),
+    (-1, "COND_SLOT_VIAL_XM1", 38212),
+    (120.5, "COND_SLOT_VIAL_XFRAC", 38213),
+])
+def test_patch_conditions_rejects_invalid_serum_vial_size(client, db_session, bad, eid, num):
+    cid = _create_serum_conditions(client, db_session, eid, num)
+    resp = client.patch(f"/api/conditions/{cid}", json={"serum_vial_size_mL": bad})
+    assert resp.status_code == 422
+    assert _vial_loc_in_detail(resp)
+
+
+def test_patch_conditions_accepts_serum_vial_size(client, db_session):
+    cid = _create_serum_conditions(client, db_session, "COND_SLOT_VIAL_XOK", 38214)
+    resp = client.patch(f"/api/conditions/{cid}", json={"serum_vial_size_mL": 160})
+    assert resp.status_code == 200
+    assert resp.json()["serum_vial_size_mL"] == 160
+
+
+def test_patch_conditions_rejected_vial_size_leaves_value_unchanged(client, db_session):
+    cid = _create_serum_conditions(client, db_session, "COND_SLOT_VIAL_XKEEP", 38215, vial=120)
+    bad = client.patch(f"/api/conditions/{cid}", json={"serum_vial_size_mL": 0})
+    assert bad.status_code == 422
+    assert client.get(f"/api/conditions/{cid}").json()["serum_vial_size_mL"] == 120
