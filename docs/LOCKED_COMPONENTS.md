@@ -211,6 +211,19 @@ overwrite never touches another author's note; `scalar_results.py` and
 `quick_upload.py` sign their `Description` column `scalar_results` / `quick_upload`;
 `long_format.py` writes no note. v3 `Description`/`Modification` headers stay
 accepted until 2026-12-31.
+**Zero note cells (2026-10-26, Mat Hearl's sign-off on two edits to
+`master_bulk_upload.py`).** The Dashboard's XLOOKUP returns the number 0 for an
+empty source cell, which stored the text `'0'` as a note. (1) `_parse_text` now
+treats a zero note cell (int or float 0, or the text `"0"`) as blank. (2) An
+`overwrite=TRUE` vial-day (every merged row TRUE) with a blank note cell now
+deletes the parser's own slot for that type: the modification slot in the parser
+(`if modification or overwrite:`), the observation slot through
+`create_scalar_result_ex`, gated on `_sheet_fields` declaring `description`. Only
+the `(result, note_type, 'master_bulk_upload')` slot is touched; notes signed by a
+researcher or another parser are never deleted. `scalar_results.py` and
+`quick_upload.py` declare no `_sheet_fields`, so they are unchanged. The one-off
+cleanup of existing `'0'` notes is `database/data_migrations/delete_zero_notes_022.py`
+(dry run by default). Issue: `docs/issues/issue-zero-note-cells.md`.
 
 ## Alembic Migration History
 

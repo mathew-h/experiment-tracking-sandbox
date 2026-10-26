@@ -239,9 +239,18 @@ class ScalarResultsService:
         db.add(experimental_result)
         db.flush()
         observation_text = _clean(observation) if observation is not None else None
-        if note_source and observation_text is not None:
-            # Same slot semantics as the Master parser: text present -> create or
-            # update the parser's slot; blank -> no call, an earlier mirror stays.
+        # Text present -> create or update the parser's slot. Blank -> an earlier
+        # mirror stays, EXCEPT on an overwrite for a caller that declared
+        # `_sheet_fields` containing 'description': its sheet has an Observation
+        # column, so a blank cell there is a deliberate clear of its own slot
+        # (sync_result_note deletes only the note signed `note_source`). Gated on
+        # the declared set because only the Master parser declares one;
+        # scalar_results.py / quick_upload.py keep leaving the note in place --
+        # narrower than #116, where `None` means "everything".
+        clears_own_slot = bool(
+            overwrite and sheet_fields is not None and 'description' in sheet_fields
+        )
+        if note_source and (observation_text is not None or clears_own_slot):
             sync_result_note(
                 db, experimental_result, NoteType.observation, observation_text,
                 created_by=note_source,
