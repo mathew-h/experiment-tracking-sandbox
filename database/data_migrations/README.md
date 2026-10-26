@@ -14,6 +14,7 @@ This directory contains data migration scripts for updating existing data in the
 | `establish_experiment_lineage_006` | Link experiment derivations and treatments | After lineage columns added |
 | `recompute_calculated_fields_005` | Recalculate all derived fields | After formula changes |
 | `calculate_grams_per_ton_yield_004` | Calculate g/ton yield for existing data | After adding yield calculation |
+| `delete_zero_notes_022` | Delete master-signed `'0'` modification/observation notes (XLOOKUP zero cells), with a ModificationsLog snapshot each | Once, after the zero-note-cells parser fix is deployed; dry run first, `--apply` after Mat audits the report |
 ---
 
 ## Recovery: Re-Upload for NULL `time_post_reaction` Rows
@@ -144,6 +145,7 @@ These migrations were run during development and may not be needed for current d
 | `recalculate_derived_conditions_001` | Recalculate water-to-rock ratio, etc. |
 | `chemical_migration.py` | Migrate deprecated catalyst/buffer fields to ChemicalAdditive |
 | `data_migration_update_statuses_001` | Update experiment statuses to enum format |
+| `delete_zero_notes_022` | Delete master-signed `'0'` modification/observation notes (XLOOKUP zero cells), with a ModificationsLog snapshot each |
 
 ---
 
