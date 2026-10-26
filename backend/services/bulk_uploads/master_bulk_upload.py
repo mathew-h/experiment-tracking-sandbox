@@ -20,7 +20,10 @@ columns are experiment_notes rows scoped to the result -- Observation Note ->
 'observation' through ScalarResultsService's `_note_source` mirror, Modification
 Note -> 'modification' through sync_result_note here -- one slot per
 (result, type, created_by='master_bulk_upload') so a re-upload updates rather
-than duplicates. A blank cell writes NO note and leaves an earlier one in place.
+than duplicates. A blank cell writes no note; without OVERWRITE it leaves an
+earlier one in place, and on an OVERWRITE row (every row of the vial-day TRUE)
+it deletes this parser's own note for that type -- never a note signed by anyone
+else.
 A cell holding 0 (number or the text '0') is blank: the Dashboard's XLOOKUP
 returns 0 for an empty source cell.
 
@@ -1045,7 +1048,9 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             exp_result = upsert.experimental_result
 
             # The Modification Note is this parser's own 'modification' slot (inside the vial-day's SAVEPOINT).
-            if modification:
+            # An OVERWRITE row's blank cell clears this parser's own slot only
+            # (sync_result_note deletes by created_by; a no-op when none exists).
+            if modification or overwrite:
                 sync_result_note(
                     db, exp_result, NoteType.modification, modification, created_by=_NOTE_SOURCE,
                 )

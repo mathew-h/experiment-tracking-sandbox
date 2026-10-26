@@ -156,6 +156,165 @@ def test_master_reupload_updates_note_slot_instead_of_appending(db_session: Sess
     assert after[NoteType.modification] == (before[NoteType.modification], "Replaced 10 mL brine with DI")
 
 
+# -- OVERWRITE clears the parser's own slots (zero-note-cells fix B) ----------
+
+_OBS = "Liquid sample, slightly cloudy"
+_MOD = "Replaced 5 mL brine with DI"
+
+
+def _day7_row(exp_id: str, obs, mod, flag: str, nh4=5.2, ph=7.1) -> list:
+    return [exp_id, 7.0, obs, None, None, None, None,
+            nh4, None, None, None, ph, 12.5, mod, flag]
+
+
+def _first_upload(db: Session, exp_id: str, exp_num: int) -> Experiment:
+    exp = _seed_experiment(db, exp_id, exp_num)
+    r = MasterBulkUploadService.from_bytes_ex(db, _dashboard(_V4_HEADERS, _rows(exp_id)))
+    assert r.errors == [], r.errors
+    return exp
+
+
+def _day7_notes(db: Session, exp: Experiment) -> list[ExperimentNotes]:
+    day7 = next(rid for rid, d in _results_by_day(db, exp).items() if d == 7.0)
+    return [n for n in _notes(db, exp) if n.result_id == day7]
+
+
+def _add_researcher_note(db: Session, exp: Experiment, note_type: NoteType, text: str) -> ExperimentNotes:
+    day7 = next(rid for rid, d in _results_by_day(db, exp).items() if d == 7.0)
+    n = ExperimentNotes(
+        experiment_fk=exp.id, experiment_id=exp.experiment_id, result_id=day7,
+        note_type=note_type, note_text=text, created_by="researcher@addisenergy.com",
+    )
+    db.add(n)
+    db.flush()
+    return n
+
+
+def test_master_overwrite_blank_modification_deletes_the_parsers_note(db_session: Session):
+    exp = _first_upload(db_session, "TNO_001", 9118501)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_001", _OBS, None, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    assert [(n.note_type, n.note_text) for n in _day7_notes(db_session, exp)] == [(NoteType.observation, _OBS)]
+
+
+def test_master_overwrite_blank_modification_keeps_a_researcher_note(db_session: Session):
+    exp = _first_upload(db_session, "TNO_002", 9118502)
+    mine = _add_researcher_note(db_session, exp, NoteType.modification, "Swapped septum")
+    mine_id = mine.id
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_002", _OBS, None, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    mods = [n for n in _day7_notes(db_session, exp) if n.note_type == NoteType.modification]
+    assert [(n.id, n.note_text, n.created_by) for n in mods] == [
+        (mine_id, "Swapped septum", "researcher@addisenergy.com"),
+    ]
+
+
+def test_master_overwrite_blank_observation_deletes_the_parsers_note(db_session: Session):
+    exp = _first_upload(db_session, "TNO_003", 9118503)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_003", None, _MOD, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    assert [(n.note_type, n.note_text) for n in _day7_notes(db_session, exp)] == [(NoteType.modification, _MOD)]
+
+
+def test_master_overwrite_blank_observation_keeps_a_researcher_note(db_session: Session):
+    exp = _first_upload(db_session, "TNO_004", 9118504)
+    mine = _add_researcher_note(db_session, exp, NoteType.observation, "Looked orange")
+    mine_id = mine.id
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_004", None, _MOD, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    obs = [n for n in _day7_notes(db_session, exp) if n.note_type == NoteType.observation]
+    assert [(n.id, n.note_text, n.created_by) for n in obs] == [
+        (mine_id, "Looked orange", "researcher@addisenergy.com"),
+    ]
+
+
+def test_master_non_overwrite_blank_cells_leave_both_slots(db_session: Session):
+    exp = _first_upload(db_session, "TNO_005", 9118505)
+    before = [(n.id, n.note_text) for n in _day7_notes(db_session, exp)]
+    assert len(before) == 2
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_005", None, None, "FALSE")]),
+    )
+    assert r.errors == [], r.errors
+    assert [(n.id, n.note_text) for n in _day7_notes(db_session, exp)] == before
+
+
+def test_master_mixed_overwrite_vial_day_clears_nothing(db_session: Session):
+    exp = _first_upload(db_session, "TNO_006", 9118506)
+    before = [(n.id, n.note_text) for n in _day7_notes(db_session, exp)]
+    rows = [
+        _day7_row("TNO_006", None, None, "TRUE", nh4=5.2, ph=None),
+        _day7_row("TNO_006", None, None, "FALSE", nh4=None, ph=7.1),
+    ]
+    r = MasterBulkUploadService.from_bytes_ex(db_session, _dashboard(_V4_HEADERS, rows))
+    assert r.errors == [], r.errors
+    assert [(n.id, n.note_text) for n in _day7_notes(db_session, exp)] == before
+
+
+def test_master_overwrite_rewrites_a_joined_zero_note(db_session: Session):
+    exp = _seed_experiment(db_session, "TNO_007", 9118507)
+    first = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_007", None, None, "FALSE")]),
+    )
+    assert first.errors == [], first.errors
+    seeded = _add_researcher_note(db_session, exp, NoteType.observation, "0; Liq")
+    seeded.created_by = "master_bulk_upload"
+    db_session.flush()
+    seeded_id = seeded.id
+    rows = [
+        _day7_row("TNO_007", "Liq", None, "TRUE", nh4=5.2, ph=None),
+        _day7_row("TNO_007", 0, None, "TRUE", nh4=None, ph=7.1),
+    ]
+    r = MasterBulkUploadService.from_bytes_ex(db_session, _dashboard(_V4_HEADERS, rows))
+    assert r.errors == [], r.errors
+    assert [(n.id, n.note_text) for n in _day7_notes(db_session, exp)] == [(seeded_id, "Liq")]
+
+
+def test_master_overwrite_blank_on_a_new_result_is_a_no_op(db_session: Session):
+    exp = _seed_experiment(db_session, "TNO_008", 9118508)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNO_008", None, None, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    assert r.created == 1
+    assert _notes(db_session, exp) == []
+
+
+def test_scalar_overwrite_blank_description_leaves_the_note(db_session: Session):
+    from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService
+    exp = _seed_experiment(db_session, "TNO_009", 9118509)
+    headers = ["Experiment ID", "Time (days)", "Description", "Gross Ammonium (mM)"]
+    ScalarResultsUploadService.bulk_upsert_from_excel_ex(
+        db_session, make_excel(headers, [["TNO_009", 7.0, "first text", 1.2]]),
+    )
+    ScalarResultsUploadService.bulk_upsert_from_excel_ex(
+        db_session, make_excel(headers, [["TNO_009", 7.0, None, 1.3]]), overwrite_all=True,
+    )
+    assert [(n.note_text, n.created_by) for n in _notes(db_session, exp)] == [("first text", "scalar_results")]
+
+
+def test_quick_upload_overwrite_blank_description_leaves_the_note(db_session: Session):
+    from backend.services.bulk_uploads.quick_upload import quick_upload_from_excel
+    exp = _seed_experiment(db_session, "TNO_010", 9118510)
+    headers = ["Experiment ID*", "Time (days)*", "H2 Conc (ppm)*", "Description"]
+    quick_upload_from_excel(
+        db_session, make_excel(headers, [["TNO_010", 7.0, 120.0, "first text"]], sheet_name="Data"), "hydrogen",
+    )
+    quick_upload_from_excel(
+        db_session, make_excel(headers, [["TNO_010", 7.0, 130.0, None]], sheet_name="Data"),
+        "hydrogen", overwrite_all=True,
+    )
+    assert [(n.note_text, n.created_by) for n in _notes(db_session, exp)] == [("first text", "quick_upload")]
+
+
 # ---------------------------------------------------------------------------
 # Timepoint modifications
 # ---------------------------------------------------------------------------
