@@ -145,7 +145,6 @@ These migrations were run during development and may not be needed for current d
 | `recalculate_derived_conditions_001` | Recalculate water-to-rock ratio, etc. |
 | `chemical_migration.py` | Migrate deprecated catalyst/buffer fields to ChemicalAdditive |
 | `data_migration_update_statuses_001` | Update experiment statuses to enum format |
-| `delete_zero_notes_022` | Delete master-signed `'0'` modification/observation notes (XLOOKUP zero cells), with a ModificationsLog snapshot each |
 
 ---
 

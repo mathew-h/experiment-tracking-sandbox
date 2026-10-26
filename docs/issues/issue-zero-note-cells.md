@@ -107,8 +107,8 @@ This touches a locked parser. **Mat Hearl signed off on 2026-10-26** on A and B 
 - [x] After `--apply`, `SELECT count(*) FROM modifications_log WHERE modified_by = 'delete_zero_notes_022'` equals the number of rows deleted. (mirror; production pending, lab PC post-deploy)
 
 **End to end:**
-- [x] HPHT_309's Results tab shows no MOD badge and no `0` modification on T+0, T+3, T+7, T+10 or T+13.
-- [x] Re-uploading the current `Master_Results_Tracker_v5.xlsx` after deploy creates no `'0'` notes.
+- [x] HPHT_309's Results tab shows no MOD badge and no `0` modification on T+0, T+3, T+7, T+10 or T+13. (mirror; production after deploy + 022 `--apply`)
+- [x] Re-uploading the current `Master_Results_Tracker_v5.xlsx` after deploy creates no `'0'` notes. (mirror; production after deploy)
 - [x] `.venv/Scripts/pytest tests/services/ tests/regression/ tests/api/ tests/data_migrations/ -v` passes.
 
 **Docs:**
