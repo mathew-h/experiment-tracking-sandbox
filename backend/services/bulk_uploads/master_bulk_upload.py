@@ -21,6 +21,8 @@ columns are experiment_notes rows scoped to the result -- Observation Note ->
 Note -> 'modification' through sync_result_note here -- one slot per
 (result, type, created_by='master_bulk_upload') so a re-upload updates rather
 than duplicates. A blank cell writes NO note and leaves an earlier one in place.
+A cell holding 0 (number or the text '0') is blank: the Dashboard's XLOOKUP
+returns 0 for an empty source cell.
 
 Several rows may describe one vial-day. Gas is drawn and run on one date and the
 liquid/solid fraction is collected later, so each fraction gets its own row;
@@ -50,6 +52,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import numbers
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -566,13 +569,22 @@ def _parse_text(val: Any) -> Optional[str]:
     renders it as the literal string 'nan'. On a single row that only replaces a
     blank description; in a merge it would be JOINED onto the partner row's real
     text ('nan; Highest H2 liquid, solids'), corrupting a good value.
+
+    A zero is also blank. The Dashboard fills both note columns with XLOOKUP,
+    which returns the number 0 for an empty source cell, so 0 (a number, or the
+    text '0') is "no note" here -- the same rule `_parse_measurement_float`
+    applies to the measurement columns. Only called for the two note columns.
     """
     if val is None:
         return None
     if isinstance(val, float) and pd.isna(val):
         return None
+    if isinstance(val, numbers.Real) and not isinstance(val, bool) and val == 0:
+        return None
     text = str(val).strip()
-    return text or None
+    if not text or text == "0":
+        return None
+    return text
 
 
 def _format_value(value: Any) -> str:

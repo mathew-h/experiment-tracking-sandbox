@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+import numpy as np
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from backend.services.bulk_uploads.master_bulk_upload import (
     MasterBulkUploadService,
     _COLLECTION_DATE,
     _merge_group,
+    _parse_text,
 )
 
 from .excel_helpers import make_excel_multisheet, make_excel
@@ -2951,6 +2953,66 @@ def test_a_real_modification_is_stored_as_a_modification_note(db_session: Sessio
     notes = _notes_for(db_session, row.id, NoteType.modification)
     assert [(n.note_type, n.note_text, n.created_by) for n in notes] == [
         (NoteType.modification, "+200ul 1M HCl", "master_bulk_upload")
+    ]
+
+
+@pytest.mark.parametrize("cell", [0, 0.0, np.int64(0), np.float64(0.0), "0", " 0 "])
+def test_parse_text_treats_a_zero_cell_as_blank(cell):
+    """The Dashboard's XLOOKUP yields the number 0 for an empty source cell."""
+    assert _parse_text(cell) is None
+
+
+@pytest.mark.parametrize("cell, expected", [
+    (False, "False"), (True, "True"), ("0.0", "0.0"), ("10", "10"),
+    (5, "5"), ("Liq", "Liq"),
+])
+def test_parse_text_keeps_non_zero_values(cell, expected):
+    assert _parse_text(cell) == expected
+
+
+@pytest.mark.parametrize("cell", [0, 0.0, "0"])
+def test_zero_modification_cell_writes_no_note(db_session: Session, cell):
+    _seed_experiment(db_session, "HPHT_ZERONOTE01", 8971)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_ZERONOTE01", 7.0, nh4=1.0, modification=cell),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_ZERONOTE01")
+    assert _notes_for(db_session, row.id, NoteType.modification) == []
+
+
+@pytest.mark.parametrize("cell", [0, 0.0, "0"])
+def test_zero_observation_cell_writes_no_note(db_session: Session, cell):
+    _seed_experiment(db_session, "HPHT_ZERONOTE02", 8972)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_ZERONOTE02", 7.0, nh4=1.0, description=cell),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_ZERONOTE02")
+    assert _notes_for(db_session, row.id, NoteType.observation) == []
+
+
+def test_merged_vial_day_of_liq_and_zero_stores_liq(db_session: Session):
+    """A 0 partner row must not be joined onto the real text ('Liq; 0')."""
+    _seed_experiment(db_session, "HPHT_ZERONOTE03", 8973)
+
+    xlsx = _master_excel_v3([
+        _v3_row("HPHT_ZERONOTE03", 7.0, description="Liq", ph=7.1),
+        _v3_row("HPHT_ZERONOTE03", 7.0, description=0, ph=None, nh4=1.0),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"unexpected errors: {result.errors}"
+    row = _result_for(db_session, "HPHT_ZERONOTE03")
+    notes = _notes_for(db_session, row.id, NoteType.observation)
+    assert [(n.note_text, n.created_by) for n in notes] == [
+        ("Liq", "master_bulk_upload")
     ]
 
 
