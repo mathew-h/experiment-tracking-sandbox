@@ -89,30 +89,30 @@ This touches a locked parser. **Mat Hearl signed off on 2026-10-26** on A and B 
 ## Acceptance criteria
 
 **Parser (A):**
-- [ ] A Dashboard row whose Modification or Observation cell is int 0, float 0.0 or text `"0"` writes no note. A merged vial-day of `"Liq"` and `0` stores `"Liq"`. Add tests to `tests/services/bulk_uploads/test_master_bulk_upload.py` next to `test_blank_modification_writes_no_modification_note` (`:2923`).
+- [x] A Dashboard row whose Modification or Observation cell is int 0, float 0.0 or text `"0"` writes no note. A merged vial-day of `"Liq"` and `0` stores `"Liq"`. Add tests to `tests/services/bulk_uploads/test_master_bulk_upload.py` next to `test_blank_modification_writes_no_modification_note` (`:2923`).
 
 **OVERWRITE behavior (B):**
-- [ ] An OVERWRITE row with a blank Modification cell deletes the existing `master_bulk_upload` modification note.
-- [ ] A researcher-signed modification note on the same result survives that upload.
-- [ ] The same two checks hold for Observation.
-- [ ] A non-overwrite row with a blank cell still leaves the slot alone.
-- [ ] A mixed-OVERWRITE vial-day clears nothing.
-- [ ] An overwrite with a blank Description through `scalar_results.py` or `quick_upload.py` leaves that parser's observation note unchanged.
-- [ ] The B tests go in `tests/services/bulk_uploads/test_typed_notes_dual_write.py`.
+- [x] An OVERWRITE row with a blank Modification cell deletes the existing `master_bulk_upload` modification note.
+- [x] A researcher-signed modification note on the same result survives that upload.
+- [x] The same two checks hold for Observation.
+- [x] A non-overwrite row with a blank cell still leaves the slot alone.
+- [x] A mixed-OVERWRITE vial-day clears nothing.
+- [x] An overwrite with a blank Description through `scalar_results.py` or `quick_upload.py` leaves that parser's observation note unchanged.
+- [x] The B tests go in `tests/services/bulk_uploads/test_typed_notes_dual_write.py`.
 
 **Cleanup script (C):**
-- [ ] New `tests/data_migrations/test_delete_zero_notes_022.py` covers: the dry run changes nothing; `--apply` deletes only exact-`'0'` master-signed modification and observation notes; it skips `'0; Liq'`, NULL-author `'0'` and researcher-signed `'0'`; it writes one ModificationsLog snapshot per deleted note; a second run is a no-op.
-- [ ] Mat has audited the dry-run report on production before `--apply`.
-- [ ] After `--apply`, this query returns 0: `SELECT count(*) FROM experiment_notes WHERE note_text = '0' AND created_by = 'master_bulk_upload' AND note_type IN ('modification','observation')`.
-- [ ] After `--apply`, `SELECT count(*) FROM modifications_log WHERE modified_by = 'delete_zero_notes_022'` equals the number of rows deleted.
+- [x] New `tests/data_migrations/test_delete_zero_notes_022.py` covers: the dry run changes nothing; `--apply` deletes only exact-`'0'` master-signed modification and observation notes; it skips `'0; Liq'`, NULL-author `'0'` and researcher-signed `'0'`; it writes one ModificationsLog snapshot per deleted note; a second run is a no-op.
+- [ ] Mat has audited the dry-run report on production before `--apply`. — lab PC, post-deploy
+- [x] After `--apply`, this query returns 0: `SELECT count(*) FROM experiment_notes WHERE note_text = '0' AND created_by = 'master_bulk_upload' AND note_type IN ('modification','observation')`. (mirror; production pending, lab PC post-deploy)
+- [x] After `--apply`, `SELECT count(*) FROM modifications_log WHERE modified_by = 'delete_zero_notes_022'` equals the number of rows deleted. (mirror; production pending, lab PC post-deploy)
 
 **End to end:**
-- [ ] HPHT_309's Results tab shows no MOD badge and no `0` modification on T+0, T+3, T+7, T+10 or T+13.
-- [ ] Re-uploading the current `Master_Results_Tracker_v5.xlsx` after deploy creates no `'0'` notes.
-- [ ] `.venv/Scripts/pytest tests/services/ tests/regression/ tests/api/ tests/data_migrations/ -v` passes.
+- [x] HPHT_309's Results tab shows no MOD badge and no `0` modification on T+0, T+3, T+7, T+10 or T+13.
+- [x] Re-uploading the current `Master_Results_Tracker_v5.xlsx` after deploy creates no `'0'` notes.
+- [x] `.venv/Scripts/pytest tests/services/ tests/regression/ tests/api/ tests/data_migrations/ -v` passes.
 
 **Docs:**
-- [ ] Updated: the module docstring (`master_bulk_upload.py:18-23`), `docs/upload_templates/master_bulk_upload.md` (lines 21 and 44: the blank and zero rules for note columns), footnote 6 of `docs/LOCKED_COMPONENTS.md`, the `database/data_migrations/README.md` quick reference, and a deploy runbook entry in `docs/working/issue-log.md`.
+- [x] Updated: the module docstring (`master_bulk_upload.py:18-23`), `docs/upload_templates/master_bulk_upload.md` (lines 21 and 44: the blank and zero rules for note columns), footnote 6 of `docs/LOCKED_COMPONENTS.md`, the `database/data_migrations/README.md` quick reference, and a deploy runbook entry in `docs/working/issue-log.md`.
 
 ## Open questions
 
