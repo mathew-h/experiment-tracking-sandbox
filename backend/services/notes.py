@@ -26,6 +26,11 @@ Two helpers, two situations:
   duplicate; blank text deletes the caller's own note. This is what
   makes "both sides match" true after the second upload, not just the first.
 
+A note leaves its parser's slot when a researcher edits its text or retypes it
+in the app: release_upload_slot re-signs created_by from the parser tag to the
+editor (PATCH /experiments/{id}/notes/{note_id} and PATCH /notes/bulk), so the
+next upload neither rewrites nor deletes the edit.
+
 Nothing here validates content. Nothing is required; a blank value simply
 writes no note (spec: behaviour change comes from visibility, not validators).
 """
@@ -40,6 +45,13 @@ from sqlalchemy.orm import Session
 from database.models.enums import NoteType
 from database.models.experiments import Experiment, ExperimentNotes
 from database.models.results import ExperimentalResults
+
+
+# The created_by tags of the parsers that mirror a sheet column through
+# sync_result_note. A result-scoped note signed with one of these sits in that
+# parser's slot. Timepoint Modifications signs with the uploader's email and
+# new_experiments writes experiment-level descriptions, so neither is here.
+UPLOAD_SLOT_SIGNERS: frozenset[str] = frozenset({"master_bulk_upload", "scalar_results", "quick_upload"})
 
 
 def _clean(text: Optional[str]) -> Optional[str]:
@@ -110,6 +122,9 @@ def sync_result_note(
     ``created_by`` is part of the slot key on purpose: a researcher's
     hand-written modification note (created_by = their email) is never
     overwritten by a bulk upload's mirror (created_by = 'master_bulk_upload').
+    The same holds for a parser note a researcher later edited or retyped in
+    the app: release_upload_slot re-signed it to the editor, so it is no
+    longer in this slot.
 
     Returns the note now standing in the slot, or None if the slot is empty.
     """
@@ -145,3 +160,19 @@ def sync_result_note(
         result_id=result.id,
         created_by=created_by,
     )
+
+
+def release_upload_slot(note: ExperimentNotes, editor: str) -> Optional[str]:
+    """Take a parser-written note out of its upload slot by re-signing it.
+
+    Called when a researcher edits the note's text or retypes it in the app.
+    If the note is result-scoped and signed by a parser in UPLOAD_SLOT_SIGNERS,
+    ``created_by`` becomes ``editor`` and the previous signer is returned, so
+    the caller can record the change in its ModificationsLog row. Any other
+    note is left unchanged and None is returned. Does not flush.
+    """
+    if note.result_id is None or note.created_by not in UPLOAD_SLOT_SIGNERS:
+        return None
+    previous = note.created_by
+    note.created_by = editor
+    return previous

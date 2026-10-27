@@ -1,4 +1,4 @@
--- Prod audit queries for the open reactor/experiment_type tickets.
+-- Prod audit queries for the open reactor/experiment_type and notes tickets.
 -- READ ONLY. Nothing here writes. Run against the lab PC's Postgres.
 --
 --   psql "postgresql://USER@HOST:5432/experiments" -f docs/issues/audit-queries.sql
@@ -6,6 +6,7 @@
 -- Paste the output into:
 --   docs/issues/issue-reactor-slot-identity-and-occupancy-uniqueness.md  (Verification)
 --   docs/issues/issue-experiment-type-enum-binding.md                    (Prerequisite)
+--   docs/issues/issue-zero-note-cells.md                                 (Q5, under Open question 2)
 
 SET default_transaction_read_only = on;
 
@@ -62,3 +63,29 @@ JOIN experimental_conditions ec ON ec.experiment_fk = e.id
 WHERE e.status = 'ONGOING'
   AND ec.reactor_number IS NOT NULL
 ORDER BY 1;
+
+\echo ''
+\echo '=== Q5. Parser-signed notes carrying a pre-fix UI edit ==='
+\echo '=== Before fix/ui-edits-leave-upload-note-slot a UI edit kept the parser tag, so the next upload could rewrite or delete it ==='
+\echo '=== note_text matches are near-certain; note_type (retype) matches are only CANDIDATES: the PATCH log row has no note id ==='
+SELECT
+  n.id AS note_id,
+  n.experiment_id,
+  n.result_id,
+  n.note_type,
+  n.created_by,
+  n.note_text,
+  ml.modified_by,
+  ml.created_at AS edited_at
+FROM experiment_notes n
+JOIN modifications_log ml ON ml.experiment_fk = n.experiment_fk
+WHERE n.result_id IS NOT NULL
+  AND n.created_by IN ('master_bulk_upload', 'scalar_results', 'quick_upload')
+  AND ml.modified_table = 'experiment_notes'
+  AND ml.modification_type = 'update'
+  AND ml.modified_by LIKE '%@%'
+  AND NOT (ml.new_values ? 'result_id')  -- excludes Timepoint Modifications rows
+  AND n.updated_at >= ml.created_at       -- the note was written at or after the edit (a PATCH stamps both in one transaction)
+  AND (ml.new_values ->> 'note_text' = n.note_text
+       OR ml.new_values ->> 'note_type' = n.note_type::text)
+ORDER BY n.experiment_id, n.id, ml.created_at;

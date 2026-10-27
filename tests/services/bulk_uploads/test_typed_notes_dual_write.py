@@ -288,6 +288,88 @@ def test_master_overwrite_blank_on_a_new_result_is_a_no_op(db_session: Session):
     assert _notes(db_session, exp) == []
 
 
+# -- A UI edit takes the note out of the parser's slot (open question 2) -----
+
+_EDITED = "Corrected in the app"
+
+
+def _edit_in_app(db: Session, exp: Experiment, note_type: NoteType, *, retype_to: NoteType | None = None):
+    """Mimic PATCH /notes/{id}: change the day-7 master note's text (or type)
+    and release it from the upload slot. Returns (id, text, type)."""
+    from backend.services.notes import release_upload_slot
+    note = next(n for n in _day7_notes(db, exp) if n.note_type == note_type)
+    if retype_to is None:
+        note.note_text = _EDITED
+    else:
+        note.note_type = retype_to
+    assert release_upload_slot(note, "researcher@addisenergy.com") == "master_bulk_upload"
+    db.flush()
+    return note.id, note.note_text, note.note_type
+
+
+def test_ui_edited_modification_survives_overwrite_blank_cell(db_session: Session):
+    exp = _first_upload(db_session, "TNR_001", 9118601)
+    edited = _edit_in_app(db_session, exp, NoteType.modification)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNR_001", _OBS, None, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    mods = [(n.id, n.note_text, n.note_type) for n in _day7_notes(db_session, exp)
+            if n.note_type == NoteType.modification]
+    assert mods == [edited]
+
+
+def test_ui_edited_modification_is_not_rewritten_by_overwrite(db_session: Session):
+    exp = _first_upload(db_session, "TNR_002", 9118602)
+    edited = _edit_in_app(db_session, exp, NoteType.modification)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNR_002", _OBS, _MOD, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    mods = [n for n in _day7_notes(db_session, exp) if n.note_type == NoteType.modification]
+    assert (mods[0].id, mods[0].note_text, mods[0].note_type) == edited
+    assert [(n.note_text, n.created_by) for n in mods[1:]] == [(_MOD, "master_bulk_upload")]
+
+
+def test_ui_edited_observation_survives_overwrite_blank_cell(db_session: Session):
+    exp = _first_upload(db_session, "TNR_003", 9118603)
+    edited = _edit_in_app(db_session, exp, NoteType.observation)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNR_003", None, _MOD, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    obs = [(n.id, n.note_text, n.note_type) for n in _day7_notes(db_session, exp)
+           if n.note_type == NoteType.observation]
+    assert obs == [edited]
+
+
+def test_ui_edited_observation_is_not_rewritten_by_overwrite(db_session: Session):
+    exp = _first_upload(db_session, "TNR_004", 9118604)
+    edited = _edit_in_app(db_session, exp, NoteType.observation)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNR_004", _OBS, _MOD, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    obs = [n for n in _day7_notes(db_session, exp) if n.note_type == NoteType.observation]
+    assert (obs[0].id, obs[0].note_text, obs[0].note_type) == edited
+    assert [(n.note_text, n.created_by) for n in obs[1:]] == [(_OBS, "master_bulk_upload")]
+
+
+def test_ui_retyped_observation_survives_overwrite_blank_modification(db_session: Session):
+    """A master observation retyped to modification would otherwise land in the
+    master modification slot and be deleted by an OVERWRITE blank cell."""
+    exp = _first_upload(db_session, "TNR_005", 9118605)
+    master_mod = next(n for n in _day7_notes(db_session, exp) if n.note_type == NoteType.modification)
+    db_session.delete(master_mod)
+    db_session.flush()
+    retyped = _edit_in_app(db_session, exp, NoteType.observation, retype_to=NoteType.modification)
+    r = MasterBulkUploadService.from_bytes_ex(
+        db_session, _dashboard(_V4_HEADERS, [_day7_row("TNR_005", None, None, "TRUE")]),
+    )
+    assert r.errors == [], r.errors
+    assert [(n.id, n.note_text, n.note_type) for n in _day7_notes(db_session, exp)] == [retyped]
+
+
 def test_scalar_overwrite_blank_description_leaves_the_note(db_session: Session):
     from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService
     exp = _seed_experiment(db_session, "TNO_009", 9118509)
