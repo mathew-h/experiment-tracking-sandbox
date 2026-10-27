@@ -253,10 +253,10 @@ def test_bulk_retype_resigns_parser_notes_and_logs_each(client, db_session):
     db_session.expire_all()
     assert db_session.get(ExperimentNotes, a.id).created_by == "test@addisenergy.com"
     assert db_session.get(ExperimentNotes, b.id).created_by == "test@addisenergy.com"
-    olds = sorted(l.old_values["created_by"] for l in _logs(db_session, exp))
+    olds = sorted(entry.old_values["created_by"] for entry in _logs(db_session, exp))
     assert olds == ["master_bulk_upload", "scalar_results"]
-    assert all(l.new_values == {"note_type": "result_note", "created_by": "test@addisenergy.com"}
-               for l in _logs(db_session, exp))
+    assert all(entry.new_values == {"note_type": "result_note", "created_by": "test@addisenergy.com"}
+               for entry in _logs(db_session, exp))
 
 
 def test_bulk_retype_keeps_a_researcher_signer(client, db_session):
@@ -268,7 +268,7 @@ def test_bulk_retype_keeps_a_researcher_signer(client, db_session):
     assert resp.status_code == 200, resp.text
     db_session.expire_all()
     assert db_session.get(ExperimentNotes, n.id).created_by == "someone@addisenergy.com"
-    assert [l.new_values for l in _logs(db_session, exp)] == [{"note_type": "result_note"}]
+    assert [entry.new_values for entry in _logs(db_session, exp)] == [{"note_type": "result_note"}]
 
 
 def test_bulk_needs_review_only_resigns_nothing(client, db_session):
@@ -279,4 +279,4 @@ def test_bulk_needs_review_only_resigns_nothing(client, db_session):
     assert resp.status_code == 200, resp.text
     db_session.expire_all()
     assert db_session.get(ExperimentNotes, n.id).created_by == "quick_upload"
-    assert [l.new_values for l in _logs(db_session, exp)] == [{"needs_review": False}]
+    assert [entry.new_values for entry in _logs(db_session, exp)] == [{"needs_review": False}]
