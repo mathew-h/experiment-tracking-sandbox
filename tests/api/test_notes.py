@@ -337,3 +337,79 @@ def test_get_experiment_detail_notes_carry_event_date(client, db_session):
     assert by_id[dated.id]["event_date"] == "2026-09-24"
     assert "event_date" in by_id[plain.id]
     assert by_id[plain.id]["event_date"] is None
+
+
+# ---------------------------------------------------------------------------
+# A UI edit takes a parser-written note out of its upload slot
+# (zero-note-cells open question 2)
+# ---------------------------------------------------------------------------
+
+def _parser_note(db, exp_id, number, created_by="master_bulk_upload", note_type=NoteType.observation):
+    exp = _make_experiment(db, exp_id, number)
+    r = _make_result(db, exp)
+    note = ExperimentNotes(
+        experiment_id=exp_id, experiment_fk=exp.id, result_id=r.id,
+        note_type=note_type, note_text="from the sheet", created_by=created_by,
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return exp, note
+
+
+def _last_note_log(db, exp):
+    return db.execute(
+        select(ModificationsLog).where(
+            ModificationsLog.experiment_fk == exp.id,
+            ModificationsLog.modified_table == "experiment_notes",
+        ).order_by(ModificationsLog.id.desc())
+    ).scalars().first()
+
+
+def test_patch_text_resigns_a_parser_note_to_the_editor(client, db_session):
+    exp, note = _parser_note(db_session, "NOTE_RS_001", 9118141)
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"note_text": "fixed in the app"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created_by"] == "test@addisenergy.com"
+    log = _last_note_log(db_session, exp)
+    assert log.old_values == {"note_text": "from the sheet", "created_by": "master_bulk_upload"}
+    assert log.new_values == {"note_text": "fixed in the app", "created_by": "test@addisenergy.com"}
+
+
+def test_patch_retype_resigns_a_parser_note_to_the_editor(client, db_session):
+    exp, note = _parser_note(db_session, "NOTE_RS_002", 9118142)
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"note_type": "modification"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created_by"] == "test@addisenergy.com"
+    log = _last_note_log(db_session, exp)
+    assert log.old_values == {"note_type": "observation", "created_by": "master_bulk_upload"}
+    assert log.new_values == {"note_type": "modification", "created_by": "test@addisenergy.com"}
+
+
+def test_patch_needs_review_only_keeps_the_parser_signer(client, db_session):
+    exp, note = _parser_note(db_session, "NOTE_RS_003", 9118143)
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"needs_review": True})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created_by"] == "master_bulk_upload"
+    assert "created_by" not in _last_note_log(db_session, exp).new_values
+
+
+def test_patch_event_date_only_keeps_the_parser_signer(client, db_session):
+    exp, note = _parser_note(db_session, "NOTE_RS_004", 9118144)
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"event_date": "2026-10-20"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created_by"] == "master_bulk_upload"
+    assert "created_by" not in _last_note_log(db_session, exp).new_values
+
+
+def test_patch_text_keeps_a_researcher_signer(client, db_session):
+    exp, note = _parser_note(db_session, "NOTE_RS_005", 9118145, created_by="someone@addisenergy.com")
+    resp = client.patch(f"/api/experiments/{exp.experiment_id}/notes/{note.id}",
+                        json={"note_text": "edited"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created_by"] == "someone@addisenergy.com"
+    assert _last_note_log(db_session, exp).new_values == {"note_text": "edited"}

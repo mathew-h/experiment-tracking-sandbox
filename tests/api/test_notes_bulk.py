@@ -239,3 +239,44 @@ def test_bulk_patch_retypes_a_dated_note_to_modification(client, db_session):
     bad = client.patch("/api/experiments/notes/bulk", json={"ids": [undated.id], "note_type": "modification"})
     assert bad.status_code == 422
     assert str(undated.id) in bad.json()["detail"]
+
+
+# ---- a retype takes a parser-written note out of its upload slot ----
+
+def test_bulk_retype_resigns_parser_notes_and_logs_each(client, db_session):
+    exp = _exp(db_session, "BULK_RS_001", 9118151)
+    r = _result(db_session, exp)
+    a = _note(db_session, exp, "a", result_id=r.id, note_type=NoteType.observation, created_by="master_bulk_upload")
+    b = _note(db_session, exp, "b", result_id=r.id, note_type=NoteType.observation, created_by="scalar_results")
+    resp = client.patch("/api/experiments/notes/bulk", json={"ids": [a.id, b.id], "note_type": "result_note"})
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, a.id).created_by == "test@addisenergy.com"
+    assert db_session.get(ExperimentNotes, b.id).created_by == "test@addisenergy.com"
+    olds = sorted(l.old_values["created_by"] for l in _logs(db_session, exp))
+    assert olds == ["master_bulk_upload", "scalar_results"]
+    assert all(l.new_values == {"note_type": "result_note", "created_by": "test@addisenergy.com"}
+               for l in _logs(db_session, exp))
+
+
+def test_bulk_retype_keeps_a_researcher_signer(client, db_session):
+    exp = _exp(db_session, "BULK_RS_002", 9118152)
+    r = _result(db_session, exp)
+    n = _note(db_session, exp, "mine", result_id=r.id, note_type=NoteType.observation,
+              created_by="someone@addisenergy.com")
+    resp = client.patch("/api/experiments/notes/bulk", json={"ids": [n.id], "note_type": "result_note"})
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, n.id).created_by == "someone@addisenergy.com"
+    assert [l.new_values for l in _logs(db_session, exp)] == [{"note_type": "result_note"}]
+
+
+def test_bulk_needs_review_only_resigns_nothing(client, db_session):
+    exp = _exp(db_session, "BULK_RS_003", 9118153)
+    r = _result(db_session, exp)
+    n = _note(db_session, exp, "p", result_id=r.id, created_by="quick_upload", needs_review=True)
+    resp = client.patch("/api/experiments/notes/bulk", json={"ids": [n.id], "needs_review": False})
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    assert db_session.get(ExperimentNotes, n.id).created_by == "quick_upload"
+    assert [l.new_values for l in _logs(db_session, exp)] == [{"needs_review": False}]

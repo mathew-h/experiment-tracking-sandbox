@@ -641,6 +641,10 @@ def bulk_patch_notes(
         if payload.note_type is not None and payload.note_type is not n.note_type:
             old["note_type"], new["note_type"] = n.note_type.value, payload.note_type.value
             n.note_type = payload.note_type
+            # A retype takes a parser-written note out of its upload slot.
+            previous_signer = notes_service.release_upload_slot(n, current_user.email)
+            if previous_signer is not None:
+                old["created_by"], new["created_by"] = previous_signer, current_user.email
         if payload.needs_review is not None and payload.needs_review != n.needs_review:
             old["needs_review"], new["needs_review"] = n.needs_review, payload.needs_review
             n.needs_review = payload.needs_review
@@ -1661,6 +1665,12 @@ def patch_note(
     if payload.needs_review is not None and payload.needs_review != note.needs_review:
         old_values["needs_review"], new_values["needs_review"] = note.needs_review, payload.needs_review
         note.needs_review = payload.needs_review
+    # A text edit or retype takes a parser-written note out of its upload slot,
+    # so the next upload neither rewrites nor deletes it.
+    if "note_text" in new_values or "note_type" in new_values:
+        previous_signer = notes_service.release_upload_slot(note, current_user.email)
+        if previous_signer is not None:
+            old_values["created_by"], new_values["created_by"] = previous_signer, current_user.email
     if not new_values:
         return NoteResponse.model_validate(note)
 

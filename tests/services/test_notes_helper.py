@@ -1,9 +1,13 @@
 """backend/services/notes.py -- the legacy -> typed note mapping (issue #118, PR1)."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+import pytest
 from sqlalchemy import select
 
-from backend.services.notes import add_note, sync_result_note
+from backend.services.notes import UPLOAD_SLOT_SIGNERS, add_note, release_upload_slot, sync_result_note
 from database import Experiment, ExperimentNotes, ExperimentalResults
 from database.models.enums import ExperimentStatus, NoteType
 
@@ -106,3 +110,42 @@ def test_sync_slots_are_independent_per_type(db_session):
     sync_result_note(db_session, r, NoteType.modification, "mod", created_by="master_bulk_upload")
     got = sorted((n.note_type.value, n.note_text, n.result_id) for n in _notes(db_session, exp))
     assert got == [("modification", "mod", r.id), ("observation", "obs", r.id)]
+
+
+# --- release_upload_slot -----------------------------------------------------
+
+@pytest.mark.parametrize("signer", sorted(UPLOAD_SLOT_SIGNERS))
+def test_release_upload_slot_resigns_each_parser_tag(db_session, signer):
+    exp = _exp(db_session, f"NH_REL_{signer}", 9118120 + sorted(UPLOAD_SLOT_SIGNERS).index(signer))
+    r = _result(db_session, exp)
+    n = add_note(db_session, exp, "parser text", result_id=r.id, created_by=signer)
+    assert release_upload_slot(n, "editor@addisenergy.com") == signer
+    assert n.created_by == "editor@addisenergy.com"
+
+
+@pytest.mark.parametrize("signer", ["someone@addisenergy.com", "reclassify_notes_020", None])
+def test_release_upload_slot_ignores_non_parser_signers(db_session, signer):
+    exp = _exp(db_session, f"NH_KEEP_{signer}", 9118130 + ["someone@addisenergy.com", "reclassify_notes_020", None].index(signer))
+    r = _result(db_session, exp)
+    n = add_note(db_session, exp, "text", result_id=r.id, created_by=signer)
+    assert release_upload_slot(n, "editor@addisenergy.com") is None
+    assert n.created_by == signer
+
+
+def test_release_upload_slot_ignores_experiment_level_parser_note(db_session):
+    exp = _exp(db_session, "NH_KEEP_EXPLVL", 9118135)
+    n = add_note(db_session, exp, "text", created_by="master_bulk_upload")
+    assert release_upload_slot(n, "editor@addisenergy.com") is None
+    assert n.created_by == "master_bulk_upload"
+
+
+def test_upload_slot_signers_match_the_parsers_tags():
+    """Drift guard: a parser that starts signing notes with a new tag must be
+    added to UPLOAD_SLOT_SIGNERS, or a UI edit to its notes stays in its slot."""
+    from backend.services.bulk_uploads import master_bulk_upload
+
+    root = Path(master_bulk_upload.__file__).parent
+    literal = re.compile(r"""\[\s*['"]_note_source['"]\s*\]\s*=\s*['"]([^'"]+)['"]""")
+    scanned = {m for path in root.glob("*.py") for m in literal.findall(path.read_text(encoding="utf-8"))}
+    assert scanned, "the regex found no _note_source assignments; update it"
+    assert UPLOAD_SLOT_SIGNERS == {master_bulk_upload._NOTE_SOURCE} | scanned
