@@ -18,6 +18,12 @@ columns, and a bare drop_column fails with "cannot drop column ... because
 other objects depend on it". No other view selects from either of these two,
 so CASCADE drops nothing else.
 
+v_core_flood_samples is new: one row per primary Core Flood timepoint with
+cross-sample run values (interval days, cumulative liquid volume, pore
+volumes, cumulative H2 g/t, H2 g/t/day, hold flag) from window functions over
+the run, variants excluded. upgrade() creates it last; downgrade() drops it
+first, before the OLD views are restored, because it selects every new column.
+
 Revision ID: f3b7c2a9d4e1
 Revises: e9a4c1f7b3d2
 Create Date: 2026-11-03
@@ -138,6 +144,102 @@ _V_CONDITIONS_NEW = """
 """
 
 
+_V_CORE_FLOOD_SAMPLES = """
+    CREATE VIEW v_core_flood_samples AS
+    WITH s AS (
+        SELECT
+            er.id                                  AS result_id,
+            e.experiment_id,
+            er.experiment_fk,
+            e.base_experiment_id                   AS run_base_id,
+            COALESCE(p.experiment_id IS NOT NULL
+                     AND left(e.experiment_id, length(p.experiment_id) + 1)
+                         = p.experiment_id || '_',
+                     false)                        AS is_variant,
+            er.time_post_reaction_days,
+            er.cumulative_time_post_reaction_days,
+            sr.measurement_date                    AS sample_date,
+            sr.gc_run_date,
+            er.sample_tube_number,
+            er."flow_rate_mL_min",
+            er."nitrogen_flow_rate_mL_min",
+            er.inlet_pressure_psi,
+            er.outlet_pressure_psi,
+            sr."sampling_volume_mL",
+            sr.h2_concentration,
+            sr.gas_sampling_volume_ml,
+            sr."gas_sampling_pressure_MPa",
+            sr.h2_micromoles,
+            sr.h2_mass_ug,
+            sr.h2_grams_per_ton_yield,
+            sr.final_ph,
+            sr."final_conductivity_mS_cm",
+            ec."pore_volume_mL"
+        FROM experimental_results er
+        JOIN experiments e               ON e.id = er.experiment_fk
+        LEFT JOIN experiments p          ON p.id = e.parent_experiment_fk
+        JOIN experimental_conditions ec  ON ec.experiment_fk = e.id
+        LEFT JOIN scalar_results sr      ON sr.result_id = er.id
+        WHERE er.is_primary_timepoint_result = TRUE
+          AND ec.experiment_type = 'Core Flood'
+    ), w AS (
+        SELECT
+            s.*,
+            s.cumulative_time_post_reaction_days
+                - COALESCE(LAG(s.cumulative_time_post_reaction_days) OVER win, 0)
+                                                   AS interval_days,
+            SUM(COALESCE(s."sampling_volume_mL", 0)) OVER win
+                                                   AS "cumulative_liquid_volume_mL",
+            SUM(COALESCE(s.h2_grams_per_ton_yield, 0)) OVER win
+                                                   AS cumulative_h2_grams_per_ton
+        FROM s
+        WINDOW win AS (PARTITION BY run_base_id, is_variant
+                       ORDER BY cumulative_time_post_reaction_days, result_id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+    )
+    SELECT
+        result_id,
+        experiment_id,
+        experiment_fk,
+        run_base_id,
+        is_variant,
+        time_post_reaction_days,
+        cumulative_time_post_reaction_days,
+        sample_date,
+        gc_run_date,
+        sample_tube_number,
+        "flow_rate_mL_min",
+        "nitrogen_flow_rate_mL_min",
+        inlet_pressure_psi,
+        outlet_pressure_psi,
+        "sampling_volume_mL",
+        h2_concentration,
+        gas_sampling_volume_ml,
+        "gas_sampling_pressure_MPa",
+        h2_micromoles,
+        h2_mass_ug,
+        h2_grams_per_ton_yield,
+        final_ph,
+        "final_conductivity_mS_cm",
+        "pore_volume_mL",
+        CASE WHEN is_variant THEN NULL ELSE interval_days END
+                                                   AS interval_days,
+        CASE WHEN is_variant THEN NULL ELSE "cumulative_liquid_volume_mL" END
+                                                   AS "cumulative_liquid_volume_mL",
+        CASE WHEN is_variant THEN NULL
+             ELSE "cumulative_liquid_volume_mL" / NULLIF("pore_volume_mL", 0) END
+                                                   AS cumulative_pore_volumes,
+        CASE WHEN is_variant THEN NULL ELSE cumulative_h2_grams_per_ton END
+                                                   AS cumulative_h2_grams_per_ton,
+        CASE WHEN is_variant THEN NULL
+             ELSE h2_grams_per_ton_yield / NULLIF(interval_days, 0) END
+                                                   AS h2_grams_per_ton_per_day,
+        CASE WHEN is_variant THEN NULL ELSE "flow_rate_mL_min" = 0 END
+                                                   AS is_hold_interval
+    FROM w
+"""
+
+
 def _recreate(name: str, sql: str) -> None:
     op.execute(f"DROP VIEW IF EXISTS {name} CASCADE")
     op.execute(sql)
@@ -161,10 +263,12 @@ def upgrade() -> None:
     )
     _recreate("v_dim_timepoints", _V_DIM_NEW)
     _recreate("v_experiment_conditions", _V_CONDITIONS_NEW)
+    _recreate("v_core_flood_samples", _V_CORE_FLOOD_SAMPLES)
 
 
 def downgrade() -> None:
     # Order matters: the views must stop depending on the columns first.
+    op.execute("DROP VIEW IF EXISTS v_core_flood_samples CASCADE")
     _recreate("v_experiment_conditions", _V_CONDITIONS_OLD)
     _recreate("v_dim_timepoints", _V_DIM_OLD)
     op.drop_column("experimental_conditions", "pore_volume_mL")

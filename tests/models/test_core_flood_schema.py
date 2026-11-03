@@ -86,3 +86,10 @@ def test_old_views_are_new_minus_column():
     assert _norm(mod._V_CONDITIONS_NEW.replace('ec."pore_volume_mL",', "")) == _norm(
         mod._V_CONDITIONS_OLD
     )
+
+
+def test_core_flood_view_matches_startup():
+    from database.event_listeners import _VIEWS
+
+    mod = _migration_module()
+    assert _norm(mod._V_CORE_FLOOD_SAMPLES) == _norm(dict(_VIEWS)["v_core_flood_samples"])
