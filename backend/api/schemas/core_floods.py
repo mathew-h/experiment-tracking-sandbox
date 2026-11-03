@@ -86,12 +86,10 @@ class CoreFloodRunListItem(BaseModel):
     warning_count: int
 
 
-class CoreFloodSampleCreate(BaseModel):
-    """Body of POST /api/core-floods/{experiment_id}/samples."""
+class _CoreFloodSampleFields(BaseModel):
+    """Optional sample fields shared by create and edit (one definition of each constraint)."""
     model_config = ConfigDict(extra="forbid")
 
-    measurement_date: datetime
-    time_post_reaction_days: Optional[float] = Field(None, ge=0)
     gc_run_date: Optional[datetime] = None
     sample_tube_number: Optional[int] = Field(None, gt=0)
     sampling_volume_mL: Optional[float] = Field(None, ge=0)
@@ -100,7 +98,19 @@ class CoreFloodSampleCreate(BaseModel):
     gas_sampling_pressure_MPa: Optional[float] = Field(None, ge=0)
     final_ph: Optional[float] = None
     final_conductivity_mS_cm: Optional[float] = None
-    flow_rate_mL_min: float = Field(..., ge=0)
     nitrogen_flow_rate_mL_min: Optional[float] = None
     inlet_pressure_psi: Optional[float] = None
     outlet_pressure_psi: Optional[float] = None
+
+
+class CoreFloodSampleCreate(_CoreFloodSampleFields):
+    """Body of POST /api/core-floods/{experiment_id}/samples."""
+    measurement_date: datetime
+    time_post_reaction_days: Optional[float] = Field(None, ge=0)
+    flow_rate_mL_min: float = Field(..., ge=0)
+
+
+class CoreFloodSampleUpdate(_CoreFloodSampleFields):
+    """Body of PATCH /api/core-floods/samples/{result_id}; the day is not editable."""
+    measurement_date: Optional[datetime] = None
+    flow_rate_mL_min: Optional[float] = Field(None, ge=0)

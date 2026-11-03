@@ -339,3 +339,127 @@ def test_create_negative_day_422(client, db_session, reporting_views):
                  time_post_reaction_days=-1, flow_rate_mL_min=0.1)
     assert resp.status_code == 422
     assert _result_count(db_session, exp) == 0
+
+
+# --- PATCH /api/core-floods/samples/{result_id} -------------------------------
+
+def _patch(client, result_id, **body):
+    return client.patch(f"/api/core-floods/samples/{result_id}", json=body)
+
+
+def _seed_posted_sample(client, db, exp_id, **extra):
+    exp = _cf_experiment(db, exp_id, date=_d(1))
+    body = dict(measurement_date="2026-10-03", time_post_reaction_days=2,
+                flow_rate_mL_min=0.1, final_ph=6.5, h2_concentration=1000,
+                gas_sampling_volume_ml=5, gas_sampling_pressure_MPa=0.1)
+    body.update(extra)
+    resp = _post(client, exp_id, **body)
+    assert resp.status_code == 201, resp.text
+    return exp, resp.json()["result_id"]
+
+
+def _scalar(db, result_id):
+    row = db.query(ScalarResults).filter_by(result_id=result_id).one()
+    db.refresh(row)
+    return row
+
+
+def _log_count(db, exp):
+    return db.query(ModificationsLog).filter_by(experiment_fk=exp.id).count()
+
+
+def test_patch_conductivity_persists(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFP_001")
+    resp = _patch(client, rid, final_conductivity_mS_cm=12.5)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["final_conductivity_mS_cm"] == 12.5
+    assert _scalar(db_session, rid).final_conductivity_mS_cm == 12.5
+
+
+def test_patch_unknown_key_422(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFP_002")
+    assert _patch(client, rid, bogus=1).status_code == 422
+
+
+def test_patch_day_not_editable_422(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFP_003")
+    assert _patch(client, rid, time_post_reaction_days=4).status_code == 422
+
+
+def test_patch_audit_changed_fields_only(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFP_004")
+    before = _log_count(db_session, exp)
+    resp = _patch(client, rid, final_ph=7.1, flow_rate_mL_min=0.1)
+    assert resp.status_code == 200, resp.text
+    new = (db_session.query(ModificationsLog).filter_by(experiment_fk=exp.id)
+           .order_by(ModificationsLog.id).all()[before:])
+    assert len(new) == 1
+    assert new[0].modification_type == "update"
+    assert new[0].modified_table == "scalar_results"
+    assert new[0].old_values == {"final_ph": 6.5}
+    assert new[0].new_values == {"final_ph": 7.1}
+    assert new[0].modified_by == "test@addisenergy.com"
+
+
+def test_patch_noop_writes_no_audit(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFP_005")
+    before = _log_count(db_session, exp)
+    assert _patch(client, rid).status_code == 200
+    assert _patch(client, rid, final_ph=6.5, flow_rate_mL_min=0.1,
+                  measurement_date="2026-10-03").status_code == 200
+    assert _log_count(db_session, exp) == before
+
+
+def test_patch_creates_missing_scalar(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFP_006", date=_d(1))
+    result = ExperimentalResults(
+        experiment_fk=exp.id, time_post_reaction_days=2.0,
+        time_post_reaction_bucket_days=2.0, cumulative_time_post_reaction_days=2.0,
+        is_primary_timepoint_result=True)
+    db_session.add(result)
+    db_session.flush()
+    resp = _patch(client, result.id, flow_rate_mL_min=0.2, final_ph=7)
+    assert resp.status_code == 200, resp.text
+    db_session.refresh(result)
+    assert result.flow_rate_mL_min == 0.2
+    assert _scalar(db_session, result.id).final_ph == 7
+    logs = db_session.query(ModificationsLog).filter_by(experiment_fk=exp.id).all()
+    assert sorted((m.modified_table, m.modification_type) for m in logs) == [
+        ("experimental_results", "update"), ("scalar_results", "create")]
+
+
+def test_patch_h2_change_recalculates(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFP_007")
+    before = _scalar(db_session, rid).h2_micromoles
+    assert _patch(client, rid, h2_concentration=2000).status_code == 200
+    after = _scalar(db_session, rid).h2_micromoles
+    assert before is not None and after is not None and after != before
+
+
+def test_patch_clear_h2_clears_micromoles(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFP_008")
+    assert _scalar(db_session, rid).h2_micromoles is not None
+    assert _patch(client, rid, h2_concentration=None).status_code == 200
+    assert _scalar(db_session, rid).h2_micromoles is None
+
+
+def test_patch_missing_result_404(client, db_session, reporting_views):
+    assert _patch(client, 99999999, final_ph=7).status_code == 404
+
+
+def test_patch_non_core_flood_422(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFP_009", experiment_type="HPHT", date=_d(1))
+    sample = _sample(db_session, exp, 1.0)
+    assert _patch(client, sample.id, final_ph=7).status_code == 422
+
+
+def test_patch_non_primary_404_writes_nothing(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFP_010", date=_d(1))
+    sample = _sample(db_session, exp, 1.0)
+    sample.is_primary_timepoint_result = False
+    db_session.flush()
+    before = _log_count(db_session, exp)
+    assert _patch(client, sample.id, flow_rate_mL_min=0.9).status_code == 404
+    db_session.refresh(sample)
+    assert sample.flow_rate_mL_min == 0.1
+    assert _log_count(db_session, exp) == before

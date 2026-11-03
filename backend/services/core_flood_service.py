@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.api.schemas.core_floods import (
     CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
-    CoreFloodSegment, CoreFloodWarning,
+    CoreFloodSampleUpdate, CoreFloodSegment, CoreFloodWarning,
 )
 from backend.services.calculations.registry import recalculate
 from backend.services.workdays import LAB_TZ
@@ -305,3 +305,81 @@ def create_sample(
     db.flush()
     log.info("core_flood_sample_created", experiment_id=experiment_id, result_id=result.id)
     return result.id
+
+
+_DATE_FIELDS = ("measurement_date", "gc_run_date")
+
+
+def _differs(current, new) -> bool:
+    if isinstance(new, datetime) and isinstance(current, datetime):
+        return _aware(current) != _aware(new)
+    return current != new
+
+
+def update_sample(
+    db: Session, result_id: int, payload: CoreFloodSampleUpdate, user_email: str,
+) -> None:
+    """Edit one sample's fields. Flushes, never commits; a no-op writes nothing.
+
+    Every rejection happens before the first write.
+    """
+    result = db.get(ExperimentalResults, result_id)
+    if result is None:
+        raise CoreFloodNotFound(f"Result {result_id} not found")
+    exp = db.get(Experiment, result.experiment_fk)
+    cond = db.execute(
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id).limit(1)
+    ).scalar_one_or_none()
+    if not is_core_flood(cond):
+        raise CoreFloodInvalid(f"{exp.experiment_id} is not a Core Flood experiment")
+    if not result.is_primary_timepoint_result:
+        raise CoreFloodNotFound("Sample is not a primary timepoint")
+
+    data = payload.model_dump(exclude_unset=True)
+    for f in _DATE_FIELDS:
+        if f in data:
+            data[f] = _lab_local(data[f])
+    new_result = {k: v for k, v in data.items() if k in RESULT_FIELDS}
+    new_scalar = {k: v for k, v in data.items() if k in SCALAR_FIELDS}
+    if new_scalar.get("h2_concentration") is not None:
+        new_scalar["h2_concentration_unit"] = "ppm"
+
+    changed_result = {k: v for k, v in new_result.items()
+                      if _differs(getattr(result, k), v)}
+    old_result = {k: getattr(result, k) for k in changed_result}
+    for k, v in changed_result.items():
+        setattr(result, k, v)
+
+    scalar = db.execute(
+        select(ScalarResults).where(ScalarResults.result_id == result.id)
+    ).scalar_one_or_none()
+    created = False
+    if scalar is None and new_scalar:
+        scalar = ScalarResults(result_id=result.id)
+        db.add(scalar)
+        created = True
+    changed_scalar: dict = {}
+    old_scalar: dict = {}
+    if scalar is not None:
+        changed_scalar = {k: v for k, v in new_scalar.items()
+                          if _differs(getattr(scalar, k), v)}
+        old_scalar = {k: getattr(scalar, k) for k in changed_scalar}
+        for k, v in changed_scalar.items():
+            setattr(scalar, k, v)
+
+    db.flush()
+    if scalar is not None and (changed_scalar or created):
+        recalculate(scalar, db)
+
+    if changed_result:
+        _audit(db, exp, "experimental_results", "update", old_result, changed_result,
+               user_email)
+    if created:
+        _audit(db, exp, "scalar_results", "create", None, changed_scalar, user_email)
+    elif changed_scalar:
+        _audit(db, exp, "scalar_results", "update", old_scalar, changed_scalar, user_email)
+    db.flush()
+    log.info("core_flood_sample_updated", result_id=result_id,
+             fields=sorted({*changed_result, *changed_scalar}))

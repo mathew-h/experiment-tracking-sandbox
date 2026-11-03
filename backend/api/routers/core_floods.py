@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies.db import get_db
 from backend.api.schemas.core_floods import (
     CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
+    CoreFloodSampleUpdate,
 )
 from backend.auth.firebase_auth import FirebaseUser, verify_firebase_token
 from backend.services import core_flood_service as svc
@@ -36,6 +37,23 @@ def list_core_flood_runs(
 ) -> list[CoreFloodRunListItem]:
     """Core flood runs, active (any ONGOING segment) first."""
     return _translate(lambda: svc.list_runs(db, scope=scope, q=q))
+
+
+@router.patch("/samples/{result_id}", response_model=CoreFloodSample)
+def update_core_flood_sample(
+    result_id: int,
+    payload: CoreFloodSampleUpdate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> CoreFloodSample:
+    """Edit one sample; only changed fields are written and audited."""
+    # update_sample rejects missing and non-primary results before it writes anything.
+    _translate(lambda: svc.update_sample(db, result_id, payload, current_user.email))
+    db.commit()
+    rows = svc.fetch_samples(db, result_id=result_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Sample is not a primary timepoint")
+    return CoreFloodSample(**rows[0])
 
 
 @router.get("/{base_id}", response_model=CoreFloodRun)
