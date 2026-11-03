@@ -6,13 +6,14 @@ import {
   type CoreFloodSample,
   type CoreFloodSegment,
 } from '@/api/coreFloods'
-import { labTodayISO } from '@/utils/labDate'
+import { labDateOf, labTodayISO } from '@/utils/labDate'
 import {
   SAMPLE_FIELDS,
   buildCreateBody,
   buildPatchBody,
   emptyForm,
   formFromSample,
+  fmt,
   prefillFromPrevious,
   validateForm,
   withSampleDate,
@@ -72,6 +73,8 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
   const [dayEdited, setDayEdited] = useState(false)
   const [errors, setErrors] = useState<Errors>({})
   const [serverError, setServerError] = useState<string | null>(null)
+  /** The segment|day pair whose replace warning the researcher has already seen. */
+  const [armedKey, setArmedKey] = useState<string | null>(null)
 
   const segment = segments.find((s) => s.experiment_id === segmentId)
   const segmentOptions = segments.map((s) => ({
@@ -80,6 +83,18 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
   }))
 
   /** Applies an auto-recompute and drops the errors of every key it changed. */
+  // A POST into a bucket that holds a sample demotes it ("newest wins"), so a same-day
+  // add is a replace. Compare numerically: "11" and "11.0" are the same bucket.
+  const dayText = form.time_post_reaction_days.trim()
+  const clash =
+    !editing && segmentId && /^-?\d+(\.\d+)?$/.test(dayText)
+      ? samples.find(
+          (s) => s.experiment_id === segmentId && s.time_post_reaction_days === Number(dayText),
+        )
+      : undefined
+  const clashKey = clash ? `${segmentId}|${Number(dayText)}` : null
+  const armed = clashKey !== null && armedKey === clashKey
+
   function applyRecompute(start: string | null, date: string) {
     const next = withSampleDate(form, date, { segmentStart: start, gcEdited, dayEdited })
     const changed = SAMPLE_FIELDS.map((f) => f.key).filter((k) => next[k] !== form[k])
@@ -129,8 +144,15 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
     setServerError(null)
     const found: Errors = validateForm(form, editing ? initial : undefined)
     if (!editing && !segment) found.segment = 'Choose a segment'
+    if (!editing && segment && !segment.date && dayText === '') {
+      found.time_post_reaction_days = `Required — ${segment.experiment_id} has no start date`
+    }
     setErrors(found)
     if (Object.values(found).some(Boolean)) return
+    if (clashKey && !armed) {
+      setArmedKey(clashKey)
+      return
+    }
     if (editing && Object.keys(buildPatchBody(initial, form)).length === 0) {
       onClose()
       return
@@ -141,6 +163,14 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
   function handleClose() {
     if (!mutation.isPending) onClose()
   }
+
+  const dayHint = editing
+    ? form.measurement_date !== initial.measurement_date
+      ? `Day stays ${fmt(editing.time_post_reaction_days)} — the day can't be changed after a sample is created.`
+      : "Day can't be edited here"
+    : segment?.date
+      ? `Days since ${segment.experiment_id} started (${labDateOf(segment.date)})`
+      : undefined
 
   return (
     <Modal
@@ -154,7 +184,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
             Cancel
           </Button>
           <Button variant="primary" size="sm" onClick={handleSubmit} loading={mutation.isPending}>
-            {editing ? 'Save' : 'Add sample'}
+            {editing ? 'Save' : armed ? 'Replace existing sample' : 'Add sample'}
           </Button>
         </>
       }
@@ -177,6 +207,13 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
             error={errors.segment}
           />
         )}
+        {clash && (
+          <div role="alert" className="rounded border border-status-warning/30 bg-status-warning/5 px-3 py-2 text-xs text-status-warning">
+            {`${clash.experiment_id} already has a sample on day ${fmt(clash.time_post_reaction_days)} (${
+              clash.sample_date ? labDateOf(clash.sample_date) : 'no date'
+            }). Saving replaces it in the run. Enter a fractional day (e.g. ${fmt(clash.time_post_reaction_days)}${Number.isInteger(clash.time_post_reaction_days) ? '.5' : '5'}) to keep both.`}
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {SAMPLE_FIELDS.map((f) => {
             const isDay = f.key === 'time_post_reaction_days'
@@ -190,7 +227,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
                 onChange={(e) => onFieldChange(f.key, e.target.value)}
                 disabled={isDay && !!editing}
                 error={errors[f.key]}
-                hint={isDay && editing ? "Day can't be edited here" : f.help}
+                hint={isDay ? dayHint : f.help}
               />
             )
           })}

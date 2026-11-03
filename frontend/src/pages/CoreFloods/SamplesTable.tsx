@@ -19,7 +19,7 @@ export function SamplesTable({ samples, variant, onEdit }: Props) {
       <TableHead>
         <tr>
           <Th>Sample date</Th>
-          <Th>Day</Th>
+          <Th>Cum. day</Th>
           <Th>Segment</Th>
           <Th>Tube #</Th>
           <Th>Flow (mL/min)</Th>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { coreFloodsApi, type CoreFloodSample } from '@/api/coreFloods'
+import { coreFloodsApi, type CoreFloodSample, type CoreFloodSegment } from '@/api/coreFloods'
 import { Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
 import { CleanupPanel } from './CleanupPanel'
 import { CoreFloodSampleModal } from './CoreFloodSampleModal'
@@ -50,7 +50,12 @@ export function CoreFloodRunPage() {
   const main = run.samples.filter((s) => !s.is_variant)
   const side = run.samples.filter((s) => s.is_variant)
   const last = main.at(-1)
-  const rig = run.segments.filter((s) => s.reactor_slot).at(-1)?.reactor_slot
+  // Same rule as the run list: the latest-dated segment's slot (undated lose, id breaks ties).
+  const rig = run.segments.reduce<CoreFloodSegment | undefined>((best, s) => {
+    if (!best) return s
+    const [a, b] = [best, s].map((x) => (x.date ? Date.parse(x.date) : -Infinity))
+    return b > a || (b === a && s.id > best.id) ? s : best
+  }, undefined)?.reactor_slot
   const ongoing = run.segments
     .filter((s) => s.status?.toUpperCase() === 'ONGOING')
     .map((s) => s.experiment_id)

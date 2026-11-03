@@ -87,6 +87,7 @@ const RUN: CoreFloodRun = {
       status: 'ONGOING',
       parent_experiment_id: 'CF_020',
       reactor_slot: 'CF02',
+      date: '2026-10-30T00:00:00',
       pore_volume_mL: null,
       description: null,
     }),
@@ -179,7 +180,7 @@ describe('CoreFloodRunPage', () => {
     const rows = within(main).getAllByRole('row').slice(1)
     expect(rows).toHaveLength(2)
     const cells = within(rows[0]).getAllByRole('cell')
-    expect(cells[1]).toHaveTextContent('—') // Day
+    expect(cells[1]).toHaveTextContent('—') // Cum. day
     expect(cells[5]).toHaveTextContent('—') // Liquid vol
     expect(within(rows[0]).getByText('11')).toBeInTheDocument()
     expect(within(rows[1]).getByText('12')).toBeInTheDocument()
@@ -192,6 +193,21 @@ describe('CoreFloodRunPage', () => {
     expect(screen.getByText('Pore volumes to date').parentElement).toHaveTextContent('1.235')
     expect(screen.getByText('Rig').parentElement).toHaveTextContent('CF02')
     expect(screen.getByText('Ongoing', { ignore: 'option' }).parentElement).toHaveTextContent('CF_020-2')
+  })
+
+  it("the rig is the latest-dated segment's slot, as in the run list", async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings(
+        [],
+        [
+          segment({ id: 1, experiment_id: 'CF_020', date: '2026-10-30T00:00:00', reactor_slot: 'CF01' }),
+          segment({ id: 2, experiment_id: 'CF_020-2', date: '2026-10-23T00:00:00', reactor_slot: 'CF02' }),
+        ],
+      ),
+    )
+    renderPage()
+    await screen.findByText('Cumulative H₂ to date')
+    expect(screen.getByText('Rig').parentElement).toHaveTextContent('CF01')
   })
 
   it('shows not-found for a 404', async () => {
@@ -289,6 +305,9 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
     await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/core-floods/CF_020'))
     expect(experimentsApi.patch).toHaveBeenCalledWith('CF_020_5_Brine', { experiment_id: 'CF_020-5_Brine' })
     await waitFor(() => expect(coreFloodsApi.get).toHaveBeenLastCalledWith('CF_020'))
+    // the old run no longer exists: it must be dropped, not refetched into a 404
+    const afterSave = vi.mocked(coreFloodsApi.get).mock.calls.filter(([id]) => id === 'CF_020_5')
+    expect(afterSave).toHaveLength(1)
   })
 
   it('renaming one of several segments refetches the run in place', async () => {

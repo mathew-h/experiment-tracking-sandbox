@@ -133,6 +133,49 @@ describe('CoreFloodSampleModal — add', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
+  it('a same-day sample warns, and replacing takes a second click', async () => {
+    renderModal({ samples: [sample({ time_post_reaction_days: 11, sample_date: '2026-11-03T00:00:00' })] })
+    fireEvent.change(screen.getByLabelText('Sample date'), { target: { value: '2026-11-03' } })
+    expect(
+      screen.getByText(/CF_020-3 already has a sample on day 11 \(2026-11-03\)\. Saving replaces it in the run\. Enter a fractional day \(e\.g\. 11\.5\) to keep both\./),
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add sample' }))
+    expect(createSample).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Replace existing sample' }))
+    await waitFor(() => expect(createSample).toHaveBeenCalledTimes(1))
+  })
+
+  it('changing the day after arming disarms the replace confirm', async () => {
+    renderModal({ samples: [sample({ time_post_reaction_days: 11, sample_date: '2026-11-03T00:00:00' })] })
+    fireEvent.change(screen.getByLabelText('Sample date'), { target: { value: '2026-11-03' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Add sample' }))
+    fireEvent.change(screen.getByLabelText('Day (days)'), { target: { value: '11.5' } })
+    expect(screen.queryByText(/already has a sample on day/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add sample' }))
+    await waitFor(() => expect(createSample).toHaveBeenCalledTimes(1))
+  })
+
+  it('a fractional day next to a same-day sample posts on one click', async () => {
+    renderModal({ samples: [sample({ time_post_reaction_days: 11, sample_date: '2026-11-03T00:00:00' })] })
+    fireEvent.change(screen.getByLabelText('Sample date'), { target: { value: '2026-11-03' } })
+    fireEvent.change(screen.getByLabelText('Day (days)'), { target: { value: '11.5' } })
+    expect(screen.queryByText(/already has a sample on day/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add sample' }))
+    await waitFor(() => expect(createSample).toHaveBeenCalledTimes(1))
+  })
+
+  it('the Day hint names the segment start in add mode', () => {
+    renderModal()
+    expect(screen.getByText('Days since CF_020-3 started (2026-10-23)')).toBeInTheDocument()
+  })
+
+  it('a segment with no start date blocks a blank day', async () => {
+    renderModal({ segments: [segment({ date: null })] })
+    await submit()
+    expect(screen.getByText('Required — CF_020-3 has no start date')).toBeInTheDocument()
+    expect(createSample).not.toHaveBeenCalled()
+  })
+
   it('several ONGOING segments make the researcher choose', async () => {
     renderModal({
       segments: [
@@ -182,6 +225,15 @@ describe('CoreFloodSampleModal — edit', () => {
     await waitFor(() => expect(updateSample).toHaveBeenCalledTimes(1))
     expect(updateSample).toHaveBeenCalledWith(77, { final_ph: 7.4 })
     expect(createSample).not.toHaveBeenCalled()
+  })
+
+  it('changing the sample date says the day stays', async () => {
+    renderModal({ editing: sample() })
+    fireEvent.change(screen.getByLabelText('Sample date'), { target: { value: '2026-10-29' } })
+    expect(
+      screen.getByText("Day stays 5 — the day can't be changed after a sample is created."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Day can't be edited here")).not.toBeInTheDocument()
   })
 
   it('an untouched edit sends nothing', async () => {

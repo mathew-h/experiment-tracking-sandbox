@@ -54,6 +54,8 @@ function RenameCell({
           success('Segment renamed', `${updated.experiment_id} moved to run ${newBase}`)
         }
         void invalidateCoreFloodWrites(qc, newBase, [])
+        // The run's only segment left it, so the old run is gone: refetching 404s.
+        if (segmentCount === 1) qc.removeQueries({ queryKey: ['core-flood', baseId] })
       }
       return invalidateCoreFloodWrites(qc, baseId, [segment.experiment_id, updated.experiment_id])
     },
