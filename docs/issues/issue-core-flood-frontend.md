@@ -65,15 +65,15 @@ Use design-system tokens only, with no hex values.
 
 ## Acceptance criteria
 
-- [ ] The sidebar shows "Core Floods". The list defaults to Active and switches to All
-- [ ] `__tests__/fields.test.ts`: 145 psi becomes about 1.0 MPa on the wire. The GC date follows the sample date until edited. Day is prefilled from the segment start
-- [ ] `__tests__/CoreFloodSampleModal.test.tsx` checks that:
+- [x] The sidebar shows "Core Floods". The list defaults to Active and switches to All (vitest `AppLayout.nav`, `CoreFloodListPage`; confirmed in Chrome DevTools by the controller)
+- [x] `__tests__/fields.test.ts`: 145 psi becomes about 1.0 MPa on the wire. The GC date follows the sample date until edited. Day is prefilled from the segment start
+- [x] `__tests__/CoreFloodSampleModal.test.tsx` checks that:
   - flow is required and prefilled from the previous sample
   - an edit that changes only pH sends `{final_ph}`
   - submitting runs one `createSample` call
-- [ ] `__tests__/CoreFloodRunPage.test.tsx`: variants render in Side samples, without cumulative values. A `multiple_ongoing` warning shows the status action
-- [ ] After a rename on the run page, the segments list and URL reflect the new lineage
-- [ ] `cd frontend && npm run test` passes, and `npm run lint` errors don't exceed the current baseline
+- [x] `__tests__/CoreFloodRunPage.test.tsx`: variants render in Side samples, without cumulative values. A `multiple_ongoing` warning shows the status action
+- [~] After a rename on the run page, the segments list and URL reflect the new lineage (verified in Chrome DevTools, not in vitest; one harmless 404 console error from refetching the old run before navigation, tracked as a follow-up)
+- [x] `cd frontend && npm run test` passes (403 tests, 51 files), and `npm run lint` errors don't exceed the current baseline (5 errors, equal to baseline)
 
 ## Notes
 

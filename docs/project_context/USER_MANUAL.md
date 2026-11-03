@@ -27,11 +27,28 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 |------|--------------|
 | **Dashboard** (`/dashboard`) | Reactor grid showing all ONGOING experiments. Click a status badge to change an experiment's status (Ongoing → Completed or Cancelled). |
 | **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and Analysis tabs. |
+| **Core Floods** (`/core-floods`) | One row per core flood run, with a run page for samples and cleanup. See [Core Floods](#core-floods) below. |
 | **New Experiment** (`/experiments/new`) | 4-step guided form to create a new experiment: basic info, conditions, chemical additives, and confirmation. |
 | **Bulk Uploads** (`/bulk-uploads`) | Accordion panel for uploading analytical data in bulk (solution chemistry, ICP-OES, XRD, pXRF, and more). See the [Bulk Uploads Guide](BULK_UPLOADS.md). |
 | **Samples** (`/samples`) | Browse and manage geological sample inventory. |
 | **Chemicals** (`/chemicals`) | Browse the reagent/compound inventory used in experiment conditions. |
 | **Notes review** (`/notes/review`) | Global queue of notes flagged for review after the typed-notes migration. Filter by researcher, experiment, type or text; select rows (or every row reading the same text) and mark reviewed, retype, or delete them in one audited action. |
+
+---
+
+## Core Floods
+
+A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`, ...). The **Core Floods** page treats the whole run as one record.
+
+**List.** One row per run: rig, segment count, sample count, last sample date, cumulative H₂ (g/t) and a warnings badge. It opens on **Active** (runs with an ONGOING segment); **All** shows every run. Type in the search box to filter by run ID.
+
+**Run page.** Click a run to open it. The header shows the rig, the ONGOING segment, cumulative H₂ and pore volumes to date. Below it:
+
+- **Segments:** one row per segment, with a link to its experiment page, an editable status, an inline description, **Rename**, and the pore volume.
+- **Samples:** every sample across all segments in time order. Day is the cumulative day since the run started. A flow rate of 0 shows a **HOLD** badge. Blanks and bypass samples sit in a separate **Side samples** section with no cumulative columns. Click a row to edit it.
+- **Cleanup:** one line per data problem the run has (several roots, several ONGOING segments, missing pore volume or description, samples with no flow rate), each with its fix. The segment's ID sits beside each per-segment control. **Set pore volume for all segments** writes one value to every segment that lacks it.
+
+**Add a sample.** Click **+ Add sample**. With one ONGOING segment it is used automatically; otherwise pick a segment. Day is filled from the sample date and the segment's start (you can change it), the GC run date follows the sample date until you edit it, and flow and pressures are filled from the previous sample. Flow rate is the rate since the previous sample: **enter 0 for a hold**. Enter gas pressure in **psi**; it is stored in MPa. When editing, only the fields you change are saved, and Day cannot be changed.
 
 ---
 
