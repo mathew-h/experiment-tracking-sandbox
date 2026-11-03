@@ -19,7 +19,7 @@ Researchers fall back to the tracker workbook, cleanup across segments happens o
 
 **Navigation.**
 
-- Add a "Core Floods" item after Experiments in `frontend/src/layouts/AppLayout.tsx` (nav items start at line 14).
+- Add a "Core Floods" item in `frontend/src/layouts/AppLayout.tsx` (nav items start at line 14). It sits second to last, just above Notes review (moved from after Experiments at Mat's request, 2026-11-03).
 - Add routes `/core-floods` and `/core-floods/:baseId` in `frontend/src/App.tsx` beside line 37.
 
 **API client.** `frontend/src/api/coreFloods.ts` provides types and `coreFloodsApi.list / get / createSample / updateSample`.

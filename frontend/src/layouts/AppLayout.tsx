@@ -36,17 +36,6 @@ const navItems: NavItem[] = [
     ),
   },
   {
-    path: '/core-floods',
-    label: 'Core Floods',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <ellipse cx="8" cy="3.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M3 3.5v9c0 1.1 2.2 2 5 2s5-.9 5-2v-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        <path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" stroke="currentColor" strokeWidth="1.5"/>
-      </svg>
-    ),
-  },
-  {
     path: '/experiments/new',
     label: 'New Experiment',
     icon: (
@@ -83,6 +72,17 @@ const navItems: NavItem[] = [
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <path d="M5 1h6M6 1v4L3.5 10.5C3 11.5 3 13 4 13.5c.5.25 1 .5 4 .5s3.5-.25 4-.5c1-.5 1-2 .5-3L10 5V1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         <path d="M4.5 10h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    path: '/core-floods',
+    label: 'Core Floods',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <ellipse cx="8" cy="3.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M3 3.5v9c0 1.1 2.2 2 5 2s5-.9 5-2v-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" stroke="currentColor" strokeWidth="1.5"/>
       </svg>
     ),
   },
