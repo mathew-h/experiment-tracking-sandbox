@@ -156,7 +156,7 @@ def test_run_samples_come_from_view(client, db_session, reporting_views):
 
 def test_segment_is_variant_matches_view(client, db_session, reporting_views):
     _cf_experiment(db_session, "CFA_005")
-    seg2 = _cf_experiment(db_session, "CFA_005-2")
+    _cf_experiment(db_session, "CFA_005-2")
     bypass = _cf_experiment(db_session, "CFA_005-2_Bypass1")
     _sample(db_session, bypass, 1.0)
     row = _view_rows(db_session, "CFA_005")[0]
