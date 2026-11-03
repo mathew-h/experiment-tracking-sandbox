@@ -30,6 +30,16 @@ class ExperimentalResults(Base):
     time_post_reaction_bucket_days = Column(Float, nullable=True, index=True) # Normalized bucket for tolerant matching
     cumulative_time_post_reaction_days = Column(Float, nullable=True, index=True) # Cumulative time across lineage chain (days)
     is_primary_timepoint_result = Column(Boolean, nullable=False, default=True, server_default=text("true"), index=True)
+    # The physical centrifuge tube number, reused across dates, any experiment type.
+    sample_tube_number = Column(Integer, nullable=True)
+    # Core Flood only, NULL elsewhere (issue #132). flow_rate_mL_min is the rate
+    # over the interval ending at this sample; 0 means a hold. Inlet/outlet
+    # pressure are stored for a future permeability calculation; pore pressure
+    # is experimental_conditions.pore_pressure.
+    flow_rate_mL_min = Column(Float, nullable=True)
+    nitrogen_flow_rate_mL_min = Column(Float, nullable=True)
+    inlet_pressure_psi = Column(Float, nullable=True)
+    outlet_pressure_psi = Column(Float, nullable=True)
     # Free text about a timepoint lives in experiment_notes (issue #118):
     # the legacy description / brine-modification columns were dropped by
     # Alembic b8c4e2d7f9a1 (issue #122 PR-D, 2026-10-14).

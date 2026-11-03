@@ -4,7 +4,7 @@ export type ConditionField =
   | 'particle_size' | 'initial_ph' | 'rock_mass_g' | 'water_volume_mL' | 'serum_vial_size_mL'
   | 'temperature_c' | 'reactor_number' | 'feedstock' | 'stir_speed_rpm'
   | 'initial_conductivity_mS_cm' | 'room_temp_pressure_psi' | 'rxn_temp_pressure_psi'
-  | 'co2_partial_pressure_MPa' | 'core_height_cm' | 'core_width_cm'
+  | 'co2_partial_pressure_MPa' | 'core_height_cm' | 'core_width_cm' | 'pore_volume_mL'
   | 'confining_pressure' | 'pore_pressure'
 
 export const FIELD_VISIBILITY: Record<ExperimentType, Set<ConditionField>> = {
@@ -26,7 +26,7 @@ export const FIELD_VISIBILITY: Record<ExperimentType, Set<ConditionField>> = {
     'particle_size', 'initial_ph', 'rock_mass_g', 'water_volume_mL',
     'temperature_c', 'reactor_number', 'feedstock', 'initial_conductivity_mS_cm',
     'room_temp_pressure_psi', 'rxn_temp_pressure_psi',
-    'core_height_cm', 'core_width_cm', 'confining_pressure', 'pore_pressure',
+    'core_height_cm', 'core_width_cm', 'pore_volume_mL', 'confining_pressure', 'pore_pressure',
   ]),
 }
 

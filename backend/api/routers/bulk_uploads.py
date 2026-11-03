@@ -967,11 +967,12 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
                 "initial_nitrate_concentration",
                 "initial_dissolved_oxygen",
                 "initial_alkalinity",
+                "pore_volume_mL",
             ],
             required={"experiment_id*"},
             example_row=[
                 "HPHT_001", "HPHT", 200.0, 7.0, 5.0, 50.0, 3, 300,
-                100.0, 1450.0, "< 150 μm", "Nitrogen", None, None, None, None, None, None,
+                100.0, 1450.0, "< 150 μm", "Nitrogen", None, None, None, None, None, None, None,
             ],
         )
 
@@ -1020,6 +1021,7 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("particle_size", "Rock particle size description (e.g. '< 150 μm')."),
             ("feedstock", "Nitrogen, Nitrate, or Blank."),
             ("serum_vial_size_mL", "Serum experiments only. Nominal vial size in whole mL (e.g. 20, 60, 120, 160). Leave blank for other types."),
+            ("pore_volume_mL", "Core Flood only. Pore volume of the core in mL (> 0). Pore volumes flushed = cumulative liquid sample volume / this value. Leave blank for other types."),
             ("--- additives sheet ---", ""),
             ("experiment_id*", "REQUIRED. Must match an experiment in the experiments sheet or exist in database."),
             ("compound*", "REQUIRED. Chemical compound name. Auto-created in compound inventory if not found."),

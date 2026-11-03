@@ -489,3 +489,45 @@ def test_patch_conditions_rejected_vial_size_leaves_value_unchanged(client, db_s
     bad = client.patch(f"/api/conditions/{cid}", json={"serum_vial_size_mL": 0})
     assert bad.status_code == 422
     assert client.get(f"/api/conditions/{cid}").json()["serum_vial_size_mL"] == 120
+
+
+# --- pore_volume_mL (issue #132) ---
+
+
+def _create_flood_conditions(client, db_session, eid, num, pore=None):
+    exp = _make_experiment(db_session, eid=eid, num=num)
+    payload = {"experiment_fk": exp.id, "experiment_id": exp.experiment_id,
+               "experiment_type": "Core Flood"}
+    if pore is not None:
+        payload["pore_volume_mL"] = pore
+    resp = client.post("/api/conditions", json=payload)
+    assert resp.status_code == 201
+    return exp, resp
+
+
+def test_post_conditions_accepts_pore_volume(client, db_session):
+    exp, resp = _create_flood_conditions(client, db_session, "COND_PORE_OK", 38301, pore=125.5)
+    assert resp.json()["pore_volume_mL"] == 125.5
+    got = client.get(f"/api/conditions/by-experiment/{exp.experiment_id}")
+    assert got.status_code == 200
+    assert got.json()["pore_volume_mL"] == 125.5
+
+
+def test_patch_conditions_pore_volume(client, db_session):
+    _, resp = _create_flood_conditions(client, db_session, "COND_PORE_PATCH", 38302)
+    cid = resp.json()["id"]
+    out = client.patch(f"/api/conditions/{cid}", json={"pore_volume_mL": 80.0})
+    assert out.status_code == 200
+    assert out.json()["pore_volume_mL"] == 80.0
+
+
+@pytest.mark.parametrize("bad, eid, num", [
+    (0, "COND_PORE_X0", 38303),
+    (-1, "COND_PORE_XM1", 38304),
+])
+def test_patch_conditions_rejects_nonpositive_pore_volume(client, db_session, bad, eid, num):
+    _, resp = _create_flood_conditions(client, db_session, eid, num, pore=50.0)
+    cid = resp.json()["id"]
+    out = client.patch(f"/api/conditions/{cid}", json={"pore_volume_mL": bad})
+    assert out.status_code == 422
+    assert client.get(f"/api/conditions/{cid}").json()["pore_volume_mL"] == 50.0

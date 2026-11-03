@@ -146,11 +146,13 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
   // hidden (stale) value is never sent. Keyed on the STORED value (not form) so the
   // input does not vanish while the user clears it.
   const showVialSize = form.experiment_type === 'Serum' || conditions?.serum_vial_size_mL != null
+  const showPoreVolume = form.experiment_type === 'Core Flood' || conditions?.pore_volume_mL != null
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = { ...form }
       if (!showVialSize) delete body.serum_vial_size_mL
+      if (!showPoreVolume) delete body.pore_volume_mL
       if (!conditions) {
         return conditionsApi.create({
           ...body,
@@ -189,6 +191,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
       pore_pressure: conditions?.pore_pressure ?? undefined,
       core_height_cm: conditions?.core_height_cm ?? undefined,
       core_width_cm: conditions?.core_width_cm ?? undefined,
+      pore_volume_mL: conditions?.pore_volume_mL ?? undefined,
     })
     setEditOpen(true)
   }
@@ -261,6 +264,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
         <Row label="CO₂ Partial Pressure" value={conditions.co2_partial_pressure_MPa} unit="MPa" />
         <Row label="Core Height" value={conditions.core_height_cm} unit="cm" />
         <Row label="Core Width" value={conditions.core_width_cm} unit="cm" />
+        <Row label="Pore Volume" value={conditions.pore_volume_mL} unit="mL" />
         <Row label="Confining Pressure" value={conditions.confining_pressure} />
         <Row label="Pore Pressure" value={conditions.pore_pressure} />
       </div>
@@ -346,6 +350,9 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
             <Input label="Pore Pressure" type="number" value={form.pore_pressure ?? ''} onChange={set('pore_pressure')} />
             <Input label="Core Height (cm)" type="number" value={form.core_height_cm ?? ''} onChange={set('core_height_cm')} />
             <Input label="Core Width (cm)" type="number" value={form.core_width_cm ?? ''} onChange={set('core_width_cm')} />
+            {showPoreVolume && (
+              <Input label="Pore Volume (mL)" type="number" min={0} value={form.pore_volume_mL ?? ''} onChange={set('pore_volume_mL')} />
+            )}
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>

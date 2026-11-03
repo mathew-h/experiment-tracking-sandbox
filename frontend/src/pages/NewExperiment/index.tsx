@@ -10,7 +10,7 @@ import { Step2Conditions, type Step2Data } from './Step2Conditions'
 import { Step3Additives, generateId, type AdditiveRow } from './Step3Additives'
 import { Step4Review } from './Step4Review'
 import { CopyFromExisting } from './CopyFromExisting'
-import type { ExperimentType } from './fieldVisibility'
+import { isVisible, type ExperimentType } from './fieldVisibility'
 import { vialSizeForPayload } from './vialSize'
 
 const STEPS = ['Basic Info', 'Conditions', 'Additives', 'Review']
@@ -29,7 +29,7 @@ const defaultStep2 = (): Step2Data => ({
   particle_size: '', feedstock: '', reactor_number: '', stir_speed_rpm: '',
   initial_conductivity_mS_cm: '', room_temp_pressure_psi: '', rxn_temp_pressure_psi: '',
   co2_partial_pressure_MPa: '', core_height_cm: '', core_width_cm: '',
-  confining_pressure: '', pore_pressure: '',
+  pore_volume_mL: '', confining_pressure: '', pore_pressure: '',
 })
 
 function toFloat(s: string): number | undefined {
@@ -89,6 +89,7 @@ export function NewExperimentPage() {
           co2_partial_pressure_MPa: numToStr(conditions.co2_partial_pressure_MPa),
           core_height_cm: numToStr(conditions.core_height_cm),
           core_width_cm: numToStr(conditions.core_width_cm),
+          pore_volume_mL: numToStr(conditions.pore_volume_mL),
           confining_pressure: numToStr(conditions.confining_pressure),
           pore_pressure: numToStr(conditions.pore_pressure),
         })
@@ -163,6 +164,7 @@ export function NewExperimentPage() {
         co2_partial_pressure_MPa: toFloat(step2.co2_partial_pressure_MPa),
         core_height_cm: toFloat(step2.core_height_cm),
         core_width_cm: toFloat(step2.core_width_cm),
+        pore_volume_mL: isVisible('pore_volume_mL', step1.experimentType) ? toFloat(step2.pore_volume_mL) : undefined,
         confining_pressure: toFloat(step2.confining_pressure),
         pore_pressure: toFloat(step2.pore_pressure),
       })

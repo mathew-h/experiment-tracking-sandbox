@@ -176,6 +176,7 @@ _VIEWS = [
             ec.core_height_cm,
             ec.core_width_cm,
             ec.core_volume_cm3,
+            ec."pore_volume_mL",
             ec.total_ferrous_iron_g,
             ec.total_ferrous_iron
         FROM experiments e
@@ -475,6 +476,7 @@ _VIEWS = [
             er.time_post_reaction_days,
             er.time_post_reaction_bucket_days,
             er.cumulative_time_post_reaction_days,
+            er.sample_tube_number,
             (SELECT string_agg(n.note_text, '; ' ORDER BY n.id)
              FROM experiment_notes n
              WHERE n.result_id = er.id
@@ -708,6 +710,126 @@ _VIEWS = [
             n.needs_review
         FROM experiment_notes n
         JOIN experiments e ON e.id = n.experiment_fk
+    """),
+
+    # ------------------------------------------------------------------
+    # v_core_flood_samples (issue #132)
+    # One row per primary timepoint of a Core Flood experiment, with
+    # cross-sample run values computed over the whole run.
+    # A run is one base ID (run_base_id = base_experiment_id) split across
+    # sequential segment experiments (CF_020, CF_020-2, ...), ordered by
+    # cumulative_time_post_reaction_days, then result_id.
+    # is_variant: a `_Text` child of a segment (CF_020-5_Bypass1, parent
+    # CF_020-5) -- a blank or bypass. Variant rows are shown with their raw
+    # values, but every derived column is NULL on them and they are in their
+    # own window partition, so they never shift the segments' sums.
+    # Flow rule: flow_rate_mL_min is the rate over the interval ENDING at
+    # that sample; 0 means a hold (is_hold_interval).
+    # H2 basis: each sample's h2_grams_per_ton_yield is only the H2 collected
+    # since the previous sample, which is why summing it gives cumulative H2
+    # and dividing it by interval_days gives a rate.
+    # Divisions use NULLIF(..., 0): a zero interval (two samples on one
+    # cumulative day, e.g. a segment boundary) or a NULL/0 pore volume gives
+    # NULL, not an error. A NULL liquid volume adds 0 to the running total.
+    # Assumes one experimental_conditions row per experiment
+    # (uq_conditions_experiment_fk).
+    # ------------------------------------------------------------------
+    ("v_core_flood_samples", """
+        CREATE VIEW v_core_flood_samples AS
+        WITH s AS (
+            SELECT
+                er.id                                  AS result_id,
+                e.experiment_id,
+                er.experiment_fk,
+                e.base_experiment_id                   AS run_base_id,
+                COALESCE(p.experiment_id IS NOT NULL
+                         AND left(e.experiment_id, length(p.experiment_id) + 1)
+                             = p.experiment_id || '_',
+                         false)                        AS is_variant,
+                er.time_post_reaction_days,
+                er.cumulative_time_post_reaction_days,
+                sr.measurement_date                    AS sample_date,
+                sr.gc_run_date,
+                er.sample_tube_number,
+                er."flow_rate_mL_min",
+                er."nitrogen_flow_rate_mL_min",
+                er.inlet_pressure_psi,
+                er.outlet_pressure_psi,
+                sr."sampling_volume_mL",
+                sr.h2_concentration,
+                sr.gas_sampling_volume_ml,
+                sr."gas_sampling_pressure_MPa",
+                sr.h2_micromoles,
+                sr.h2_mass_ug,
+                sr.h2_grams_per_ton_yield,
+                sr.final_ph,
+                sr."final_conductivity_mS_cm",
+                ec."pore_volume_mL"
+            FROM experimental_results er
+            JOIN experiments e               ON e.id = er.experiment_fk
+            LEFT JOIN experiments p          ON p.id = e.parent_experiment_fk
+            JOIN experimental_conditions ec  ON ec.experiment_fk = e.id
+            LEFT JOIN scalar_results sr      ON sr.result_id = er.id
+            WHERE er.is_primary_timepoint_result = TRUE
+              -- Same reading of Core Flood as database/reactor_slot.py::_SERIES_BY_TYPE
+              -- (lowercase, whitespace collapsed); keep the two in sync.
+              AND lower(btrim(regexp_replace(ec.experiment_type, '\\s+', ' ', 'g')))
+                  IN ('core flood', 'coreflood', 'cf')
+        ), w AS (
+            SELECT
+                s.*,
+                s.cumulative_time_post_reaction_days
+                    - COALESCE(LAG(s.cumulative_time_post_reaction_days) OVER win, 0)
+                                                       AS interval_days,
+                SUM(COALESCE(s."sampling_volume_mL", 0)) OVER win
+                                                       AS "cumulative_liquid_volume_mL",
+                SUM(COALESCE(s.h2_grams_per_ton_yield, 0)) OVER win
+                                                       AS cumulative_h2_grams_per_ton
+            FROM s
+            WINDOW win AS (PARTITION BY run_base_id, is_variant
+                           ORDER BY cumulative_time_post_reaction_days, result_id
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        )
+        SELECT
+            result_id,
+            experiment_id,
+            experiment_fk,
+            run_base_id,
+            is_variant,
+            time_post_reaction_days,
+            cumulative_time_post_reaction_days,
+            sample_date,
+            gc_run_date,
+            sample_tube_number,
+            "flow_rate_mL_min",
+            "nitrogen_flow_rate_mL_min",
+            inlet_pressure_psi,
+            outlet_pressure_psi,
+            "sampling_volume_mL",
+            h2_concentration,
+            gas_sampling_volume_ml,
+            "gas_sampling_pressure_MPa",
+            h2_micromoles,
+            h2_mass_ug,
+            h2_grams_per_ton_yield,
+            final_ph,
+            "final_conductivity_mS_cm",
+            "pore_volume_mL",
+            CASE WHEN is_variant THEN NULL ELSE interval_days END
+                                                       AS interval_days,
+            CASE WHEN is_variant THEN NULL ELSE "cumulative_liquid_volume_mL" END
+                                                       AS "cumulative_liquid_volume_mL",
+            CASE WHEN is_variant THEN NULL
+                 ELSE "cumulative_liquid_volume_mL" / NULLIF("pore_volume_mL", 0) END
+                                                       AS cumulative_pore_volumes,
+            CASE WHEN is_variant THEN NULL ELSE cumulative_h2_grams_per_ton END
+                                                       AS cumulative_h2_grams_per_ton,
+            CASE WHEN is_variant THEN NULL
+                 ELSE h2_grams_per_ton_yield / NULLIF(interval_days, 0) END
+                                                       AS h2_grams_per_ton_per_day,
+            CASE WHEN is_variant THEN NULL ELSE "flow_rate_mL_min" = 0 END
+                                                       AS is_hold_interval
+        FROM w
     """),
 ]
 

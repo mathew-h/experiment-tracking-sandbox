@@ -19,6 +19,8 @@ class ConditionsCreate(BaseModel):
     # SERUM_VIAL_SIZE_MAX_ML (10,000); 120.0 coerces to 120, 120.5 is rejected. Accepted on any experiment type -- "Serum only" is
     # a UI rule, not an API rule.
     serum_vial_size_mL: Optional[int] = Field(default=None, gt=0, le=SERUM_VIAL_SIZE_MAX_ML)
+    # Core pore volume in mL (Core Flood). Float column, so no upper bound.
+    pore_volume_mL: Optional[float] = Field(default=None, gt=0)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
     feedstock: Optional[str] = None
@@ -46,6 +48,7 @@ class ConditionsUpdate(BaseModel):
     rock_mass_g: Optional[float] = None
     water_volume_mL: Optional[float] = None
     serum_vial_size_mL: Optional[int] = Field(default=None, gt=0, le=SERUM_VIAL_SIZE_MAX_ML)
+    pore_volume_mL: Optional[float] = Field(default=None, gt=0)
     experiment_type: Optional[str] = None
     reactor_number: Optional[int] = None
     feedstock: Optional[str] = None
@@ -77,6 +80,7 @@ class ConditionsResponse(BaseModel):
     rock_mass_g: Optional[float] = None
     water_volume_mL: Optional[float] = None
     serum_vial_size_mL: Optional[int] = None
+    pore_volume_mL: Optional[float] = None
     water_to_rock_ratio: Optional[float] = None
     total_ferrous_iron_g: Optional[float] = None
     experiment_type: Optional[str] = None

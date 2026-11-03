@@ -19,6 +19,7 @@ export interface ConditionsPayload {
   co2_partial_pressure_MPa?: number
   core_height_cm?: number
   core_width_cm?: number
+  pore_volume_mL?: number
   confining_pressure?: number
   pore_pressure?: number
 }

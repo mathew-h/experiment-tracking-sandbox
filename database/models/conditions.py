@@ -53,6 +53,9 @@ class ExperimentalConditions(Base):
     core_height_cm = Column(Float, nullable=True)
     core_width_cm = Column(Float, nullable=True)
     core_volume_cm3 = Column(Float, nullable=True)
+    # The core's pore volume in mL, entered by the researcher; denominator of
+    # v_core_flood_samples.cumulative_pore_volumes (issue #132).
+    pore_volume_mL = Column(Float, nullable=True)
 
     # DEPRECATED: Migrated to ChemicalAdditive - use chemical_additives relationship
     catalyst = Column(String)
@@ -68,6 +71,7 @@ class ExperimentalConditions(Base):
     
     # DEPRECATED: Migrated to ChemicalAdditive - use chemical_additives relationship
     buffer_concentration = Column(Float, nullable=True)  # in mM
+    # DEPRECATED: per-sample flow lives in experimental_results.flow_rate_mL_min (issue #132); kept, not backfilled
     flow_rate = Column(Float, nullable=True)
     initial_nitrate_concentration = Column(Float, nullable=True)  # in mM, optional
     initial_dissolved_oxygen = Column(Float, nullable=True)  # in ppm, optional

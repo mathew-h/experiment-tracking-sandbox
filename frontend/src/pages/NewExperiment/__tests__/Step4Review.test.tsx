@@ -33,6 +33,7 @@ const step2: Step2Data = {
   co2_partial_pressure_MPa: '',
   core_height_cm: '',
   core_width_cm: '',
+  pore_volume_mL: '',
   confining_pressure: '',
   pore_pressure: '',
 }
