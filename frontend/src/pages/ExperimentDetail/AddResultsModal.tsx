@@ -4,8 +4,7 @@ import { Modal, Button } from '@/components/ui'
 import { resultsApi, type ResultCreate, type ScalarCreate } from '@/api/results'
 import { experimentsApi } from '@/api/experiments'
 import { NOTE_TYPE_LABELS, type NoteType } from '@/api/noteTypes'
-
-const PSI_TO_MPA = 0.00689476
+import { PSI_TO_MPA } from '@/utils/units'
 
 function todayIso(): string {
   const d = new Date()
