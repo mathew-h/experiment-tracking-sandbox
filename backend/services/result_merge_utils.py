@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import and_, or_, func as sa_func
+from sqlalchemy import and_, or_, func as sa_func, update
 from sqlalchemy.orm import Session, joinedload
 
 from database import ExperimentalResults, Experiment
@@ -43,6 +43,40 @@ def apply_id_timepoint(id_timepoint_days, time_post_reaction):
             "The ID is canonical: leave Time blank to use the ID's day, or fix the ID."
         )
     return time_post_reaction
+
+
+def resolve_primary_timepoint(
+    db: Session,
+    exp: Experiment,
+    time_post_reaction_days: Optional[float],
+    is_primary: bool = True,
+) -> tuple[Optional[float], Optional[float]]:
+    """
+    Resolve a new result row's time and bucket, demoting a clashing primary row.
+
+    Returns ``(resolved_time, bucket)``. Raises ValueError (from
+    ``apply_id_timepoint``) when the time conflicts with the ``-t`` token in the
+    experiment ID. Does not insert, flush or commit.
+    """
+    # Issue #81: '-t<days>' in the experiment ID is canonical for the timepoint.
+    time = apply_id_timepoint(exp.id_timepoint_days, time_post_reaction_days)
+    # Issue #83: the server owns the bucket — mirror the resolved time and
+    # ignore any client-supplied value, so hand-entered rows land in
+    # v_results_scalar_rollup's per-day buckets like bulk-uploaded ones.
+    bucket = normalize_timepoint(time)
+    if bucket is not None and is_primary:
+        # Newest wins: demote any existing primary row in this bucket so
+        # uq_primary_result_per_experiment_bucket cannot reject the insert.
+        db.execute(
+            update(ExperimentalResults)
+            .where(
+                ExperimentalResults.experiment_fk == exp.id,
+                ExperimentalResults.time_post_reaction_bucket_days == bucket,
+                ExperimentalResults.is_primary_timepoint_result.is_(True),
+            )
+            .values(is_primary_timepoint_result=False)
+        )
+    return time, bucket
 
 
 def find_timepoint_candidates(
