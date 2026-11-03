@@ -749,6 +749,91 @@ POST /api/bulk-uploads/experiment-deletion   file=<xlsx with experiment_id colum
 | GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`, `experiment-deletion`. Returns 404 for types with no template. |
 | GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
 
+## Core floods
+
+Issue #133. A **run** is every Core Flood experiment sharing a `base_experiment_id` (`CF_020`, `CF_020-2`, ...). Core Flood is detected the way `database/reactor_slot.py::series_prefix` reads `experiment_type` (so `CF` and `Core Flood` both count). All routes need a Firebase bearer token.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/core-floods` | List runs, active first. Query: `scope` (`active` default, or `all`), `q` |
+| GET | `/api/core-floods/{base_id}` | One run: segments, view-derived samples, warnings |
+| POST | `/api/core-floods/{experiment_id}/samples` | Add one sample (result + scalar rows) to a Core Flood experiment. 201 |
+| PATCH | `/api/core-floods/samples/{result_id}` | Edit one sample |
+
+Errors: a missing run, experiment or result is **404**; a rule violation is **422** with `detail` set to the message. Service errors are `CoreFloodNotFound` (404) and `CoreFloodInvalid` (422).
+
+### GET /api/core-floods
+
+One item per Core Flood `base_experiment_id`. `scope=active` keeps runs with at least one ONGOING segment; `all` returns every run. `q` is a case-insensitive substring match on the base ID or any segment's `experiment_id`. Sorted active first, then most recent `last_sample_date` first (runs with no samples last), then `base_id`.
+
+Item fields: `base_id`, `segment_count`, `ongoing_experiment_ids`, `rig` (`reactor_slot` of the latest segment), `sample_count`, `first_sample_date`, `last_sample_date`, `latest_cumulative_h2_grams_per_ton`, `warning_count`. Variant samples (see below) are excluded from the sample count, the dates and the latest cumulative H2.
+
+### GET /api/core-floods/{base_id}
+
+Returns 404 when no Core Flood experiment has that base ID.
+
+- `segments`, ordered by start date (undated last), then `experiment_id`: `id`, `experiment_id`, `status`, `date`, `parent_experiment_id`, `is_variant`, `description` (the `description` note), `conditions_id`, `pore_volume_mL`, `rock_mass_g`, `reactor_slot`. `conditions_id` is not in the original spec: it lets the run page edit pore volume through `PATCH /api/conditions/{id}`. `is_variant` is true when the segment has a parent and its ID starts with `<parent experiment_id>_` (e.g. `CF_020-5_Bypass1`).
+- `samples`: rows of the `v_core_flood_samples` view for this run, read as-is so the app and Power BI share one definition. Field names are the view's column names, including the derived ones (`interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval`). Nothing is recomputed in the API. Variant rows keep their raw columns and have every derived column NULL. See `MODELS.md` and `docs/CALCULATIONS.md` ("Core flood run values").
+- `warnings`: zero or one entry per code, `{code, experiment_ids}` with sorted IDs:
+
+| Code | Raised when | Experiment IDs |
+|------|-------------|----------------|
+| `multiple_roots` | more than one non-variant segment has no parent | the roots |
+| `multiple_ongoing` | more than one segment is ONGOING | the ONGOING segments |
+| `missing_pore_volume` | a non-variant segment has no `pore_volume_mL` | those segments |
+| `missing_description` | a segment has no description note | those segments |
+| `sample_missing_flow_rate` | a non-variant sample has NULL `flow_rate_mL_min` | the experiments owning those samples |
+
+### POST /api/core-floods/{experiment_id}/samples
+
+Body (model field names; `extra="forbid"`, so an unknown key is 422):
+
+| Field | Rule |
+|-------|------|
+| `measurement_date` | required |
+| `flow_rate_mL_min` | required, `ge=0` (`0` is a hold) |
+| `time_post_reaction_days` | optional, `ge=0`; see default below |
+| `gc_run_date` | optional; defaults to `measurement_date` |
+| `sample_tube_number` | optional, `gt=0` |
+| `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa` | optional, `ge=0` |
+| `final_ph`, `final_conductivity_mS_cm`, `nitrogen_flow_rate_mL_min`, `inlet_pressure_psi`, `outlet_pressure_psi` | optional |
+
+**Time zone.** A naive datetime (including a date-only string) in `measurement_date` or `gc_run_date` is read as lab-local, America/New_York (`LAB_TZ`), because production stores `Experiment.date` at local midnight. An aware datetime is kept as given.
+
+**Day default.** When `time_post_reaction_days` is omitted: `round((measurement_date - experiment.date) in days, 4)`. 422 if the experiment has no start date, or if the sample is dated before the start. An explicit negative day is 422.
+
+**422 cases:** missing or negative `flow_rate_mL_min`; an experiment whose conditions are not Core Flood (or that has no conditions row); the day rules above; a conflict with a `-t<days>` token in the experiment ID. 404 for an unknown experiment. Validation runs before any write, so a rejected request leaves the experiment's result rows unchanged (including the existing primary row, which is not demoted).
+
+**What is written, in one transaction:**
+1. An `ExperimentalResults` row, with bucket, id-timepoint and newest-wins handling shared with `POST /api/results` (`resolve_primary_timepoint` in `backend/services/result_merge_utils.py`). A same-bucket primary row is demoted.
+2. The flow, pressure and tube fields on that row, and a `ScalarResults` row (`h2_concentration_unit` is set to `ppm` when an H2 value is given).
+3. `recalculate(scalar, db)`.
+4. `update_cumulative_times_for_chain`, so a sample on a derivation gets cumulative time equal to the parent chain's max day plus the day.
+5. One `ModificationsLog` `create` row per table written, with `modified_by` = the caller's email.
+
+The response is the new sample as a `v_core_flood_samples` row.
+
+### PATCH /api/core-floods/samples/{result_id}
+
+Body: any create field except `time_post_reaction_days`, all optional; `extra="forbid"`. The day is not editable, so sending it is 422.
+
+- Only fields whose value differs are written. A no-op PATCH (including re-sending the same lab-local date) writes nothing and logs nothing.
+- A missing `ScalarResults` row is created when the body carries a scalar field, so historical samples can be given values.
+- `recalculate` runs when any scalar field changed or the scalar row was created (a superset of "an H2 input changed"). Clearing `h2_concentration` clears the derived H2 values.
+- One `ModificationsLog` row per table changed (`update`, or `create` for a new scalar row), with `modified_by` = the caller's email and old and new values for the changed fields only.
+- 404 for an unknown result, and for a result that is not a primary timepoint (nothing is written). 422 for a non-Core Flood experiment or an unknown key.
+
+The response is the updated sample as a `v_core_flood_samples` row.
+
+### Run page cleanup (existing endpoints, no new routes)
+
+| Action | Endpoint |
+|--------|----------|
+| Rename an experiment (lineage is re-derived from the new ID) | `PATCH /api/experiments/{id}` with `experiment_id` |
+| Change status | `PATCH /api/experiments/{id}/status` |
+| Edit the description | the experiment notes endpoints (`/api/experiments/{id}/notes`) |
+| Edit pore volume | `PATCH /api/conditions/{id}` (use the segment's `conditions_id`) |
+
 ## Interactive Docs
 
 - Swagger UI: `http://localhost:8000/docs`
