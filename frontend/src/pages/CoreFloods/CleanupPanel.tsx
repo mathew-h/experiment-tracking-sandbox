@@ -27,21 +27,31 @@ function PoreVolumeAll({ baseId, run, ids }: { baseId: string; run: CoreFloodRun
     mutationFn: async (v: number) => {
       const listed = run.segments.filter((s) => ids.includes(s.experiment_id))
       const writable = listed.filter((s) => s.conditions_id != null)
-      await Promise.all(
+      const settled = await Promise.allSettled(
         writable.map((s) => conditionsApi.patch(s.conditions_id as number, { pore_volume_mL: v })),
       )
+      const touched: string[] = []
+      const failed: string[] = []
+      settled.forEach((r, i) => {
+        if (r.status === 'fulfilled') touched.push(writable[i].experiment_id)
+        else failed.push(`${writable[i].experiment_id} (${(r.reason as Error).message})`)
+      })
       return {
         skipped: listed.filter((s) => s.conditions_id == null).map((s) => s.experiment_id),
-        touched: writable.map((s) => s.experiment_id),
+        touched,
+        failed,
       }
     },
-    onSuccess: ({ skipped, touched }) => {
-      setDraft('')
-      if (skipped.length > 0) {
-        toastError('Some segments skipped', `No conditions row on: ${skipped.join(', ')}`)
-      } else {
-        success('Pore volume set')
-      }
+    onSuccess: ({ skipped, touched, failed }) => {
+      if (failed.length === 0) setDraft('')
+      const notes = [
+        failed.length > 0 ? `Failed: ${failed.join('; ')}` : '',
+        skipped.length > 0 ? `No conditions row on: ${skipped.join(', ')}` : '',
+      ].filter(Boolean)
+      if (failed.length > 0) toastError('Pore volume not set on every segment', notes.join('. '))
+      else if (skipped.length > 0) toastError('Some segments skipped', notes.join('. '))
+      else success('Pore volume set')
+      // Always refresh: patches that succeeded are committed even when others failed.
       return invalidateCoreFloodWrites(qc, baseId, touched)
     },
     onError: (err: Error) => toastError('Pore volume not saved', err.message),
@@ -91,8 +101,8 @@ export function CleanupPanel({ baseId, run, onEditSample, onRename, onEditDescri
             </p>
             <div className="flex flex-wrap gap-2 mt-1">
               {ids.map((id) => (
-                <Button key={id} variant="secondary" size="xs" aria-label={`Rename ${id}`} onClick={() => onRename(id)}>
-                  Rename
+                <Button key={id} variant="secondary" size="xs" onClick={() => onRename(id)}>
+                  Rename {id}
                 </Button>
               ))}
             </div>
@@ -102,10 +112,15 @@ export function CleanupPanel({ baseId, run, onEditSample, onRename, onEditDescri
         return (
           <>
             <p>More than one segment is ONGOING: {joined}.</p>
-            <div className="flex flex-wrap gap-3 mt-1">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 mt-1">
               {ids.map((id) => {
                 const seg = segment(id)
-                return seg ? <SegmentStatusSelect key={id} baseId={baseId} segment={seg} /> : null
+                return seg ? (
+                  <div key={id} className="flex items-center gap-2">
+                    <span className="font-mono-data text-xs text-ink-primary">{id}</span>
+                    <SegmentStatusSelect baseId={baseId} segment={seg} />
+                  </div>
+                ) : null
               })}
             </div>
           </>
@@ -123,14 +138,8 @@ export function CleanupPanel({ baseId, run, onEditSample, onRename, onEditDescri
             <p>No description on: {joined}.</p>
             <div className="flex flex-wrap gap-2 mt-1">
               {ids.map((id) => (
-                <Button
-                  key={id}
-                  variant="secondary"
-                  size="xs"
-                  aria-label={`Describe ${id}`}
-                  onClick={() => onEditDescription(id)}
-                >
-                  Describe
+                <Button key={id} variant="secondary" size="xs" onClick={() => onEditDescription(id)}>
+                  Describe {id}
                 </Button>
               ))}
             </div>
@@ -146,7 +155,7 @@ export function CleanupPanel({ baseId, run, onEditSample, onRename, onEditDescri
             <div className="flex flex-wrap gap-2 mt-1">
               {matching.map((s) => (
                 <Button key={s.result_id} variant="secondary" size="xs" onClick={() => onEditSample(s)}>
-                  Edit {s.sample_date ? labDateOf(s.sample_date) : s.experiment_id}
+                  Edit {s.experiment_id} · {s.sample_date ? labDateOf(s.sample_date) : 'no date'}
                 </Button>
               ))}
             </div>

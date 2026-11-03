@@ -97,16 +97,25 @@ function RenameCell({
 /** The description, loaded on demand: the note ID only exists on the experiment detail. */
 function DescribeCell({ baseId, segment, onDone }: SegmentProps & { onDone: () => void }) {
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['experiment', segment.experiment_id],
     queryFn: () => experimentsApi.get(segment.experiment_id),
   })
+  if (error) {
+    return (
+      <span className="text-red-400">
+        Could not load description: {(error as Error).message}{' '}
+        <Button variant="ghost" size="xs" onClick={onDone}>Close</Button>
+      </span>
+    )
+  }
   if (isLoading || !data) return <span className="text-ink-muted">Loading…</span>
   return (
     <DescriptionEditor
       experimentId={segment.experiment_id}
       note={data.notes.find((n) => n.note_type === 'description')}
       initialEditing
+      onCancel={onDone}
       onSaved={() => {
         onDone()
         void invalidateCoreFloodWrites(qc, baseId, [segment.experiment_id])

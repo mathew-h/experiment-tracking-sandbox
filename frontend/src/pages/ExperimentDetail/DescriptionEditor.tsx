@@ -9,6 +9,8 @@ interface Props {
   note: ExperimentNote | undefined
   /** Called once a save and its invalidations have finished. */
   onSaved?: () => void
+  /** Called when the user cancels an edit. */
+  onCancel?: () => void
   /** Open straight into the textarea, seeded from the note text. */
   initialEditing?: boolean
 }
@@ -18,7 +20,7 @@ interface Props {
  *  is how a description-less experiment gets one from its page. The reactor
  *  card and the experiments list read the same note, so both refetch. Blank
  *  or unchanged text cannot be saved; deleting is done in the Notes tab. */
-export function DescriptionEditor({ experimentId, note, onSaved, initialEditing = false }: Props) {
+export function DescriptionEditor({ experimentId, note, onSaved, onCancel, initialEditing = false }: Props) {
   const [editing, setEditing] = useState(initialEditing)
   const [draft, setDraft] = useState(initialEditing ? (note?.note_text ?? '') : '')
   const queryClient = useQueryClient()
@@ -52,6 +54,7 @@ export function DescriptionEditor({ experimentId, note, onSaved, initialEditing 
   const cancel = () => {
     setEditing(false)
     setDraft('')
+    onCancel?.()
   }
   const trimmed = draft.trim()
   const canSave = trimmed.length > 0 && trimmed !== (note?.note_text ?? '').trim()

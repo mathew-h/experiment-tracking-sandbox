@@ -242,6 +242,10 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
     renderPage()
     const card = (await screen.findByRole('heading', { name: 'Cleanup' })).closest('section')!
     expect(within(card).getAllByRole('combobox')).toHaveLength(2)
+    for (const id of ['CF_020', 'CF_020-2']) {
+      const label = within(card).getByText(id, { selector: 'span' })
+      expect(within(label.parentElement!).getByRole('combobox', { name: `Status of ${id}` })).toBeInTheDocument()
+    }
     await userEvent.selectOptions(
       within(card).getByRole('combobox', { name: 'Status of CF_020-2' }),
       'COMPLETED',
@@ -316,5 +320,59 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Status of CF_020' }), 'ONGOING')
     expect(await screen.findByText('Reactor CF01 is occupied by CF_026')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Status of CF_020' })).toHaveValue('COMPLETED')
+  })
+
+  it('a partial pore volume failure still refreshes and names the failed segment', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings(
+        [{ code: 'missing_pore_volume', experiment_ids: ['CF_020', 'CF_020-2'] }],
+        [segment({ id: 1, conditions_id: 11 }), segment({ id: 2, experiment_id: 'CF_020-2', conditions_id: 12 })],
+      ),
+    )
+    vi.mocked(conditionsApi.patch).mockImplementation(async (id) => {
+      if (id === 12) throw new Error('boom')
+      return {} as never
+    })
+    renderPage()
+    await userEvent.type(await screen.findByLabelText('Pore volume for all segments'), '42')
+    const before = vi.mocked(coreFloodsApi.get).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Set pore volume for all segments' }))
+    expect(await screen.findByText(/CF_020-2 \(boom\)/)).toBeInTheDocument()
+    await waitFor(() => expect(vi.mocked(coreFloodsApi.get).mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('cleanup buttons name their segment', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings([
+        { code: 'multiple_roots', experiment_ids: ['CF_020', 'CF_020-2'] },
+        { code: 'sample_missing_flow_rate', experiment_ids: ['CF_020'] },
+      ], [segment({}), segment({ id: 2, experiment_id: 'CF_020-2' })]),
+    )
+    vi.mocked(coreFloodsApi.get).mockResolvedValue({
+      ...(await coreFloodsApi.get('x')),
+      samples: [sample({ result_id: 50, flow_rate_mL_min: null })],
+    })
+    renderPage()
+    const card = (await screen.findByRole('heading', { name: 'Cleanup' })).closest('section')!
+    expect(within(card).getByRole('button', { name: 'Rename CF_020-2' })).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: /^Edit CF_020 · / })).toBeInTheDocument()
+  })
+
+  it('Describe then Cancel returns the cell to the description button', async () => {
+    vi.mocked(experimentsApi.get).mockResolvedValue({ notes: [] } as never)
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit description of CF_020' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByRole('button', { name: 'Edit description of CF_020' })).toBeInTheDocument()
+    expect(screen.queryByTestId('description-editor')).not.toBeInTheDocument()
+  })
+
+  it('a failed description fetch shows the error and a way back', async () => {
+    vi.mocked(experimentsApi.get).mockRejectedValue(new Error('nope'))
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit description of CF_020' }))
+    expect(await screen.findByText(/Could not load description: nope/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.getByRole('button', { name: 'Edit description of CF_020' })).toBeInTheDocument()
   })
 })
