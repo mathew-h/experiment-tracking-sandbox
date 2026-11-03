@@ -1,7 +1,8 @@
 """serum_vial_size_mL: nominal serum vial size on experimental_conditions
 (docs/issues/issue-serum_vial_size.md.txt). Pins the column, the migration's
-place in the chain, and that the migration's view SQL is the same view that
-database/event_listeners.py recreates on API startup."""
+place in the chain, and that the migration's new view SQL is the same view its
+successor (f3b7c2a9d4e1) restores on downgrade. The startup comparison lives
+with the newest migration (tests/models/test_core_flood_schema.py)."""
 from __future__ import annotations
 
 import importlib.util
@@ -50,11 +51,17 @@ def test_revision_revises_pr_d_drop():
     assert _script_dir().get_revision(REVISION).down_revision == PARENT
 
 
-def test_migration_new_view_matches_startup_view():
-    from database.event_listeners import _VIEWS
+def test_migration_new_view_matches_successor_old_view():
+    # Chain parity: this migration's NEW view must be exactly what its
+    # successor f3b7c2a9d4e1 restores as OLD on downgrade. Only the newest
+    # migration is compared to the startup view in event_listeners.py.
+    path = REPO_ROOT / "alembic" / "versions" / "f3b7c2a9d4e1_core_flood_columns_and_view.py"
+    spec = importlib.util.spec_from_file_location("_serum_vial_successor_migration", path)
+    successor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(successor)
 
     mod = _migration_module()
-    assert _norm(mod._V_CONDITIONS_NEW) == _norm(dict(_VIEWS)["v_experiment_conditions"])
+    assert _norm(mod._V_CONDITIONS_NEW) == _norm(successor._V_CONDITIONS_OLD)
 
 
 def test_migration_old_view_is_new_view_minus_the_column():
