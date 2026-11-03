@@ -75,16 +75,16 @@ Cleanup on the run page uses existing endpoints, with no backend change:
 
 ## Acceptance criteria
 
-- [ ] `tests/api/test_core_floods.py`: the list puts active runs first, and the `q` filter narrows it
-- [ ] The run endpoint returns the `multiple_roots` and `multiple_ongoing` warnings on a fixture shaped like CF_027
-- [ ] Creating a sample on a derivation persists the scalar and core flood rows, `h2_micromoles`, and a cumulative time equal to the parent's max day plus the day
-- [ ] Creating a sample with no `flow_rate_mL_min`, or with a negative value, returns 422, and the experiment's result rows are unchanged
-- [ ] Create on a non-Core Flood experiment returns 422
-- [ ] `time_post_reaction_days` defaults from the sample date minus the start date, and `gc_run_date` defaults to the sample date. Omitting the day on an experiment with no start date returns 422
-- [ ] PATCH of `final_conductivity_mS_cm` persists the value. PATCH with an unknown key returns 422
-- [ ] PATCH writes `ModificationsLog` rows carrying the caller's email and the changed fields only. A no-op PATCH writes none
-- [ ] `docs/api/API_REFERENCE.md` has a "Core floods" section
-- [ ] `.venv/Scripts/pytest tests/services/ tests/regression/ tests/api/ -v` passes
+- [x] `tests/api/test_core_floods.py`: the list puts active runs first, and the `q` filter narrows it
+- [x] The run endpoint returns the `multiple_roots` and `multiple_ongoing` warnings on a fixture shaped like CF_027
+- [x] Creating a sample on a derivation persists the scalar and core flood rows, `h2_micromoles`, and a cumulative time equal to the parent's max day plus the day
+- [x] Creating a sample with no `flow_rate_mL_min`, or with a negative value, returns 422, and the experiment's result rows are unchanged
+- [x] Create on a non-Core Flood experiment returns 422
+- [x] `time_post_reaction_days` defaults from the sample date minus the start date, and `gc_run_date` defaults to the sample date. Omitting the day on an experiment with no start date returns 422
+- [x] PATCH of `final_conductivity_mS_cm` persists the value. PATCH with an unknown key returns 422
+- [x] PATCH writes `ModificationsLog` rows carrying the caller's email and the changed fields only. A no-op PATCH writes none
+- [x] `docs/api/API_REFERENCE.md` has a "Core floods" section
+- [x] `.venv/Scripts/pytest tests/services/ tests/regression/ tests/api/ -v` passes
 
 ## Notes
 
