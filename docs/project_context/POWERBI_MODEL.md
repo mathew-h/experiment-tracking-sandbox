@@ -78,7 +78,8 @@ One row per **primary timepoint of a Core Flood experiment**, with cross-sample 
 - **Derived columns:** `interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval`. Formulas and bases in `docs/CALCULATIONS.md` ("Core flood run values").
 - **Variants.** `is_variant = true` marks a `_Text` blank or bypass child of a segment (`CF_020-5_Bypass1`). Its raw columns are present but every derived column is NULL. Filter `is_variant = false` for the run curve; show variants in a separate "side samples" table.
 - **Flow.** `flow_rate_mL_min` is the rate over the interval *ending* at that sample; `0` is a hold (`is_hold_interval`). `NULL` means not recorded (all pre-2026-11 samples), and `is_hold_interval` is then NULL, not false.
-- **Pore volume.** `pore_volume_mL` is each segment's own conditions value. `cumulative_pore_volumes` is NULL until it is entered.
+- **Pore volume.** `pore_volume_mL` is each segment's own conditions value. `cumulative_pore_volumes` is NULL until it is entered. A value of 0 means no liquid sample volumes have been recorded yet (`sampling_volume_mL` is NULL on 116 of 180 Core Flood rows), not zero flow.
+- **Undated legacy rows.** 54 of 180 Core Flood primary rows (CF-02 to CF-12, 2026-10-26 backup) have NULL cumulative time: they sort last in their run, `interval_days` and `h2_grams_per_ton_per_day` are NULL, and the cumulative columns accumulate in `result_id` order, so their per-row progression is insertion order, not time (the run total on the last row is still right).
 - **Hide** `experiment_fk` (join key only); `result_id` is the join key to `v_dim_timepoints`. `inlet_pressure_psi` / `outlet_pressure_psi` are stored for a future permeability calculation; nothing derives from them yet.
 
 ---
