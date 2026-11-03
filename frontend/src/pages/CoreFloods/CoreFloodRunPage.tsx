@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { coreFloodsApi, type CoreFloodSample } from '@/api/coreFloods'
 import { Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
+import { CleanupPanel } from './CleanupPanel'
 import { CoreFloodSampleModal } from './CoreFloodSampleModal'
 import { SamplesTable } from './SamplesTable'
 import { SegmentsTable } from './SegmentsTable'
@@ -18,6 +19,8 @@ const HEADING = 'text-xs font-semibold text-ink-secondary uppercase tracking-wid
 export function CoreFloodRunPage() {
   const { baseId = '' } = useParams<{ baseId: string }>()
   const [modal, setModal] = useState<{ editing?: CoreFloodSample } | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [describing, setDescribing] = useState<string | null>(null)
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ['core-flood', baseId],
@@ -72,13 +75,28 @@ export function CoreFloodRunPage() {
         <MetricCard label="Pore volumes to date" value={fmt(last?.cumulative_pore_volumes)} />
       </div>
 
+      <CleanupPanel
+        baseId={run.base_id}
+        run={run}
+        onEditSample={(s) => setModal({ editing: s })}
+        onRename={setRenaming}
+        onEditDescription={setDescribing}
+      />
+
       <section aria-labelledby="segments-heading">
         <Card padding="none">
           <CardHeader>
             <h2 id="segments-heading" className={HEADING}>Segments</h2>
           </CardHeader>
           <div className="p-4">
-            <SegmentsTable baseId={run.base_id} segments={run.segments} />
+            <SegmentsTable
+              baseId={run.base_id}
+              segments={run.segments}
+              renaming={renaming}
+              setRenaming={setRenaming}
+              describing={describing}
+              setDescribing={setDescribing}
+            />
           </div>
         </Card>
       </section>
