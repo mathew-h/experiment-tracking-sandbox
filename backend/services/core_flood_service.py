@@ -21,6 +21,7 @@ from backend.api.schemas.core_floods import (
     CoreFloodSegment, CoreFloodWarning,
 )
 from backend.services.calculations.registry import recalculate
+from backend.services.workdays import LAB_TZ
 from backend.services.result_merge_utils import (
     resolve_primary_timepoint, update_cumulative_times_for_chain,
 )
@@ -55,6 +56,13 @@ def is_core_flood(conditions: ExperimentalConditions | None) -> bool:
 def _aware(dt: datetime | None) -> datetime | None:
     if dt is not None and dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _lab_local(dt: datetime | None) -> datetime | None:
+    """Naive input (including a date-only string) is lab-local; aware is kept."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=LAB_TZ)
     return dt
 
 
@@ -251,7 +259,7 @@ def create_sample(
     if not is_core_flood(cond):
         raise CoreFloodInvalid(f"{experiment_id} is not a Core Flood experiment")
 
-    measurement_date = _aware(payload.measurement_date)
+    measurement_date = _lab_local(payload.measurement_date)
     day = payload.time_post_reaction_days
     if day is None:
         if exp.date is None:
@@ -279,7 +287,7 @@ def create_sample(
 
     scalar_values = {f: getattr(payload, f) for f in SCALAR_FIELDS}
     scalar_values["measurement_date"] = measurement_date
-    scalar_values["gc_run_date"] = _aware(payload.gc_run_date) or measurement_date
+    scalar_values["gc_run_date"] = _lab_local(payload.gc_run_date) or measurement_date
     if scalar_values["h2_concentration"] is not None:
         scalar_values["h2_concentration_unit"] = "ppm"
     scalar = ScalarResults(result_id=result.id, **scalar_values)

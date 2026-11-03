@@ -91,7 +91,7 @@ class CoreFloodSampleCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     measurement_date: datetime
-    time_post_reaction_days: Optional[float] = None
+    time_post_reaction_days: Optional[float] = Field(None, ge=0)
     gc_run_date: Optional[datetime] = None
     sample_tube_number: Optional[int] = Field(None, gt=0)
     sampling_volume_mL: Optional[float] = Field(None, ge=0)

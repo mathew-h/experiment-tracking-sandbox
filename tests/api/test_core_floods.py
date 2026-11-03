@@ -178,6 +178,7 @@ def test_run_404_non_core_flood_base(client, db_session, reporting_views):
 
 # ---- POST /api/core-floods/{experiment_id}/samples (Task 3) ----
 
+from backend.services.workdays import LAB_TZ  # noqa: E402
 from database.models import ModificationsLog  # noqa: E402
 
 
@@ -246,7 +247,7 @@ def test_create_no_conditions_422(client, db_session, reporting_views):
 
 
 def test_create_defaults_day_and_gc_run_date(client, db_session, reporting_views):
-    exp = _cf_experiment(db_session, "CFA_105", date=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    exp = _cf_experiment(db_session, "CFA_105", date=datetime(2026, 10, 1, tzinfo=LAB_TZ))
     resp = _post(client, "CFA_105", measurement_date="2026-10-04", flow_rate_mL_min=0.1)
     assert resp.status_code == 201, resp.text
     row = db_session.query(ExperimentalResults).filter_by(experiment_fk=exp.id).one()
@@ -263,7 +264,7 @@ def test_create_no_start_date_without_day_422(client, db_session, reporting_view
 
 
 def test_create_date_before_start_422(client, db_session, reporting_views):
-    exp = _cf_experiment(db_session, "CFA_107", date=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    exp = _cf_experiment(db_session, "CFA_107", date=datetime(2026, 10, 1, tzinfo=LAB_TZ))
     resp = _post(client, "CFA_107", measurement_date="2026-09-30", flow_rate_mL_min=0.1)
     assert resp.status_code == 422
     assert _result_count(db_session, exp) == 0
@@ -289,6 +290,7 @@ def test_create_writes_audit_rows(client, db_session, reporting_views):
                  time_post_reaction_days=2, flow_rate_mL_min=0.1)
     assert resp.status_code == 201, resp.text
     logs = db_session.query(ModificationsLog).filter_by(experiment_fk=exp.id).all()
+    assert len(logs) == 2
     assert {m.modified_table for m in logs} == {"experimental_results", "scalar_results"}
     assert {m.modification_type for m in logs} == {"create"}
     assert {m.modified_by for m in logs} == {"test@addisenergy.com"}
@@ -305,3 +307,35 @@ def test_create_unknown_key_422(client, db_session, reporting_views):
     resp = _post(client, "CFA_110", measurement_date="2026-10-03",
                  time_post_reaction_days=2, flow_rate_mL_min=0.1, bogus=1)
     assert resp.status_code == 422
+
+
+def test_create_local_midnight_start_day_and_storage(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_111", date=datetime(2026, 10, 23, tzinfo=LAB_TZ))
+    r0 = _post(client, "CFA_111", measurement_date="2026-10-23", flow_rate_mL_min=0.1)
+    assert r0.status_code == 201, r0.text
+    r3 = _post(client, "CFA_111", measurement_date="2026-10-26", flow_rate_mL_min=0.1)
+    assert r3.status_code == 201, r3.text
+    rows = db_session.query(ExperimentalResults).filter_by(
+        experiment_fk=exp.id).order_by(ExperimentalResults.id).all()
+    assert [r.time_post_reaction_days for r in rows] == [0.0, 3.0]
+    scalar = db_session.query(ScalarResults).filter_by(result_id=rows[1].id).one()
+    assert scalar.measurement_date == datetime(2026, 10, 26, tzinfo=LAB_TZ)
+
+
+def test_create_t_token_conflict_422_no_demotion(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_312-t5", date=_d(1))
+    existing = _sample(db_session, exp, 5.0)
+    resp = _post(client, "CFA_312-t5", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1)
+    assert resp.status_code == 422
+    db_session.refresh(existing)
+    assert existing.is_primary_timepoint_result is True
+    assert _result_count(db_session, exp) == 1
+
+
+def test_create_negative_day_422(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_313", date=_d(1))
+    resp = _post(client, "CFA_313", measurement_date="2026-10-03",
+                 time_post_reaction_days=-1, flow_rate_mL_min=0.1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
