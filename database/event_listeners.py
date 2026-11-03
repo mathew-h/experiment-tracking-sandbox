@@ -176,6 +176,7 @@ _VIEWS = [
             ec.core_height_cm,
             ec.core_width_cm,
             ec.core_volume_cm3,
+            ec."pore_volume_mL",
             ec.total_ferrous_iron_g,
             ec.total_ferrous_iron
         FROM experiments e
@@ -475,6 +476,7 @@ _VIEWS = [
             er.time_post_reaction_days,
             er.time_post_reaction_bucket_days,
             er.cumulative_time_post_reaction_days,
+            er.sample_tube_number,
             (SELECT string_agg(n.note_text, '; ' ORDER BY n.id)
              FROM experiment_notes n
              WHERE n.result_id = er.id
