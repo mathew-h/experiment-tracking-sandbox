@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 WarningCode = Literal[
     "multiple_roots", "multiple_ongoing", "missing_pore_volume",
@@ -84,3 +84,23 @@ class CoreFloodRunListItem(BaseModel):
     last_sample_date: Optional[datetime] = None
     latest_cumulative_h2_grams_per_ton: Optional[float] = None
     warning_count: int
+
+
+class CoreFloodSampleCreate(BaseModel):
+    """Body of POST /api/core-floods/{experiment_id}/samples."""
+    model_config = ConfigDict(extra="forbid")
+
+    measurement_date: datetime
+    time_post_reaction_days: Optional[float] = None
+    gc_run_date: Optional[datetime] = None
+    sample_tube_number: Optional[int] = Field(None, gt=0)
+    sampling_volume_mL: Optional[float] = Field(None, ge=0)
+    h2_concentration: Optional[float] = Field(None, ge=0)
+    gas_sampling_volume_ml: Optional[float] = Field(None, ge=0)
+    gas_sampling_pressure_MPa: Optional[float] = Field(None, ge=0)
+    final_ph: Optional[float] = None
+    final_conductivity_mS_cm: Optional[float] = None
+    flow_rate_mL_min: float = Field(..., ge=0)
+    nitrogen_flow_rate_mL_min: Optional[float] = None
+    inlet_pressure_psi: Optional[float] = None
+    outlet_pressure_psi: Optional[float] = None

@@ -174,3 +174,134 @@ def test_run_404_unknown_base(client, db_session, reporting_views):
 def test_run_404_non_core_flood_base(client, db_session, reporting_views):
     _cf_experiment(db_session, "CFA_020", experiment_type="HPHT")
     assert client.get("/api/core-floods/CFA_020").status_code == 404
+
+
+# ---- POST /api/core-floods/{experiment_id}/samples (Task 3) ----
+
+from database.models import ModificationsLog  # noqa: E402
+
+
+def _result_count(db, exp):
+    return db.query(ExperimentalResults).filter_by(experiment_fk=exp.id).count()
+
+
+def _post(client, exp_id, **body):
+    return client.post(f"/api/core-floods/{exp_id}/samples", json=body)
+
+
+def test_create_on_derivation_persists_everything(client, db_session, reporting_views):
+    parent = _cf_experiment(db_session, "CFA_100", date=_d(1))
+    _sample(db_session, parent, 10.0, date=_d(11))
+    child = _cf_experiment(db_session, "CFA_100-2", date=_d(1))
+    resp = _post(client, "CFA_100-2", measurement_date="2026-10-05",
+                 time_post_reaction_days=3, flow_rate_mL_min=0.5,
+                 sample_tube_number=4, inlet_pressure_psi=100,
+                 h2_concentration=1000, gas_sampling_volume_ml=5,
+                 gas_sampling_pressure_MPa=0.1)
+    assert resp.status_code == 201, resp.text
+    row = db_session.query(ExperimentalResults).filter_by(experiment_fk=child.id).one()
+    db_session.refresh(row)
+    assert row.flow_rate_mL_min == 0.5
+    assert row.sample_tube_number == 4
+    assert row.inlet_pressure_psi == 100
+    assert row.cumulative_time_post_reaction_days == 13.0
+    scalar = db_session.query(ScalarResults).filter_by(result_id=row.id).one()
+    assert scalar.h2_micromoles is not None
+    assert resp.json()["result_id"] == row.id
+
+
+def test_create_missing_flow_422_no_rows(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_101", date=_d(1))
+    resp = _post(client, "CFA_101", measurement_date="2026-10-05",
+                 time_post_reaction_days=1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_negative_flow_422_no_rows(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_102", date=_d(1))
+    resp = _post(client, "CFA_102", measurement_date="2026-10-05",
+                 time_post_reaction_days=1, flow_rate_mL_min=-1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_non_core_flood_422(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_103", experiment_type="HPHT", date=_d(1))
+    resp = _post(client, "CFA_103", measurement_date="2026-10-05",
+                 time_post_reaction_days=1, flow_rate_mL_min=0.1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_no_conditions_422(client, db_session, reporting_views):
+    exp = Experiment(experiment_id="CFA_104", experiment_number=next(_NUM),
+                     status=ExperimentStatus.COMPLETED, date=_d(1))
+    db_session.add(exp)
+    db_session.flush()
+    resp = _post(client, "CFA_104", measurement_date="2026-10-05",
+                 time_post_reaction_days=1, flow_rate_mL_min=0.1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_defaults_day_and_gc_run_date(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_105", date=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    resp = _post(client, "CFA_105", measurement_date="2026-10-04", flow_rate_mL_min=0.1)
+    assert resp.status_code == 201, resp.text
+    row = db_session.query(ExperimentalResults).filter_by(experiment_fk=exp.id).one()
+    assert row.time_post_reaction_days == 3.0
+    scalar = db_session.query(ScalarResults).filter_by(result_id=row.id).one()
+    assert scalar.gc_run_date == scalar.measurement_date
+
+
+def test_create_no_start_date_without_day_422(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_106", date=None)
+    resp = _post(client, "CFA_106", measurement_date="2026-10-04", flow_rate_mL_min=0.1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_date_before_start_422(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_107", date=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    resp = _post(client, "CFA_107", measurement_date="2026-09-30", flow_rate_mL_min=0.1)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_same_day_newest_wins(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_108", date=_d(1))
+    ids = []
+    for flow in (0.1, 0.2):
+        resp = _post(client, "CFA_108", measurement_date="2026-10-03",
+                     time_post_reaction_days=2, flow_rate_mL_min=flow)
+        assert resp.status_code == 201, resp.text
+        ids.append(resp.json()["result_id"])
+    primaries = db_session.query(ExperimentalResults).filter_by(
+        experiment_fk=exp.id, is_primary_timepoint_result=True).count()
+    assert primaries == 1
+    assert [r["result_id"] for r in _view_rows(db_session, "CFA_108")] == [ids[1]]
+
+
+def test_create_writes_audit_rows(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFA_109", date=_d(1))
+    resp = _post(client, "CFA_109", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1)
+    assert resp.status_code == 201, resp.text
+    logs = db_session.query(ModificationsLog).filter_by(experiment_fk=exp.id).all()
+    assert {m.modified_table for m in logs} == {"experimental_results", "scalar_results"}
+    assert {m.modification_type for m in logs} == {"create"}
+    assert {m.modified_by for m in logs} == {"test@addisenergy.com"}
+
+
+def test_create_unknown_experiment_404(client, db_session, reporting_views):
+    resp = _post(client, "NOPE_999", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1)
+    assert resp.status_code == 404
+
+
+def test_create_unknown_key_422(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CFA_110", date=_d(1))
+    resp = _post(client, "CFA_110", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1, bogus=1)
+    assert resp.status_code == 422

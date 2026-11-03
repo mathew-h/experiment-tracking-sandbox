@@ -15,13 +15,20 @@ import structlog
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
+import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.api.schemas.core_floods import (
-    CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSegment,
-    CoreFloodWarning,
+    CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
+    CoreFloodSegment, CoreFloodWarning,
 )
+from backend.services.calculations.registry import recalculate
+from backend.services.result_merge_utils import (
+    resolve_primary_timepoint, update_cumulative_times_for_chain,
+)
+from database.models import ModificationsLog
 from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 from database.models.experiments import Experiment
+from database.models.results import ExperimentalResults, ScalarResults
 from database.reactor_slot import series_prefix
 
 log = structlog.get_logger(__name__)
@@ -190,3 +197,103 @@ def list_runs(
         i.base_id,
     ))
     return items
+
+
+RESULT_FIELDS = (
+    "sample_tube_number", "flow_rate_mL_min", "nitrogen_flow_rate_mL_min",
+    "inlet_pressure_psi", "outlet_pressure_psi",
+)
+SCALAR_FIELDS = (
+    "measurement_date", "gc_run_date", "sampling_volume_mL", "h2_concentration",
+    "gas_sampling_volume_ml", "gas_sampling_pressure_MPa", "final_ph",
+    "final_conductivity_mS_cm",
+)
+
+
+def _jsonable(values: dict) -> dict:
+    """Audit-log payload: datetimes become ISO strings."""
+    return {k: v.isoformat() if isinstance(v, datetime) else v for k, v in values.items()}
+
+
+def _audit(
+    db: Session, exp: Experiment, table: str, mod_type: Literal["create", "update"],
+    old: dict | None, new: dict, user_email: str,
+) -> None:
+    db.add(ModificationsLog(
+        experiment_fk=exp.id,
+        experiment_id=exp.experiment_id,
+        modified_by=user_email,
+        modification_type=mod_type,
+        modified_table=table,
+        old_values=_jsonable(old) if old is not None else None,
+        new_values=_jsonable(new),
+    ))
+
+
+def create_sample(
+    db: Session, experiment_id: str, payload: CoreFloodSampleCreate, user_email: str,
+) -> int:
+    """Create one core flood sample (result + scalar rows). Flushes, never commits.
+
+    All validation runs before resolve_primary_timepoint, which demotes the
+    existing primary row eagerly.
+    """
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise CoreFloodNotFound(f"Experiment {experiment_id} not found")
+    cond = db.execute(
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id).limit(1)
+    ).scalar_one_or_none()
+    if not is_core_flood(cond):
+        raise CoreFloodInvalid(f"{experiment_id} is not a Core Flood experiment")
+
+    measurement_date = _aware(payload.measurement_date)
+    day = payload.time_post_reaction_days
+    if day is None:
+        if exp.date is None:
+            raise CoreFloodInvalid(
+                "time_post_reaction_days is required when the experiment has no start date")
+        day = round((measurement_date - _aware(exp.date)).total_seconds() / 86400, 4)
+        if day < 0:
+            raise CoreFloodInvalid("measurement_date is before the experiment start date")
+
+    try:
+        resolved_time, bucket = resolve_primary_timepoint(db, exp, day, True)
+    except ValueError as exc:
+        raise CoreFloodInvalid(str(exc)) from exc
+
+    result_values = {f: getattr(payload, f) for f in RESULT_FIELDS}
+    result = ExperimentalResults(
+        experiment_fk=exp.id,
+        time_post_reaction_days=resolved_time,
+        time_post_reaction_bucket_days=bucket,
+        is_primary_timepoint_result=True,
+        **result_values,
+    )
+    db.add(result)
+    db.flush()
+
+    scalar_values = {f: getattr(payload, f) for f in SCALAR_FIELDS}
+    scalar_values["measurement_date"] = measurement_date
+    scalar_values["gc_run_date"] = _aware(payload.gc_run_date) or measurement_date
+    if scalar_values["h2_concentration"] is not None:
+        scalar_values["h2_concentration_unit"] = "ppm"
+    scalar = ScalarResults(result_id=result.id, **scalar_values)
+    db.add(scalar)
+    db.flush()
+    recalculate(scalar, db)
+
+    update_cumulative_times_for_chain(db, exp.id)
+
+    _audit(db, exp, "experimental_results", "create", None,
+           {"time_post_reaction_days": resolved_time,
+            **{k: v for k, v in result_values.items() if v is not None}}, user_email)
+    _audit(db, exp, "scalar_results", "create", None,
+           {k: v for k, v in scalar_values.items() if v is not None}, user_email)
+    db.flush()
+    log.info("core_flood_sample_created", experiment_id=experiment_id, result_id=result.id)
+    return result.id
