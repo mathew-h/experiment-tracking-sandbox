@@ -157,3 +157,19 @@ describe('ConditionsTab — serum vial size', () => {
     expect(payload).toHaveProperty('experiment_type', 'HPHT')
   })
 })
+
+describe('ConditionsTab — pore volume', () => {
+  const core = { ...mockConditions, experiment_type: 'Core Flood', pore_volume_mL: 42 }
+
+  it('shows the read row with unit', () => {
+    wrap(<ConditionsTab conditions={core} experimentId="CF_001" experimentFk={1} />)
+    expect(screen.getByText('Pore Volume')).toBeInTheDocument()
+    expect(screen.getByText('42 mL')).toBeInTheDocument()
+  })
+
+  it('edit modal input is seeded with the stored value', async () => {
+    wrap(<ConditionsTab conditions={core} experimentId="CF_001" experimentFk={1} />)
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(42)
+  })
+})

@@ -25,6 +25,7 @@ export interface Step2Data {
   co2_partial_pressure_MPa: string
   core_height_cm: string
   core_width_cm: string
+  pore_volume_mL: string
   confining_pressure: string
   pore_pressure: string
 }
@@ -69,6 +70,14 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
   const vialVisible = isVisible('serum_vial_size_mL', experimentType)
   const vialError = vialVisible ? parseVialSize(data.serum_vial_size_mL).error : undefined
 
+  // Core Flood only. The wizard creates the experiment before its conditions, so a
+  // 422 on the conditions POST would strand an experiment with no conditions row.
+  const poreVisible = isVisible('pore_volume_mL', experimentType)
+  const poreBlank = data.pore_volume_mL.trim() === ''
+  const poreError = poreVisible && !poreBlank && !(Number(data.pore_volume_mL) > 0)
+    ? 'Must be greater than 0'
+    : undefined
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
@@ -112,12 +121,22 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
         {field('CO₂ Partial Pressure', 'co2_partial_pressure_MPa', experimentType, data, onChange, 'MPa')}
         {field('Core Height', 'core_height_cm', experimentType, data, onChange, 'cm')}
         {field('Core Width', 'core_width_cm', experimentType, data, onChange, 'cm')}
+        {poreVisible && (
+          <Input
+            label="Pore Volume (mL)"
+            type="number"
+            min={0}
+            value={data.pore_volume_mL}
+            error={poreError}
+            onChange={(e) => onChange({ pore_volume_mL: e.target.value })}
+          />
+        )}
         {field('Confining Pressure', 'confining_pressure', experimentType, data, onChange)}
         {field('Pore Pressure', 'pore_pressure', experimentType, data, onChange)}
       </div>
       <div className="flex justify-between pt-2">
         <Button variant="ghost" onClick={onBack}>← Back</Button>
-        <Button variant="primary" onClick={onNext} disabled={!!vialError}>Next: Additives →</Button>
+        <Button variant="primary" onClick={onNext} disabled={!!vialError || !!poreError}>Next: Additives →</Button>
       </div>
     </div>
   )
