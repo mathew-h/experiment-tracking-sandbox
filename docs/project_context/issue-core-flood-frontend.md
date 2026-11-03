@@ -72,7 +72,7 @@ Use design-system tokens only, with no hex values.
   - an edit that changes only pH sends `{final_ph}`
   - submitting runs one `createSample` call
 - [x] `__tests__/CoreFloodRunPage.test.tsx`: variants render in Side samples, without cumulative values. A `multiple_ongoing` warning shows the status action
-- [~] After a rename on the run page, the segments list and URL reflect the new lineage (verified in Chrome DevTools, not in vitest; one harmless 404 console error from refetching the old run before navigation, tracked as a follow-up)
+- [x] After a rename on the run page, the segments list and URL reflect the new lineage (vitest `CoreFloodRunPage.test.tsx`: "renaming the only segment moves the URL to the new run" and "renaming one of several segments refetches the run in place"; also confirmed in Chrome DevTools. Noted follow-up: one harmless 404 console error from refetching the old run before navigation)
 - [x] `cd frontend && npm run test` passes (403 tests, 51 files), and `npm run lint` errors don't exceed the current baseline (5 errors, equal to baseline)
 
 ## Notes
