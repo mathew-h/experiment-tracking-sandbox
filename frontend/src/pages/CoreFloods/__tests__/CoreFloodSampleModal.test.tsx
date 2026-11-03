@@ -145,6 +145,20 @@ describe('CoreFloodSampleModal — add', () => {
     expect(createSample).not.toHaveBeenCalled()
   })
 
+  it('picking a segment clears the segment error', async () => {
+    renderModal({
+      segments: [
+        segment(),
+        segment({ id: 2, experiment_id: 'CF_020-4', date: '2026-10-30T00:00:00' }),
+      ],
+    })
+    await submit()
+    expect(screen.getByText('Choose a segment')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('Segment'), 'CF_020-4')
+    expect(screen.queryByText('Choose a segment')).not.toBeInTheDocument()
+    expect((screen.getByLabelText('Day (days)') as HTMLInputElement).value).not.toBe('')
+  })
+
   it('a 422 shows the server detail in the modal', async () => {
     createSample.mockRejectedValue(
       Object.assign(new Error('sample dated before the start'), { response: { status: 422 } }),
@@ -183,5 +197,17 @@ describe('CoreFloodSampleModal — edit', () => {
     await submit()
     expect(screen.getByText('Required')).toBeInTheDocument()
     expect(updateSample).not.toHaveBeenCalled()
+  })
+
+  it('edits a historical row missing flow and date, sending only pH', async () => {
+    renderModal({
+      editing: sample({ flow_rate_mL_min: null, sample_date: null, gc_run_date: null }),
+    })
+    const ph = screen.getByLabelText('pH')
+    await userEvent.clear(ph)
+    await userEvent.type(ph, '7.4')
+    await submit()
+    await waitFor(() => expect(updateSample).toHaveBeenCalledTimes(1))
+    expect(updateSample).toHaveBeenCalledWith(77, { final_ph: 7.4 })
   })
 })

@@ -143,12 +143,18 @@ export function withSampleDate(
   return next
 }
 
-export function validateForm(form: SampleForm): Partial<Record<SampleFieldKey, string>> {
+/** With `initial` (edit mode), a required field is only an error when the user
+ *  cleared a value it started with; a historical row that never had it can still
+ *  be edited, since the patch omits unchanged fields. */
+export function validateForm(
+  form: SampleForm,
+  initial?: SampleForm,
+): Partial<Record<SampleFieldKey, string>> {
   const errors: Partial<Record<SampleFieldKey, string>> = {}
   for (const f of SAMPLE_FIELDS) {
     const v = form[f.key].trim()
     if (v === '') {
-      if (f.required) errors[f.key] = 'Required'
+      if (f.required && (!initial || initial[f.key].trim() !== '')) errors[f.key] = 'Required'
       continue
     }
     if (f.kind === 'date') {

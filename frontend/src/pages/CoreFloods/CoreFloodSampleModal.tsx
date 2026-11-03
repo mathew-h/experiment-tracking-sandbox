@@ -79,15 +79,22 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
     label: s.is_variant ? `${s.experiment_id} (side)` : s.experiment_id,
   }))
 
-  function recompute(next: SampleForm, segmentStart: string | null, date: string): SampleForm {
-    return withSampleDate(next, date, { segmentStart, gcEdited, dayEdited })
+  /** Applies an auto-recompute and drops the errors of every key it changed. */
+  function applyRecompute(start: string | null, date: string) {
+    const next = withSampleDate(form, date, { segmentStart: start, gcEdited, dayEdited })
+    const changed = SAMPLE_FIELDS.map((f) => f.key).filter((k) => next[k] !== form[k])
+    setForm(next)
+    setErrors((e) => {
+      const cleared = { ...e }
+      for (const k of changed) cleared[k] = undefined
+      return cleared
+    })
   }
 
   function onSegmentChange(id: string) {
     setSegmentId(id)
     setErrors((e) => ({ ...e, segment: undefined }))
-    const start = segments.find((s) => s.experiment_id === id)?.date ?? null
-    setForm((f) => recompute(f, start, f.measurement_date))
+    applyRecompute(segments.find((s) => s.experiment_id === id)?.date ?? null, form.measurement_date)
   }
 
   function onFieldChange(key: SampleFieldKey, value: string) {
@@ -95,7 +102,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
     if (key === 'gc_run_date') setGcEdited(true)
     if (key === 'time_post_reaction_days') setDayEdited(true)
     if (key === 'measurement_date' && !editing) {
-      setForm((f) => recompute(f, segment?.date ?? null, value))
+      applyRecompute(segment?.date ?? null, value)
       return
     }
     setForm((f) => ({ ...f, [key]: value }))
@@ -120,7 +127,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
 
   function handleSubmit() {
     setServerError(null)
-    const found: Errors = validateForm(form)
+    const found: Errors = validateForm(form, editing ? initial : undefined)
     if (!editing && !segment) found.segment = 'Choose a segment'
     setErrors(found)
     if (Object.values(found).some(Boolean)) return

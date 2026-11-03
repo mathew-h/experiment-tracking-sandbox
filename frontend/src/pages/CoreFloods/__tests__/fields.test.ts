@@ -184,6 +184,20 @@ describe('buildCreateBody', () => {
   })
 })
 
+describe('validateForm with initial (edit mode)', () => {
+  it('does not require a field that was blank and still is', () => {
+    expect(validateForm(emptyForm(), emptyForm())).toEqual({})
+  })
+  it('requires a field the user cleared, and still checks format', () => {
+    const initial = { ...emptyForm(), flow_rate_mL_min: '0.5', sample_tube_number: '' }
+    const form = { ...emptyForm(), sample_tube_number: 'abc' }
+    expect(validateForm(form, initial)).toEqual({
+      flow_rate_mL_min: 'Required',
+      sample_tube_number: 'Must be a number',
+    })
+  })
+})
+
 describe('fmt', () => {
   it('renders missing values as a dash', () => {
     expect(fmt(null)).toBe('—')
