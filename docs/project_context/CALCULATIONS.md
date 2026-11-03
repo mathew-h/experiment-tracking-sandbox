@@ -195,6 +195,39 @@ yield_nh3_pct    = (Fe²⁺_consumed_g / total_ferrous_iron_g) × 100
 
 ---
 
+## Core flood run values (`v_core_flood_samples`)
+
+A core flood run is one `base_experiment_id` split across sequential segment experiments (`CF_020`, `CF_020-2`, ...). Values that depend on more than one sample are computed in the SQL view `v_core_flood_samples` (`database/event_listeners.py`), one row per primary timepoint of a Core Flood experiment. **These are view columns, not calculation-engine fields:** nothing is registered in the calculation registry, nothing is stored, and per-sample H2 (`h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`) is still computed by `recalculate_scalar` as above. The app and Power BI read the same view, so they cannot disagree.
+
+**Window.** Per `run_base_id` (= `base_experiment_id`) and `is_variant`, ordered by `cumulative_time_post_reaction_days` then `result_id`, from the first sample to the current row.
+
+| Column | Definition |
+|---|---|
+| `interval_days` | `cumulative_time − COALESCE(LAG(cumulative_time), 0)` |
+| `cumulative_liquid_volume_mL` | `SUM(COALESCE(sampling_volume_mL, 0))` over the window |
+| `cumulative_pore_volumes` | `cumulative_liquid_volume_mL / NULLIF(pore_volume_mL, 0)` |
+| `cumulative_h2_grams_per_ton` | `SUM(COALESCE(h2_grams_per_ton_yield, 0))` over the window |
+| `h2_grams_per_ton_per_day` | `h2_grams_per_ton_yield / NULLIF(interval_days, 0)` |
+| `is_hold_interval` | `flow_rate_mL_min = 0` |
+
+**Flow rule.** `flow_rate_mL_min` is the rate over the interval *ending* at that sample; `0` means a hold. Flow only ever changes at a sample, so a hold or a flow change needs no new experiment.
+
+**Volume basis.** Volume is the measured liquid sample volume (`sampling_volume_mL`), not flow × time. Pore volumes = cumulative liquid volume / `pore_volume_mL`, the researcher-entered `experimental_conditions.pore_volume_mL` of that segment's own conditions row. A NULL liquid volume adds 0 to the running total; a NULL or 0 pore volume gives NULL pore volumes.
+
+**H2 basis.** Each sample's H2 is only what was collected since the previous sample (confirmed by Mat, 2026-11-03). That is why per-sample H2 g/t can be summed into `cumulative_h2_grams_per_ton`, and why dividing a sample's H2 g/t by its interval days gives a rate (`h2_grams_per_ton_per_day`, compared against the 0.5 g/t/day target). If a sample's H2 were cumulative instead, both columns would be wrong.
+
+**Variants (`is_variant`).** A `_Text` child of a segment (`CF_020-5_Bypass1`, `CF_023-3_Accumulator`) is a blank or bypass. `is_variant` is true when the experiment has a parent and its ID starts with `<parent experiment_id>_`. Variant rows keep their raw values (flow, tube, volume, H2, pH) but every derived column above is NULL, and they sit in their own window partition, so they never shift the segments' sums. Sequential segments (`-N`) are never variants.
+
+**Edge cases.**
+- Zero interval (two samples on one cumulative day, e.g. a segment boundary): `NULLIF` makes `h2_grams_per_ton_per_day` NULL, not an error.
+- `CF_020_5_Brine` (underscore typo) parses to base `CF_020_5`, so it forms its own one-row run rather than a variant; renaming it on the run page fixes this.
+- An orphaned variant (parent link cleared) is no longer a variant and counts as a segment.
+- Assumes one `experimental_conditions` row per experiment (`uq_conditions_experiment_fk`).
+
+**Permeability (not computed).** `inlet_pressure_psi` and `outlet_pressure_psi` are stored per sample so a later Darcy permeability calculation has the pressure drop; nothing computes it yet. Pore pressure is `experimental_conditions.pore_pressure`, not a result column.
+
+---
+
 ## Utility Functions
 
 ### `format_additives(conditions)` — `additive_calcs.py`

@@ -14,11 +14,11 @@ PostgreSQL database on the lab PC and import these views as tables.
 | View | Key columns |
 |---|---|
 | `public.v_experiments` | `experiment_id`, `experiment_number`, `status`, `researcher`, `date`, `sample_id`, `base_experiment_id`, `reactor_number`, `rock_mass_g`, `water_volume_mL`, `initial_ph`, `experiment_type`, `feedstock`, `description` |
-| `public.v_experiment_conditions` | `experiment_id`, `experiment_type`, `temperature_c`, `particle_size`, `initial_ph`, `rock_mass_g`, `water_volume_mL`, `serum_vial_size_mL`, `water_to_rock_ratio`, `reactor_number`, `feedstock`, `stir_speed_rpm`, `room_temp_pressure_psi`, `rxn_temp_pressure_psi`, `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`, `initial_conductivity_mS_cm`, `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`, `total_ferrous_iron_g`, `total_ferrous_iron` |
+| `public.v_experiment_conditions` | `experiment_id`, `experiment_type`, `temperature_c`, `particle_size`, `initial_ph`, `rock_mass_g`, `water_volume_mL`, `serum_vial_size_mL`, `pore_volume_mL`, `water_to_rock_ratio`, `reactor_number`, `feedstock`, `stir_speed_rpm`, `room_temp_pressure_psi`, `rxn_temp_pressure_psi`, `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`, `initial_conductivity_mS_cm`, `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`, `total_ferrous_iron_g`, `total_ferrous_iron` |
 | `public.v_chemical_additives` | `experiment_id`, `compound_name`, `formula`, `amount`, `unit`, `addition_order`, `addition_method`, `purity`, `mass_in_grams`, `moles_added`, `final_concentration`, `concentration_units`, `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm` |
 | `public.v_experiment_additives_summary` | `experiment_id`, `additives_summary` |
 | `public.v_experiment_additive_names_summary` | `experiment_id`, `additive_names` |
-| `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `modification_note` |
+| `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `sample_tube_number`, `modification_note` |
 | `public.v_notes` | `note_id`, `experiment_id`, `result_id`, `event_date`, `note_type`, `note_text`, `created_at`, `created_by`, `needs_review` |
 | `public.v_experiment_xrd` | `experiment_id`, `time_post_reaction_days`, `mineral_name`, `amount_pct`, `rwp`, `measurement_date` |
 
@@ -31,6 +31,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_results_scalar` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `net_ammonium_concentration`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `ferrous_iron_yield_h2_pct`, `cumulative_ferrous_iron_yield_h2_pct`, `ferrous_iron_yield_nh3_pct`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`, `nmr_run_date` |
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
 | `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `ti_ppm` (37 element columns; `s_ppm` is a known gap) |
+| `public.v_core_flood_samples` | `result_id`, `experiment_id`, `experiment_fk`, `run_base_id`, `is_variant`, `time_post_reaction_days`, `cumulative_time_post_reaction_days`, `sample_date`, `gc_run_date`, `sample_tube_number`, `flow_rate_mL_min`, `nitrogen_flow_rate_mL_min`, `inlet_pressure_psi`, `outlet_pressure_psi`, `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `final_ph`, `final_conductivity_mS_cm`, `pore_volume_mL`, `interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval` |
 | `public.v_results_scalar_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_vials`, `n_replicate_letters`, `n_values`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph` |
 
 ---
@@ -69,6 +70,19 @@ PostgreSQL database on the lab PC and import these views as tables.
 
 ---
 
+## Core Flood Run View (`v_core_flood_samples`, issue #132)
+
+One row per **primary timepoint of a Core Flood experiment**, with cross-sample run values computed over the whole run. Key: `result_id`, joining 1–1 to `v_dim_timepoints` (Core Flood timepoints only, so the join is 1–0..1 from that side). **`run_base_id` (= `base_experiment_id`) is the run**: it spans the sequential segment experiments `CF_020`, `CF_020-2`, ... Use it, not `experiment_id`, for run-level slicers and time-series charts.
+
+- **Order and window.** Per `run_base_id` and `is_variant`, ordered by `cumulative_time_post_reaction_days` then `result_id`. Plot against `cumulative_time_post_reaction_days`, never `time_post_reaction_days` (which restarts per segment).
+- **Derived columns:** `interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval`. Formulas and bases in `docs/CALCULATIONS.md` ("Core flood run values").
+- **Variants.** `is_variant = true` marks a `_Text` blank or bypass child of a segment (`CF_020-5_Bypass1`). Its raw columns are present but every derived column is NULL. Filter `is_variant = false` for the run curve; show variants in a separate "side samples" table.
+- **Flow.** `flow_rate_mL_min` is the rate over the interval *ending* at that sample; `0` is a hold (`is_hold_interval`). `NULL` means not recorded (all pre-2026-11 samples), and `is_hold_interval` is then NULL, not false.
+- **Pore volume.** `pore_volume_mL` is each segment's own conditions value. `cumulative_pore_volumes` is NULL until it is entered.
+- **Hide** `experiment_fk` (join key only); `result_id` is the join key to `v_dim_timepoints`. `inlet_pressure_psi` / `outlet_pressure_psi` are stored for a future permeability calculation; nothing derives from them yet.
+
+---
+
 ## Sample Views
 
 | View | Key columns |
@@ -94,6 +108,7 @@ v_experiments (experiment_id)    1 ──── * v_dim_timepoints (experiment_i
 v_dim_timepoints (result_id)    1 ──── 1 v_results_scalar (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_results_h2 (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_results_icp (result_id)
+v_dim_timepoints (result_id)    1 ──── 1 v_core_flood_samples (result_id)   -- Core Flood timepoints only
 
 v_experiments (base_experiment_id or experiment_id)  * ──── 1 v_results_scalar_rollup (base_experiment_id, time_post_reaction_bucket_days)
 
@@ -122,6 +137,7 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
 | `time_post_reaction_bucket_days` | Yes | Authoritative source for bucketed time axis |
 | `cumulative_time_post_reaction_days` | Yes | Authoritative source for cumulative time |
 | `modification_note` | Yes | What was done to the vial at this timepoint — the result's `modification` notes, `; `-joined (issue #118) |
+| `sample_tube_number` | Yes | Physical centrifuge tube for this timepoint, any experiment type. Reused across dates, so not a key (issue #132) |
 | `experiment_id` | **Hide** | Users get `experiment_id` from `v_experiments` |
 | `result_id` | **Hide** | Join key only |
 
