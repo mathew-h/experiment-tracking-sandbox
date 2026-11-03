@@ -172,4 +172,37 @@ describe('ConditionsTab — pore volume', () => {
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(42)
   })
+
+  it('edit modal shows the input for a Core Flood with no stored value', async () => {
+    wrap(<ConditionsTab conditions={{ ...core, pore_volume_mL: null }} experimentId="CF_001" experimentFk={1} />)
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(null)
+  })
+
+  it('edit modal hides the input for a Serum with no stored value', async () => {
+    const serum = { ...mockConditions, experiment_type: 'Serum', pore_volume_mL: null }
+    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    expect(screen.queryByLabelText('Pore Volume (mL)')).not.toBeInTheDocument()
+  })
+
+  it('edit modal shows the input for a Serum when a value is already stored', async () => {
+    const serum = { ...mockConditions, experiment_type: 'Serum', pore_volume_mL: 15 }
+    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(15)
+  })
+
+  it('omits a hidden pore volume from the save payload after switching to HPHT', async () => {
+    wrap(<ConditionsTab conditions={{ ...core, pore_volume_mL: null }} experimentId="CF_001" experimentFk={1} />)
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    await userEvent.type(screen.getByLabelText('Pore Volume (mL)'), '30')
+    await userEvent.selectOptions(screen.getByLabelText('Experiment Type'), 'HPHT')
+    expect(screen.queryByLabelText('Pore Volume (mL)')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => expect(conditionsApi.patch).toHaveBeenCalled())
+    const payload = vi.mocked(conditionsApi.patch).mock.calls.at(-1)![1]
+    expect(payload).not.toHaveProperty('pore_volume_mL')
+    expect(payload).toHaveProperty('experiment_type', 'HPHT')
+  })
 })

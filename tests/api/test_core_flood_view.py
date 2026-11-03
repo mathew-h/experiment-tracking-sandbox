@@ -179,3 +179,25 @@ def test_excludes_non_primary_and_non_core_flood(db_session, reporting_views):
     assert len(rows) == 1
     assert rows[0]["cumulative_liquid_volume_mL"] == pytest.approx(10.0)
     assert rows[0]["cumulative_h2_grams_per_ton"] == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("experiment_type", ["CF", "core  Flood ", "coreflood"])
+def test_core_flood_type_matched_like_reactor_slot(db_session, reporting_views, experiment_type):
+    # Same reading of "Core Flood" as database/reactor_slot.py::_SERIES_BY_TYPE
+    # (lowercase, whitespace collapsed): production holds CF-014 as "CF".
+    exp = _cf_experiment(db_session, "CFV_006", 98601, experiment_type=experiment_type)
+    result = _sample(db_session, exp, 1.0, 10.0, 0.1)
+    rows = _rows(db_session, "CFV_006")
+    assert [r["result_id"] for r in rows] == [result.id]
+
+
+def test_null_h2_carries_cumulative_and_nulls_rate(db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFV_007", 98701)
+    _sample(db_session, exp, 1.0, 5.0, 0.2)
+    _sample(db_session, exp, 2.0, 5.0, None)
+    _sample(db_session, exp, 4.0, 5.0, 0.4)
+    rows = _rows(db_session, "CFV_007")
+    assert _col(rows, "cumulative_h2_grams_per_ton") == pytest.approx([0.2, 0.2, 0.6])
+    assert rows[0]["h2_grams_per_ton_per_day"] == pytest.approx(0.2)
+    assert rows[1]["h2_grams_per_ton_per_day"] is None
+    assert rows[2]["h2_grams_per_ton_per_day"] == pytest.approx(0.2)

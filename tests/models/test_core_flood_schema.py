@@ -23,12 +23,16 @@ def _script_dir():
     return ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic.ini")))
 
 
-def _migration_module():
-    path = REPO_ROOT / "alembic" / "versions" / f"{REVISION}_core_flood_columns_and_view.py"
-    spec = importlib.util.spec_from_file_location("_core_flood_migration", path)
+def _load_migration(filename: str, module_name: str):
+    path = REPO_ROOT / "alembic" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(module_name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _migration_module():
+    return _load_migration(f"{REVISION}_core_flood_columns_and_view.py", "_core_flood_migration")
 
 
 def _norm(sql: str) -> str:
@@ -93,3 +97,9 @@ def test_core_flood_view_matches_startup():
 
     mod = _migration_module()
     assert _norm(mod._V_CORE_FLOOD_SAMPLES) == _norm(dict(_VIEWS)["v_core_flood_samples"])
+
+
+def test_dim_old_matches_predecessor():
+    # downgrade() restores _V_DIM_OLD; it must be exactly what c4d8f1a2b6e7 created.
+    prev = _load_migration("c4d8f1a2b6e7_typed_notes_reporting_views.py", "_typed_notes_migration")
+    assert _norm(prev._V_DIM_NEW) == _norm(_migration_module()._V_DIM_OLD)

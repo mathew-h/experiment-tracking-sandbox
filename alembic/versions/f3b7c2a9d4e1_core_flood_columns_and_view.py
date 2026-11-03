@@ -181,7 +181,10 @@ _V_CORE_FLOOD_SAMPLES = """
         JOIN experimental_conditions ec  ON ec.experiment_fk = e.id
         LEFT JOIN scalar_results sr      ON sr.result_id = er.id
         WHERE er.is_primary_timepoint_result = TRUE
-          AND ec.experiment_type = 'Core Flood'
+          -- Same reading of Core Flood as database/reactor_slot.py::_SERIES_BY_TYPE
+          -- (lowercase, whitespace collapsed); keep the two in sync.
+          AND lower(btrim(regexp_replace(ec.experiment_type, '\\s+', ' ', 'g')))
+              IN ('core flood', 'coreflood', 'cf')
     ), w AS (
         SELECT
             s.*,

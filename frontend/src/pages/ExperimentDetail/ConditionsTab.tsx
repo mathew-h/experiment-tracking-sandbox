@@ -146,11 +146,13 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
   // hidden (stale) value is never sent. Keyed on the STORED value (not form) so the
   // input does not vanish while the user clears it.
   const showVialSize = form.experiment_type === 'Serum' || conditions?.serum_vial_size_mL != null
+  const showPoreVolume = form.experiment_type === 'Core Flood' || conditions?.pore_volume_mL != null
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = { ...form }
       if (!showVialSize) delete body.serum_vial_size_mL
+      if (!showPoreVolume) delete body.pore_volume_mL
       if (!conditions) {
         return conditionsApi.create({
           ...body,
@@ -348,7 +350,9 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
             <Input label="Pore Pressure" type="number" value={form.pore_pressure ?? ''} onChange={set('pore_pressure')} />
             <Input label="Core Height (cm)" type="number" value={form.core_height_cm ?? ''} onChange={set('core_height_cm')} />
             <Input label="Core Width (cm)" type="number" value={form.core_width_cm ?? ''} onChange={set('core_width_cm')} />
-            <Input label="Pore Volume (mL)" type="number" min={0} value={form.pore_volume_mL ?? ''} onChange={set('pore_volume_mL')} />
+            {showPoreVolume && (
+              <Input label="Pore Volume (mL)" type="number" min={0} value={form.pore_volume_mL ?? ''} onChange={set('pore_volume_mL')} />
+            )}
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
