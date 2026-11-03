@@ -800,7 +800,7 @@ Body (model field names; `extra="forbid"`, so an unknown key is 422):
 
 **Time zone.** A naive datetime (including a date-only string) in `measurement_date` or `gc_run_date` is read as lab-local, America/New_York (`LAB_TZ`), because production stores `Experiment.date` at local midnight. An aware datetime is kept as given.
 
-**Day default.** When `time_post_reaction_days` is omitted: `round((measurement_date - experiment.date) in days, 4)`. 422 if the experiment has no start date, or if the sample is dated before the start. An explicit negative day is 422.
+**Day default.** When `time_post_reaction_days` is omitted, the day is computed in lab-local time. A date-only `measurement_date` (a naive value at exactly midnight, which is what a date-only string parses to) counts lab-local calendar days from the start date: `(sample date − experiment.date's lab-local date).days`, so a same-day sample on a segment started at 14:04 is day 0, not negative. A full timestamp keeps the fractional difference in lab-local wall-clock time: `round((wall(measurement_date) − wall(experiment.date)) in days, 4)`. Both sides are compared as wall clocks, so a DST change between start and sample does not add or remove an hour. 422 if the experiment has no start date, or if the sample is dated before the start. An explicit negative day is 422.
 
 **422 cases:** missing or negative `flow_rate_mL_min`; an experiment whose conditions are not Core Flood (or that has no conditions row); the day rules above; a conflict with a `-t<days>` token in the experiment ID. 404 for an unknown experiment. Validation runs before any write, so a rejected request leaves the experiment's result rows unchanged (including the existing primary row, which is not demoted).
 
@@ -818,7 +818,8 @@ The response is the new sample as a `v_core_flood_samples` row.
 Body: any create field except `time_post_reaction_days`, all optional; `extra="forbid"`. The day is not editable, so sending it is 422.
 
 - Only fields whose value differs are written. A no-op PATCH (including re-sending the same lab-local date) writes nothing and logs nothing.
-- A missing `ScalarResults` row is created when the body carries a scalar field, so historical samples can be given values.
+- `measurement_date` and `flow_rate_mL_min` may be omitted but not sent as `null` (422); a hold is an explicit `0`.
+- A missing `ScalarResults` row is created when the body carries a non-null scalar field, so historical samples can be given values. A body of nulls on such a sample writes nothing.
 - `recalculate` runs when any scalar field changed or the scalar row was created (a superset of "an H2 input changed"). Clearing `h2_concentration` clears the derived H2 values.
 - One `ModificationsLog` row per table changed (`update`, or `create` for a new scalar row), with `modified_by` = the caller's email and old and new values for the changed fields only.
 - 404 for an unknown result, and for a result that is not a primary timepoint (nothing is written). 422 for a non-Core Flood experiment or an unknown key.

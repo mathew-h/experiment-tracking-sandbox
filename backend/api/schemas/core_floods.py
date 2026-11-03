@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 WarningCode = Literal[
     "multiple_roots", "multiple_ongoing", "missing_pore_volume",
@@ -114,3 +114,12 @@ class CoreFloodSampleUpdate(_CoreFloodSampleFields):
     """Body of PATCH /api/core-floods/samples/{result_id}; the day is not editable."""
     measurement_date: Optional[datetime] = None
     flow_rate_mL_min: Optional[float] = Field(None, ge=0)
+
+    @field_validator("measurement_date", "flow_rate_mL_min")
+    @classmethod
+    def _omittable_not_nullable(cls, v):
+        # Omitting either field leaves it alone (validators skip unset defaults);
+        # an explicit null is rejected. A hold is flow 0, not null.
+        if v is None:
+            raise ValueError("may be omitted but not null")
+        return v

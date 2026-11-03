@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Callable, Literal, Optional, TypeVar
 
-import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -13,7 +12,6 @@ from backend.api.schemas.core_floods import (
 from backend.auth.firebase_auth import FirebaseUser, verify_firebase_token
 from backend.services import core_flood_service as svc
 
-log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/core-floods", tags=["core-floods"])
 
 T = TypeVar("T")
@@ -51,6 +49,9 @@ def update_core_flood_sample(
     _translate(lambda: svc.update_sample(db, result_id, payload, current_user.email))
     db.commit()
     rows = svc.fetch_samples(db, result_id=result_id)
+    # Effectively unreachable: update_sample already rejected non-primary and
+    # non-Core-Flood results. This guards against v_core_flood_samples and the
+    # Python Core Flood rule (is_core_flood) diverging.
     if not rows:
         raise HTTPException(status_code=404, detail="Sample is not a primary timepoint")
     return CoreFloodSample(**rows[0])

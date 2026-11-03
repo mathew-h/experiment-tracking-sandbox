@@ -66,6 +66,46 @@ def _lab_local(dt: datetime | None) -> datetime | None:
     return dt
 
 
+def _wall(dt: datetime) -> datetime:
+    """Naive lab-local wall clock of an aware datetime.
+
+    A start date loaded from Postgres carries a fixed offset (-04:00 / -05:00)
+    while _lab_local attaches ZoneInfo(LAB_TZ); Python subtracts aware datetimes
+    with different tzinfo as instants, which adds the DST hour across a change.
+    Subtracting wall clocks does not.
+    """
+    return dt.astimezone(LAB_TZ).replace(tzinfo=None)
+
+
+def _is_date_only(dt: datetime) -> bool:
+    """A naive value at exactly midnight: what a date-only string parses to."""
+    return dt.tzinfo is None and dt.time() == datetime.min.time()
+
+
+def _default_day(raw_measurement: datetime, start: datetime) -> float:
+    """Day of a sample from the experiment start, in lab-local time.
+
+    A date-only sample date counts lab-local calendar days from the start date
+    (31 of 85 production Core Flood starts carry a time of day, so a same-day
+    sample would otherwise be negative). A full timestamp keeps the fractional
+    wall-clock difference.
+    """
+    start_wall = _wall(_aware(start))
+    sample_wall = _wall(_lab_local(raw_measurement))
+    if _is_date_only(raw_measurement):
+        return float((sample_wall.date() - start_wall.date()).days)
+    return round((sample_wall - start_wall).total_seconds() / 86400, 4)
+
+
+def _conditions_for(db: Session, exp: Experiment) -> ExperimentalConditions | None:
+    """The experiment's conditions row (lowest id, should a duplicate survive)."""
+    return db.execute(
+        select(ExperimentalConditions)
+        .where(ExperimentalConditions.experiment_fk == exp.id)
+        .order_by(ExperimentalConditions.id).limit(1)
+    ).scalar_one_or_none()
+
+
 def fetch_samples(
     db: Session, *, base_ids: list[str] | None = None, result_id: int | None = None,
 ) -> list[dict]:
@@ -95,6 +135,8 @@ def _load_segments(db: Session, base_id: str | None = None) -> dict[str, list[Co
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
         .where(Experiment.base_experiment_id.is_not(None))
         .options(selectinload(Experiment.parent), selectinload(Experiment.description_note))
+        # Lowest conditions id first, so the `seen` guard matches _conditions_for.
+        .order_by(Experiment.id, ExperimentalConditions.id)
     )
     if base_id is not None:
         stmt = stmt.where(Experiment.base_experiment_id == base_id)
@@ -251,11 +293,7 @@ def create_sample(
     ).scalar_one_or_none()
     if exp is None:
         raise CoreFloodNotFound(f"Experiment {experiment_id} not found")
-    cond = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id).limit(1)
-    ).scalar_one_or_none()
+    cond = _conditions_for(db, exp)
     if not is_core_flood(cond):
         raise CoreFloodInvalid(f"{experiment_id} is not a Core Flood experiment")
 
@@ -265,7 +303,7 @@ def create_sample(
         if exp.date is None:
             raise CoreFloodInvalid(
                 "time_post_reaction_days is required when the experiment has no start date")
-        day = round((measurement_date - _aware(exp.date)).total_seconds() / 86400, 4)
+        day = _default_day(payload.measurement_date, exp.date)
         if day < 0:
             raise CoreFloodInvalid("measurement_date is before the experiment start date")
 
@@ -327,11 +365,7 @@ def update_sample(
     if result is None:
         raise CoreFloodNotFound(f"Result {result_id} not found")
     exp = db.get(Experiment, result.experiment_fk)
-    cond = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id).limit(1)
-    ).scalar_one_or_none()
+    cond = _conditions_for(db, exp)
     if not is_core_flood(cond):
         raise CoreFloodInvalid(f"{exp.experiment_id} is not a Core Flood experiment")
     if not result.is_primary_timepoint_result:
@@ -356,7 +390,8 @@ def update_sample(
         select(ScalarResults).where(ScalarResults.result_id == result.id)
     ).scalar_one_or_none()
     created = False
-    if scalar is None and new_scalar:
+    # A payload of nulls on a sample with no scalar row is a no-op, not a create.
+    if scalar is None and any(v is not None for v in new_scalar.values()):
         scalar = ScalarResults(result_id=result.id)
         db.add(scalar)
         created = True

@@ -463,3 +463,87 @@ def test_patch_non_primary_404_writes_nothing(client, db_session, reporting_view
     db_session.refresh(sample)
     assert sample.flow_rate_mL_min == 0.1
     assert _log_count(db_session, exp) == before
+
+
+# --- Final-review fixes: day default across DST and non-midnight starts -------
+#
+# These tests expire `exp` before the POST. The client shares db_session, so
+# without the expire the identity map hands create_sample the same Experiment
+# object the test built, whose `date` still carries tzinfo=LAB_TZ. Postgres
+# returns a FIXED offset (-04:00 / -05:00) instead, and that is the shape the
+# service sees in production; expiring forces the reload.
+
+def _day_of(db, exp):
+    row = db.query(ExperimentalResults).filter_by(experiment_fk=exp.id).one()
+    return row.time_post_reaction_days
+
+
+def test_create_day_across_dst_is_whole(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFD_001", date=datetime(2026, 10, 23, tzinfo=LAB_TZ))
+    db_session.expire(exp)
+    resp = _post(client, "CFD_001", measurement_date="2026-11-03", flow_rate_mL_min=0.1)
+    assert resp.status_code == 201, resp.text
+    assert _day_of(db_session, exp) == 11.0
+
+
+@pytest.mark.parametrize("sample_date, expected", [
+    ("2026-09-08", 0.0), ("2026-09-09", 1.0),
+])
+def test_create_date_only_counts_calendar_days(
+        client, db_session, reporting_views, sample_date, expected):
+    exp = _cf_experiment(db_session, "CFD_002",
+                         date=datetime(2026, 9, 8, 14, 4, tzinfo=LAB_TZ))
+    db_session.expire(exp)
+    resp = _post(client, "CFD_002", measurement_date=sample_date, flow_rate_mL_min=0.1)
+    assert resp.status_code == 201, resp.text
+    assert _day_of(db_session, exp) == expected
+
+
+def test_create_full_timestamp_keeps_fraction(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFD_003",
+                         date=datetime(2026, 9, 8, 12, 0, tzinfo=LAB_TZ))
+    db_session.expire(exp)
+    resp = _post(client, "CFD_003", measurement_date="2026-09-09T00:00:00-04:00",
+                 flow_rate_mL_min=0.1)
+    assert resp.status_code == 201, resp.text
+    assert _day_of(db_session, exp) == 0.5
+
+
+# --- Final-review fixes: PATCH nulls ------------------------------------------
+
+def test_patch_null_on_missing_scalar_writes_nothing(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFD_004", date=_d(1))
+    result = ExperimentalResults(
+        experiment_fk=exp.id, time_post_reaction_days=2.0,
+        time_post_reaction_bucket_days=2.0, cumulative_time_post_reaction_days=2.0,
+        is_primary_timepoint_result=True)
+    db_session.add(result)
+    db_session.flush()
+    before = _log_count(db_session, exp)
+    resp = _patch(client, result.id, final_ph=None)
+    assert resp.status_code == 200, resp.text
+    assert db_session.query(ScalarResults).filter_by(result_id=result.id).count() == 0
+    assert _log_count(db_session, exp) == before
+
+
+@pytest.mark.parametrize("field", ["flow_rate_mL_min", "measurement_date"])
+def test_patch_explicit_null_rejected(client, db_session, reporting_views, field):
+    exp, rid = _seed_posted_sample(client, db_session, f"CFD_005_{field}")
+    before = _log_count(db_session, exp)
+    resp = _patch(client, rid, **{field: None})
+    assert resp.status_code == 422
+    row = db_session.get(ExperimentalResults, rid)
+    db_session.refresh(row)
+    assert row.flow_rate_mL_min == 0.1
+    assert _scalar(db_session, rid).measurement_date is not None
+    assert _log_count(db_session, exp) == before
+
+
+def test_create_full_timestamp_across_dst_uses_wall_clock(
+        client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFD_006", date=datetime(2026, 10, 23, tzinfo=LAB_TZ))
+    db_session.expire(exp)  # see the section comment above
+    resp = _post(client, "CFD_006", measurement_date="2026-11-03T12:00:00",
+                 flow_rate_mL_min=0.1)
+    assert resp.status_code == 201, resp.text
+    assert _day_of(db_session, exp) == 11.5
