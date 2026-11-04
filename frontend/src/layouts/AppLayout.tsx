@@ -76,6 +76,17 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    path: '/core-floods',
+    label: 'Core Floods',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <ellipse cx="8" cy="3.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M3 3.5v9c0 1.1 2.2 2 5 2s5-.9 5-2v-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" stroke="currentColor" strokeWidth="1.5"/>
+      </svg>
+    ),
+  },
+  {
     path: '/notes/review',
     label: 'Notes review',
     icon: (

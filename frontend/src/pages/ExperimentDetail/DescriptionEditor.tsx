@@ -7,6 +7,12 @@ interface Props {
   experimentId: string
   /** The experiment's 'description' note, or undefined when it has none. */
   note: ExperimentNote | undefined
+  /** Called once a save and its invalidations have finished. */
+  onSaved?: () => void
+  /** Called when the user cancels an edit. */
+  onCancel?: () => void
+  /** Open straight into the textarea, seeded from the note text. */
+  initialEditing?: boolean
 }
 
 /** The header description (issue #122 PR-C): the note typed 'description',
@@ -14,9 +20,9 @@ interface Props {
  *  is how a description-less experiment gets one from its page. The reactor
  *  card and the experiments list read the same note, so both refetch. Blank
  *  or unchanged text cannot be saved; deleting is done in the Notes tab. */
-export function DescriptionEditor({ experimentId, note }: Props) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
+export function DescriptionEditor({ experimentId, note, onSaved, onCancel, initialEditing = false }: Props) {
+  const [editing, setEditing] = useState(initialEditing)
+  const [draft, setDraft] = useState(initialEditing ? (note?.note_text ?? '') : '')
   const queryClient = useQueryClient()
   const { success, error: toastError } = useToast()
 
@@ -36,7 +42,7 @@ export function DescriptionEditor({ experimentId, note }: Props) {
         queryClient.invalidateQueries({ queryKey: ['experiment', experimentId] }),
         queryClient.invalidateQueries({ queryKey: ['experiments'] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
-      ])
+      ]).then(() => onSaved?.())
     },
     onError: (err: Error) => toastError('Failed to save description', err.message),
   })
@@ -48,6 +54,7 @@ export function DescriptionEditor({ experimentId, note }: Props) {
   const cancel = () => {
     setEditing(false)
     setDraft('')
+    onCancel?.()
   }
   const trimmed = draft.trim()
   const canSave = trimmed.length > 0 && trimmed !== (note?.note_text ?? '').trim()
