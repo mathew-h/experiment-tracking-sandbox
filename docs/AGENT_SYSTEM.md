@@ -183,12 +183,13 @@ Strict mode — zero TypeScript errors is a pre-merge requirement. Available fro
 | `postman` | `/add-plugin postman` | API lifecycle management — sync from FastAPI OpenAPI spec |
 | `semgrep` | `/add-plugin semgrep` | Static analysis for security vulnerabilities |
 
-## Sample Data File
+## Real Data Files
 
-Located at: `docs/sample_data/representative_sample.xlsx`
+No real data lives in the repo. The current data is held outside it (OneDrive-synced, gitignored), in two forms:
 
-This file is the ground truth for what data fields the application must support. Before implementing any data model change, upload feature, or dashboard visualization, verify it accounts for all columns in this file.
+- **Production database backup** — a `pg_dump -Fc` archive (custom format, despite a `.sql` name). Restore it into the dev DB with `pg_restore` as `experiments_user`, passing `--no-owner --no-acl`.
+- **Latest data workbook** — the most recent Master Results / tracker `.xlsx`, the ground truth for which columns uploads must accept.
 
-If this file does not yet exist, stop and ask the user to provide it before proceeding with any data-layer work.
+**Ask the user for the most recent file whenever real data would make the work more reliable** — for example: verifying a bulk-upload parser or column mapping against the current workbook, rehearsing a migration or data migration against production-shaped data, building or checking a reporting view or dashboard, or reproducing a bug reported on real records. Name which file you want (backup or workbook) and why.
 
-The Documentation Agent maintains `docs/sample_data/FIELD_MAPPING.md` which maps every column to its corresponding database model and field.
+This is a request, not a gate: if the user has no file to hand, proceed with seeded test data and say in the report that real-data verification is still outstanding.
