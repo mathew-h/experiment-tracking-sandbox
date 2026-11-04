@@ -149,8 +149,7 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 All descriptions: imperative mood, under 50 characters, no trailing period.
 
 ## 9. MCP Servers
-Notion MCP (`notion`, `author`) is disabled for this project via `.mcp.json` -- not needed and consumes significant context tokens.
-Claude.ai Slack and Microsoft 365 plugins are disabled for this project via `disabledMcpServers` in `.mcp.json` -- not needed and consume significant context tokens. If they reappear, disable via Cursor Settings > Features > MCP.
+claude.ai connectors (Slack, Microsoft 365, Notion, Claude Docs, ...) are not needed here and cost context. They come from each developer's claude.ai account, so `.mcp.json` cannot disable them (it has no `disabledMcpServers` key). Disable them per developer with `/mcp disable "claude.ai <Name>"` in this project; it persists to `~/.claude.json`.
 
 ---
 
@@ -166,27 +165,4 @@ after every `Write` or `Edit` tool call. It copies any file written inside `docs
 
 **Do not write directly to `docs/project_context/`** — the hook handles synchronization automatically.
 
-### Agent responsibility on task completion
-Before running `/complete-task`, the agent must:
-1. Update all documentation files affected by the completed work (e.g. `MODELS.md`, `API_REFERENCE.md`, `CALCULATIONS.md`, milestone files)
-2. The hook will automatically copy each written doc to `docs/project_context/`
-3. Confirm in the commit message: `- Docs updated: yes`
-
-### CLAUDE.md files
-Each layer's `CLAUDE.md` is copied with a prefix derived from its parent directory:
-- `frontend/CLAUDE.md` → `frontend_CLAUDE.md`
-- `backend/CLAUDE.md` → `backend_CLAUDE.md`
-- `database/CLAUDE.md` → `database_CLAUDE.md`
-- `.claude/CLAUDE.md` → `.claude_CLAUDE.md`
-
-Source files keep their original names so Claude Code continues loading them normally.
-
-### What belongs in project_context
-Anything the external team needs to understand current app state:
-- Schema and model documentation (`MODELS.md`, `CALCULATIONS.md`)
-- API reference (`docs/api/API_REFERENCE.md`)
-- User-facing guides (`docs/user_guide/`)
-- Milestone summaries
-- All layer `CLAUDE.md` files (prefixed as above)
-
-Internal-only files excluded from sync: `docs/working/` (session state), `docs/superpowers/` (implementation plans).
+Documentation updates required before committing are listed in `/complete-task` Step 1.

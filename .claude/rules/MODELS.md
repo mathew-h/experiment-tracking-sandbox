@@ -1,6 +1,15 @@
+---
+paths:
+  - "database/**"
+  - "backend/**"
+  - "alembic/**"
+  - "scripts/**"
+  - "tests/**"
+---
+
 # Database Schema Documentation
 
-This document provides a comprehensive overview of the database schema for the Experiment Tracking System. The schema is built using SQLAlchemy ORM and deployed on SQLite.
+This document provides a comprehensive overview of the database schema for the Experiment Tracking System. The schema is built using SQLAlchemy ORM and deployed on PostgreSQL.
 
 The models are modularized within the `database/models/` directory.
 
@@ -469,18 +478,7 @@ Raw data from portable XRF scans.
 ---
 
 ## Enumerations
-Defined in `database/models/enums.py`.
-- **ExperimentStatus**: ONGOING, COMPLETED, CANCELLED, QUEUED.
-- **ExperimentType**: Serum, Autoclave, HPHT, Core Flood, Other.
-- **FeedstockType**: Nitrogen, Nitrate, Blank.
-- **ComponentType**: catalyst, promoter, support, additive, inhibitor.
-- **AnalysisType**: pXRF, XRD, SEM, Elemental, Magnetic Susceptibility, Titration, Other.
-- **AmmoniumQuantMethod**: NMR, Colorimetric Assay, Ion Chromatography.
-- **TitrationType**: Acid-Base, Complexometric, Redox, Precipitation.
-- **CharacterizationStatus**: not_started, in_progress, completed, partial.
-- **ConcentrationUnit**: ppm, mM, M, %, wt%.
-- **PressureUnit**: psi, bar, atm, Pa, kPa, MPa.
-- **AmountUnit**: g, mg, μg, kg, μL, mL, L, μmol, mmol, mol, ppm, mM, M, %, wt%, % of Rock.
+Defined in `database/models/enums.py` (read it for current values; changing them breaks existing data).
 
 ---
 
@@ -539,20 +537,7 @@ One row per experiment: compound names only, comma-separated and alphabetically 
 
 ### `v_primary_experiment_results`
 
-> **Not a live view.** `database/event_listeners.py` only drops it (`DROP VIEW IF EXISTS v_primary_experiment_results CASCADE`); the definition below is historical. Use `v_dim_timepoints` / `v_results_*` / `v_notes`.
-
-One row per **primary** result timepoint per experiment, with scalar and ICP data resolved by experiment + time bucket.
-
-- **Purpose:** Dynamic Power BI dashboards can use this as the main fact table: one row per experiment per timepoint, with all key scalars and ICP elements in one place. No need to join `experimental_results`, `scalar_results`, and `icp_results` in the report.
-- **Logic:**
-  - **Base:** Rows from `experimental_results` where `is_primary_timepoint_result = 1`.
-  - **Scalar/ICP resolution:** For each (experiment_fk, time_post_reaction_bucket_days), scalar and ICP rows are picked with `ROW_NUMBER() ... ORDER BY is_primary_timepoint_result DESC, id DESC` so the primary (or latest) result per bucket is chosen.
-- **Columns (summary):**
-  - Experiment and result: `experiment_id`, `experiment_fk`, `result_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `result_created_at`.
-  - Scalar: `scalar_result_id`, `gross_ammonium_concentration_mM`, `background_ammonium_concentration_mM`, `grams_per_ton_yield`, `final_ph`, `final_nitrate_concentration_mM`, `ferrous_iron_yield`, `final_dissolved_oxygen_mg_L`, `final_conductivity_mS_cm`, `final_alkalinity_mg_L`, `co2_partial_pressure_MPa`, `sampling_volume_mL`, `ammonium_quant_method`, `background_experiment_fk`, `scalar_measurement_date`.
-  - H2: `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`.
-  - ICP metadata: `icp_result_id`, `icp_dilution_factor`, `icp_raw_label`, `icp_measurement_date`, `icp_sample_date`, `icp_instrument_used`.
-  - ICP elements (ppm): `icp_fe_ppm`, `icp_si_ppm`, `icp_ni_ppm`, … (all fixed ICP element columns with `icp_*_ppm` naming).
+> **Not a live view.** `database/event_listeners.py` only drops it (`DROP VIEW IF EXISTS v_primary_experiment_results CASCADE`); its old definition is in git history. Use `v_dim_timepoints` / `v_results_*` / `v_notes`.
 
 **Note on `v_results_scalar`:** its `cumulative_ferrous_iron_yield_h2_pct` running-sum window partitions by `e.experiment_id` (per-vial), not by `COALESCE(base_experiment_id, experiment_id)` — replicate siblings (e.g. `SERUM_001a/b/c`) each accumulate independently and do not sum across each other. A digit-suffixed derivation (e.g. `HPHT_001-2`) also no longer shares its running sum with its root; each `experiment_id` gets its own partition. **`-t<days>` caveat:** a single-timepoint `-t` vial (e.g. `SERUM_001a-t7`) has exactly one result row, so its per-experiment cumulative equals that one row — it never accumulates across sibling timepoints of the same base. Read time courses across `-t` vials at the base/rollup grain (`v_results_scalar_rollup`, grouped by `COALESCE(base_experiment_id, experiment_id)`), not from an individual `-t` vial's own cumulative column.
 

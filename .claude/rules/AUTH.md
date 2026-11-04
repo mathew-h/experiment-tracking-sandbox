@@ -1,3 +1,15 @@
+---
+paths:
+  - "auth/**"
+  - "backend/auth/**"
+  - "backend/api/routers/auth.py"
+  - "backend/api/schemas/auth.py"
+  - "frontend/src/auth/**"
+  - "frontend/src/pages/Login.tsx"
+  - "scripts/manage_users.py"
+  - "tests/test_firebase_config.py"
+---
+
 # Firebase Authentication System
 
 This document describes the Firebase authentication setup used by the Experiment Tracking app. **Use it as the source of truth when changing auth logic** so the approval flow, domain restriction, and token handling are not broken.

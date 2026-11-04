@@ -1,3 +1,9 @@
+---
+paths:
+  - "database/models/**"
+  - "alembic/**"
+---
+
 # Schema Modification Checklist
 
 **Before writing any code that touches the database models, READ and APPLY this checklist.**
