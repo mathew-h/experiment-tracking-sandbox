@@ -13,8 +13,10 @@ from database.models.enums import ExperimentStatus, NoteType
 from backend.services.bulk_uploads.master_bulk_upload import (
     MasterBulkUploadService,
     _COLLECTION_DATE,
+    _TUBE_NUMBER,
     _merge_group,
     _parse_text,
+    _parse_tube,
 )
 
 from .excel_helpers import make_excel_multisheet, make_excel
@@ -3164,3 +3166,232 @@ def test_merged_group_with_no_h2_reading_stores_no_gas_geometry(db_session: Sess
     )
     assert scalar.gas_sampling_pressure_MPa is None
     assert scalar.final_ph == pytest.approx(7.24), "the liquid row still lands"
+
+
+# ---------------------------------------------------------------------------
+# Tube Number (issue #135; locked parser, Mat's sign-off 2026-11-03)
+# ---------------------------------------------------------------------------
+
+def _master_excel_tube(rows: list[tuple[list, object]]) -> bytes:
+    """A v3 Dashboard with a trailing 'Tube Number' column.
+
+    Each entry is (_v3_row(...), tube_cell).
+    """
+    headers = list(_V3_HEADERS) + [_TUBE_NUMBER]
+    return make_excel_multisheet(
+        {"Dashboard": (headers, [row + [tube] for row, tube in rows])}
+    )
+
+
+@pytest.mark.parametrize("cell", [None, np.nan, "", "  ", 0, 0.0, "0"])
+def test_parse_tube_blank_cells(cell):
+    """0 is blank: the Dashboard's XLOOKUP returns 0 for an empty source cell."""
+    assert _parse_tube(cell) is None
+
+
+@pytest.mark.parametrize("cell", [7, 7.0, np.int64(7), np.float64(7.0), "7", " 7 "])
+def test_parse_tube_whole_numbers(cell):
+    assert _parse_tube(cell) == 7
+
+
+@pytest.mark.parametrize("cell", [7.5, "abc", "T7", -3, True])
+def test_parse_tube_rejects_non_whole_numbers(cell):
+    assert _parse_tube(cell) is None
+
+
+def test_tube_number_is_stored_on_the_timepoint(db_session: Session):
+    _seed_experiment(db_session, "SERUM_TB01a-t7", 91350)
+
+    result = MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB01a-t7", 7.0), 7)]),
+    )
+
+    assert result.errors == [], result.errors
+    assert result.created == 1
+    db_session.expire_all()  # read the flushed row, not the identity map
+    assert _result_for(db_session, "SERUM_TB01a-t7").sample_tube_number == 7
+
+
+def test_zero_tube_cell_is_blank(db_session: Session):
+    _seed_experiment(db_session, "SERUM_TB02a-t7", 91351)
+
+    result = MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB02a-t7", 7.0), 0)]),
+    )
+
+    assert result.errors == [], result.errors
+    assert _result_for(db_session, "SERUM_TB02a-t7").sample_tube_number is None
+    assert not any(_TUBE_NUMBER in w for w in result.warnings), result.warnings
+
+
+def test_tube_number_is_set_on_the_merged_timepoint(db_session: Session):
+    """A gas row (Sgas key: XLOOKUP gives 0) and a liquid row with tube 7."""
+    _seed_experiment(db_session, "SERUM_TB03a-t7", 91352)
+
+    xlsx = _master_excel_tube([
+        (_v3_row("SERUM_TB03a-t7", 7.0, ph=None, fl_h2=10.0), 0),
+        (_v3_row("SERUM_TB03a-t7", 7.0, ph=7.4), 7),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], result.errors
+    assert result.created == 1
+    assert _result_for(db_session, "SERUM_TB03a-t7").sample_tube_number == 7
+    assert not any(_TUBE_NUMBER in w for w in result.warnings), result.warnings
+
+
+def test_tube_clash_stores_the_first_and_warns(db_session: Session):
+    _seed_experiment(db_session, "SERUM_TB04a-t7", 91353)
+
+    xlsx = _master_excel_tube([
+        (_v3_row("SERUM_TB04a-t7", 7.0, ph=None, fl_h2=10.0), 7),
+        (_v3_row("SERUM_TB04a-t7", 7.0, ph=7.4), 9),
+    ])
+    result = MasterBulkUploadService.from_bytes_ex(db_session, xlsx)
+
+    assert result.errors == [], f"a tube clash is not a rejection: {result.errors}"
+    assert result.created == 1
+    assert _result_for(db_session, "SERUM_TB04a-t7").sample_tube_number == 7
+    clash = [w for w in result.warnings if _TUBE_NUMBER in w]
+    assert len(clash) == 1 and "2 and 3" in clash[0], result.warnings
+
+
+def test_merge_group_tube_clash_is_a_note_not_a_conflict():
+    a = {_TUBE_NUMBER: 7, "Sample pH": None}
+    b = {_TUBE_NUMBER: 9, "Sample pH": 7.4}
+
+    merged, conflicts, notes = _merge_group([(2, "X-t1", a), (3, "X-t1", b)])
+
+    assert conflicts == []
+    assert merged.cells[_TUBE_NUMBER] == 7
+    assert notes.tube_disagreement is True
+
+
+def test_merge_group_zero_tube_does_not_clash():
+    a = {_TUBE_NUMBER: 0}
+    b = {_TUBE_NUMBER: 7}
+
+    merged, conflicts, notes = _merge_group([(2, "X-t1", a), (3, "X-t1", b)])
+
+    assert conflicts == []
+    assert merged.cells[_TUBE_NUMBER] == 7
+    assert notes.tube_disagreement is False
+
+
+def test_missing_tube_column_leaves_stored_tube_untouched(db_session: Session):
+    """Even an OVERWRITE row cannot clear a column the sheet does not have."""
+    _seed_experiment(db_session, "SERUM_TB05a-t7", 91354)
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB05a-t7", 7.0), 7)]),
+    )
+
+    result = MasterBulkUploadService.from_bytes_ex(
+        db_session,
+        _master_excel_v3([_v3_row("SERUM_TB05a-t7", 7.0, ph=7.9, overwrite="TRUE")]),
+    )
+
+    assert result.errors == [], result.errors
+    assert result.updated == 1
+    stored = _result_for(db_session, "SERUM_TB05a-t7")
+    assert stored.sample_tube_number == 7
+    assert stored.scalar_data.final_ph == pytest.approx(7.9)
+
+
+def test_overwrite_with_blank_tube_cell_clears_it(db_session: Session):
+    _seed_experiment(db_session, "SERUM_TB06a-t7", 91355)
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB06a-t7", 7.0), 7)]),
+    )
+
+    result = MasterBulkUploadService.from_bytes_ex(
+        db_session,
+        _master_excel_tube([(_v3_row("SERUM_TB06a-t7", 7.0, overwrite="TRUE"), None)]),
+    )
+
+    assert result.errors == [], result.errors
+    db_session.expire_all()
+    assert _result_for(db_session, "SERUM_TB06a-t7").sample_tube_number is None
+
+
+def test_blank_tube_cell_without_overwrite_keeps_the_stored_tube(db_session: Session):
+    _seed_experiment(db_session, "SERUM_TB07a-t7", 91356)
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB07a-t7", 7.0), 7)]),
+    )
+
+    result = MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB07a-t7", 7.0), 0)]),
+    )
+
+    assert result.errors == [], result.errors
+    assert _result_for(db_session, "SERUM_TB07a-t7").sample_tube_number == 7
+
+
+def test_new_tube_replaces_the_stored_one_without_overwrite(db_session: Session):
+    """A value is a value: like every other cell, a non-blank tube is written."""
+    _seed_experiment(db_session, "SERUM_TB08a-t7", 91357)
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB08a-t7", 7.0), 7)]),
+    )
+
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB08a-t7", 7.0), 12)]),
+    )
+
+    assert _result_for(db_session, "SERUM_TB08a-t7").sample_tube_number == 12
+
+
+def test_mixed_overwrite_does_not_clear_the_tube(db_session: Session):
+    """Clearing needs every row of the vial-day TRUE, for the tube as for the rest."""
+    _seed_experiment(db_session, "SERUM_TB09a-t7", 91358)
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB09a-t7", 7.0), 7)]),
+    )
+
+    MasterBulkUploadService.from_bytes_ex(db_session, _master_excel_tube([
+        (_v3_row("SERUM_TB09a-t7", 7.0, ph=None, fl_h2=10.0, overwrite="TRUE"), None),
+        (_v3_row("SERUM_TB09a-t7", 7.0, ph=7.4, overwrite="FALSE"), None),
+    ]))
+
+    assert _result_for(db_session, "SERUM_TB09a-t7").sample_tube_number == 7
+
+
+def test_invalid_tube_cell_is_ignored_with_a_warning(db_session: Session):
+    _seed_experiment(db_session, "SERUM_TB10a-t7", 91359)
+
+    result = MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB10a-t7", 7.0), "abc")]),
+    )
+
+    assert result.errors == [], (
+        f"a bad tube cell must not reject the row: {result.errors}"
+    )
+    assert result.created == 1
+    assert _result_for(db_session, "SERUM_TB10a-t7").sample_tube_number is None
+    bad = [w for w in result.warnings if _TUBE_NUMBER in w]
+    assert len(bad) == 1 and "(2)" in bad[0], result.warnings
+
+
+def test_tube_is_not_declared_as_a_scalar_sheet_field(db_session: Session, monkeypatch):
+    """_sheet_fields names ScalarResults fields; the tube is on ExperimentalResults."""
+    from backend.services.scalar_results_service import ScalarResultsService
+
+    seen: list[dict] = []
+    original = ScalarResultsService.create_scalar_result_ex
+
+    def spy(db, exp_id, data):
+        seen.append(dict(data))
+        return original(db, exp_id, data)
+
+    monkeypatch.setattr(
+        ScalarResultsService, "create_scalar_result_ex", staticmethod(spy)
+    )
+    _seed_experiment(db_session, "SERUM_TB11a-t7", 91360)
+
+    MasterBulkUploadService.from_bytes_ex(
+        db_session, _master_excel_tube([(_v3_row("SERUM_TB11a-t7", 7.0), 7)]),
+    )
+
+    assert len(seen) == 1
+    assert "sample_tube_number" not in seen[0]
+    assert "sample_tube_number" not in seen[0]["_sheet_fields"]
