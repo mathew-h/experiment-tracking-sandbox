@@ -3,7 +3,7 @@
 ## Must Read Before Any Frontend Task
 - `docs/DESIGN.md` — brand hex codes and UI vision
 - `docs/CODE_STANDARDS.md` — TypeScript/React standards
-- `.claude/skills/frontend-builder.md` — full role definition
+- `frontend-builder` skill (`.claude/skills/frontend-builder/SKILL.md`) — full role definition
 
 ## Quick Commands
 

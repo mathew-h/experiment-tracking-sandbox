@@ -16,7 +16,6 @@ paths:
 
 - [ ] Read `.claude/rules/MODELS.md` (index) and the `MODELS-<topic>.md` file it lists for the model you're modifying; field names and relationships come from the model file itself
 - [ ] Read `.claude/MEMORY.md` Key Design Decisions section (locked patterns, do NOT rewrite)
-- [ ] Check `docs/sample_data/representative_sample.xlsx` if it exists — does your change account for all columns in it?
 - [ ] Run `git log --oneline database/models/ | head -20` — what's changed recently?
 - [ ] Check `alembic/versions/` — when was the last schema change? What pattern was used?
 
@@ -27,7 +26,7 @@ paths:
 **STOP and escalate to user if ANY of these are true:**
 
 - [ ] Your change affects more than ONE model (e.g., renaming a column that's FK'd elsewhere)
-- [ ] You need to modify a **locked model** (listed in CLAUDE.md Section 4) without explicit user instruction
+- [ ] You need to modify a **locked model** (listed under "What Is Locked" in `.claude/CLAUDE.md`) without explicit user instruction
 - [ ] You want to **flatten JSON columns** (ICPResults.all_elements, XRDAnalysis.mineral_phases) into separate tables
 - [ ] You want to add a NEW THIRD-PARTY PACKAGE to requirements.txt
 - [ ] Your migration requires a **destructive operation** (dropping a column, renaming, changing types)
@@ -64,9 +63,8 @@ paths:
    - [ ] If unique constraint: verify duplicate rejects
    - [ ] Tests pass: pytest tests/models/ -v
 
-5. Documentation (MODELS*.md, FIELD_MAPPING.md)
+5. Documentation (MODELS*.md)
    - [ ] The relevant `.claude/rules/MODELS*.md` file records the field's gotchas and rationale (not a bare field list — the model file is the field list)
-   - [ ] If it's a user-facing field: add to FIELD_MAPPING.md
 ```
 
 ### For Modifying Locked Models
@@ -77,7 +75,7 @@ paths:
 
 ## Phase 4: Validation
 
-Run these commands in the Docker container:
+Run these from the project root with the venv active (one `pytest` process at a time — the test DB is shared):
 
 ```bash
 # Fresh migration on clean DB
@@ -87,8 +85,8 @@ alembic upgrade head
 alembic downgrade -1
 alembic upgrade head
 
-# Test ORM models
-pytest tests/models/test_integrity.py -v
+# Test ORM models (includes the migration view-parity tests)
+pytest tests/models/ -v
 
 # If views depend on your change, recreate them. There is NO create_reporting_views()
 # function — earlier revisions of this checklist named one and it never existed. The
@@ -96,9 +94,6 @@ pytest tests/models/test_integrity.py -v
 # (see its `try:` around the _VIEWS loop), so importing the module in a fresh process
 # re-runs it. Verified 2026-08-10 by dropping a view and watching this restore it:
 python -c "import database.event_listeners"
-
-# Verify sample data still loads (Milestone 1 concern)
-python3 scripts/migrate-sqlite-to-postgres.py
 ```
 
 ---

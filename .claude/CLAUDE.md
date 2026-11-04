@@ -1,34 +1,18 @@
 # CLAUDE.md — Lab Experiment Tracking System
-> Read this file first. Then follow the instructions here to load additional context.
 > Do not modify this file unless explicitly directed by the user.
 
 ---
 
 ## 1. Start Every Session With This
 
-1. Run `/start-task` — classify task mode (`milestone` / `issue` / `inline`), create or confirm the branch, load context, confirm scope
+1. Run `/start-task` — classify task mode (`milestone` / `issue` / `inline`), create or confirm the branch, load context, confirm scope. The mode governs which context files load and must be stated in the scope confirmation.
 2. Never begin coding without completing the `/start-task` checklist
 3. **Git:** follow `docs/GIT_WORKFLOW.md`. Branch in `/start-task` Step 2 before context load; state branch (or skip) in Step 4 scope confirmation
 4. **Pull requests:** Always use `--base develop` when creating PRs (e.g. `gh pr create --base develop`). Never rely on GitHub’s default branch.
 
 ---
 
-## 2. Task Mode
-
-Every session operates in one of three modes. The mode is set during `/start-task`
-and governs which context files are loaded.
-
-| Mode | Trigger | Milestone files |
-|------|---------|-----------------|
-| `milestone` | User references a milestone | Yes — read the active milestone file |
-| `issue` | GitHub issue number or URL | No |
-| `inline` | Direct prompt description | No |
-
-The current mode must be stated in the scope confirmation (Step 4 of `/start-task`).
-
----
-
-## 3. Project Overview
+## 2. Project Overview
 
 A laboratory experiment tracking system for a small geochemistry team (8 users).
 Researchers log experiments, upload bulk analytical data, track samples and chemicals,
@@ -40,19 +24,18 @@ and visualize reactor status.
 
 ---
 
-## 4. Agent System
+## 3. Role Skills
 
-You operate as the **Conductor Agent**. Load `.claude/skills/conductor.md` now.
-
-Sub-agent skills (load when relevant):
-- `.claude/skills/db-architect.md` — schema, migrations, calculation registry
-- `.claude/skills/api-developer.md` — FastAPI, Pydantic, calculation formulas
-- `.claude/skills/frontend-builder.md` — React, Tailwind, design system
-- `.claude/skills/test-writer.md` — pytest, vitest, coverage
+Role skills live in `.claude/skills/<name>/SKILL.md` and load on demand from their descriptions:
+- `conductor` — multi-step work: decomposing a goal, sub-agent handoffs, review routing
+- `db-architect` — schema, migrations, calculation registry
+- `api-developer` — FastAPI, Pydantic, calculation formulas
+- `frontend-builder` — React, Tailwind, design system
+- `test-writer` — pytest, vitest, coverage
 
 ---
 
-## 5. What Is Locked
+## 4. What Is Locked
 
 Full details in `docs/LOCKED_COMPONENTS.md`. Summary:
 
@@ -82,9 +65,13 @@ git commit -m "chore: ..."   # both files in the same commit
 - Move deps between `dependencies` and `devDependencies` without running `npm install` after
 - Commit `package.json` without `package-lock.json` (or vice versa)
 
+### Tests share one database
+
+Never run two `pytest` processes at the same time: every run uses the shared `experiments_test` database, and parallel runs (or an interrupted one) corrupt each other's schema and data.
+
 ---
 
-## 6. Key Reference Files
+## 5. Key Reference Files
 
 | Need | Read |
 |------|------|
@@ -102,14 +89,16 @@ git commit -m "chore: ..."   # both files in the same commit
 
 ---
 
-## 7. Stop and Ask the User When
+## 6. Stop and Ask the User When
 
 - A schema change affects more than one model
 - A new third-party package is needed
 - Any bulk upload parser needs modification
 - A migration cannot be written as purely additive
-- Brand assets have not been provided and Milestone 4 is starting
+- A decision would affect the production database or the lab PC service
+- Firebase authentication configuration needs to change
 - A derived field formula is ambiguous or undocumented
+- A browser (Chrome DevTools) check reveals a bug that needs a schema or API change to fix
 - Any test is failing and the fix is not obvious within 2 attempts
 - Estimated scope expands significantly beyond what was agreed
 
@@ -117,7 +106,7 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 
 ---
 
-## 8. Commit Format
+## 7. Commit Format
 
 **Milestone tasks:**
 ```
@@ -148,12 +137,14 @@ When escalating: state the ambiguity, the options, your recommendation. Then wai
 
 All descriptions: imperative mood, under 50 characters, no trailing period.
 
-## 9. MCP Servers
+---
+
+## 8. MCP Servers
 claude.ai connectors (Slack, Microsoft 365, Notion, Claude Docs, ...) are not needed here and cost context. They come from each developer's claude.ai account, so `.mcp.json` cannot disable them (it has no `disabledMcpServers` key). Disable them per developer with `/mcp disable "claude.ai <Name>"` in this project; it persists to `~/.claude.json`.
 
 ---
 
-## 10. Documentation Sync — `docs/project_context/`
+## 9. Documentation Sync — `docs/project_context/`
 
 `docs/project_context/` is the **external team folder**. It receives copies of all documentation
 files so the broader team can stay informed of schema changes, API updates, and app functionality.
@@ -164,5 +155,6 @@ after every `Write` or `Edit` tool call. It copies any file written inside `docs
 `docs/working/` and `docs/project_context/` itself) to `docs/project_context/`.
 
 **Do not write directly to `docs/project_context/`** — the hook handles synchronization automatically.
+Edits made through Bash or Python scripts bypass the hook; run the sync script with `--all` afterwards.
 
 Documentation updates required before committing are listed in `/complete-task` Step 1.

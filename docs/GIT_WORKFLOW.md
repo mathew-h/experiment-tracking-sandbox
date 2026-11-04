@@ -128,7 +128,7 @@ Routine commit, merge, and cleanup steps for agents: `.claude/commands/complete-
 
 ## Commit messages
 
-Subject-line prefixes and body bullets by task type: `.claude/CLAUDE.md` section 10.
+Subject-line prefixes and body bullets by task type: "Commit Format" in `.claude/CLAUDE.md`.
 
 ## Pre-Merge Checklist
 - [ ] All tests pass (`pytest` backend, `vitest` frontend)
