@@ -6,6 +6,7 @@ Use after finishing each sub-task or milestone phase.
 1. Run all relevant tests (`pytest` or `vitest`)
 2. Run linters (`flake8`/`black` or `eslint`)
 3. Confirm pre-merge checklist from `docs/GIT_WORKFLOW.md`
+4. Update all documentation files affected by the completed work (e.g. `MODELS.md`, `API_REFERENCE.md`, `CALCULATIONS.md`, milestone files). The PostToolUse hook copies each written doc to `docs/project_context/`; confirm in the commit message with `- Docs updated: yes`
 
 ## Step 2 — Record the work (varies by task type)
 
@@ -36,7 +37,7 @@ Use after finishing each sub-task or milestone phase.
 ```
 
 ## Step 3 — Commit
-Commit all changes for this task first (required before push/merge). Use the format from `.claude/CLAUDE.md` section 10 (task-type-specific subject lines).
+Commit all changes for this task first (required before push/merge). Use the format from `.claude/CLAUDE.md` section 8 (task-type-specific subject lines).
 
 ## Step 4 — Merge and clean up
 
