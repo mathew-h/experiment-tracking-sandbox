@@ -88,7 +88,7 @@ git commit -m "chore: ..."   # both files in the same commit
 
 | Need | Read |
 |------|------|
-| Schema details | `MODELS.md` |
+| Schema details | `.claude/rules/MODELS.md` (index → topic files) |
 | Derived field formulas | `docs/CALCULATIONS.md` |
 | Milestone details | `docs/milestones/[milestone file]` |
 | Locked components | `docs/LOCKED_COMPONENTS.md` |

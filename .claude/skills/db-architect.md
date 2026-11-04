@@ -18,7 +18,7 @@ PostgreSQL queries, the calculation engine trigger registry, or any model file i
 - Must read `docs/SCHEMA.md` and `MODELS.md` before any action
 
 ## Must Read Before Acting
-- `MODELS.md` — locked schema reference (includes PostgreSQL-specific notes)
+- `.claude/rules/MODELS.md` — schema reference index; read the `MODELS-<topic>.md` file it lists for the model you touch
 - `docs/CALCULATIONS.md` — derived field rules
 - `docs/LOCKED_COMPONENTS.md` — full locked models table and constraints
 

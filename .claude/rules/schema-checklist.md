@@ -14,7 +14,7 @@ paths:
 
 ## Phase 1: Understand Current State
 
-- [ ] Read `MODELS.md` for the field you're modifying (complete reference of all models, relationships, enums)
+- [ ] Read `.claude/rules/MODELS.md` (index) and the `MODELS-<topic>.md` file it lists for the model you're modifying; field names and relationships come from the model file itself
 - [ ] Read `.claude/MEMORY.md` Key Design Decisions section (locked patterns, do NOT rewrite)
 - [ ] Check `docs/sample_data/representative_sample.xlsx` if it exists — does your change account for all columns in it?
 - [ ] Run `git log --oneline database/models/ | head -20` — what's changed recently?
@@ -56,7 +56,7 @@ paths:
 3. Enum Changes (database/models/enums.py)
    - [ ] New enum value added
    - [ ] Migration created to add new constraint (if needed)
-   - [ ] Document the new value in MODELS.md
+   - [ ] Document any non-obvious meaning of the new value in the relevant MODELS*.md file
 
 4. Tests (tests/models/)
    - [ ] Model instantiation test with new field
@@ -64,8 +64,8 @@ paths:
    - [ ] If unique constraint: verify duplicate rejects
    - [ ] Tests pass: pytest tests/models/ -v
 
-5. Documentation (MODELS.md, FIELD_MAPPING.md)
-   - [ ] MODELS.md updated with new field details
+5. Documentation (MODELS*.md, FIELD_MAPPING.md)
+   - [ ] The relevant `.claude/rules/MODELS*.md` file records the field's gotchas and rationale (not a bare field list — the model file is the field list)
    - [ ] If it's a user-facing field: add to FIELD_MAPPING.md
 ```
 
@@ -110,5 +110,5 @@ python3 scripts/migrate-sqlite-to-postgres.py
 - [ ] Migration is purely additive (no drops/renames)
 - [ ] Alembic downgrade works cleanly
 - [ ] New fields have docstrings and type hints
-- [ ] MODELS.md is updated
+- [ ] The relevant MODELS*.md file is updated
 - [ ] No hardcoded values in migration
