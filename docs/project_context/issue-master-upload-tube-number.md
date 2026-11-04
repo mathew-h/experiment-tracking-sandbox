@@ -35,6 +35,8 @@ Tube numbers would only be entered by hand, and uploaded timepoints couldn't be 
 
 **Real-data check (2026-11-04, `Master_Results_Tracker_v5.xlsx`, dev DB, rolled back):** the Dashboard had no Tube Number column yet, so one was derived from `Sample Key` (`|T<n>` -> n, otherwise 0). 202 of 637 rows carry a tube; 156 written vial-days got one; created/updated, row actions, errors and non-tube warnings were identical to an upload without the column, apart from one blank row (below). 0 of 346 written vial-days stored a tube other than the first non-zero tube among their rows. Two real tube clashes (rows 316/362/443 and 366/429/452) were stored first-wins with the warning. Re-check once the team's column exists.
 
+**Re-check with the team's real column (2026-11-04, same file, now 639 rows, dev DB, rolled back):** the header is exactly `Tube Number`. Blanks are empty cells (NaN), not 0; both count as blank. All 204 rows with a `|T<n>` Sample Key carry that same tube, and no other row has one. The upload set a tube on 156 vial-days, and all 156 stored the tube in their sheet rows. With the column dropped in pandas, the upload gave identical results otherwise: 42 created / 307 updated / 49 skipped, the same 191 errors (missing dev-DB experiments plus the row-529 NaT quirk), the same row actions and warnings. No tube warnings fired. The two clashes in the derived-column check above are gone; in this version rows 362 and 366 are `-t0` samples, a separate vial-day from the `-t3` rows. A fresh session confirmed the rollback left 0 stored tubes.
+
 ## Notes
 
 The column can land in the workbook before this PR merges; the parser ignores headers it doesn't recognize. Check that before rolling out.
