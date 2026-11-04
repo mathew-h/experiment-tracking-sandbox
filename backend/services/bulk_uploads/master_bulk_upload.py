@@ -8,6 +8,7 @@ Dashboard sheet column spec (v4, issue #118, 2026-09-08):
   Sample Conductivity (mS/cm) | Modification Note | NMR Run Date |
   Sampled Solution Volume (mL) | ICP Run Date | GC Run Date | XRD Run Date |
   OVERWRITE | DI H2 (ppm) | DI gas volume (mL) | DI gas pressure (psi)
+  [| Tube Number]  (optional, issue #135; see _TUBE_NUMBER)
 
 v4 renamed the two free-text columns: v3's 'Description' is 'Observation
 Note' and 'Modification' is 'Modification Note'. Both spellings are accepted
@@ -146,6 +147,7 @@ _HEADER_ALIASES: Dict[str, str] = {
     "description": _OBSERVATION_NOTE,
     "modification note": _MODIFICATION_NOTE,
     "modification": _MODIFICATION_NOTE,
+    "tube number": "Tube Number",
 }
 
 # H2 as a standalone token, so 'H2S (ppm)' and 'H2O' never look like a dropped
@@ -221,6 +223,13 @@ _LIQUID_SOLID_COLUMNS = (
 # are instrument run dates, duplicated identically across both rows of every
 # pair in the team's workbook.
 _RUN_DATE_COLUMNS = ("NMR Run Date", "ICP Run Date", "GC Run Date", "XRD Run Date")
+
+# Optional centrifuge tube column (issue #135; Mat's sign-off 2026-11-03). Merged
+# like a run date: first non-blank wins, a clash is a warning. It is written to
+# ExperimentalResults.sample_tube_number, NOT through result_data, because
+# _sheet_fields is derived from result_data and names ScalarResults fields.
+# A gas row's Sample Key ('...|Sgas') has no tube, so its XLOOKUP gives 0 (blank).
+_TUBE_NUMBER = "Tube Number"
 
 # Free text: distinct values joined, nothing discarded, so no warning needed.
 _JOINED_TEXT_COLUMNS = (_OBSERVATION_NOTE, _MODIFICATION_NOTE)
@@ -541,6 +550,7 @@ class MergeNotes:
     overwrite_mixed: bool = False
     spellings: List[str] = field(default_factory=list)
     fallback_date_disagreement: bool = False
+    tube_disagreement: bool = False
 
 
 @dataclass
@@ -588,6 +598,46 @@ def _parse_text(val: Any) -> Optional[str]:
     if not text or text == "0":
         return None
     return text
+
+
+def _is_blank_tube(val: Any) -> bool:
+    """True for an empty Tube Number cell: None, NaN, whitespace, or 0.
+
+    0 is blank because the Dashboard's XLOOKUP returns 0 for an empty source
+    cell (same rule as _ZERO_BLANK_COLUMNS).
+    """
+    if val is None:
+        return True
+    if isinstance(val, float) and pd.isna(val):
+        return True
+    if isinstance(val, str):
+        text = val.strip()
+        return text == "" or text == "0"
+    if isinstance(val, numbers.Real) and not isinstance(val, bool):
+        return val == 0
+    return False
+
+
+def _parse_tube(val: Any) -> Optional[int]:
+    """A Tube Number cell as a positive int, or None.
+
+    None both for a blank cell and for one that is not a positive whole number
+    (7.5, 'abc', 'T7', -3, a boolean); `_is_blank_tube` tells the two apart so
+    the caller can warn about the second.
+    """
+    if _is_blank_tube(val) or isinstance(val, bool):
+        return None
+    if isinstance(val, str):
+        try:
+            val = float(val.strip())
+        except ValueError:
+            return None
+    if not isinstance(val, numbers.Real):
+        return None
+    number = float(val)
+    if not number.is_integer() or number < 1:
+        return None
+    return int(number)
 
 
 def _format_value(value: Any) -> str:
@@ -700,6 +750,18 @@ def _merge_group(
         if len({_parse_date(raw) for _, raw in dated}) > 1:
             notes.run_date_disagreements.append(column)
         cells[column] = dated[0][1]
+
+    # Tube Number follows the same rule (issue #135). A gas row's 0 is blank,
+    # so a gas/liquid pair takes the liquid row's tube without a clash.
+    tubes = [
+        (row_num, row.get(_TUBE_NUMBER))
+        for row_num, _exp_id, row in members
+        if _parse_tube(row.get(_TUBE_NUMBER)) is not None
+    ]
+    if tubes:
+        if len({_parse_tube(raw) for _, raw in tubes}) > 1:
+            notes.tube_disagreement = True
+        cells[_TUBE_NUMBER] = tubes[0][1]
 
     # --- Free text: join distinct values in sheet order ------------------
     for column in _JOINED_TEXT_COLUMNS:
@@ -842,6 +904,13 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
     # read, by which point the earlier row has already been flushed, counted
     # and given a feedback record — hence a pre-pass rather than an in-loop
     # check. (The upload commits once, at the endpoint, via _finalize_write.)
+    # Issue #135: a blank Tube Number cell may clear a stored tube (OVERWRITE)
+    # only when the sheet HAS the column; a sheet without it leaves tubes alone.
+    tube_column = _TUBE_NUMBER in df.columns
+    # Rows whose tube cell is neither blank nor a positive whole number. The
+    # cell is ignored (provenance, like a run date) and reported once below.
+    bad_tube_rows: List[int] = []
+
     resolved: List[Tuple[int, str, float, Any, TimepointCheck]] = []
     for idx, row in df.iterrows():
         row_num = idx + 2
@@ -854,6 +923,10 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         if error is not None:
             row_errors.append((row_num, error))
             continue
+        if tube_column:
+            tube_cell = row.get(_TUBE_NUMBER)
+            if not _is_blank_tube(tube_cell) and _parse_tube(tube_cell) is None:
+                bad_tube_rows.append(row_num)
         resolved.append((row_num, exp_id, time_post_reaction, row, check))
 
     # Keyed on the normalized ID, not the raw string: `_id_match.normalize_id`
@@ -1001,6 +1074,8 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
         conductivity = _parse_measurement_float(row.get("Sample Conductivity (mS/cm)"))
         sampling_vol_ml = _parse_float(row.get("Sampled Solution Volume (mL)"))
         modification = _parse_text(row.get(_MODIFICATION_NOTE))
+        # Kept out of result_data on purpose: see _TUBE_NUMBER.
+        tube = _parse_tube(row.get(_TUBE_NUMBER)) if tube_column else None
 
         result_data: Dict[str, Any] = {
             "time_post_reaction": time_post_reaction,
@@ -1054,6 +1129,14 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
                 sync_result_note(
                     db, exp_result, NoteType.modification, modification, created_by=_NOTE_SOURCE,
                 )
+
+            # Tube Number (issue #135), inside the same SAVEPOINT so a failed
+            # vial-day rolls the tube back with everything else. A blank cell
+            # clears only on OVERWRITE, and only when the sheet has the column.
+            if tube is not None:
+                exp_result.sample_tube_number = tube
+            elif overwrite and tube_column:
+                exp_result.sample_tube_number = None
 
             action = upsert.action
             if action == "created":
@@ -1154,6 +1237,25 @@ def _process_bytes(db: Session, file_bytes: bytes) -> MasterUploadResult:
             f"vial-day(s)" + _rows_clause(clashing)
             + ". It is provenance, not a measurement, so the first value in "
               "sheet order was stored and no row was rejected."
+        )
+
+    tube_clashes = [
+        " and ".join(str(r) for r in rows)
+        for _anchor, rows, notes in group_notes if notes.tube_disagreement
+    ]
+    if tube_clashes:
+        warnings.append(
+            f"'{_TUBE_NUMBER}' differs between the rows of {len(tube_clashes)} "
+            f"merged vial-day(s)" + _rows_clause(tube_clashes)
+            + ". The first tube in sheet order was stored and no row was "
+              "rejected; check which tube the sample was really in."
+        )
+
+    if bad_tube_rows:
+        warnings.append(
+            f"'{_TUBE_NUMBER}' is not a whole number on {len(bad_tube_rows)} "
+            f"row(s)" + _rows_clause([str(r) for r in bad_tube_rows])
+            + ". Those cells were ignored; the rest of each row was uploaded."
         )
 
     variant_spellings = [
