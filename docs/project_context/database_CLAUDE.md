@@ -2,7 +2,6 @@
 
 ## Must Read Before Any Database Task
 - `.claude/rules/MODELS.md` — schema reference index (topic files: `MODELS-deletion`, `-lineage`, `-notes`, `-conditions`, `-results`, `-views`)
-- `docs/SCHEMA.md` — PostgreSQL-specific notes and migration history
 - `docs/LOCKED_COMPONENTS.md` — complete locked models table
 
 ## Quick Commands

@@ -37,7 +37,7 @@ Use after finishing each sub-task or milestone phase.
 ```
 
 ## Step 3 — Commit
-Commit all changes for this task first (required before push/merge). Use the format from `.claude/CLAUDE.md` section 8 (task-type-specific subject lines).
+Commit all changes for this task first (required before push/merge). Use "Commit Format" in `.claude/CLAUDE.md` (task-type-specific subject lines).
 
 ## Step 4 — Merge and clean up
 

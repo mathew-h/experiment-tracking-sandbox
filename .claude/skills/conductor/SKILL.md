@@ -18,12 +18,13 @@ verify outputs, and report to the user. You do not implement features yourself.
 3.  Invoke Superpowers `writing-plans` skill — produce bite-sized tasks (2-5 min each)
     with exact file paths, complete code, and verification steps.
 4.  Assign sub-tasks to appropriate agents
-5.  Sub-agents: use Context7 MCP (`resolve-library-id` then `get-library-docs`) for any
-    prompt requiring current library docs (FastAPI, SQLAlchemy, Alembic, React,
-    TanStack Query, Firebase, Tailwind, Vite)
+5.  Sub-agents: when the Context7 MCP is enabled, use it (`resolve-library-id` then
+    `get-library-docs`) for any prompt requiring current library docs (FastAPI,
+    SQLAlchemy, Alembic, React, TanStack Query, Firebase, Tailwind, Vite)
 6.  Invoke Superpowers `subagent-driven-development` — dispatch one subagent per task
     with two-stage review (spec compliance, then code quality)
-7.  Route completed code through Code Review plugin before Test Writer Agent sees it
+7.  Route completed code through code review (`requesting-code-review`, or the Code Review
+    plugin where enabled) before Test Writer Agent sees it
 8. Route completed features to Test Writer Agent for test coverage
 9. Route completed milestones to Documentation Agent for docs update
 10. Documentation Agent updates all affected docs in `docs/` (MODELS.md, CALCULATIONS.md,
@@ -46,36 +47,20 @@ verify outputs, and report to the user. You do not implement features yourself.
 ## Documentation Agent Responsibilities
 The Documentation Agent is triggered at every milestone completion and whenever a public API or UI changes. It must:
 - Ensure every function, endpoint, component, and feature is documented
-- Maintain `docs/sample_data/FIELD_MAPPING.md`
 - Maintain `docs/CALCULATIONS.md` in sync with `backend/services/calculations/`
 - Maintain `docs/POWERBI_MODEL.md`
 
-## Escalation — Stop and Ask the User When
+## Escalation
 
-Do not proceed autonomously when any of these conditions are true:
-
-- A schema change would affect more than one model
-- A new third-party package is needed
-- Any existing bulk upload parser needs to be modified (even a small change)
-- The sample data file contains fields not currently in the database schema
-- A decision would affect the production database or production service
-- A migration cannot be written as purely additive (requires dropping or renaming a column)
-- Firebase authentication configuration needs to change
-- Brand assets (logo, hex codes) have not yet been provided and Milestone 4 is starting
-- A derived field formula is ambiguous or undocumented
-- Any test is failing and the fix is not obvious within 2 attempts
-- The Chrome DevTools loop reveals a bug that requires a schema or API change to fix
-- Estimated scope of a task expands significantly beyond what was agreed
-
-When escalating, state clearly: what the ambiguity is, what the options are, and what your recommendation is. Then wait.
+Follow "Stop and Ask the User When" in `.claude/CLAUDE.md` — it is the single list. Do not proceed autonomously past any item on it.
 
 ## Tool and MCP Requirements
 
 | Tool / MCP | Mandatory for |
 |---|---|
 | Superpowers skills | Conductor — every milestone (brainstorming, plans, subagent dispatch) |
-| Context7 MCP | All agents — any prompt requiring current library docs |
+| Context7 MCP (when enabled) | All agents — any prompt requiring current library docs |
 | Chrome DevTools MCP | frontend-builder — iterative UI verification |
-| GitHub MCP | All agents — PRs, issues, CI status checks |
+| `gh` CLI (or GitHub MCP when enabled) | All agents — PRs, issues, CI status checks |
 | `pytest` / `vitest` | All agents — run before every commit |
 | `flake8` / `black` / `eslint` | All agents — zero warnings pre-merge |

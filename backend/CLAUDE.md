@@ -3,11 +3,10 @@
 ## Must Read Before Any Backend Task
 - `docs/LOCKED_COMPONENTS.md` — what cannot be modified
 - `docs/CODE_STANDARDS.md` — Python standards and patterns
-- The active milestone file from `docs/milestones/`
 
 ## Skills to Load
-- For schema/migration work: read `.claude/skills/db-architect.md`
-- For API/service work: read `.claude/skills/api-developer.md`
+- For schema/migration work: the `db-architect` skill
+- For API/service work: the `api-developer` skill
 
 ## Quick Commands
 

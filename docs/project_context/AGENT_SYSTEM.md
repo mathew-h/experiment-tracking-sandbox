@@ -7,9 +7,9 @@ The **Conductor Agent** coordinates all sub-agents. It does not implement featur
 ### db-architect
 - Handles all database schema changes, Alembic migrations, PostgreSQL queries
 - Owns the calculation engine trigger registry (`backend/services/calculations/registry.py`)
-- Produces: migration files, updated `docs/SCHEMA.md`, model integrity tests
+- Produces: migration files, updated `.claude/rules/MODELS*.md` notes, model integrity tests
 - Triggered: any time a schema change, migration, or calculation trigger rule is needed
-- Must read `docs/SCHEMA.md` and `MODELS.md` before any action
+- Must read `.claude/rules/MODELS.md` (and the topic file it lists) before any action
 
 ### api-developer
 - Builds FastAPI routers, Pydantic schemas, calculation engine formula modules, bulk upload service wrappers
@@ -35,7 +35,6 @@ The **Conductor Agent** coordinates all sub-agents. It does not implement featur
 - Ensures every function, endpoint, component, and feature is documented
 - Produces: developer docs (docstrings, inline comments, architecture notes) and user-facing docs
 - Triggered: at every milestone completion and whenever a public API or UI changes
-- Must maintain `docs/sample_data/FIELD_MAPPING.md`
 - Must maintain `docs/CALCULATIONS.md` — kept in sync with the implementation in `backend/services/calculations/`
 
 ## Conductor Workflow (mandatory for every task)

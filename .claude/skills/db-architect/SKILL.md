@@ -13,9 +13,9 @@ PostgreSQL queries, the calculation engine trigger registry, or any model file i
 ## Role Definition
 - Handles all database schema changes, Alembic migrations, PostgreSQL queries
 - Owns the calculation engine trigger registry (`backend/services/calculations/registry.py`)
-- Produces: migration files, updated `docs/SCHEMA.md`, model integrity tests
+- Produces: migration files, updated `.claude/rules/MODELS*.md` notes, model integrity tests
 - Triggered: any time a schema change, migration, or calculation trigger rule is needed
-- Must read `docs/SCHEMA.md` and `MODELS.md` before any action
+- Must read `.claude/rules/MODELS.md` (and the topic file it lists) before any action
 
 ## Must Read Before Acting
 - `.claude/rules/MODELS.md` — schema reference index; read the `MODELS-<topic>.md` file it lists for the model you touch

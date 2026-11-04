@@ -61,7 +61,7 @@ Do this **before** reading any context files or writing any code. Full policy: `
 2. Read `docs/milestones/MILESTONE_INDEX.md` — confirm active milestone.
 3. Read the active milestone file from `docs/milestones/`.
 4. Run `git log --oneline -10`.
-5. Identify which sub-agent skill(s) are needed and read them from `.claude/skills/` (see `.claude/CLAUDE.md` section 4).
+5. Identify which role skill(s) are needed and invoke them (see "Role Skills" in `.claude/CLAUDE.md`).
 6. Update `docs/working/plan.md` with the task being started.
 
 ### If task type = issue
@@ -69,10 +69,10 @@ Do this **before** reading any context files or writing any code. Full policy: `
 1. Read `docs/working/plan.md` — **quick orientation only**: through `## Current State` (the bullet list) and the following `---`; do not read the milestone detail section below that.
 2. Fetch the issue via `gh issue view <number>` — read labels, description, acceptance criteria.
 3. Run `git log --oneline -5`.
-4. Read only the sub-agent skill file(s) in `.claude/skills/` relevant to the issue labels:
-   - Label `backend` or `api` → `api-developer.md`
-   - Label `frontend` or `ui` → `frontend-builder.md`
-   - Label `db` or `schema` → `db-architect.md`
+4. Invoke only the role skill(s) relevant to the issue labels:
+   - Label `backend` or `api` → `api-developer`
+   - Label `frontend` or `ui` → `frontend-builder`
+   - Label `db` or `schema` → `db-architect`
 5. Do **not** update `plan.md` until the task completes.
 
 ### If task type = inline
@@ -100,4 +100,4 @@ Wait for user confirmation before proceeding.
 
 ## Step 5 — Escalate back to milestone mode if needed
 
-If an inline or issue task reveals it requires a schema change, new package, or modification to a locked component — stop, re-run from Step 2 (branch) and Step 3 (milestone path), and surface the escalation per `.claude/CLAUDE.md` section 9 before continuing.
+If an inline or issue task reveals it requires a schema change, new package, or modification to a locked component — stop, re-run from Step 2 (branch) and Step 3 (milestone path), and surface the escalation per "Stop and Ask the User When" in `.claude/CLAUDE.md` before continuing.
