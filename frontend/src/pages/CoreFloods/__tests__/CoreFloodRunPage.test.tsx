@@ -7,7 +7,7 @@ import type { CoreFloodRun, CoreFloodSample, CoreFloodSegment } from '@/api/core
 import { ToastProvider } from '@/components/ui'
 
 vi.mock('@/api/coreFloods', () => ({
-  coreFloodsApi: { get: vi.fn(), createSample: vi.fn(), updateSample: vi.fn() },
+  coreFloodsApi: { get: vi.fn(), icp: vi.fn(), createSample: vi.fn(), updateSample: vi.fn() },
 }))
 
 vi.mock('@/api/experiments', () => ({
@@ -73,6 +73,8 @@ const sample = (over: Partial<CoreFloodSample>): CoreFloodSample => ({
   cumulative_h2_grams_per_ton: 2.5,
   h2_grams_per_ton_per_day: 2.5,
   is_hold_interval: false,
+  permeability_flow_rate_mL_min: null,
+  notes: [],
   ...over,
 })
 
@@ -154,18 +156,144 @@ describe('CoreFloodRunPage', () => {
   beforeEach(() => {
     vi.mocked(coreFloodsApi.get).mockReset()
     vi.mocked(coreFloodsApi.get).mockResolvedValue(RUN)
+    vi.mocked(coreFloodsApi.icp).mockReset()
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([])
   })
 
-  it('variants render in Side samples without cumulative values', async () => {
+  it('side samples collapsed', async () => {
     renderPage()
-    const region = await screen.findByRole('region', { name: 'Side samples (blanks, bypass)' })
+    const toggle = await screen.findByRole('button', { name: /^Side samples/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('CF_020-5_Bypass1', { selector: 'td' })).not.toBeInTheDocument()
+    await userEvent.click(toggle)
+    const region = screen.getByRole('region', { name: 'Side samples' })
     expect(within(region).getByText('CF_020-5_Bypass1')).toBeInTheDocument()
-    expect(within(region).queryByText('Cum. H₂ (g/t)')).not.toBeInTheDocument()
-    expect(within(region).queryByText('Pore volumes')).not.toBeInTheDocument()
-    expect(within(region).queryByText('g/t/day')).not.toBeInTheDocument()
     // the variant is not in the main samples table
     const main = screen.getByRole('region', { name: 'Samples' })
     expect(within(main).queryByText('CF_020-5_Bypass1')).not.toBeInTheDocument()
+  })
+
+  it('header shows run description, rig and ongoing segment', async () => {
+    renderPage()
+    expect(await screen.findByText('First segment')).toBeInTheDocument()
+    expect(screen.getByText('Rig CF02')).toBeInTheDocument()
+    expect(screen.getByText('Ongoing: CF_020-2')).toBeInTheDocument()
+  })
+
+  it('samples table comes before collapsed sections', async () => {
+    renderPage()
+    const main = await screen.findByRole('region', { name: 'Samples' })
+    const seg = screen.getByRole('button', { name: /^Segments/ })
+    expect(main.compareDocumentPosition(seg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    for (const name of [/^Segments/, /^Side samples/, /^Run totals/]) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute('aria-expanded', 'false')
+    }
+    expect(screen.queryByRole('button', { name: /^Data checks/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Cumulative H₂ to date')).not.toBeInTheDocument()
+  })
+
+  it('run totals collapsed by default and show cumulative H₂ when opened', async () => {
+    renderPage()
+    const toggle = await screen.findByRole('button', { name: /^Run totals/ })
+    expect(toggle).toHaveTextContent('Cum. H₂ 42.123 g/t · Pore volumes 1.235')
+    await userEvent.click(toggle)
+    const label = screen.getByText('Cumulative H₂ to date')
+    expect(label.parentElement).toHaveTextContent('42.123')
+    expect(screen.getByText('Pore volumes to date').parentElement).toHaveTextContent('1.235')
+  })
+
+  it('segments collapsed by default; rename from data checks opens it', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings([{ code: 'multiple_roots', experiment_ids: ['CF_020', 'CF_020-2'] }]),
+    )
+    renderPage()
+    const seg = await screen.findByRole('button', { name: /^Segments/ })
+    expect(seg).toHaveAttribute('aria-expanded', 'false')
+    expect(seg).toHaveTextContent('3 (CF_020, CF_020-2, CF_020-5_Bypass1)')
+    await userEvent.click(screen.getByRole('button', { name: /^Data checks/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Rename CF_020-2' }))
+    expect(seg).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('an ICP failure does not break the page', async () => {
+    vi.mocked(coreFloodsApi.icp).mockRejectedValue(new Error('icp down'))
+    renderPage()
+    expect(await screen.findByRole('region', { name: 'Samples' })).toBeInTheDocument()
+  })
+
+  it('ICP fetch failure keeps the page and shows no expander', async () => {
+    const rejected = new Error('icp down')
+    const failing = Promise.reject(rejected)
+    failing.catch(() => {})
+    vi.mocked(coreFloodsApi.icp).mockReturnValue(failing)
+    renderPage()
+    expect(await screen.findByRole('region', { name: 'Samples' })).toBeInTheDocument()
+    await waitFor(() => expect(coreFloodsApi.icp).toHaveBeenCalled())
+    await expect(failing).rejects.toBe(rejected)
+    expect(screen.queryByRole('button', { name: /Show ICP for/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^ICP over time/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Samples' })).toBeInTheDocument()
+  })
+
+  it('empty root description falls back', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings([], [
+        segment({ id: 1, description: '' }),
+        segment({ id: 2, experiment_id: 'CF_020-2', parent_experiment_id: 'CF_020', description: 'Second segment' }),
+      ]),
+    )
+    renderPage()
+    expect(await screen.findByText('Second segment', { selector: 'p' })).toBeInTheDocument()
+  })
+
+  it('editing a description from Data checks opens Segments', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings([{ code: 'missing_description', experiment_ids: ['CF_020-2'] }]),
+    )
+    vi.mocked(experimentsApi.get).mockResolvedValue({ notes: [] } as never)
+    renderPage()
+    const seg = await screen.findByRole('button', { name: /^Segments/ })
+    expect(seg).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(screen.getByRole('button', { name: /^Data checks/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Describe CF_020-2' }))
+    expect(seg).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('ICP rows get an expander in the samples table', async () => {
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([
+      {
+        result_id: 11,
+        experiment_id: 'CF_020-2',
+        is_variant: false,
+        cumulative_time_post_reaction_days: 5,
+        sample_date: '2026-10-24T00:00:00',
+        elements: { fe: 12.4 },
+      },
+    ])
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: /Show ICP for/ }))
+    expect(screen.getByText('Fe 12.4')).toBeInTheDocument()
+  })
+
+  it('shows ICP over time only when the run has ICP', async () => {
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([
+      {
+        result_id: 11,
+        experiment_id: 'CF_020-2',
+        is_variant: false,
+        cumulative_time_post_reaction_days: 5,
+        sample_date: '2026-10-24T00:00:00',
+        elements: { fe: 12.4 },
+      },
+    ])
+    const { unmount } = renderPage()
+    const btn = await screen.findByRole('button', { name: /^ICP over time/ })
+    expect(btn).toHaveAttribute('aria-expanded', 'true')
+    unmount()
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([])
+    renderPage()
+    await screen.findByRole('region', { name: 'Samples' })
+    expect(screen.queryByRole('button', { name: /^ICP over time/ })).not.toBeInTheDocument()
   })
 
   it('a zero flow shows a HOLD badge', async () => {
@@ -174,25 +302,16 @@ describe('CoreFloodRunPage', () => {
     expect(within(main).getAllByText('HOLD')).toHaveLength(1)
   })
 
-  it('legacy nulls render as dashes, in server order', async () => {
+  it('legacy nulls render as dashes, newest first', async () => {
     renderPage()
     const main = await screen.findByRole('region', { name: 'Samples' })
-    const rows = within(main).getAllByRole('row').slice(1)
+    const rows = within(main).getAllByRole('row').slice(2)
     expect(rows).toHaveLength(2)
-    const cells = within(rows[0]).getAllByRole('cell')
-    expect(cells[1]).toHaveTextContent('—') // Cum. day
-    expect(cells[5]).toHaveTextContent('—') // Liquid vol
-    expect(within(rows[0]).getByText('11')).toBeInTheDocument()
-    expect(within(rows[1]).getByText('12')).toBeInTheDocument()
-  })
-
-  it('header shows the server cumulative values', async () => {
-    renderPage()
-    const label = await screen.findByText('Cumulative H₂ to date')
-    expect(label.parentElement).toHaveTextContent('42.123')
-    expect(screen.getByText('Pore volumes to date').parentElement).toHaveTextContent('1.235')
-    expect(screen.getByText('Rig').parentElement).toHaveTextContent('CF02')
-    expect(screen.getByText('Ongoing', { ignore: 'option' }).parentElement).toHaveTextContent('CF_020-2')
+    expect(within(rows[0]).getByText('12')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('11')).toBeInTheDocument()
+    const cells = within(rows[1]).getAllByRole('cell')
+    expect(cells[2]).toHaveTextContent('—') // Day
+    expect(cells[9]).toHaveTextContent('—') // Liq mL
   })
 
   it("the rig is the latest-dated segment's slot, as in the run list", async () => {
@@ -206,8 +325,7 @@ describe('CoreFloodRunPage', () => {
       ),
     )
     renderPage()
-    await screen.findByText('Cumulative H₂ to date')
-    expect(screen.getByText('Rig').parentElement).toHaveTextContent('CF01')
+    expect(await screen.findByText('Rig CF01')).toBeInTheDocument()
   })
 
   it('shows not-found for a 404', async () => {
@@ -233,6 +351,11 @@ describe('CoreFloodRunPage', () => {
   })
 })
 
+const openSection = (name: RegExp) =>
+  screen.findByRole('button', { name }).then(async (b) => {
+    if (b.getAttribute('aria-expanded') !== 'true') await userEvent.click(b)
+  })
+
 const withWarnings = (warnings: CoreFloodRun['warnings'], segments?: CoreFloodSegment[]): CoreFloodRun => ({
   ...RUN,
   warnings,
@@ -243,6 +366,8 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
   beforeEach(() => {
     vi.mocked(coreFloodsApi.get).mockReset()
     vi.mocked(coreFloodsApi.get).mockResolvedValue(RUN)
+    vi.mocked(coreFloodsApi.icp).mockReset()
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([])
     vi.mocked(experimentsApi.patchStatus).mockReset()
     vi.mocked(experimentsApi.patch).mockReset()
     vi.mocked(experimentsApi.checkExists).mockReset()
@@ -256,6 +381,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
     )
     vi.mocked(experimentsApi.patchStatus).mockResolvedValue({} as never)
     renderPage()
+    await openSection(/^Data checks/)
     const card = (await screen.findByRole('heading', { name: 'Cleanup' })).closest('section')!
     expect(within(card).getAllByRole('combobox')).toHaveLength(2)
     for (const id of ['CF_020', 'CF_020-2']) {
@@ -278,6 +404,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
     )
     vi.mocked(conditionsApi.patch).mockResolvedValue({} as never)
     renderPage()
+    await openSection(/^Data checks/)
     await userEvent.type(await screen.findByLabelText('Pore volume for all segments'), '42')
     await userEvent.click(screen.getByRole('button', { name: 'Set pore volume for all segments' }))
     await waitFor(() => expect(conditionsApi.patch).toHaveBeenCalledTimes(2))
@@ -295,6 +422,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
       base_experiment_id: 'CF_020',
     } as never)
     renderPage('/core-floods/CF_020_5')
+    await openSection(/^Segments/)
     await userEvent.click(await screen.findByRole('button', { name: 'Rename CF_020_5_Brine' }))
     const input = screen.getByLabelText('New experiment ID')
     await userEvent.clear(input)
@@ -320,6 +448,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
       return { experiment_id: 'CF_020-3', base_experiment_id: 'CF_020' } as never
     })
     renderPage()
+    await openSection(/^Segments/)
     await userEvent.click(await screen.findByRole('button', { name: 'Rename CF_020-2' }))
     const input = screen.getByLabelText('New experiment ID')
     await userEvent.clear(input)
@@ -328,7 +457,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
     await waitFor(() => expect(save).toBeEnabled())
     await userEvent.click(save)
     const seg = await screen.findByRole('region', { name: 'Segments' })
-    await waitFor(() => expect(within(seg).getByText('CF_020-3')).toBeInTheDocument())
+    await waitFor(() => expect(within(seg).getByText('CF_020-3', { selector: 'td *, td' })).toBeInTheDocument())
     expect(coreFloodsApi.get).toHaveBeenLastCalledWith('CF_020')
     expect(screen.getByTestId('path')).toHaveTextContent('/core-floods/CF_020')
   })
@@ -336,6 +465,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
   it('a rejected status change shows the server detail', async () => {
     vi.mocked(experimentsApi.patchStatus).mockRejectedValue(new Error('Reactor CF01 is occupied by CF_026'))
     renderPage()
+    await openSection(/^Segments/)
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Status of CF_020' }), 'ONGOING')
     expect(await screen.findByText('Reactor CF01 is occupied by CF_026')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Status of CF_020' })).toHaveValue('COMPLETED')
@@ -353,6 +483,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
       return {} as never
     })
     renderPage()
+    await openSection(/^Data checks/)
     await userEvent.type(await screen.findByLabelText('Pore volume for all segments'), '42')
     const before = vi.mocked(coreFloodsApi.get).mock.calls.length
     await userEvent.click(screen.getByRole('button', { name: 'Set pore volume for all segments' }))
@@ -372,6 +503,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
       samples: [sample({ result_id: 50, flow_rate_mL_min: null })],
     })
     renderPage()
+    await openSection(/^Data checks/)
     const card = (await screen.findByRole('heading', { name: 'Cleanup' })).closest('section')!
     expect(within(card).getByRole('button', { name: 'Rename CF_020-2' })).toBeInTheDocument()
     expect(within(card).getByRole('button', { name: /^Edit CF_020 · / })).toBeInTheDocument()
@@ -380,6 +512,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
   it('Describe then Cancel returns the cell to the description button', async () => {
     vi.mocked(experimentsApi.get).mockResolvedValue({ notes: [] } as never)
     renderPage()
+    await openSection(/^Segments/)
     await userEvent.click(await screen.findByRole('button', { name: 'Edit description of CF_020' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(await screen.findByRole('button', { name: 'Edit description of CF_020' })).toBeInTheDocument()
@@ -389,6 +522,7 @@ describe('CoreFloodRunPage segment edits and cleanup', () => {
   it('a failed description fetch shows the error and a way back', async () => {
     vi.mocked(experimentsApi.get).mockRejectedValue(new Error('nope'))
     renderPage()
+    await openSection(/^Segments/)
     await userEvent.click(await screen.findByRole('button', { name: 'Edit description of CF_020' }))
     expect(await screen.findByText(/Could not load description: nope/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Close' }))

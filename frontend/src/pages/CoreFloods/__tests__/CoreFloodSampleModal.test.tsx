@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
@@ -68,6 +68,8 @@ function sample(over: Partial<CoreFloodSample> = {}): CoreFloodSample {
     cumulative_h2_grams_per_ton: null,
     h2_grams_per_ton_per_day: null,
     is_hold_interval: false,
+    permeability_flow_rate_mL_min: null,
+    notes: [],
     ...over,
   }
 }
@@ -261,5 +263,180 @@ describe('CoreFloodSampleModal — edit', () => {
     await submit()
     await waitFor(() => expect(updateSample).toHaveBeenCalledTimes(1))
     expect(updateSample).toHaveBeenCalledWith(77, { final_ph: 7.4 })
+  })
+})
+
+describe('CoreFloodSampleModal — regrouped form', () => {
+  it('renders GC, Solution and Core flood groups with their fields', () => {
+    renderModal()
+    const gc = within(screen.getByRole('region', { name: 'GC' }))
+    for (const l of [/H₂ \(ppm\)/, /Gas pressure/, /Gas volume/, /GC run date/]) {
+      expect(gc.getByLabelText(l)).toBeInTheDocument()
+    }
+    const sol = within(screen.getByRole('region', { name: 'Solution' }))
+    for (const l of [/^pH/, /Conductivity/, /Liquid sample volume/]) {
+      expect(sol.getByLabelText(l)).toBeInTheDocument()
+    }
+    const cf = within(screen.getByRole('region', { name: 'Core flood' }))
+    for (const l of [
+      'Hold since last sample',
+      /^Flow rate/,
+      /Permeability test flow rate/,
+      /Inlet pressure/,
+      /Outlet pressure/,
+      /N₂ flow/,
+    ]) {
+      expect(cf.getByLabelText(l)).toBeInTheDocument()
+    }
+  })
+
+  it('hold checkbox sets flow to 0 and disables it; unchecking restores', async () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0.1 }) })
+    const flow = screen.getByLabelText('Flow rate (mL/min)') as HTMLInputElement
+    const hold = screen.getByLabelText('Hold since last sample')
+    expect(hold).not.toBeChecked()
+    await userEvent.click(hold)
+    expect(flow.value).toBe('0')
+    expect(flow).toBeDisabled()
+    expect(screen.getByLabelText(/Permeability test flow rate/)).toHaveFocus()
+    await userEvent.click(hold)
+    expect(flow.value).toBe('0.1')
+    expect(flow).not.toBeDisabled()
+  })
+
+  it('uncheck after typing 0 does not restore an earlier flow', async () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0.1 }) })
+    const flow = screen.getByLabelText('Flow rate (mL/min)') as HTMLInputElement
+    const hold = screen.getByLabelText('Hold since last sample')
+    await userEvent.click(hold)
+    await userEvent.click(hold)
+    expect(flow.value).toBe('0.1')
+    await userEvent.clear(flow)
+    await userEvent.type(flow, '0')
+    expect(hold).toBeChecked()
+    await userEvent.click(hold)
+    expect(flow.value).toBe('')
+  })
+
+  it('starts checked when flow is 0', () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0 }) })
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
+  })
+
+  it('hold toggle round-trip leaves patch empty', async () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0.1 }) })
+    const hold = screen.getByLabelText('Hold since last sample')
+    await userEvent.click(hold)
+    await userEvent.click(hold)
+    const ph = screen.getByLabelText('pH')
+    await userEvent.clear(ph)
+    await userEvent.type(ph, '7.4')
+    await submit()
+    await waitFor(() => expect(updateSample).toHaveBeenCalledTimes(1))
+    expect(updateSample.mock.calls[0][1]).not.toHaveProperty('flow_rate_mL_min')
+  })
+
+  it('blocks save when pressures have no test rate', async () => {
+    renderModal({ samples: [sample({ flow_rate_mL_min: 0 })] })
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
+    await userEvent.type(screen.getByLabelText(/Inlet pressure/), '1520')
+    await submit()
+    expect(
+      screen.getByText('Enter the test flow rate used for these pressures'),
+    ).toBeInTheDocument()
+    expect(createSample).not.toHaveBeenCalled()
+  })
+
+  it('typing a pressure fills the test rate from the flow', async () => {
+    renderModal()
+    await userEvent.type(screen.getByLabelText(/Inlet pressure/), '1')
+    expect((screen.getByLabelText(/Permeability test flow rate/) as HTMLInputElement).value).toBe('0.5')
+  })
+
+  it('sends result_note on create', async () => {
+    renderModal()
+    await userEvent.type(screen.getByLabelText('Result note'), '  clear liquid ')
+    await submit()
+    await waitFor(() => expect(createSample).toHaveBeenCalledTimes(1))
+    expect(createSample.mock.calls[0][1]).toHaveProperty('result_note', 'clear liquid')
+  })
+
+  it('omits result_note on create when blank', async () => {
+    renderModal()
+    await submit()
+    await waitFor(() => expect(createSample).toHaveBeenCalledTimes(1))
+    expect(createSample.mock.calls[0][1]).not.toHaveProperty('result_note')
+  })
+
+  const withNotes = () =>
+    sample({
+      notes: [
+        { id: 1, note_type: 'result_note', note_text: 'first', created_by: null },
+        { id: 2, note_type: 'observation', note_text: 'bubbles seen', created_by: null },
+      ],
+    })
+
+  it('omits result_note on edit when unchanged', async () => {
+    renderModal({ editing: withNotes() })
+    expect((screen.getByLabelText('Result note') as HTMLTextAreaElement).value).toBe('first')
+    const ph = screen.getByLabelText('pH')
+    await userEvent.clear(ph)
+    await userEvent.type(ph, '7.4')
+    await submit()
+    await waitFor(() => expect(updateSample).toHaveBeenCalledTimes(1))
+    expect(updateSample).toHaveBeenCalledWith(77, { final_ph: 7.4 })
+  })
+
+  it('sends null when the note is cleared, and a changed note alone is a change', async () => {
+    renderModal({ editing: withNotes() })
+    await userEvent.clear(screen.getByLabelText('Result note'))
+    await submit()
+    await waitFor(() => expect(updateSample).toHaveBeenCalledTimes(1))
+    expect(updateSample).toHaveBeenCalledWith(77, { result_note: null })
+  })
+
+  it('lists other notes read-only', () => {
+    renderModal({ editing: withNotes() })
+    expect(screen.getByText('bubbles seen')).toBeInTheDocument()
+    expect(screen.getByText('Observation')).toBeInTheDocument()
+    expect(screen.getAllByRole('textbox', { name: /note/i })).toHaveLength(1)
+    expect(screen.queryByText('first', { selector: 'p, li, span' })).not.toBeInTheDocument()
+  })
+})
+
+describe('CoreFloodSampleModal — legacy pressure rows', () => {
+  it('edit of a legacy row with pressures but no test rate saves other changes', async () => {
+    renderModal({ editing: sample() })
+    const ph = screen.getByLabelText('pH')
+    await userEvent.clear(ph)
+    await userEvent.type(ph, '7.4')
+    await submit()
+    await waitFor(() => expect(updateSample).toHaveBeenCalledWith(77, { final_ph: 7.4 }))
+  })
+
+  it('edit that changes a pressure without a test rate is blocked', async () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0 }) })
+    const inlet = screen.getByLabelText(/Inlet pressure/)
+    await userEvent.clear(inlet)
+    await userEvent.type(inlet, '1600')
+    await submit()
+    expect(screen.getByText('Enter the test flow rate used for these pressures')).toBeInTheDocument()
+    expect(updateSample).not.toHaveBeenCalled()
+  })
+})
+
+describe('CoreFloodSampleModal — hold derived from flow', () => {
+  it('create after a hold sample opens with Hold checked and flow disabled', () => {
+    renderModal({ samples: [sample({ flow_rate_mL_min: 0 })] })
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
+    expect(screen.getByLabelText('Flow rate (mL/min)')).toBeDisabled()
+  })
+
+  it('typing 0 into flow checks Hold', async () => {
+    renderModal()
+    const flow = screen.getByLabelText('Flow rate (mL/min)')
+    await userEvent.clear(flow)
+    await userEvent.type(flow, '0')
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
   })
 })

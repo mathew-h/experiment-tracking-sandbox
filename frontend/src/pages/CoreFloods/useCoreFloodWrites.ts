@@ -11,6 +11,7 @@ export async function invalidateCoreFloodWrites(
   await Promise.all([
     qc.invalidateQueries({ queryKey: ['core-floods'] }),
     qc.invalidateQueries({ queryKey: ['core-flood', baseId] }),
+    qc.invalidateQueries({ queryKey: ['core-flood-icp', baseId] }),
     ...segmentIds.flatMap((id) => [
       qc.invalidateQueries({ queryKey: ['experiment', id] }),
       qc.invalidateQueries({ queryKey: ['experiment-results', id] }),

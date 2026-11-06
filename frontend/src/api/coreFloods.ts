@@ -26,6 +26,13 @@ export interface CoreFloodSegment {
   reactor_slot: string | null
 }
 
+export interface CoreFloodSampleNote {
+  id: number
+  note_type: 'observation' | 'result_note' | 'modification'
+  note_text: string
+  created_by: string | null
+}
+
 /** One v_core_flood_samples row; names are the view's column names. */
 export interface CoreFloodSample {
   result_id: number
@@ -58,6 +65,9 @@ export interface CoreFloodSample {
   cumulative_h2_grams_per_ton: number | null
   h2_grams_per_ton_per_day: number | null
   is_hold_interval: boolean | null
+  permeability_flow_rate_mL_min: number | null
+  /** Ordered by id. */
+  notes: CoreFloodSampleNote[]
 }
 
 export interface CoreFloodRun {
@@ -77,6 +87,16 @@ export interface CoreFloodRunListItem {
   last_sample_date: string | null
   latest_cumulative_h2_grams_per_ton: number | null
   warning_count: number
+  description: string | null
+}
+
+export interface CoreFloodIcpRow {
+  result_id: number
+  experiment_id: string
+  is_variant: boolean
+  cumulative_time_post_reaction_days: number | null
+  sample_date: string | null
+  elements: Record<string, number>
 }
 
 /** Body of POST /core-floods/{experiment_id}/samples. Dates are YYYY-MM-DD. */
@@ -95,6 +115,9 @@ export interface CoreFloodSampleCreate {
   nitrogen_flow_rate_mL_min?: number | string | null
   inlet_pressure_psi?: number | string | null
   outlet_pressure_psi?: number | string | null
+  permeability_flow_rate_mL_min?: number | string | null
+  /** On PATCH, null or blank deletes the first result note; omitted leaves notes alone. */
+  result_note?: string | null
 }
 
 /** Body of PATCH /core-floods/samples/{result_id}; the day is not editable. */
@@ -107,6 +130,11 @@ export const coreFloodsApi = {
   get: (baseId: string) =>
     apiClient
       .get<CoreFloodRun>(`/core-floods/${encodeURIComponent(baseId)}`)
+      .then((r) => r.data),
+
+  icp: (baseId: string) =>
+    apiClient
+      .get<CoreFloodIcpRow[]>(`/core-floods/${encodeURIComponent(baseId)}/icp`)
       .then((r) => r.data),
 
   createSample: (experimentId: string, body: CoreFloodSampleCreate) =>

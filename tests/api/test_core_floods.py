@@ -547,3 +547,276 @@ def test_create_full_timestamp_across_dst_uses_wall_clock(
                  flow_rate_mL_min=0.1)
     assert resp.status_code == 201, resp.text
     assert _day_of(db_session, exp) == 11.5
+
+
+# --- Issue #140: permeability flow, sample notes, run description ---------------
+
+_USER = "test@addisenergy.com"
+
+
+def _note(db, exp, result_id, note_type, text_, created_by=None):
+    n = ExperimentNotes(experiment_fk=exp.id, experiment_id=exp.experiment_id,
+                        note_text=text_, note_type=note_type, result_id=result_id,
+                        created_by=created_by)
+    db.add(n)
+    db.flush()
+    return n
+
+
+def _result_notes(db, result_id, note_type=None):
+    q = db.query(ExperimentNotes).filter_by(result_id=result_id)
+    if note_type is not None:
+        q = q.filter_by(note_type=note_type)
+    return q.order_by(ExperimentNotes.id).all()
+
+
+def _notes_audit(db, exp):
+    return db.query(ModificationsLog).filter_by(
+        experiment_fk=exp.id, modified_table="experiment_notes").all()
+
+
+def test_create_with_permeability_flow_persists(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CFN_001", date=_d(1))
+    resp = _post(client, "CFN_001", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1,
+                 permeability_flow_rate_mL_min=0.05)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["permeability_flow_rate_mL_min"] == 0.05
+    row = db_session.get(ExperimentalResults, resp.json()["result_id"])
+    assert row.permeability_flow_rate_mL_min == 0.05
+
+
+def test_create_permeability_zero_422(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFN_002", date=_d(1))
+    resp = _post(client, "CFN_002", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1,
+                 permeability_flow_rate_mL_min=0)
+    assert resp.status_code == 422
+    assert _result_count(db_session, exp) == 0
+
+
+def test_create_with_result_note(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFN_003", date=_d(1))
+    resp = _post(client, "CFN_003", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1,
+                 result_note=" Pulled after hold ")
+    assert resp.status_code == 201, resp.text
+    notes = resp.json()["notes"]
+    assert len(notes) == 1
+    assert {k: v for k, v in notes[0].items() if k != "id"} == {
+        "note_type": "result_note", "note_text": "Pulled after hold",
+        "created_by": _USER}
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.modification_type == "create"
+    assert audit.old_values is None
+    assert audit.new_values == {"note_text": "Pulled after hold"}
+
+
+def test_create_blank_result_note_writes_no_note(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFN_004", date=_d(1))
+    resp = _post(client, "CFN_004", measurement_date="2026-10-03",
+                 time_post_reaction_days=2, flow_rate_mL_min=0.1, result_note="  ")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["notes"] == []
+    assert _result_notes(db_session, resp.json()["result_id"]) == []
+    assert _notes_audit(db_session, exp) == []
+
+
+def test_run_samples_include_result_scoped_notes(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFN_005", date=_d(1), description="exp desc")
+    res = _sample(db_session, exp, 1.0, date=_d(5))
+    n1 = _note(db_session, exp, res.id, NoteType.observation, "obs", "master_bulk_upload")
+    n2 = _note(db_session, exp, res.id, NoteType.result_note, "rn", _USER)
+    n3 = _note(db_session, exp, res.id, NoteType.modification, "mod", _USER)
+    body = client.get("/api/core-floods/CFN_005").json()
+    (sample,) = body["samples"]
+    assert [n["id"] for n in sample["notes"]] == [n1.id, n2.id, n3.id]
+    assert [n["note_type"] for n in sample["notes"]] == [
+        "observation", "result_note", "modification"]
+    assert "exp desc" not in [n["note_text"] for n in sample["notes"]]
+
+
+def test_patch_result_note_updates_first_in_place(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_006")
+    first = _note(db_session, exp, rid, NoteType.result_note, "old1", "someone@else.com")
+    second = _note(db_session, exp, rid, NoteType.result_note, "old2", _USER)
+    resp = _patch(client, rid, result_note="new")
+    assert resp.status_code == 200, resp.text
+    db_session.refresh(first)
+    db_session.refresh(second)
+    assert first.note_text == "new"
+    assert second.note_text == "old2"
+    assert [n["id"] for n in resp.json()["notes"]] == [first.id, second.id]
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.modification_type == "update"
+    assert audit.old_values == {"note_text": "old1"}
+    assert audit.new_values == {"note_text": "new"}
+
+
+def test_patch_result_note_blank_deletes_and_audits(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_007")
+    _note(db_session, exp, rid, NoteType.result_note, "gone soon", _USER)
+    resp = _patch(client, rid, result_note="")
+    assert resp.status_code == 200, resp.text
+    assert _result_notes(db_session, rid, NoteType.result_note) == []
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.modification_type == "delete"
+    assert audit.old_values == {"note_text": "gone soon"}
+
+
+def test_patch_result_note_leaves_observation(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_008")
+    obs = _note(db_session, exp, rid, NoteType.observation, "obs", "master_bulk_upload")
+    resp = _patch(client, rid, result_note="x")
+    assert resp.status_code == 200, resp.text
+    db_session.refresh(obs)
+    assert obs.note_text == "obs"
+    assert obs.created_by == "master_bulk_upload"
+    (rn,) = _result_notes(db_session, rid, NoteType.result_note)
+    assert rn.note_text == "x"
+    assert rn.created_by == _USER
+
+
+def test_patch_without_result_note_key_leaves_notes(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_009")
+    rn = _note(db_session, exp, rid, NoteType.result_note, "keep", _USER)
+    resp = _patch(client, rid, final_ph=7.1)
+    assert resp.status_code == 200, resp.text
+    db_session.refresh(rn)
+    assert rn.note_text == "keep"
+    assert _notes_audit(db_session, exp) == []
+
+
+def test_patch_result_note_only_is_not_noop(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFN_010")
+    resp = _patch(client, rid, result_note="x")
+    assert resp.status_code == 200, resp.text
+    assert [n.note_text for n in _result_notes(db_session, rid, NoteType.result_note)] == ["x"]
+
+
+def test_list_item_description_is_root_segment(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_900", date=_d(1), description="root desc")
+    _cf_experiment(db_session, "CF_900-2", date=_d(2), description="child desc")
+    items = client.get("/api/core-floods", params={"scope": "all", "q": "CF_900"}).json()
+    (item,) = items
+    assert item["description"] == "root desc"
+
+
+def test_list_q_matches_description(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_901", date=_d(1), description="Tuscarora core")
+    _cf_experiment(db_session, "CF_902", date=_d(1), description="Other")
+    items = client.get("/api/core-floods", params={"scope": "all", "q": "tuscarora"}).json()
+    assert [i["base_id"] for i in items] == ["CF_901"]
+
+
+# ---- GET /api/core-floods/{base_id}/icp (issue #140 Task 3) ----
+
+from database.models.results import ICPResults  # noqa: E402
+
+
+def _icp(db, result, **elements):
+    db.add(ICPResults(result_id=result.id, **elements))
+    db.flush()
+
+
+def test_icp_rows_for_run(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFI_001", date=_d(1))
+    with_icp = _sample(db_session, exp, 1.0, date=_d(5))
+    _sample(db_session, exp, 2.0, date=_d(6))
+    _icp(db_session, with_icp, fe=12.4, ca=210, cu=None)
+    body = client.get("/api/core-floods/CFI_001/icp").json()
+    assert len(body) == 1
+    row = body[0]
+    assert row["result_id"] == with_icp.id
+    assert row["experiment_id"] == "CFI_001"
+    assert row["is_variant"] is False
+    assert row["cumulative_time_post_reaction_days"] == 1.0
+    assert datetime.fromisoformat(row["sample_date"]) == _d(5)
+    assert row["elements"] == {"fe": 12.4, "ca": 210.0}
+
+
+def test_icp_rows_include_variants_flagged(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_901")
+    _cf_experiment(db_session, "CF_901-2")
+    bypass = _cf_experiment(db_session, "CF_901-2_Bypass1")
+    res = _sample(db_session, bypass, 1.0)
+    _icp(db_session, res, fe=1.5)
+    body = client.get("/api/core-floods/CF_901/icp").json()
+    assert [r["experiment_id"] for r in body] == ["CF_901-2_Bypass1"]
+    assert body[0]["is_variant"] is True
+
+
+def test_icp_unknown_run_404(client, db_session, reporting_views):
+    assert client.get("/api/core-floods/NOPE_998/icp").status_code == 404
+
+
+def test_icp_run_without_icp_returns_empty_list(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFI_002")
+    _sample(db_session, exp, 1.0)
+    resp = client.get("/api/core-floods/CFI_002/icp")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# --- Issue #140 follow-up: result note edge cases --------------------------------
+
+from backend.services import notes as notes_service  # noqa: E402
+
+
+def test_patch_result_note_null_deletes(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_011")
+    _note(db_session, exp, rid, NoteType.result_note, "gone soon", _USER)
+    resp = _patch(client, rid, result_note=None)
+    assert resp.status_code == 200, resp.text
+    assert _result_notes(db_session, rid, NoteType.result_note) == []
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.modification_type == "delete"
+
+
+def test_patch_result_note_whitespace_deletes(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_012")
+    _note(db_session, exp, rid, NoteType.result_note, "gone soon", _USER)
+    resp = _patch(client, rid, result_note="   ")
+    assert resp.status_code == 200, resp.text
+    assert _result_notes(db_session, rid, NoteType.result_note) == []
+
+
+def test_patch_result_note_text_nan_is_kept(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFN_013")
+    resp = _patch(client, rid, result_note="nan")
+    assert resp.status_code == 200, resp.text
+    (rn,) = _result_notes(db_session, rid, NoteType.result_note)
+    assert rn.note_text == "nan"
+
+
+def test_patch_reassigns_parser_signed_result_note_and_audits_signer(
+        client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_014")
+    tag = sorted(notes_service.UPLOAD_SLOT_SIGNERS)[0]
+    note = _note(db_session, exp, rid, NoteType.result_note, "parsed", tag)
+    note_id = note.id
+    resp = _patch(client, rid, result_note="edited")
+    assert resp.status_code == 200, resp.text
+    (rn,) = _result_notes(db_session, rid, NoteType.result_note)
+    assert rn.id == note_id
+    assert rn.note_text == "edited"
+    assert rn.created_by == _USER
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.old_values == {"note_text": "parsed", "created_by": tag}
+    assert audit.new_values == {"note_text": "edited", "created_by": _USER}
+
+
+def test_list_item_description_falls_back_when_root_has_none(
+        client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_910", date=_d(1), description=None)
+    _cf_experiment(db_session, "CF_910-2", date=_d(2), description="child desc")
+    (item,) = client.get("/api/core-floods", params={"scope": "all", "q": "CF_910"}).json()
+    assert item["description"] == "child desc"
+
+
+def test_list_item_description_none_when_no_segment_has_one(
+        client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_911", date=_d(1), description=None)
+    _cf_experiment(db_session, "CF_911-2", date=_d(2), description=None)
+    (item,) = client.get("/api/core-floods", params={"scope": "all", "q": "CF_911"}).json()
+    assert item["description"] is None

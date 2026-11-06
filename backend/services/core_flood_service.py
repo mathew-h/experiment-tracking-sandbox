@@ -16,10 +16,13 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 import backend.services.calculations  # noqa: F401 — registers @register decorators
+from backend.api.schemas.results import ICP_ELEMENTS
 from backend.api.schemas.core_floods import (
+    CoreFloodIcpRow,
     CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
     CoreFloodSampleUpdate, CoreFloodSegment, CoreFloodWarning,
 )
+from backend.services import notes as notes_service
 from backend.services.calculations.registry import recalculate
 from backend.services.workdays import LAB_TZ
 from backend.services.result_merge_utils import (
@@ -27,8 +30,8 @@ from backend.services.result_merge_utils import (
 )
 from database.models import ModificationsLog
 from database.models.conditions import ExperimentalConditions
-from database.models.enums import ExperimentStatus
-from database.models.experiments import Experiment
+from database.models.enums import ExperimentStatus, NoteType
+from database.models.experiments import Experiment, ExperimentNotes
 from database.models.results import ExperimentalResults, ScalarResults
 from database.reactor_slot import series_prefix
 
@@ -128,6 +131,38 @@ def fetch_samples(
     return [dict(r) for r in db.execute(text(sql), params).mappings()]
 
 
+_SAMPLE_NOTE_TYPES = (NoteType.result_note, NoteType.observation, NoteType.modification)
+
+
+def attach_notes(db: Session, rows: list[dict]) -> list[dict]:
+    """Add `notes` (result-scoped result_note/observation/modification, by id) to each row."""
+    by_result: dict[int, list[dict]] = defaultdict(list)
+    ids = [r["result_id"] for r in rows]
+    if ids:
+        found = db.execute(
+            select(ExperimentNotes)
+            .where(ExperimentNotes.result_id.in_(ids),
+                   ExperimentNotes.note_type.in_(_SAMPLE_NOTE_TYPES))
+            .order_by(ExperimentNotes.id)
+        ).scalars()
+        for n in found:
+            by_result[n.result_id].append({
+                "id": n.id, "note_type": n.note_type.value,
+                "note_text": n.note_text, "created_by": n.created_by})
+    return [{**r, "notes": by_result.get(r["result_id"], [])} for r in rows]
+
+
+def run_description(segments: list[CoreFloodSegment]) -> str | None:
+    """Root segment's description (non-variant, no parent, earliest date); else the
+    first segment that has one."""
+    ordered = sorted(segments, key=lambda s: (
+        s.date is None, _aware(s.date) or _EPOCH, s.experiment_id))
+    roots = [s for s in ordered if not s.is_variant and s.parent_experiment_id is None]
+    if roots and roots[0].description:
+        return roots[0].description
+    return next((s.description for s in ordered if s.description), None)
+
+
 def _load_segments(db: Session, base_id: str | None = None) -> dict[str, list[CoreFloodSegment]]:
     """Core Flood segments grouped by base_experiment_id (one query)."""
     stmt = (
@@ -198,9 +233,32 @@ def get_run(db: Session, base_id: str) -> CoreFloodRun:
     return CoreFloodRun(
         base_id=base_id,
         segments=segments,
-        samples=[CoreFloodSample.model_validate(r) for r in samples],
+        samples=[CoreFloodSample.model_validate(r) for r in attach_notes(db, samples)],
         warnings=compute_warnings(segments, samples),
     )
+
+
+def get_run_icp(db: Session, base_id: str) -> list[CoreFloodIcpRow]:
+    """ICP-OES readings for a run's samples, in view order; samples without ICP are omitted."""
+    if not _load_segments(db, base_id).get(base_id):
+        raise CoreFloodNotFound(base_id)
+    cols = ", ".join(f'i."{e}" AS "icp_{e}"' for e in ICP_ELEMENTS)
+    sql = (
+        "SELECT v.result_id, v.experiment_id, v.is_variant, "
+        "v.cumulative_time_post_reaction_days, v.sample_date, " + cols +
+        " FROM v_core_flood_samples v JOIN icp_results i ON i.result_id = v.result_id"
+        " WHERE v.run_base_id = :base_id"
+        " ORDER BY v.cumulative_time_post_reaction_days NULLS LAST, v.result_id")
+    out: list[CoreFloodIcpRow] = []
+    for r in db.execute(text(sql), {"base_id": base_id}).mappings():
+        out.append(CoreFloodIcpRow(
+            result_id=r["result_id"], experiment_id=r["experiment_id"],
+            is_variant=r["is_variant"],
+            cumulative_time_post_reaction_days=r["cumulative_time_post_reaction_days"],
+            sample_date=r["sample_date"],
+            elements={e: float(r[f"icp_{e}"]) for e in ICP_ELEMENTS
+                      if r[f"icp_{e}"] is not None}))
+    return out
 
 
 def list_runs(
@@ -214,9 +272,10 @@ def list_runs(
     needle = q.strip().lower() if q and q.strip() else None
     items: list[CoreFloodRunListItem] = []
     for base_id, segments in by_base.items():
+        description = run_description(segments)
         if needle and needle not in base_id.lower() and not any(
             needle in s.experiment_id.lower() for s in segments
-        ):
+        ) and needle not in (description or "").lower():
             continue
         samples = samples_by_base.get(base_id, [])
         ongoing = sorted(s.experiment_id for s in segments
@@ -229,6 +288,7 @@ def list_runs(
             s.date is not None, _aware(s.date) or _EPOCH, s.id))
         items.append(CoreFloodRunListItem(
             base_id=base_id,
+            description=description,
             segment_count=len(segments),
             ongoing_experiment_ids=ongoing,
             rig=latest_seg.reactor_slot,
@@ -251,7 +311,7 @@ def list_runs(
 
 RESULT_FIELDS = (
     "sample_tube_number", "flow_rate_mL_min", "nitrogen_flow_rate_mL_min",
-    "inlet_pressure_psi", "outlet_pressure_psi",
+    "inlet_pressure_psi", "outlet_pressure_psi", "permeability_flow_rate_mL_min",
 )
 SCALAR_FIELDS = (
     "measurement_date", "gc_run_date", "sampling_volume_mL", "h2_concentration",
@@ -266,8 +326,9 @@ def _jsonable(values: dict) -> dict:
 
 
 def _audit(
-    db: Session, exp: Experiment, table: str, mod_type: Literal["create", "update"],
-    old: dict | None, new: dict, user_email: str,
+    db: Session, exp: Experiment, table: str,
+    mod_type: Literal["create", "update", "delete"],
+    old: dict | None, new: dict | None, user_email: str,
 ) -> None:
     db.add(ModificationsLog(
         experiment_fk=exp.id,
@@ -276,8 +337,50 @@ def _audit(
         modification_type=mod_type,
         modified_table=table,
         old_values=_jsonable(old) if old is not None else None,
-        new_values=_jsonable(new),
+        new_values=_jsonable(new) if new is not None else None,
     ))
+
+
+def _apply_result_note(
+    db: Session, exp: Experiment, result: ExperimentalResults,
+    text: str | None, user_email: str,
+) -> None:
+    """Set the sample's first result_note (lowest id, any author). Blank deletes it.
+
+    Observation and modification notes are never touched. Audits only a change.
+    """
+    cleaned = text.strip() if text is not None else ""
+    first = db.execute(
+        select(ExperimentNotes)
+        .where(ExperimentNotes.result_id == result.id,
+               ExperimentNotes.note_type == NoteType.result_note)
+        .order_by(ExperimentNotes.id).limit(1)
+    ).scalar_one_or_none()
+    if not cleaned:
+        if first is None:
+            return
+        old = first.note_text
+        db.delete(first)
+        db.flush()
+        _audit(db, exp, "experiment_notes", "delete", {"note_text": old}, None, user_email)
+    elif first is None:
+        notes_service.add_note(db, exp, cleaned, note_type=NoteType.result_note,
+                               result_id=result.id, created_by=user_email)
+        _audit(db, exp, "experiment_notes", "create", None, {"note_text": cleaned},
+               user_email)
+    else:
+        if first.note_text == cleaned:
+            return
+        old = first.note_text
+        first.note_text = cleaned
+        previous = notes_service.release_upload_slot(first, user_email)
+        old_vals: dict = {"note_text": old}
+        new_vals: dict = {"note_text": cleaned}
+        if previous is not None and previous != user_email:
+            old_vals["created_by"] = previous
+            new_vals["created_by"] = user_email
+        _audit(db, exp, "experiment_notes", "update", old_vals, new_vals, user_email)
+    db.flush()
 
 
 def create_sample(
@@ -340,6 +443,8 @@ def create_sample(
             **{k: v for k, v in result_values.items() if v is not None}}, user_email)
     _audit(db, exp, "scalar_results", "create", None,
            {k: v for k, v in scalar_values.items() if v is not None}, user_email)
+    if payload.result_note is not None and payload.result_note.strip():
+        _apply_result_note(db, exp, result, payload.result_note, user_email)
     db.flush()
     log.info("core_flood_sample_created", experiment_id=experiment_id, result_id=result.id)
     return result.id
@@ -408,6 +513,8 @@ def update_sample(
     if scalar is not None and (changed_scalar or created):
         recalculate(scalar, db)
 
+    if "result_note" in data:
+        _apply_result_note(db, exp, result, data["result_note"], user_email)
     if changed_result:
         _audit(db, exp, "experimental_results", "update", old_result, changed_result,
                user_email)

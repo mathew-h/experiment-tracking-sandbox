@@ -92,11 +92,13 @@ def test_old_views_are_new_minus_column():
     )
 
 
-def test_core_flood_view_matches_startup():
-    from database.event_listeners import _VIEWS
-
-    mod = _migration_module()
-    assert _norm(mod._V_CORE_FLOOD_SAMPLES) == _norm(dict(_VIEWS)["v_core_flood_samples"])
+def test_core_flood_view_matches_successor_old():
+    # Only the newest migration compares to the startup _VIEWS; this one's view
+    # must be exactly what a1c5e8f2b9d3's downgrade restores.
+    succ = _load_migration(
+        "a1c5e8f2b9d3_core_flood_permeability_flow_rate.py", "_core_flood_permeability_migration"
+    )
+    assert _norm(_migration_module()._V_CORE_FLOOD_SAMPLES) == _norm(succ._V_CORE_FLOOD_SAMPLES_OLD)
 
 
 def test_dim_old_matches_predecessor():

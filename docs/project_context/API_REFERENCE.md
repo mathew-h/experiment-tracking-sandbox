@@ -756,6 +756,7 @@ Issue #133. A **run** is every Core Flood experiment sharing a `base_experiment_
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/core-floods` | List runs, active first. Query: `scope` (`active` default, or `all`), `q` |
+| GET | `/api/core-floods/{base_id}/icp` | ICP-OES readings (ppm) for the run's samples, in view order |
 | GET | `/api/core-floods/{base_id}` | One run: segments, view-derived samples, warnings |
 | POST | `/api/core-floods/{experiment_id}/samples` | Add one sample (result + scalar rows) to a Core Flood experiment. 201 |
 | PATCH | `/api/core-floods/samples/{result_id}` | Edit one sample |
@@ -764,16 +765,16 @@ Errors: a missing run, experiment or result is **404**; a rule violation is **42
 
 ### GET /api/core-floods
 
-One item per Core Flood `base_experiment_id`. `scope=active` keeps runs with at least one ONGOING segment; `all` returns every run. `q` is a case-insensitive substring match on the base ID or any segment's `experiment_id`. Sorted active first, then most recent `last_sample_date` first (runs with no samples last), then `base_id`.
+One item per Core Flood `base_experiment_id`. `scope=active` keeps runs with at least one ONGOING segment; `all` returns every run. `q` is a case-insensitive substring match on the base ID, any segment's `experiment_id`, or the run `description`. Sorted active first, then most recent `last_sample_date` first (runs with no samples last), then `base_id`.
 
-Item fields: `base_id`, `segment_count`, `ongoing_experiment_ids`, `rig` (`reactor_slot` of the latest segment), `sample_count`, `first_sample_date`, `last_sample_date`, `latest_cumulative_h2_grams_per_ton`, `warning_count`. Variant samples (see below) are excluded from the sample count, the dates and the latest cumulative H2.
+Item fields: `base_id`, `description` (the root segment's `description` note: non-variant, no parent, earliest date; falls back to the first segment that has one; issue #140), `segment_count`, `ongoing_experiment_ids`, `rig` (`reactor_slot` of the latest segment), `sample_count`, `first_sample_date`, `last_sample_date`, `latest_cumulative_h2_grams_per_ton`, `warning_count`. Variant samples (see below) are excluded from the sample count, the dates and the latest cumulative H2.
 
 ### GET /api/core-floods/{base_id}
 
 Returns 404 when no Core Flood experiment has that base ID.
 
 - `segments`, ordered by start date (undated last), then `experiment_id`: `id`, `experiment_id`, `status`, `date`, `parent_experiment_id`, `is_variant`, `description` (the `description` note), `conditions_id`, `pore_volume_mL`, `rock_mass_g`, `reactor_slot`. `conditions_id` is not in the original spec: it lets the run page edit pore volume through `PATCH /api/conditions/{id}`. `is_variant` is true when the segment has a parent and its ID starts with `<parent experiment_id>_` (e.g. `CF_020-5_Bypass1`).
-- `samples`: rows of the `v_core_flood_samples` view for this run, read as-is so the app and Power BI share one definition. Field names are the view's column names, including the derived ones (`interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval`). Nothing is recomputed in the API. Variant rows keep their raw columns and have every derived column NULL. See `MODELS.md` and `docs/CALCULATIONS.md` ("Core flood run values").
+- `samples`: rows of the `v_core_flood_samples` view for this run, read as-is so the app and Power BI share one definition. Field names are the view's column names, including the derived ones (`interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval`). Nothing is recomputed in the API. Each sample also carries `permeability_flow_rate_mL_min` (view column) and `notes` (issue #140): the sample's result-scoped `result_note`, `observation` and `modification` notes ordered by note id, each `{id, note_type, note_text, created_by}`; the experiment `description` note is never included. Variant rows keep their raw columns and have every derived column NULL. See `MODELS.md` and `docs/CALCULATIONS.md` ("Core flood run values").
 - `warnings`: zero or one entry per code, `{code, experiment_ids}` with sorted IDs:
 
 | Code | Raised when | Experiment IDs |
@@ -783,6 +784,12 @@ Returns 404 when no Core Flood experiment has that base ID.
 | `missing_pore_volume` | a non-variant segment has no `pore_volume_mL` | those segments |
 | `missing_description` | a segment has no description note | those segments |
 | `sample_missing_flow_rate` | a non-variant sample has NULL `flow_rate_mL_min` | the experiments owning those samples |
+
+### GET /api/core-floods/{base_id}/icp
+
+ICP-OES readings for the run's samples (issue #140), in `v_core_flood_samples` order (cumulative day, undated last, then `result_id`). Returns 404 when no Core Flood experiment has that base ID. A sample with no `icp_results` row is omitted, so a run without ICP returns `[]`. Variant samples are included and flagged.
+
+Row fields: `result_id`, `experiment_id`, `is_variant`, `cumulative_time_post_reaction_days`, `sample_date`, `elements`: a map of lowercase element symbol (the fixed `ICP_ELEMENTS` columns) to ppm as a float. NULL elements are omitted, so `elements` holds only measured values.
 
 ### POST /api/core-floods/{experiment_id}/samples
 
@@ -797,6 +804,8 @@ Body (model field names; `extra="forbid"`, so an unknown key is 422):
 | `sample_tube_number` | optional, `gt=0` |
 | `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa` | optional, `ge=0` |
 | `final_ph`, `final_conductivity_mS_cm`, `nitrogen_flow_rate_mL_min`, `inlet_pressure_psi`, `outlet_pressure_psi` | optional |
+| `permeability_flow_rate_mL_min` | optional, `gt=0` (issue #140); its presence marks a permeability test |
+| `result_note` | optional, max 2000 chars. Written as the sample's first `result_note`, signed with the caller's email; blank writes nothing. One `ModificationsLog` row (`experiment_notes`, `create`, `new_values={"note_text": ...}`) |
 
 **Time zone.** A naive datetime (including a date-only string) in `measurement_date` or `gc_run_date` is read as lab-local, America/New_York (`LAB_TZ`), because production stores `Experiment.date` at local midnight. An aware datetime is kept as given.
 
@@ -811,7 +820,7 @@ Body (model field names; `extra="forbid"`, so an unknown key is 422):
 4. `update_cumulative_times_for_chain`, so a sample on a derivation gets cumulative time equal to the parent chain's max day plus the day.
 5. One `ModificationsLog` `create` row per table written, with `modified_by` = the caller's email.
 
-The response is the new sample as a `v_core_flood_samples` row.
+The response is the new sample as a `v_core_flood_samples` row plus `notes`.
 
 ### PATCH /api/core-floods/samples/{result_id}
 
@@ -822,9 +831,11 @@ Body: any create field except `time_post_reaction_days`, all optional; `extra="f
 - A missing `ScalarResults` row is created when the body carries a non-null scalar field, so historical samples can be given values. A body of nulls on such a sample writes nothing.
 - `recalculate` runs when any scalar field changed or the scalar row was created (a superset of "an H2 input changed"). Clearing `h2_concentration` clears the derived H2 values.
 - One `ModificationsLog` row per table changed (`update`, or `create` for a new scalar row), with `modified_by` = the caller's email and old and new values for the changed fields only.
+- `permeability_flow_rate_mL_min` (`gt=0`) is editable like any result field.
+- `result_note` (issue #140) acts only when the key is present. It targets the sample's **first** `result_note` (lowest id, any author): text edits it in place (a parser-signed note is re-signed to the caller), blank deletes it, and with none present text creates one signed with the caller's email. `observation` and `modification` notes are never touched. Each change writes one `ModificationsLog` row (`experiment_notes`; `update`, `delete` or `create`, with `{"note_text": ...}` old/new values); an unchanged text writes nothing. A body of only `result_note` is valid.
 - 404 for an unknown result, and for a result that is not a primary timepoint (nothing is written). 422 for a non-Core Flood experiment or an unknown key.
 
-The response is the updated sample as a `v_core_flood_samples` row.
+The response is the updated sample as a `v_core_flood_samples` row plus `notes`, as in the POST response.
 
 ### Run page cleanup (existing endpoints, no new routes)
 
