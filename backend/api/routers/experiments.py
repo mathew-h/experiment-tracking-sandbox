@@ -1,7 +1,9 @@
 from __future__ import annotations
+import io
 from typing import Literal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, text, case, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -36,6 +38,7 @@ from database.models.samples import SampleInfo
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
 from backend.services import notes as notes_service
+from backend.services import experiment_export
 from backend.services.experiment_deletion import (
     DeleteImpact, collect_delete_impact, delete_experiment_cascade,
 )
@@ -1126,6 +1129,28 @@ def set_experiment_background_ammonium(
         count=len(scalars),
     )
     return BackgroundAmmoniumUpdated(updated=len(scalars))
+
+
+@router.get("/{experiment_id}/export")
+def export_experiment(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> StreamingResponse:
+    """Download one .xlsx covering the experiment's whole lineage (issue #141).
+
+    Read-only: every value comes from the reporting views Power BI reads.
+    """
+    try:
+        filename, payload = experiment_export.build_workbook(
+            db, experiment_id, exported_by=current_user.email)
+    except experiment_export.ExportNotFound:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type=experiment_export.XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{experiment_id}/exists")

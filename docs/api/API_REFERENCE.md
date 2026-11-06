@@ -10,6 +10,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `search` (case-insensitive partial match on `experiment_id`), `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, and `description` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
+| GET | `/api/experiments/{experiment_id}/export` | **Export all** (issue #141): one `.xlsx` for the experiment's whole lineage. See below. |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. |
 | GET | `/api/experiments/notes/review` | Review queue: notes with `needs_review = true` across all experiments, with `experiment_id`, `researcher`, `time_post_reaction_days`. Query: `researcher` (exact), `note_type`, `q` and `experiment_id` (case-insensitive substrings; `%`/`_` literal), `order` = `experiment`\|`created_at`\|`text`, `desc`, `skip`, `limit` (≤1000). Response adds `distinct_texts`: top-50 `{text, count}` histogram over the current filter (issue #122 PR-A). |
@@ -273,6 +274,40 @@ Batch-create lettered replicates copying a base experiment's setup.
 **Errors:**
 - `404 Not Found` — no base/parent experiment exists for `base_experiment_id` (create the base experiment first)
 - `409 Conflict` — unexpected IntegrityError on creation (distinct from the normal skip path above)
+
+### GET /api/experiments/{experiment_id}/export
+
+**Export all** (issue #141). Returns one Excel workbook (`StreamingResponse`,
+`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`) covering the
+experiment's **lineage**: every experiment sharing its `base_experiment_id` (the
+experiment alone when it has none), ordered by experiment date then ID. Any member's
+ID gives the same workbook, so `CF_027-2` and `CF_027` are interchangeable. Side
+samples (`<parent>_<Text>` children: blanks, bypass) are included and flagged
+`is_variant`. A lettered replicate shares its base ID, so exporting `SERUM_001a`
+includes the whole replicate set.
+
+Read-only, no new formulas: every value comes from the reporting views Power BI
+reads. Service: `backend/services/experiment_export.py`.
+
+- **Filename:** `Content-Disposition: attachment; filename="<base_id>_export_<YYYY-MM-DD>.xlsx"`, lab-local (America/New_York) date.
+- **Errors:** `404` if the experiment does not exist.
+
+| Tab | Rows | Source |
+|-----|------|--------|
+| Results | one per primary timepoint, all lineage members | `v_results_scalar` left-joined on `result_id` to `v_results_h2`, `v_results_icp` and `v_dim_timepoints` (tube number, modification note). Adds `is_variant` (same rule as `v_core_flood_samples`). Ordered by member, then cumulative day. |
+| Core Flood | one per sample; **only when a member is a Core Flood experiment** | `v_core_flood_samples` (flow, hold flag, permeability test flow, pressures, interval, cumulative liquid volume / pore volumes / H₂, H₂ rate) |
+| Conditions | one per member | `v_experiment_conditions` |
+| Additives | one per member × compound | `v_chemical_additives` |
+| Notes | one per note | `v_notes` (type, event date, result ID, text, author, created at, needs review) |
+| Summary | key/value | base ID, experiment IDs, side samples, root description, status per member, export time (lab-local), exporting user, row count per tab |
+
+Formatting: units are in the header names (`H2 (ppm)`, `Flow (mL/min)`); the
+header row is bold and frozen. Timestamps are written as Excel dates in lab-local
+time (a column whose every value is lab midnight is formatted `yyyy-mm-dd`, others
+`yyyy-mm-dd hh:mm`). ICP element columns appear only for elements with at least one
+reading in the export, in `ICP_ELEMENTS` order. **S is never exported**:
+`v_results_icp` has no `s_ppm` column (known view gap, noted 2026-08-13).
+An experiment with no results still exports; its Results tab keeps the header row.
 
 ### GET /api/experiments/{experiment_id}/delete-impact
 

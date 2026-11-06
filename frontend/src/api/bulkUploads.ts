@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { saveBlob } from '@/utils/download'
 
 export interface BulkUploadResult {
   created: number
@@ -204,12 +205,7 @@ export const bulkUploadsApi = {
     const response = await apiClient.get(`/bulk-uploads/templates/${type}${params}`, {
       responseType: 'blob',
     })
-    const url = URL.createObjectURL(response.data as Blob)
-    const a = document.createElement('a')
-    a.href = url
     const suffix = mode ? `-${mode}` : ''
-    a.download = `${type}${suffix}-template.xlsx`
-    a.click()
-    URL.revokeObjectURL(url)
+    saveBlob(response.data as Blob, `${type}${suffix}-template.xlsx`)
   },
 }

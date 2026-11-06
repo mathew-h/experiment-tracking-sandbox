@@ -8,6 +8,7 @@ import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { CreateReplicatesModal } from '@/components/experiments/CreateReplicatesModal'
 import { DeleteExperimentModal } from '@/components/experiments/DeleteExperimentModal'
+import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { ConditionsTab } from './ConditionsTab'
 import { ResultsTab } from './ResultsTab'
 import { NotesTab } from './NotesTab'
@@ -427,6 +428,7 @@ export function ExperimentDetailPage() {
             {experiment.is_outlier ? 'Include in rollup' : 'Mark as outlier'}
           </Button>
         )}
+        <ExportAllButton experimentId={experiment.experiment_id} />
         <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}>
           Delete Experiment
         </Button>

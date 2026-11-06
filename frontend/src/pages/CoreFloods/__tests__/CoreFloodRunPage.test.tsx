@@ -18,6 +18,7 @@ vi.mock('@/api/experiments', () => ({
     checkExists: vi.fn(),
     patchNote: vi.fn(),
     addNote: vi.fn(),
+    exportAll: vi.fn(),
   },
 }))
 vi.mock('@/api/conditions', () => ({ conditionsApi: { patch: vi.fn() } }))
@@ -158,6 +159,14 @@ describe('CoreFloodRunPage', () => {
     vi.mocked(coreFloodsApi.get).mockResolvedValue(RUN)
     vi.mocked(coreFloodsApi.icp).mockReset()
     vi.mocked(coreFloodsApi.icp).mockResolvedValue([])
+  })
+
+  it('Export all sends the root segment ID', async () => {
+    vi.mocked(experimentsApi.exportAll).mockResolvedValue('CF_020_export_2026-11-06.xlsx')
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Export all' }))
+    expect(experimentsApi.exportAll).toHaveBeenCalledWith('CF_020')
+    expect(await screen.findByText('Export downloaded')).toBeInTheDocument()
   })
 
   it('side samples collapsed', async () => {

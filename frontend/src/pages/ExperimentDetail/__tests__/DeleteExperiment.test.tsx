@@ -14,6 +14,7 @@ vi.mock('@/api/experiments', () => ({
     getRollup: vi.fn(),
     getDeleteImpact: vi.fn(),
     delete: vi.fn(),
+    exportAll: vi.fn(),
   },
 }))
 vi.mock('@/api/conditions', () => ({

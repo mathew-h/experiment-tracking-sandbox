@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { coreFloodsApi, type CoreFloodSample, type CoreFloodSegment } from '@/api/coreFloods'
 import { Badge, Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
+import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { CleanupPanel } from './CleanupPanel'
 import { Collapsible } from './Collapsible'
 import { CoreFloodSampleModal } from './CoreFloodSampleModal'
@@ -17,13 +18,17 @@ interface ApiError extends Error {
 
 const HEADING = 'text-xs font-semibold text-ink-secondary uppercase tracking-wider'
 
-/** The root segment's description: non-variant, no parent, earliest date; else the first described segment. */
-function runDescription(segments: CoreFloodSegment[]): string | null {
+/** Non-variant, parentless segments, earliest first (the first is the run's root). */
+function rootSegments(segments: CoreFloodSegment[]): CoreFloodSegment[] {
   const date = (s: CoreFloodSegment) => (s.date ? Date.parse(s.date) : Infinity)
-  const roots = segments
+  return segments
     .filter((s) => !s.is_variant && s.parent_experiment_id == null)
     .sort((a, b) => date(a) - date(b))
-  return roots[0]?.description || segments.find((s) => s.description)?.description || null
+}
+
+/** The root segment's description: non-variant, no parent, earliest date; else the first described segment. */
+function runDescription(segments: CoreFloodSegment[]): string | null {
+  return rootSegments(segments)[0]?.description || segments.find((s) => s.description)?.description || null
 }
 
 /** One core flood run: header metrics, segments, samples and side samples. */
@@ -83,6 +88,8 @@ export function CoreFloodRunPage() {
     .map((s) => s.experiment_id)
 
   const description = runDescription(run.segments)
+  // The export covers the whole lineage from any segment; send the root's ID.
+  const exportId = (rootSegments(run.segments)[0] ?? run.segments[0])?.experiment_id
   const onEdit = (s: CoreFloodSample) => setModal({ editing: s })
 
   return (
@@ -99,9 +106,12 @@ export function CoreFloodRunPage() {
             {ongoing.length > 0 && <Badge variant="ongoing">Ongoing: {ongoing.join(', ')}</Badge>}
           </div>
         </div>
-        <Button variant="primary" size="sm" onClick={() => setModal({})}>
-          + Add sample
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {exportId && <ExportAllButton experimentId={exportId} />}
+          <Button variant="primary" size="sm" onClick={() => setModal({})}>
+            + Add sample
+          </Button>
+        </div>
       </div>
 
       <section aria-labelledby="samples-heading">
