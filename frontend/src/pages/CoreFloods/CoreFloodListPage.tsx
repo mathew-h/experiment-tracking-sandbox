@@ -111,7 +111,7 @@ export function CoreFloodListPage() {
                         {run.base_id}
                       </Link>
                     </Td>
-                    <Td className="text-xs max-w-md">
+                    <Td className="text-xs max-w-md !whitespace-normal">
                       {run.description ?? <span className="text-ink-muted">—</span>}
                     </Td>
                     <Td className="font-mono-data text-xs">

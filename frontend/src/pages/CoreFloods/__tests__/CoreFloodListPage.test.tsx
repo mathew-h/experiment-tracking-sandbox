@@ -64,6 +64,8 @@ describe('CoreFloodListPage', () => {
     vi.mocked(coreFloodsApi.list).mockResolvedValue([item({ description: 'Brine at 200C' })])
     renderPage()
     expect(await screen.findByText('Brine at 200C')).toBeInTheDocument()
+    // Td applies whitespace-nowrap; the important modifier is what lets the text wrap
+    expect(screen.getByText('Brine at 200C').closest('td')).toHaveClass('!whitespace-normal')
     for (const name of ['Run', 'Description', 'Rig', 'Samples', 'Last sample', 'Status']) {
       expect(screen.getByRole('columnheader', { name })).toBeInTheDocument()
     }
