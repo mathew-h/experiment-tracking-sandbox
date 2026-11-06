@@ -40,6 +40,13 @@ class ExperimentalResults(Base):
     nitrogen_flow_rate_mL_min = Column(Float, nullable=True)
     inlet_pressure_psi = Column(Float, nullable=True)
     outlet_pressure_psi = Column(Float, nullable=True)
+    # Issue #140. Inlet/outlet pressures are recorded only when permeability is
+    # intentionally tested, at flow_rate_mL_min or at a separate test rate. The
+    # presence of permeability_flow_rate_mL_min is what marks a sample as a
+    # permeability test and is the sole trigger for any future permeability
+    # computation (nothing computes it yet). flow_rate_mL_min keeps its meaning
+    # (rate over the interval ending at the sample; 0 = hold).
+    permeability_flow_rate_mL_min = Column(Float, nullable=True)
     # Free text about a timepoint lives in experiment_notes (issue #118):
     # the legacy description / brine-modification columns were dropped by
     # Alembic b8c4e2d7f9a1 (issue #122 PR-D, 2026-10-14).

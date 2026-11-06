@@ -227,7 +227,7 @@ A core flood run is one `base_experiment_id` split across sequential segment exp
 - Two-root runs: CF_026 and CF_027 each have a bare root and a `-1` root holding their own samples. Both share one `base_experiment_id`, so the view merges them and interleaves their samples by cumulative time; an interval or rate can then be measured against the other root's sample. Cleanup is tracked in the parent issue (#131).
 - Undated legacy rows: 54 of 180 Core Flood primary rows (CF-02 to CF-12, 2026-10-26 backup) have NULL cumulative time. They sort last in their run, their `interval_days` and `h2_grams_per_ton_per_day` are NULL, and the cumulative columns keep accumulating in `result_id` order, so the per-row progression is insertion order, not time. The run total on the last row is still right.
 
-**Permeability (not computed).** `inlet_pressure_psi` and `outlet_pressure_psi` are stored per sample so a later Darcy permeability calculation has the pressure drop; nothing computes it yet. Pore pressure is `experimental_conditions.pore_pressure`, not a result column.
+**Permeability (not computed).** Inlet/outlet pressures are recorded only when permeability is intentionally tested, at the sample's flow rate or at a separate test rate (issue #140). The presence of `permeability_flow_rate_mL_min` is what marks a sample as a permeability test and is the sole trigger for any future permeability (Darcy) computation; a sample without it is never treated as one, whatever its pressures. `flow_rate_mL_min` keeps its meaning: the rate over the interval ending at the sample, 0 meaning a hold. Nothing computes permeability yet. Pore pressure is `experimental_conditions.pore_pressure`, not a result column.
 
 ---
 
