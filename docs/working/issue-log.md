@@ -2786,3 +2786,29 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Real column re-check (same day, after the team added it):** header exact, all 204 `|T<n>` rows match their Sample Key, 156 vial-days tubed and all correct, otherwise identical to a no-column upload (42/307/49, same 191 errors), no tube warnings, rollback confirmed. Details in the spec.
 - **Follow-ups:** the row-529 NaT quirk; the #134 follow-ups stay open (Experiment Detail -> run page link, "No samples yet" empty state, `POST /api/results` not calling `update_cumulative_times_for_chain`).
 - **Tests added:** yes — parser unit + upload tests. **Docs updated:** yes. **Decision logged:** no (recorded in the issue spec).
+
+## 2026-11-06 | issue #140 — Core Floods run page revamp (`feat/issue-140-core-flood-revamp`)
+- **Files changed:** `database/models/results.py` (one additive column, Mat's sign-off), `alembic/versions/a1c5e8f2b9d3_core_flood_permeability_flow_rate.py`, `database/event_listeners.py` (`v_core_flood_samples`), `backend/api/schemas/core_floods.py`, `backend/services/core_flood_service.py`, `backend/api/routers/core_floods.py`, `frontend/src/api/coreFloods.ts`, `frontend/src/pages/CoreFloods/` (`fields.ts`, `CoreFloodSampleModal.tsx`, `SamplesTable.tsx`, `CoreFloodRunPage.tsx`, `CoreFloodListPage.tsx`, new `Collapsible.tsx`, `IcpChart.tsx`, `icpSeries.ts`, `icpElements.ts`, `useCoreFloodWrites.ts`), tests in `tests/models/`, `tests/api/test_core_floods.py`, `frontend/src/pages/CoreFloods/__tests__/`; docs `API_REFERENCE.md`, `CALCULATIONS.md`, `POWERBI_MODEL.md` (+ `project_context` copies), `.claude/rules/MODELS-results.md`, `MODELS-views.md`; plan `docs/superpowers/plans/2026-11-06-core-flood-run-page-revamp.md` (its Design section is the spec).
+- **What:**
+  - **Schema:** `experimental_results.permeability_flow_rate_mL_min`. Its presence marks a permeability test and is the sole trigger for any future permeability computation; pressures are recorded only on tests.
+  - **API:** samples carry their result-scoped notes; `result_note` on create/PATCH edits the sample's first `result_note` (blank deletes, audited, re-signed signer recorded); list items carry the root-segment description, and search matches it; `GET /api/core-floods/{base_id}/icp`.
+  - **Frontend:**
+    - List: Description and Status columns.
+    - Run page header: description, rig and ongoing chip.
+    - Samples table: newest first, with GC/Solution/Core flood groups, Result note column, MOD/HOLD/PERM badges, an ICP expander, and sticky expander/date columns.
+    - Collapsed bottom sections: side samples, ICP over time, segments, data checks, run totals.
+    - Sample form: identity row and Result note on top, then GC / Solution / Core flood columns in Mat's order; a "Hold since last sample" checkbox; pressures no longer prefilled; pairing check.
+    - ICP chart: line chart vs cumulative day with element chips, an **All** toggle, log scale (no bridging of ≤0 in log mode) and staggered segment markers. Line styles use the 4 validated series colours + 6 dashes (never the mean red).
+- **Rulings:** edit mode runs the pressure/test-rate pairing check only when a pressure or the test rate changed (legacy rows stay editable; server never enforces pairing). The flow input locks only via the Hold checkbox. Side-sample rows show their experiment ID. The header chip reads "Ongoing: <ids>".
+- **Verification:**
+  - **Frontend:** vitest 54 files / 476 passed.
+  - **Backend:** pytest `tests/api/test_core_floods.py tests/api/test_core_flood_view.py tests/models/ tests/services/bulk_uploads/test_master_bulk_upload.py` 343 passed. The full suite earlier gave 1768 passed with 8 pre-existing failures in files untouched by the branch: 3 `pg_backup_restore` (test-order), and 1+4 `test_lineage_migration` (sets the read-only `Experiment.description` hybrid since #122 PR-D).
+  - **tsc/eslint:** the only errors are pre-existing ones in untouched files.
+  - **Migration:** rehearsed on `experiments_test` (upgrade/downgrade/upgrade); the dev DB is at `a1c5e8f2b9d3`.
+  - **Browser:** checked on CF-015 at 1920 and 1280 px.
+- **Not done:** no sample was created or edited through the browser (core flood samples have no delete path, so dev DB writes were avoided; covered by API and modal tests).
+- **Follow-ups:**
+  - #141 Export all (Excel workbook per experiment lineage).
+  - **Production:** run `alembic upgrade head` on the lab PC for `a1c5e8f2b9d3`.
+  - Deferred minors are in the SDD ledger summary: the sticky-cell border gap, "All" showing pressed on load when the defaults already cover every element, and the redundant create guard.
+- **Tests added:** yes — schema/migration parity, API (notes, permeability, ICP, description), frontend unit + component. **Docs updated:** yes. **Decision logged:** yes (permeability test marker).

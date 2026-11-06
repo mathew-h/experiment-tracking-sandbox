@@ -814,3 +814,15 @@ is "any modification note on the timepoint" and overwrite writes the uploader's 
 
 **Related:** `docs/superpowers/plans/2026-10-14-drop-legacy-note-columns-pr-d.md`;
 Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
+
+## 2026-11-06 — Permeability test marker on core flood samples (issue #140)
+
+**Decision (Mat):** inlet/outlet pressures are recorded only when permeability is intentionally tested, either at the interval flow rate or at a separate test rate. The new `experimental_results.permeability_flow_rate_mL_min` records that rate. **Its presence is what marks a sample as a permeability test, and it is the sole trigger for any future permeability (Darcy) computation.** `flow_rate_mL_min` keeps its meaning: the rate over the interval ending at the sample, with 0 meaning a hold.
+
+**Consequences:**
+- The sample form no longer copies pressures forward from the previous sample.
+- When a pressure is typed, the form fills the test rate from a non-zero flow.
+- The form blocks unpaired pressure/test-rate entry on new samples. On edits it does this only when those fields change.
+- The server does not enforce the pairing.
+
+**Related:** Alembic `a1c5e8f2b9d3`; `.claude/rules/MODELS-results.md`; `docs/CALCULATIONS.md` ("Core flood run values").
