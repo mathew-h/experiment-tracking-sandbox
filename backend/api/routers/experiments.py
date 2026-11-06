@@ -29,8 +29,9 @@ from backend.services.replicate_groups import (
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
-    RollupTimepointResponse,
+    RollupTimepointResponse, ExperimentIcpResponse,
 )
+from backend.services import icp_series
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
@@ -797,6 +798,20 @@ def get_experiment_results(
             xrd_run_date=scalar.xrd_run_date if scalar else None,
         ))
     return out
+
+
+@router.get("/{experiment_id}/icp", response_model=ExperimentIcpResponse)
+def get_experiment_icp(
+    experiment_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ExperimentIcpResponse:
+    """ICP-OES readings (ppm) over cumulative time for the experiment's whole
+    series, plus chained-segment start days (issue #143). Read-only."""
+    try:
+        return icp_series.series_icp(db, experiment_id)
+    except icp_series.ExperimentNotFound:
+        raise HTTPException(status_code=404, detail="Experiment not found")
 
 
 @router.get("/{experiment_id}/rollup", response_model=list[RollupTimepointResponse])

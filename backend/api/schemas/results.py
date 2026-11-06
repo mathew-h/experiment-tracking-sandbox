@@ -245,3 +245,28 @@ class RollupTimepointResponse(BaseModel):
     mean_grams_per_ton_yield: Optional[float] = None
     sd_grams_per_ton_yield: Optional[float] = None
     mean_final_ph: Optional[float] = None
+
+
+class IcpRow(BaseModel):
+    """One sample's ICP-OES reading (non-null fixed elements only, ppm).
+
+    Shared by GET /api/core-floods/{base_id}/icp and
+    GET /api/experiments/{experiment_id}/icp (issue #143)."""
+    result_id: int
+    experiment_id: str
+    is_variant: bool
+    cumulative_time_post_reaction_days: Optional[float] = None
+    sample_date: Optional[datetime] = None
+    elements: dict[str, float]
+
+
+class IcpSegmentStart(BaseModel):
+    """First cumulative day of a chained segment (an experiment with a parent
+    that is not a `_Text` variant); drawn as a marker on the ICP chart."""
+    experiment_id: str
+    day: float
+
+
+class ExperimentIcpResponse(BaseModel):
+    rows: list[IcpRow]
+    segment_starts: list[IcpSegmentStart]

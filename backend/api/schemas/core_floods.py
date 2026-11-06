@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.api.schemas.results import IcpRow
+
 WarningCode = Literal[
     "multiple_roots", "multiple_ongoing", "missing_pore_volume",
     "missing_description", "sample_missing_flow_rate",
@@ -139,11 +141,5 @@ class CoreFloodSampleUpdate(_CoreFloodSampleFields):
         return v
 
 
-class CoreFloodIcpRow(BaseModel):
-    """One sample's ICP-OES reading (non-null fixed elements only, ppm)."""
-    result_id: int
-    experiment_id: str
-    is_variant: bool
-    cumulative_time_post_reaction_days: Optional[float] = None
-    sample_date: Optional[datetime] = None
-    elements: dict[str, float]
+# Shared with GET /api/experiments/{experiment_id}/icp (issue #143).
+CoreFloodIcpRow = IcpRow

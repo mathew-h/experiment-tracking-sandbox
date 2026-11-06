@@ -10,7 +10,8 @@ import { CoreFloodSampleModal } from './CoreFloodSampleModal'
 import { SamplesTable } from './SamplesTable'
 import { SegmentsTable } from './SegmentsTable'
 import { fmt } from './fields'
-import { IcpChart } from './IcpChart'
+import { IcpChart } from '@/components/icp/IcpChart'
+import { segmentStarts } from '@/components/icp/icpSeries'
 
 interface ApiError extends Error {
   response?: { status?: number }
@@ -136,7 +137,7 @@ export function CoreFloodRunPage() {
 
       {icpRows && icpRows.length > 0 && (
         <Collapsible title="ICP over time" defaultOpen>
-          <IcpChart rows={icpRows} samples={run.samples} />
+          <IcpChart rows={icpRows} markers={segmentStarts(run.samples)} />
         </Collapsible>
       )}
 

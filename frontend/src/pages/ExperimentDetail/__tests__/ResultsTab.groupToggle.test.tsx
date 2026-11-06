@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom'
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     getResults: vi.fn(),
+    getIcp: vi.fn().mockResolvedValue({ rows: [], segment_starts: [] }),
     setBackgroundAmmonium: vi.fn(),
     getReplicateGroup: vi.fn(),
     getGroup: vi.fn(),

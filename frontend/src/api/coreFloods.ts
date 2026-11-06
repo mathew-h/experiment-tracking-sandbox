@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { IcpRow } from './icp'
 
 export type CoreFloodWarningCode =
   | 'multiple_roots'
@@ -90,14 +91,8 @@ export interface CoreFloodRunListItem {
   description: string | null
 }
 
-export interface CoreFloodIcpRow {
-  result_id: number
-  experiment_id: string
-  is_variant: boolean
-  cumulative_time_post_reaction_days: number | null
-  sample_date: string | null
-  elements: Record<string, number>
-}
+/** Shared with the Experiment Detail ICP chart (issue #143). */
+export type CoreFloodIcpRow = IcpRow
 
 /** Body of POST /core-floods/{experiment_id}/samples. Dates are YYYY-MM-DD. */
 export interface CoreFloodSampleCreate {

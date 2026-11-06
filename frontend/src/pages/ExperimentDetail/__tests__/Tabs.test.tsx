@@ -67,3 +67,11 @@ describe('experiment detail tab strip (issue #122 PR-B)', () => {
     expect(screen.queryByRole('button', { name: /reactor modifications/i })).toBeNull()
   })
 })
+
+describe('experiment detail tab strip (issue #143)', () => {
+  it('labels the analysis tab XRD', async () => {
+    renderPage()
+    expect(await screen.findByRole('button', { name: /^xrd$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^analysis$/i })).toBeNull()
+  })
+})
