@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { filenameFromDisposition, saveBlob } from '../download'
+import { blobErrorMessage, filenameFromDisposition, saveBlob } from '../download'
 
 describe('filenameFromDisposition', () => {
   it('reads a quoted filename', () => {
@@ -37,5 +37,32 @@ describe('saveBlob', () => {
     expect(anchor.download).toBe('out.xlsx')
     expect(anchor.href).toBe('blob:mock')
     expect(revoke).toHaveBeenCalledWith('blob:mock')
+  })
+})
+
+describe('blobErrorMessage', () => {
+  it('returns the string detail from a blob response body', async () => {
+    const err = {
+      message: 'Request failed with status code 422',
+      response: { data: new Blob([JSON.stringify({ detail: 'Unknown experiment IDs: NOPE_1' })]) },
+    }
+    expect(await blobErrorMessage(err)).toBe('Unknown experiment IDs: NOPE_1')
+  })
+
+  it('falls back to err.message when the blob is not JSON', async () => {
+    const err = {
+      message: 'Request failed with status code 500',
+      response: { data: new Blob(['<html>oops</html>']) },
+    }
+    expect(await blobErrorMessage(err)).toBe('Request failed with status code 500')
+  })
+
+  it('falls back to err.message when there is no response', async () => {
+    expect(await blobErrorMessage(new Error('Network Error'))).toBe('Network Error')
+  })
+
+  it('returns a generic message for a non-Error value', async () => {
+    expect(await blobErrorMessage('boom')).toBe('Export failed')
+    expect(await blobErrorMessage(undefined)).toBe('Export failed')
   })
 })
