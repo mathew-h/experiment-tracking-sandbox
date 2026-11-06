@@ -15,6 +15,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. |
 | GET | `/api/experiments/notes/review` | Review queue: notes with `needs_review = true` across all experiments, with `experiment_id`, `researcher`, `time_post_reaction_days`. Query: `researcher` (exact), `note_type`, `q` and `experiment_id` (case-insensitive substrings; `%`/`_` literal), `order` = `experiment`\|`created_at`\|`text`, `desc`, `skip`, `limit` (≤1000). Response adds `distinct_texts`: top-50 `{text, count}` histogram over the current filter (issue #122 PR-A). |
+| GET | `/api/experiments/{experiment_id}/icp` | **ICP over time** (issue #143): ICP-OES readings for the experiment's whole series plus chained-segment start days. See below. |
 | GET | `/api/experiments/{experiment_id}/rollup` | Cross-replicate mean/median/std per timepoint bucket from `v_results_scalar_rollup` |
 | GET | `/api/experiments/{experiment_id}/replicate-group` | The lettered replicate set (parent + members) this experiment belongs to |
 | GET | `/api/experiments/groups/{base_id}` | Replicate group detail addressed by base-ID string (not an experiment row) — members, shared/divergent conditions, additives summary |
@@ -100,6 +101,30 @@ Example grouped item (`group_replicates=true`) — letter `a` was sacrificed acr
 }
 ```
 `SERUM_001a-t3`, the sibling timepoint collapsed into the `SERUM_001a` child above, is not itself listed — it is folded into `vial_count: 2` on that child. `experiment_id` on the top-level item still names the group's representative row, not a rendering label; the UI renders `group_display_id`.
+
+### GET /api/experiments/{experiment_id}/icp
+
+ICP-OES readings over cumulative time for the experiment's whole series (issue #143), for the **ICP over time** chart on the Results tab. Read-only. Implemented in `backend/services/icp_series.py`.
+
+**Auth:** Required (Firebase token)
+
+**Series:** every experiment sharing the requested experiment's `base_experiment_id` (the experiment alone when it has none), so any member returns the same body. A serum vial set (`X-t1`, `X-t3`, ...) therefore plots as one curve. Only primary timepoint results are included, as in `v_core_flood_samples`. A result with no `icp_results` row is omitted.
+
+**Response `200`:**
+```json
+{
+  "rows": [
+    {"result_id": 812, "experiment_id": "CF_027-3", "is_variant": false,
+     "cumulative_time_post_reaction_days": 7.0, "sample_date": "2026-10-05T00:00:00Z",
+     "elements": {"ca": 210.0, "fe": 12.4, "s": 3.1}}
+  ],
+  "segment_starts": [{"experiment_id": "CF_027-3", "day": 7.0}]
+}
+```
+- `rows`: the same row shape as `GET /api/core-floods/{base_id}/icp` (shared `IcpRow` schema), ordered by cumulative day (undated last), then `result_id`. `sample_date` is `scalar_results.measurement_date`. `is_variant` uses the `v_core_flood_samples` rule (a `_Text` child of its parent, such as a bypass). `elements` reads `icp_results` directly, so it includes **S** (`v_results_icp` has no `s_ppm`).
+- `segment_starts`: for each **chained segment** (an experiment with a `parent_experiment_fk` that is not a variant), the lowest cumulative day among its primary results, ICP or not. A root experiment, a vial (no parent) and a variant get no entry. Ordered by day.
+
+**Response `404`:** unknown `experiment_id`. A series with no ICP returns `{"rows": [], "segment_starts": [...]}`; the chart is hidden when `rows` is empty.
 
 ### GET /api/experiments/{experiment_id}/rollup
 
@@ -866,7 +891,7 @@ Returns 404 when no Core Flood experiment has that base ID.
 
 ICP-OES readings for the run's samples (issue #140), in `v_core_flood_samples` order (cumulative day, undated last, then `result_id`). Returns 404 when no Core Flood experiment has that base ID. A sample with no `icp_results` row is omitted, so a run without ICP returns `[]`. Variant samples are included and flagged.
 
-Row fields: `result_id`, `experiment_id`, `is_variant`, `cumulative_time_post_reaction_days`, `sample_date`, `elements`: a map of lowercase element symbol (the fixed `ICP_ELEMENTS` columns) to ppm as a float. NULL elements are omitted, so `elements` holds only measured values.
+Row fields: `result_id`, `experiment_id`, `is_variant`, `cumulative_time_post_reaction_days`, `sample_date`, `elements`: a map of lowercase element symbol (the fixed `ICP_ELEMENTS` columns) to ppm as a float. NULL elements are omitted, so `elements` holds only measured values. The row schema (`IcpRow`) and its builder (`backend/services/icp_series.py`) are shared with `GET /api/experiments/{experiment_id}/icp` (issue #143).
 
 ### POST /api/core-floods/{experiment_id}/samples
 

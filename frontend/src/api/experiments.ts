@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { ExperimentIcp } from './icp'
 import { blobErrorMessage, filenameFromDisposition, saveBlob } from '@/utils/download'
 
 export type ExperimentStatus = 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
@@ -408,6 +409,12 @@ export const experimentsApi = {
   delete: (experimentId: string) =>
     apiClient
       .delete<ExperimentDeleted>(`/experiments/${encodeURIComponent(experimentId)}`)
+      .then((r) => r.data),
+
+  /** ICP readings over cumulative time for the experiment's whole series (issue #143). */
+  getIcp: (experimentId: string) =>
+    apiClient
+      .get<ExperimentIcp>(`/experiments/${encodeURIComponent(experimentId)}/icp`)
       .then((r) => r.data),
 
   getRollup: (experimentId: string) =>

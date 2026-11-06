@@ -6,6 +6,7 @@ import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
 import { AddResultsModal } from './AddResultsModal'
 import { GroupedResultsView } from './GroupedResultsView'
+import { IcpSection } from './IcpSection'
 
 function fmt(n: number | null | undefined, decimals = 2) {
   return n != null ? n.toFixed(decimals) : '—'
@@ -283,6 +284,9 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
           )}
         </>
       )}
+
+      {/* Issue #143: whole-series ICP chart, below the table in both modes. */}
+      <IcpSection experimentId={experimentId} />
 
       <AddResultsModal
         open={showAddModal}

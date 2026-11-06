@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { chartColors } from '@/assets/brand'
-import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
-import { chartPoints, defaultSelection, elementsPresent, lineProps, lineStyles, segmentStarts } from '../icpSeries'
+import type { IcpRow } from '@/api/icp'
+import type { CoreFloodSample } from '@/api/coreFloods'
+import {
+  chartPoints, defaultSelection, elementsPresent, lineProps, lineStyles, markerLabels, segmentStarts,
+} from '../icpSeries'
 
-const row = (over: Partial<CoreFloodIcpRow>): CoreFloodIcpRow => ({
+const row = (over: Partial<IcpRow>): IcpRow => ({
   result_id: 1,
   experiment_id: 'CF_020',
   is_variant: false,
@@ -28,16 +31,16 @@ describe('icpSeries', () => {
     expect(elementsPresent(rows)).toEqual(['fe', 'ca', 'cu'])
   })
 
-  it('defaultSelection prefers ca si fe cu ni', () => {
-    expect(defaultSelection(['fe', 'si', 'mg', 'ca', 'ni', 'cu', 'mo', 'zn'])).toEqual([
-      'fe', 'si', 'ca', 'ni', 'cu',
-    ])
-    expect(defaultSelection(['mg', 'ca', 'zn'])).toEqual(['ca'])
+  it('defaultSelection prefers ca si fe ni mg mn al, without cu (issue #143)', () => {
+    expect(
+      defaultSelection(['fe', 'si', 'mg', 'ca', 'ni', 'cu', 'mo', 'zn', 'mn', 'cr', 'al', 's']),
+    ).toEqual(['fe', 'si', 'mg', 'ca', 'ni', 'mn', 'al'])
+    expect(defaultSelection(['cu', 'ca', 'zn'])).toEqual(['ca'])
   })
 
   it('defaultSelection falls back to first five present', () => {
-    expect(defaultSelection(['mg', 'mo', 'zn', 'mn', 'cr', 'co'])).toEqual([
-      'mg', 'mo', 'zn', 'mn', 'cr',
+    expect(defaultSelection(['cu', 'mo', 'zn', 'cr', 'co', 'sr'])).toEqual([
+      'cu', 'mo', 'zn', 'cr', 'co',
     ])
   })
 
@@ -101,5 +104,21 @@ describe('icpSeries', () => {
     const els = Array.from({ length: 24 }, (_, i) => `e${i}`)
     const pairs = Object.values(lineStyles(els)).map((x) => `${x.color}|${x.dash ?? ''}`)
     expect(new Set(pairs).size).toBe(24)
+  })
+
+  it('markerLabels keeps labels inside the plot: left half reads right, right half reads left', () => {
+    const m = (day: number) => ({ day, experimentId: `X${day}` })
+    // Domain 6..14 (CF_027 on Experiment Detail): edge markers must not point outward.
+    expect(markerLabels([m(6), m(7), m(10), m(14)], [7, 14])).toEqual([
+      { position: 'insideTopLeft', dy: 0 },
+      { position: 'insideTopLeft', dy: 14 },
+      { position: 'insideTopLeft', dy: 0 },
+      { position: 'insideTopRight', dy: 0 },
+    ])
+  })
+
+  it('markerLabels stacks markers on the same day', () => {
+    const m = (day: number, id: string) => ({ day, experimentId: id })
+    expect(markerLabels([m(23, 'A'), m(23, 'B'), m(70.5, 'C')], [1, 100]).map((l) => l.dy)).toEqual([0, 14, 0])
   })
 })

@@ -9,6 +9,7 @@ import * as resultsApiModule from '@/api/results'
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     getResults: vi.fn(),
+    getIcp: vi.fn().mockResolvedValue({ rows: [], segment_starts: [] }),
     setBackgroundAmmonium: vi.fn(),
   },
 }))
@@ -201,5 +202,24 @@ describe('ResultsTab — H2-first columns', () => {
     expect(within(section).getByText('2026-05-01')).toBeInTheDocument()
     expect(within(section).getByText('2026-06-15')).toBeInTheDocument()
     expect(within(section).queryByText(/^ICP:/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ResultsTab — ICP over time (issue #143)', () => {
+  it('renders the series ICP chart below the results table', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
+    vi.mocked(experimentsApiModule.experimentsApi.getIcp).mockResolvedValueOnce({
+      rows: [{
+        result_id: 1, experiment_id: 'HPHT_001', is_variant: false,
+        cumulative_time_post_reaction_days: 7, sample_date: null, elements: { fe: 3 },
+      }],
+      segment_starts: [],
+    })
+    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
+    const heading = await screen.findByRole('heading', { name: 'ICP over time' })
+    const header = screen.getByText('H₂ (ppm)')
+    // DOCUMENT_POSITION_FOLLOWING: the chart comes after the table header.
+    expect(header.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(experimentsApiModule.experimentsApi.getIcp).toHaveBeenCalledWith('HPHT_001')
   })
 })

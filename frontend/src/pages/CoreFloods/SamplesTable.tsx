@@ -3,7 +3,7 @@ import type { CoreFloodSample } from '@/api/coreFloods'
 import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
 import { labDateOf } from '@/utils/labDate'
 import { fmt, noteSummary } from './fields'
-import { ICP_ELEMENTS } from './icpElements'
+import { ICP_ELEMENTS } from '@/components/icp/icpElements'
 
 interface Props {
   samples: CoreFloodSample[]

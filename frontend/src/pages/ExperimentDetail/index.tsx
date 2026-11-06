@@ -16,7 +16,8 @@ import { DescriptionEditor } from './DescriptionEditor'
 import { ModificationsTab } from './ModificationsTab'
 import { AnalysisTab } from './AnalysisTab'
 
-const TABS = ['Conditions', 'Results', 'Notes', 'Analysis', 'Entry Logs'] as const
+// 'XRD' renders AnalysisTab (XRD phases and external analyses); relabelled in issue #143.
+const TABS = ['Conditions', 'Results', 'Notes', 'XRD', 'Entry Logs'] as const
 type Tab = typeof TABS[number]
 
 /**
@@ -40,7 +41,7 @@ const PER_EXPERIMENT_QUERY_KEYS = [
   'replicate-group',
 ] as const
 
-/** Full experiment detail page with tabbed navigation (Results, Conditions, Analysis, Notes, Modifications). */
+/** Full experiment detail page with tabbed navigation (Results, Conditions, XRD, Notes, Modifications). */
 export function ExperimentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -513,7 +514,7 @@ export function ExperimentDetailPage() {
         {activeTab === 'Entry Logs' && (
           <ModificationsTab modifications={experiment.modifications} />
         )}
-        {activeTab === 'Analysis' && <AnalysisTab experimentId={id!} />}
+        {activeTab === 'XRD' && <AnalysisTab experimentId={id!} />}
       </div>
     </div>
   )

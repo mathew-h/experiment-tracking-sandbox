@@ -1,25 +1,32 @@
-import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
+import type { IcpRow } from '@/api/icp'
 import { chartColors } from '@/assets/brand'
 import { ICP_ELEMENTS } from './icpElements'
 
-const PREFERRED = ['ca', 'si', 'fe', 'cu', 'ni']
+// Issue #143: Cu is off by default; Mg, Mn and Al are on.
+const PREFERRED = ['ca', 'si', 'fe', 'ni', 'mg', 'mn', 'al']
+
+/** A vertical marker on the chart, e.g. where a chained segment starts. */
+export type ChartMarker = { day: number; experimentId: string }
+
+/** The fields of a sample that segmentStarts reads (a CoreFloodSample fits). */
+type SegmentSample = Pick<IcpRow, 'experiment_id' | 'is_variant' | 'cumulative_time_post_reaction_days'>
 
 export type IcpPoint = { day: number } & Record<string, number | null>
 
 /** Elements with a value in any row, in ICP_ELEMENTS order. */
-export function elementsPresent(rows: CoreFloodIcpRow[]): string[] {
+export function elementsPresent(rows: IcpRow[]): string[] {
   const seen = new Set(rows.flatMap((r) => Object.keys(r.elements)))
   return ICP_ELEMENTS.filter((e) => seen.has(e))
 }
 
-/** Ca/Si/Fe/Cu/Ni when present; otherwise the first five present elements. */
+/** Ca/Si/Fe/Ni/Mg/Mn/Al when present; otherwise the first five present elements. */
 export function defaultSelection(present: string[]): string[] {
   const preferred = present.filter((e) => PREFERRED.includes(e))
   return preferred.length > 0 ? preferred : present.slice(0, 5)
 }
 
 /** Main-line rows with a cumulative day, sorted by day. Log mode nulls values <= 0. */
-export function chartPoints(rows: CoreFloodIcpRow[], selected: string[], log: boolean): IcpPoint[] {
+export function chartPoints(rows: IcpRow[], selected: string[], log: boolean): IcpPoint[] {
   return rows
     .filter((r) => !r.is_variant && r.cumulative_time_post_reaction_days != null)
     .sort((a, b) => a.cumulative_time_post_reaction_days! - b.cumulative_time_post_reaction_days!)
@@ -34,7 +41,7 @@ export function chartPoints(rows: CoreFloodIcpRow[], selected: string[], log: bo
 }
 
 /** Day of each non-variant segment's first sample (server view order), minus the first segment. */
-export function segmentStarts(samples: CoreFloodSample[]): Array<{ day: number; experimentId: string }> {
+export function segmentStarts(samples: SegmentSample[]): ChartMarker[] {
   const first = new Map<string, number>()
   for (const s of samples) {
     if (s.is_variant || first.has(s.experiment_id)) continue
@@ -70,4 +77,35 @@ export function lineStyles(
       },
     ]),
   )
+}
+
+/** Tooltip value: up to 3 decimals, trailing zeros dropped; em dash when missing. */
+export function fmtPpm(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—'
+  return parseFloat(v.toFixed(3)).toString()
+}
+
+export type MarkerLabel = { position: 'insideTopLeft' | 'insideTopRight'; dy: number }
+
+/** Markers closer than this share of the x span stack their labels vertically. */
+const STACK_FRACTION = 0.15
+const STACK_DY = 14
+
+/** Label placement per marker (in the given order, which is by day). A label
+ *  reads away from the nearer edge: 'insideTopLeft' draws it right of the line
+ *  (left half), 'insideTopRight' left of it (right half), so a marker at either
+ *  end of the axis is never clipped. A marker close to the previous one drops
+ *  one line, so same-day segment starts don't overprint. */
+export function markerLabels(markers: ChartMarker[], dataDays: number[]): MarkerLabel[] {
+  const days = [...dataDays, ...markers.map((m) => m.day)]
+  if (days.length === 0) return []
+  const lo = Math.min(...days)
+  const hi = Math.max(...days)
+  const mid = (lo + hi) / 2
+  const near = (hi - lo) * STACK_FRACTION
+  let level = 0
+  return markers.map((m, i) => {
+    level = i > 0 && m.day - markers[i - 1].day <= near ? 1 - level : 0
+    return { position: m.day <= mid ? 'insideTopLeft' : 'insideTopRight', dy: level * STACK_DY }
+  })
 }

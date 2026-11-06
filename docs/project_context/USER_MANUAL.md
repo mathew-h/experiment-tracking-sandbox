@@ -26,7 +26,7 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 | Page | What it does |
 |------|--------------|
 | **Dashboard** (`/dashboard`) | Reactor grid showing all ONGOING experiments. Click a status badge to change an experiment's status (Ongoing → Completed or Cancelled). |
-| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and Analysis tabs. |
+| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and XRD tabs. |
 | **Core Floods** (`/core-floods`) | One row per core flood run, with a run page for samples and cleanup. See [Core Floods](#core-floods) below. |
 | **New Experiment** (`/experiments/new`) | 4-step guided form to create a new experiment: basic info, conditions, chemical additives, and confirmation. |
 | **Bulk Uploads** (`/bulk-uploads`) | Accordion panel for uploading analytical data in bulk (solution chemistry, ICP-OES, XRD, pXRF, and more). See the [Bulk Uploads Guide](BULK_UPLOADS.md). |
@@ -48,6 +48,7 @@ A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`,
 - **Segments:** one row per segment, with a link to its experiment page, an editable status, an inline description and **Rename**. Pore volume is set from **Data checks** or on each experiment's Conditions tab.
 - **Samples:** every sample across all segments in time order. **Cum. day** is the cumulative day since the run started. A flow rate of 0 shows a **HOLD** badge. Blanks and bypass samples sit in a separate **Side samples** section with no cumulative columns. Click a row to edit it.
 - **Cleanup:** one line per data problem the run has (several roots, several ONGOING segments, missing pore volume or description, samples with no flow rate), each with its fix. The segment's ID sits beside each per-segment control. **Set pore volume for all segments** writes one value to every segment that lacks it.
+- **ICP over time:** ICP ppm against cumulative day for the run's main-line samples, with a dashed marker where each segment starts. It works the same way as on the Results tab (see "Plot ICP concentrations over time" below).
 
 **Export.** **Export all** in the run header downloads one Excel workbook for the whole run: every segment and side sample, with a Core Flood tab of flow, pressures and cumulative values.
 
@@ -62,7 +63,7 @@ Experiments move through a defined lifecycle from creation to completion:
 1. **Create** — Use the New Experiment form (`/experiments/new`) to record the basic metadata: experiment ID, researcher, date, and the associated sample.
 2. **Add Conditions** — Open the experiment's detail view and complete the Conditions tab: temperature, pH, reactor number, rock mass, water volume, and chemical additives.
 3. **Add Results** — Upload analytical data via Bulk Uploads (preferred for multiple experiments at once) or enter results manually on the Results tab of the experiment detail view. The Results tab and the grouped rollup **display** hydrogen metrics (H₂ ppm/µmol/g/t, Fe²⁺ → H₂ %, pH, conductivity); ammonium fields are still recorded and stored — they remain in the database and Power BI datasets — but are no longer shown in these two on-screen tables. See `REPLICATES.md` for details.
-4. **Analyze** — Use the Analysis tab to attach external analyses (XRD, pXRF, SEM, elemental) or view Aeris XRD time-series data.
+4. **Analyze** — Use the XRD tab (called Analysis before November 2026) to attach external analyses (XRD, pXRF, SEM, elemental) or view Aeris XRD time-series data.
 5. **Complete** — When the experiment is finished, change the status to **Completed** from the Dashboard or the experiment detail header. Cancelled experiments can be marked **Cancelled**.
 
 ---
@@ -77,11 +78,12 @@ Experiments move through a defined lifecycle from creation to completion:
 | Check Water:Rock Ratio | Open an experiment → **Conditions** tab |
 | Upload ICP data | **Bulk Uploads** → ICP-OES Data → upload the instrument CSV |
 | View all results for an experiment | Open an experiment → **Results** tab |
+| Plot ICP concentrations over time | Open any experiment with ICP data → **Results** tab → **ICP over time**, below the results table (not shown when the series has no ICP). It plots ppm against cumulative day for the experiment's whole series: every segment, side sample and timepoint vial sharing its base ID. Dashed vertical lines mark where each chained segment starts. Click element chips to add or remove lines; **All** toggles every element; **Log scale** switches the y axis. Ca, Si, Fe, Ni, Mg, Mn and Al are on by default (Cu is off). The first four lines are solid; from the fifth on, lines reuse the four colours with a dash pattern, and the legend shows each line's colour and dash. The core flood run page has the same chart |
 | Add or fix an experiment's description | Fill in "Experiment Description" in step 1 of **New Experiment**; it is saved as the experiment's Description note and shows on the reactor card and detail header. Later, open the experiment and click the description under its ID to edit it in place — or click **Add description** if it has none. Only one Description is allowed per experiment |
 | Read or write notes on an experiment | Open an experiment → **Notes** tab. Every note — experiment-level and timepoint-scoped — is one timeline, newest first, each with a type badge, a `T+N` chip (on a timepoint) or a date chip (a dated modification), and its author. Filter by type or "Review queue only". To add one, pick a type: an Observation may name a timepoint; a Result note must; a Modification needs a timepoint **or** a date (defaults to today); a Description has neither |
 | Change a note's type | Open an experiment → **Notes** tab → use the type dropdown on the note. Experiment-level notes can be Observation or Description; notes on a timepoint can be Observation, Modification or Result note; a dated note can be Observation, Modification or Description. Only one Description is allowed per experiment |
 | Export an experiment's data to Excel | Open an experiment (or a run on **Core Floods**) → **Export all** in the header. One workbook downloads with Results, Conditions, Additives, Notes and Summary tabs (plus Core Flood for core flood runs), covering the experiment and every segment and side sample in its series. Values are the same as the Power BI report |
 | Export several experiments to one Excel workbook | **Data Export** → set filters (for example an Additive or a Researcher) → tick the experiments (**Select all shown** ticks every row listed; ticks survive changing the filters) → leave **Include whole series** on to bring each experiment's whole series, or untick it for just the ticked ones and their timepoint vials → **Export**. The page lists up to 500 matches; narrow the filters if it says "Showing N of M". An export is limited to 500 experiments after series expansion |
-| Attach an external analysis file | Open an experiment → **Analysis** tab → Add Analysis |
+| Attach an external analysis file | Open an experiment → **XRD** tab → Add Analysis |
 | Search for a sample | Navigate to **Samples**, use the search bar |
 | Add a new user (admin only) | Run `python scripts/manage_users.py create <email> <password> <display_name>` on the lab PC, then `approve <request_id>` |
