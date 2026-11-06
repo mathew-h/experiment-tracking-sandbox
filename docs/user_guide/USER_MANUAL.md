@@ -44,7 +44,7 @@ A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`,
 
 **Run page.** Click a run to open it. The header shows the rig, the ONGOING segment, cumulative H₂ and pore volumes to date. Below it:
 
-- **Segments:** one row per segment, with a link to its experiment page, an editable status, an inline description, **Rename**, and the pore volume.
+- **Segments:** one row per segment, with a link to its experiment page, an editable status, an inline description and **Rename**. Pore volume is set from **Data checks** or on each experiment's Conditions tab.
 - **Samples:** every sample across all segments in time order. **Cum. day** is the cumulative day since the run started. A flow rate of 0 shows a **HOLD** badge. Blanks and bypass samples sit in a separate **Side samples** section with no cumulative columns. Click a row to edit it.
 - **Cleanup:** one line per data problem the run has (several roots, several ONGOING segments, missing pore volume or description, samples with no flow rate), each with its fix. The segment's ID sits beside each per-segment control. **Set pore volume for all segments** writes one value to every segment that lacks it.
 
