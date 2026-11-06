@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies.db import get_db
 from backend.api.schemas.core_floods import (
-    CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
+    CoreFloodIcpRow, CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
     CoreFloodSampleUpdate,
 )
 from backend.auth.firebase_auth import FirebaseUser, verify_firebase_token
@@ -55,6 +55,16 @@ def update_core_flood_sample(
     if not rows:
         raise HTTPException(status_code=404, detail="Sample is not a primary timepoint")
     return CoreFloodSample(**svc.attach_notes(db, rows)[0])
+
+
+@router.get("/{base_id}/icp", response_model=list[CoreFloodIcpRow])
+def get_core_flood_run_icp(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[CoreFloodIcpRow]:
+    """ICP-OES readings (ppm) for the run's samples, in view order."""
+    return _translate(lambda: svc.get_run_icp(db, base_id))
 
 
 @router.get("/{base_id}", response_model=CoreFloodRun)

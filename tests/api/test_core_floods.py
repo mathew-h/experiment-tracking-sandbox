@@ -707,3 +707,52 @@ def test_list_q_matches_description(client, db_session, reporting_views):
     _cf_experiment(db_session, "CF_902", date=_d(1), description="Other")
     items = client.get("/api/core-floods", params={"scope": "all", "q": "tuscarora"}).json()
     assert [i["base_id"] for i in items] == ["CF_901"]
+
+
+# ---- GET /api/core-floods/{base_id}/icp (issue #140 Task 3) ----
+
+from database.models.results import ICPResults  # noqa: E402
+
+
+def _icp(db, result, **elements):
+    db.add(ICPResults(result_id=result.id, **elements))
+    db.flush()
+
+
+def test_icp_rows_for_run(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFI_001", date=_d(1))
+    with_icp = _sample(db_session, exp, 1.0, date=_d(5))
+    _sample(db_session, exp, 2.0, date=_d(6))
+    _icp(db_session, with_icp, fe=12.4, ca=210, cu=None)
+    body = client.get("/api/core-floods/CFI_001/icp").json()
+    assert len(body) == 1
+    row = body[0]
+    assert row["result_id"] == with_icp.id
+    assert row["experiment_id"] == "CFI_001"
+    assert row["is_variant"] is False
+    assert row["cumulative_time_post_reaction_days"] == 1.0
+    assert datetime.fromisoformat(row["sample_date"]) == _d(5)
+    assert row["elements"] == {"fe": 12.4, "ca": 210.0}
+
+
+def test_icp_rows_include_variants_flagged(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_901")
+    _cf_experiment(db_session, "CF_901-2")
+    bypass = _cf_experiment(db_session, "CF_901-2_Bypass1")
+    res = _sample(db_session, bypass, 1.0)
+    _icp(db_session, res, fe=1.5)
+    body = client.get("/api/core-floods/CF_901/icp").json()
+    assert [r["experiment_id"] for r in body] == ["CF_901-2_Bypass1"]
+    assert body[0]["is_variant"] is True
+
+
+def test_icp_unknown_run_404(client, db_session, reporting_views):
+    assert client.get("/api/core-floods/NOPE_998/icp").status_code == 404
+
+
+def test_icp_run_without_icp_returns_empty_list(client, db_session, reporting_views):
+    exp = _cf_experiment(db_session, "CFI_002")
+    _sample(db_session, exp, 1.0)
+    resp = client.get("/api/core-floods/CFI_002/icp")
+    assert resp.status_code == 200
+    assert resp.json() == []

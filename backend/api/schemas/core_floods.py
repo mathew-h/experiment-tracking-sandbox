@@ -137,3 +137,13 @@ class CoreFloodSampleUpdate(_CoreFloodSampleFields):
         if v is None:
             raise ValueError("may be omitted but not null")
         return v
+
+
+class CoreFloodIcpRow(BaseModel):
+    """One sample's ICP-OES reading (non-null fixed elements only, ppm)."""
+    result_id: int
+    experiment_id: str
+    is_variant: bool
+    cumulative_time_post_reaction_days: Optional[float] = None
+    sample_date: Optional[datetime] = None
+    elements: dict[str, float]

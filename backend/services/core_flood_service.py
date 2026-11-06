@@ -16,7 +16,9 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 import backend.services.calculations  # noqa: F401 — registers @register decorators
+from backend.api.schemas.results import ICP_ELEMENTS
 from backend.api.schemas.core_floods import (
+    CoreFloodIcpRow,
     CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
     CoreFloodSampleUpdate, CoreFloodSegment, CoreFloodWarning,
 )
@@ -234,6 +236,29 @@ def get_run(db: Session, base_id: str) -> CoreFloodRun:
         samples=[CoreFloodSample.model_validate(r) for r in attach_notes(db, samples)],
         warnings=compute_warnings(segments, samples),
     )
+
+
+def get_run_icp(db: Session, base_id: str) -> list[CoreFloodIcpRow]:
+    """ICP-OES readings for a run's samples, in view order; samples without ICP are omitted."""
+    if not _load_segments(db, base_id).get(base_id):
+        raise CoreFloodNotFound(base_id)
+    cols = ", ".join(f'i."{e}" AS "icp_{e}"' for e in ICP_ELEMENTS)
+    sql = (
+        "SELECT v.result_id, v.experiment_id, v.is_variant, "
+        "v.cumulative_time_post_reaction_days, v.sample_date, " + cols +
+        " FROM v_core_flood_samples v JOIN icp_results i ON i.result_id = v.result_id"
+        " WHERE v.run_base_id = :base_id"
+        " ORDER BY v.cumulative_time_post_reaction_days NULLS LAST, v.result_id")
+    out: list[CoreFloodIcpRow] = []
+    for r in db.execute(text(sql), {"base_id": base_id}).mappings():
+        out.append(CoreFloodIcpRow(
+            result_id=r["result_id"], experiment_id=r["experiment_id"],
+            is_variant=r["is_variant"],
+            cumulative_time_post_reaction_days=r["cumulative_time_post_reaction_days"],
+            sample_date=r["sample_date"],
+            elements={e: float(r[f"icp_{e}"]) for e in ICP_ELEMENTS
+                      if r[f"icp_{e}"] is not None}))
+    return out
 
 
 def list_runs(

@@ -756,6 +756,7 @@ Issue #133. A **run** is every Core Flood experiment sharing a `base_experiment_
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/core-floods` | List runs, active first. Query: `scope` (`active` default, or `all`), `q` |
+| GET | `/api/core-floods/{base_id}/icp` | ICP-OES readings (ppm) for the run's samples, in view order |
 | GET | `/api/core-floods/{base_id}` | One run: segments, view-derived samples, warnings |
 | POST | `/api/core-floods/{experiment_id}/samples` | Add one sample (result + scalar rows) to a Core Flood experiment. 201 |
 | PATCH | `/api/core-floods/samples/{result_id}` | Edit one sample |
@@ -783,6 +784,12 @@ Returns 404 when no Core Flood experiment has that base ID.
 | `missing_pore_volume` | a non-variant segment has no `pore_volume_mL` | those segments |
 | `missing_description` | a segment has no description note | those segments |
 | `sample_missing_flow_rate` | a non-variant sample has NULL `flow_rate_mL_min` | the experiments owning those samples |
+
+### GET /api/core-floods/{base_id}/icp
+
+ICP-OES readings for the run's samples (issue #140), in `v_core_flood_samples` order (cumulative day, undated last, then `result_id`). Returns 404 when no Core Flood experiment has that base ID. A sample with no `icp_results` row is omitted, so a run without ICP returns `[]`. Variant samples are included and flagged.
+
+Row fields: `result_id`, `experiment_id`, `is_variant`, `cumulative_time_post_reaction_days`, `sample_date`, `elements`: a map of lowercase element symbol (the fixed `ICP_ELEMENTS` columns) to ppm as a float. NULL elements are omitted, so `elements` holds only measured values.
 
 ### POST /api/core-floods/{experiment_id}/samples
 
