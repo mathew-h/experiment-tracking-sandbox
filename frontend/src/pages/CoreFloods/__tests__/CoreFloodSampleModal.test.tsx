@@ -324,6 +324,7 @@ describe('CoreFloodSampleModal — regrouped form', () => {
 
   it('blocks save when pressures have no test rate', async () => {
     renderModal({ samples: [sample({ flow_rate_mL_min: 0 })] })
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
     await userEvent.type(screen.getByLabelText(/Inlet pressure/), '1520')
     await submit()
     expect(
@@ -407,5 +408,21 @@ describe('CoreFloodSampleModal — legacy pressure rows', () => {
     await submit()
     expect(screen.getByText('Enter the test flow rate used for these pressures')).toBeInTheDocument()
     expect(updateSample).not.toHaveBeenCalled()
+  })
+})
+
+describe('CoreFloodSampleModal — hold derived from flow', () => {
+  it('create after a hold sample opens with Hold checked and flow disabled', () => {
+    renderModal({ samples: [sample({ flow_rate_mL_min: 0 })] })
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
+    expect(screen.getByLabelText('Flow rate (mL/min)')).toBeDisabled()
+  })
+
+  it('typing 0 into flow checks Hold', async () => {
+    renderModal()
+    const flow = screen.getByLabelText('Flow rate (mL/min)')
+    await userEvent.clear(flow)
+    await userEvent.type(flow, '0')
+    expect(screen.getByLabelText('Hold since last sample')).toBeChecked()
   })
 })

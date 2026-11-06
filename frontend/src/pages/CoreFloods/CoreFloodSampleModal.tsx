@@ -97,9 +97,10 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
   const noteChanged = noteText.trim() !== initialNote.trim()
   const firstNoteId = editing ? resultNoteOf(editing)?.id : undefined
   const otherNotes = editing ? editing.notes.filter((n) => n.id !== firstNoteId) : []
-  const [hold, setHold] = useState(
-    () => initial.flow_rate_mL_min.trim() !== '' && Number(initial.flow_rate_mL_min) === 0,
-  )
+  const isHoldFlow = (v: string) => v.trim() !== '' && Number(v) === 0
+  const hold = isHoldFlow(form.flow_rate_mL_min)
+  // Locked only by the checkbox (or an initial hold), so typing "0." on the way to "0.5" never traps the input.
+  const [flowLocked, setFlowLocked] = useState(() => isHoldFlow(form.flow_rate_mL_min))
   const [storedFlow, setStoredFlow] = useState('')
   const permRef = useRef<HTMLInputElement>(null)
   const [errors, setErrors] = useState<Errors>({})
@@ -150,7 +151,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
   }
 
   function onHoldChange(checked: boolean) {
-    setHold(checked)
+    setFlowLocked(checked)
     setErrors((e) => ({ ...e, flow_rate_mL_min: undefined }))
     if (checked) {
       setStoredFlow(form.flow_rate_mL_min)
@@ -251,7 +252,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
         inputMode={f.kind === 'date' ? undefined : 'decimal'}
         value={form[key]}
         onChange={(e) => onFieldChange(key, e.target.value)}
-        disabled={(isDay && !!editing) || (isFlow && hold)}
+        disabled={(isDay && !!editing) || (isFlow && flowLocked)}
         error={errors[key]}
         hint={isDay ? dayHint : f.help}
       />
