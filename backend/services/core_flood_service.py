@@ -22,6 +22,7 @@ from backend.api.schemas.core_floods import (
     CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
     CoreFloodSampleUpdate, CoreFloodSegment, CoreFloodWarning,
 )
+from backend.services import notes as notes_service
 from backend.services.calculations.registry import recalculate
 from backend.services.workdays import LAB_TZ
 from backend.services.result_merge_utils import (
@@ -29,7 +30,6 @@ from backend.services.result_merge_utils import (
 )
 from database.models import ModificationsLog
 from database.models.conditions import ExperimentalConditions
-from backend.services import notes as notes_service
 from database.models.enums import ExperimentStatus, NoteType
 from database.models.experiments import Experiment, ExperimentNotes
 from database.models.results import ExperimentalResults, ScalarResults
@@ -349,14 +349,14 @@ def _apply_result_note(
 
     Observation and modification notes are never touched. Audits only a change.
     """
-    cleaned = notes_service._clean(text)
+    cleaned = text.strip() if text is not None else ""
     first = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.result_id == result.id,
                ExperimentNotes.note_type == NoteType.result_note)
         .order_by(ExperimentNotes.id).limit(1)
     ).scalar_one_or_none()
-    if cleaned is None:
+    if not cleaned:
         if first is None:
             return
         old = first.note_text
@@ -373,9 +373,13 @@ def _apply_result_note(
             return
         old = first.note_text
         first.note_text = cleaned
-        notes_service.release_upload_slot(first, user_email)
-        _audit(db, exp, "experiment_notes", "update", {"note_text": old},
-               {"note_text": cleaned}, user_email)
+        previous = notes_service.release_upload_slot(first, user_email)
+        old_vals: dict = {"note_text": old}
+        new_vals: dict = {"note_text": cleaned}
+        if previous is not None and previous != user_email:
+            old_vals["created_by"] = previous
+            new_vals["created_by"] = user_email
+        _audit(db, exp, "experiment_notes", "update", old_vals, new_vals, user_email)
     db.flush()
 
 
@@ -439,7 +443,7 @@ def create_sample(
             **{k: v for k, v in result_values.items() if v is not None}}, user_email)
     _audit(db, exp, "scalar_results", "create", None,
            {k: v for k, v in scalar_values.items() if v is not None}, user_email)
-    if notes_service._clean(payload.result_note) is not None:
+    if payload.result_note is not None and payload.result_note.strip():
         _apply_result_note(db, exp, result, payload.result_note, user_email)
     db.flush()
     log.info("core_flood_sample_created", experiment_id=experiment_id, result_id=result.id)

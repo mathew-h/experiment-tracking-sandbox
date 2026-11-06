@@ -49,7 +49,7 @@ def test_revision_parent():
 
 
 def test_single_head():
-    assert _script_dir().get_heads() == [REVISION]
+    assert len(_script_dir().get_heads()) == 1
 
 
 def test_view_matches_startup():

@@ -756,3 +756,67 @@ def test_icp_run_without_icp_returns_empty_list(client, db_session, reporting_vi
     resp = client.get("/api/core-floods/CFI_002/icp")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# --- Issue #140 follow-up: result note edge cases --------------------------------
+
+from backend.services import notes as notes_service  # noqa: E402
+
+
+def test_patch_result_note_null_deletes(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_011")
+    _note(db_session, exp, rid, NoteType.result_note, "gone soon", _USER)
+    resp = _patch(client, rid, result_note=None)
+    assert resp.status_code == 200, resp.text
+    assert _result_notes(db_session, rid, NoteType.result_note) == []
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.modification_type == "delete"
+
+
+def test_patch_result_note_whitespace_deletes(client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_012")
+    _note(db_session, exp, rid, NoteType.result_note, "gone soon", _USER)
+    resp = _patch(client, rid, result_note="   ")
+    assert resp.status_code == 200, resp.text
+    assert _result_notes(db_session, rid, NoteType.result_note) == []
+
+
+def test_patch_result_note_text_nan_is_kept(client, db_session, reporting_views):
+    _, rid = _seed_posted_sample(client, db_session, "CFN_013")
+    resp = _patch(client, rid, result_note="nan")
+    assert resp.status_code == 200, resp.text
+    (rn,) = _result_notes(db_session, rid, NoteType.result_note)
+    assert rn.note_text == "nan"
+
+
+def test_patch_reassigns_parser_signed_result_note_and_audits_signer(
+        client, db_session, reporting_views):
+    exp, rid = _seed_posted_sample(client, db_session, "CFN_014")
+    tag = sorted(notes_service.UPLOAD_SLOT_SIGNERS)[0]
+    note = _note(db_session, exp, rid, NoteType.result_note, "parsed", tag)
+    note_id = note.id
+    resp = _patch(client, rid, result_note="edited")
+    assert resp.status_code == 200, resp.text
+    (rn,) = _result_notes(db_session, rid, NoteType.result_note)
+    assert rn.id == note_id
+    assert rn.note_text == "edited"
+    assert rn.created_by == _USER
+    (audit,) = _notes_audit(db_session, exp)
+    assert audit.old_values == {"note_text": "parsed", "created_by": tag}
+    assert audit.new_values == {"note_text": "edited", "created_by": _USER}
+
+
+def test_list_item_description_falls_back_when_root_has_none(
+        client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_910", date=_d(1), description=None)
+    _cf_experiment(db_session, "CF_910-2", date=_d(2), description="child desc")
+    (item,) = client.get("/api/core-floods", params={"scope": "all", "q": "CF_910"}).json()
+    assert item["description"] == "child desc"
+
+
+def test_list_item_description_none_when_no_segment_has_one(
+        client, db_session, reporting_views):
+    _cf_experiment(db_session, "CF_911", date=_d(1), description=None)
+    _cf_experiment(db_session, "CF_911-2", date=_d(2), description=None)
+    (item,) = client.get("/api/core-floods", params={"scope": "all", "q": "CF_911"}).json()
+    assert item["description"] is None
