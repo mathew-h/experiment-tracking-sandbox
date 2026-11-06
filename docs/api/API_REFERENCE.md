@@ -281,7 +281,7 @@ Batch-create lettered replicates copying a base experiment's setup.
 **Export all** (issue #141). Returns one Excel workbook (`StreamingResponse`,
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`) covering the
 experiment's **lineage**: every experiment sharing its `base_experiment_id` (the
-experiment alone when it has none), ordered by experiment date then ID. Any member's
+experiment alone when it has none), ordered by experiment date (undated last), then timepoint stem, then `-t` day ascending (so `-t3` precedes `-t20`), then ID. Any member's
 ID gives the same workbook, so `CF_027-2` and `CF_027` are interchangeable. Side
 samples (`<parent>_<Text>` children: blanks, bypass) are included and flagged
 `is_variant`. A lettered replicate shares its base ID, so exporting `SERUM_001a`
@@ -322,12 +322,12 @@ Declared before `/{experiment_id}/export`, so `export` is never read as an exper
 { "experiment_ids": ["CF_027", "SERUM_X_001-t1"], "include_series": true }
 ```
 
-`experiment_ids`: 1 to 500 strings (duplicates are ignored). `include_series`: boolean, default `true`.
+`experiment_ids`: at least 1 string (duplicates are ignored; the only size limit is the 500-experiment cap below). `include_series`: boolean, default `true`.
 
 **Expansion rules** (`resolve_selection`):
 - A picked ID always brings every vial of its timepoint stem (`SERUM_X_001-t1` also brings `-t3`, `-t7`).
 - With `include_series` true, it also brings every experiment sharing the `base_experiment_id` of any of those (the whole lineage, replicate set and side samples).
-- Members are ordered series by series (`_series_order`). Side samples are flagged `is_variant`.
+- Members are ordered series by series (`_series_order`): series by base ID; within a series by experiment date (undated last), then timepoint stem, then `-t` day ascending (numeric, so `-t3` precedes `-t20`). Every tab follows this member order. Side samples are flagged `is_variant`.
 - At most **500** experiments after expansion (`EXPORT_MAX_EXPERIMENTS`).
 
 - **Filename:** `Content-Disposition: attachment; filename="data_export_<YYYY-MM-DD>.xlsx"`, lab-local (America/New_York) date.

@@ -8,9 +8,12 @@ interface ExportResultsTableProps {
   onToggleAll: () => void
 }
 
+/** Selection key: a collapsed vial row is identified by its stem, not the representative vial. */
+export const rowKey = (row: ExperimentListItem) => row.group_display_id ?? row.experiment_id
+
 /** Checkbox table of experiments matching the export filters. */
 export function ExportResultsTable({ rows, selected, onToggle, onToggleAll }: ExportResultsTableProps) {
-  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.experiment_id))
+  const allSelected = rows.length > 0 && rows.every((r) => selected.has(rowKey(r)))
 
   return (
     <Table>
@@ -42,7 +45,7 @@ export function ExportResultsTable({ rows, selected, onToggle, onToggleAll }: Ex
           rows.map((row) => {
             const label = row.group_display_id ?? row.experiment_id
             const vials = row.vial_count ?? 1
-            const isSelected = selected.has(row.experiment_id)
+            const isSelected = selected.has(rowKey(row))
             return (
               <TableRow key={row.experiment_id} className={isSelected ? 'bg-red-500/5' : ''}>
                 <Td>

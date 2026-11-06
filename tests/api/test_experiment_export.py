@@ -520,3 +520,36 @@ def test_selection_summary(client, db_session, reporting_views):
     assert summary["Exported by"] == "test@addisenergy.com"
     assert summary["Rows: Experiments"] == 4
     assert summary["Rows: Results"] == 5
+
+
+def test_vials_sort_by_timepoint_not_text(client, db_session, reporting_views):
+    same_day = _lab(2026, 10, 1)
+    for exp_id, day in (("SERUM_Y_001-t20", 20.0), ("SERUM_Y_001-t1", 1.0),
+                        ("SERUM_Y_001-t3", 3.0)):
+        exp = _experiment(db_session, exp_id, date_=same_day,
+                          experiment_type="HPHT")
+        assert exp.base_experiment_id == "SERUM_Y_001"
+        _sample(db_session, exp, day, measured=_lab(2026, 10, 3))
+    want = ["SERUM_Y_001-t1", "SERUM_Y_001-t3", "SERUM_Y_001-t20"]
+
+    _resp, wb = _post(client, ["SERUM_Y_001-t1"], include_series=False)
+    _h, exps = _table(wb["Experiments"])
+    assert [r["Experiment ID"] for r in exps] == want
+    _h, rows = _table(wb["Results"])
+    assert [r["Experiment ID"] for r in rows] == want
+
+    _resp, wb = _get(client, "SERUM_Y_001-t3")
+    _h, rows = _table(wb["Results"])
+    assert [r["Experiment ID"] for r in rows] == want
+    _h, cond = _table(wb["Conditions"])
+    assert [r["Experiment ID"] for r in cond] == want
+
+
+def test_selection_more_than_500_ids_gets_string_detail(
+        client, db_session, reporting_views):
+    resp = client.post("/api/experiments/export", json={
+        "experiment_ids": [f"NOPE_{i}" for i in range(501)]})
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert detail.startswith("Unknown experiment IDs: ")

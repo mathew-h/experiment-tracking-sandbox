@@ -3,7 +3,7 @@ import { useMutation, useQuery, keepPreviousData } from '@tanstack/react-query'
 import { experimentsApi, type ExperimentListItem } from '@/api/experiments'
 import { Button, PageSpinner, useToast } from '@/components/ui'
 import { EMPTY_FILTERS, ExportFilters, type ExportFilterValues } from './ExportFilters'
-import { ExportResultsTable } from './ExportResultsTable'
+import { ExportResultsTable, rowKey } from './ExportResultsTable'
 
 const SEARCH_DEBOUNCE_MS = 300
 const LIST_LIMIT = 500
@@ -19,7 +19,8 @@ export function DataExportPage() {
     return () => clearTimeout(t)
   }, [filters])
 
-  // Keyed by experiment_id and independent of the filters, so a selection survives
+  // Keyed by the row's display id (a collapsed vial row's stem, so a changed
+  // representative vial is still the same row) and independent of the filters, so a selection survives
   // narrowing or changing the filter bar.
   const [selected, setSelected] = useState<Map<string, ExperimentListItem>>(new Map())
   const [includeSeries, setIncludeSeries] = useState(true)
@@ -44,7 +45,10 @@ export function DataExportPage() {
   })
 
   const mutation = useMutation({
-    mutationFn: () => experimentsApi.exportSelection([...selected.keys()], includeSeries),
+    mutationFn: () => experimentsApi.exportSelection(
+      [...selected.values()].map((r) => r.experiment_id),
+      includeSeries,
+    ),
     onSuccess: (filename) => success('Export downloaded', filename),
     onError: (err: Error) => error('Export failed', err.message),
   })
@@ -54,18 +58,19 @@ export function DataExportPage() {
   const toggle = (row: ExperimentListItem) =>
     setSelected((prev) => {
       const next = new Map(prev)
-      if (next.has(row.experiment_id)) next.delete(row.experiment_id)
-      else next.set(row.experiment_id, row)
+      const key = rowKey(row)
+      if (next.has(key)) next.delete(key)
+      else next.set(key, row)
       return next
     })
 
   const toggleAll = () =>
     setSelected((prev) => {
       const next = new Map(prev)
-      if (rows.length > 0 && rows.every((r) => next.has(r.experiment_id))) {
-        rows.forEach((r) => next.delete(r.experiment_id))
+      if (rows.length > 0 && rows.every((r) => next.has(rowKey(r)))) {
+        rows.forEach((r) => next.delete(rowKey(r)))
       } else {
-        rows.forEach((r) => next.set(r.experiment_id, r))
+        rows.forEach((r) => next.set(rowKey(r), r))
       }
       return next
     })

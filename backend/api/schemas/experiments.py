@@ -346,5 +346,5 @@ class ExperimentDeletedResponse(BaseModel):
 
 class ExperimentExportRequest(BaseModel):
     """POST /api/experiments/export (issue #142)."""
-    experiment_ids: list[str] = Field(min_length=1, max_length=500)
+    experiment_ids: list[str] = Field(min_length=1)
     include_series: bool = True

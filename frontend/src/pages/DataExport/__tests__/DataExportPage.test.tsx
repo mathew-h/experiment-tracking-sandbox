@@ -122,6 +122,24 @@ describe('DataExportPage', () => {
     )
   })
 
+  it('counts a collapsed row once when its representative changes', async () => {
+    renderPage()
+    await userEvent.click(await screen.findByLabelText('Select SERUM_X_001'))
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
+    vi.mocked(experimentsApi.list).mockResolvedValue(
+      page([item({ ...SERUM, experiment_id: 'SERUM_X_001-t3' })]),
+    )
+    await userEvent.type(screen.getByLabelText('Experiment ID'), 'SERUM')
+    await waitFor(() =>
+      expect(experimentsApi.list).toHaveBeenCalledWith(
+        expect.objectContaining({ search: 'SERUM' }),
+      ),
+    )
+    await waitFor(() => expect(screen.queryByText('CF_027')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('Select SERUM_X_001')).toBeChecked()
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
+  })
+
   it('disables Export with nothing selected and Clear selection resets', async () => {
     renderPage()
     await screen.findByText('CF_027')

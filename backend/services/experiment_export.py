@@ -261,11 +261,17 @@ def _load_members(db: Session, exps: list[Experiment]) -> list[Member]:
 
 
 def _series_order(members: list[Member]) -> list[Member]:
-    """Series by base ID, then experiment date (undated last), then ID, so a
-    side sample such as CF_027-2_Bypass1 follows its parent segment when they
-    share a start date."""
-    return sorted(members, key=lambda m: (
-        m.base_id, m.date is None, m.date or _EPOCH, m.experiment_id))
+    """Series by base ID, then experiment date (undated last), then ID stem and
+    -t day (numeric, so -t3 precedes -t20), so a side sample such as
+    CF_027-2_Bypass1 follows its parent segment when they share a start date."""
+    def key(m: Member):
+        stem, tp = split_timepoint_token(m.experiment_id)
+        # Vials share the text key "<stem>-t" so only their day orders them;
+        # every other ID keeps its plain text order (X-2 before X-t1).
+        text_key = m.experiment_id if tp is None else f"{stem}-t"
+        return (m.base_id, m.date is None, m.date or _EPOCH, text_key,
+                tp is not None, tp or 0, m.experiment_id)
+    return sorted(members, key=key)
 
 
 def _load_experiments(db: Session, clause) -> list[Experiment]:
