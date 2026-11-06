@@ -54,7 +54,7 @@ def update_core_flood_sample(
     # Python Core Flood rule (is_core_flood) diverging.
     if not rows:
         raise HTTPException(status_code=404, detail="Sample is not a primary timepoint")
-    return CoreFloodSample(**rows[0])
+    return CoreFloodSample(**svc.attach_notes(db, rows)[0])
 
 
 @router.get("/{base_id}", response_model=CoreFloodRun)
@@ -83,4 +83,5 @@ def create_core_flood_sample(
     rid = _translate(
         lambda: svc.create_sample(db, experiment_id, payload, current_user.email))
     db.commit()
-    return CoreFloodSample(**svc.fetch_samples(db, result_id=rid)[0])
+    rows = svc.attach_notes(db, svc.fetch_samples(db, result_id=rid))
+    return CoreFloodSample(**rows[0])

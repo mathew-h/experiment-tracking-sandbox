@@ -31,6 +31,14 @@ class CoreFloodSegment(BaseModel):
     reactor_slot: Optional[str] = None
 
 
+class CoreFloodSampleNote(BaseModel):
+    """A result-scoped note shown on a sample (never the experiment description)."""
+    id: int
+    note_type: Literal["observation", "result_note", "modification"]
+    note_text: str
+    created_by: Optional[str] = None
+
+
 class CoreFloodSample(BaseModel):
     """One v_core_flood_samples row; field names are the view's column names."""
     model_config = ConfigDict(from_attributes=True)
@@ -49,6 +57,7 @@ class CoreFloodSample(BaseModel):
     nitrogen_flow_rate_mL_min: Optional[float] = None
     inlet_pressure_psi: Optional[float] = None
     outlet_pressure_psi: Optional[float] = None
+    permeability_flow_rate_mL_min: Optional[float] = None
     sampling_volume_mL: Optional[float] = None
     h2_concentration: Optional[float] = None
     gas_sampling_volume_ml: Optional[float] = None
@@ -65,6 +74,7 @@ class CoreFloodSample(BaseModel):
     cumulative_h2_grams_per_ton: Optional[float] = None
     h2_grams_per_ton_per_day: Optional[float] = None
     is_hold_interval: Optional[bool] = None
+    notes: list[CoreFloodSampleNote] = []
 
 
 class CoreFloodRun(BaseModel):
@@ -76,6 +86,7 @@ class CoreFloodRun(BaseModel):
 
 class CoreFloodRunListItem(BaseModel):
     base_id: str
+    description: Optional[str] = None
     segment_count: int
     ongoing_experiment_ids: list[str]
     rig: Optional[str] = None
@@ -101,6 +112,9 @@ class _CoreFloodSampleFields(BaseModel):
     nitrogen_flow_rate_mL_min: Optional[float] = None
     inlet_pressure_psi: Optional[float] = None
     outlet_pressure_psi: Optional[float] = None
+    permeability_flow_rate_mL_min: Optional[float] = Field(None, gt=0)
+    # Edits the sample's first result_note; blank deletes it (see core_flood_service).
+    result_note: Optional[str] = Field(None, max_length=2000)
 
 
 class CoreFloodSampleCreate(_CoreFloodSampleFields):
