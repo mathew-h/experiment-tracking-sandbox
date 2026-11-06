@@ -1,5 +1,6 @@
 import type {
   CoreFloodSample,
+  CoreFloodSampleNote,
   CoreFloodSampleCreate,
   CoreFloodSampleUpdate,
 } from '@/api/coreFloods'
@@ -13,6 +14,7 @@ export type SampleFieldKey =
   | 'sample_tube_number'
   | 'flow_rate_mL_min'
   | 'nitrogen_flow_rate_mL_min'
+  | 'permeability_flow_rate_mL_min'
   | 'inlet_pressure_psi'
   | 'outlet_pressure_psi'
   | 'sampling_volume_mL'
@@ -67,9 +69,15 @@ export const SAMPLE_FIELDS: readonly SampleFieldDef[] = [
     unit: 'mL/min',
     required: true,
     min: 0,
-    help: 'Rate since the previous sample. Enter 0 for a hold.',
+    help: 'Rate since the previous sample.',
   }),
   numberField('nitrogen_flow_rate_mL_min', 'N₂ flow', { unit: 'mL/min' }),
+  numberField('permeability_flow_rate_mL_min', 'Permeability test flow rate', {
+    unit: 'mL/min',
+    min: 0,
+    minExclusive: true,
+    help: 'Rate while pressures were read. Marks this sample as a permeability test.',
+  }),
   numberField('inlet_pressure_psi', 'Inlet pressure', { unit: 'psi' }),
   numberField('outlet_pressure_psi', 'Outlet pressure', { unit: 'psi' }),
   numberField('sampling_volume_mL', 'Liquid sample volume', { unit: 'mL', min: 0 }),
@@ -84,6 +92,18 @@ export const SAMPLE_FIELDS: readonly SampleFieldDef[] = [
   numberField('final_ph', 'pH'),
   numberField('final_conductivity_mS_cm', 'Conductivity', { unit: 'mS/cm' }),
 ]
+
+export const SAMPLE_GROUPS: Record<'gc' | 'solution' | 'coreflood', readonly SampleFieldKey[]> = {
+  gc: ['gc_run_date', 'h2_concentration', 'gas_sampling_volume_ml', 'gas_sampling_pressure_MPa'],
+  solution: ['sampling_volume_mL', 'final_ph', 'final_conductivity_mS_cm'],
+  coreflood: [
+    'flow_rate_mL_min',
+    'permeability_flow_rate_mL_min',
+    'inlet_pressure_psi',
+    'outlet_pressure_psi',
+    'nitrogen_flow_rate_mL_min',
+  ],
+}
 
 export const FIELD_BY_KEY = Object.fromEntries(
   SAMPLE_FIELDS.map((f) => [f.key, f]),
@@ -105,22 +125,70 @@ export function formFromSample(s: CoreFloodSample): SampleForm {
   return form
 }
 
-/** A new sample usually keeps the previous one's flow and pressures. */
+/** A new sample keeps the previous flow and N₂ flow. Pressures are only recorded
+ *  when permeability is tested, so they never carry forward. */
 export function prefillFromPrevious(
   form: SampleForm,
   prev: CoreFloodSample | undefined,
 ): SampleForm {
   if (!prev) return form
   const next = { ...form }
-  for (const key of [
-    'flow_rate_mL_min',
-    'nitrogen_flow_rate_mL_min',
-    'inlet_pressure_psi',
-    'outlet_pressure_psi',
-  ] as const) {
+  for (const key of ['flow_rate_mL_min', 'nitrogen_flow_rate_mL_min'] as const) {
     next[key] = FIELD_BY_KEY[key].fromWire(prev[key])
   }
   return next
+}
+
+/** Sets a pressure. A non-blank pressure fills a blank, untouched test rate with
+ *  the current non-zero flow rate. */
+export function withPressure(
+  form: SampleForm,
+  key: 'inlet_pressure_psi' | 'outlet_pressure_psi',
+  value: string,
+  opts: { permEdited: boolean },
+): SampleForm {
+  const next = { ...form, [key]: value }
+  const flow = form.flow_rate_mL_min.trim()
+  if (
+    value.trim() !== '' &&
+    !opts.permEdited &&
+    next.permeability_flow_rate_mL_min.trim() === '' &&
+    flow !== '' &&
+    Number(flow) !== 0 &&
+    !Number.isNaN(Number(flow))
+  ) {
+    next.permeability_flow_rate_mL_min = form.flow_rate_mL_min.trim()
+  }
+  return next
+}
+
+/** Pressures and the test rate go together: either both or neither. */
+export function validatePermeability(form: SampleForm): Partial<Record<SampleFieldKey, string>> {
+  const errors: Partial<Record<SampleFieldKey, string>> = {}
+  const hasPressure =
+    form.inlet_pressure_psi.trim() !== '' || form.outlet_pressure_psi.trim() !== ''
+  const hasRate = form.permeability_flow_rate_mL_min.trim() !== ''
+  if (hasPressure && !hasRate) {
+    errors.permeability_flow_rate_mL_min = 'Enter the test flow rate used for these pressures'
+  } else if (hasRate && !hasPressure) {
+    errors.inlet_pressure_psi = 'Enter inlet or outlet pressure for this permeability test'
+  }
+  return errors
+}
+
+export function resultNoteOf(s: CoreFloodSample): CoreFloodSampleNote | undefined {
+  return s.notes.find((n) => n.note_type === 'result_note')
+}
+
+/** Result and observation texts in order, joined for a table cell. */
+export function noteSummary(s: CoreFloodSample): { text: string; hasModification: boolean } {
+  return {
+    text: s.notes
+      .filter((n) => n.note_type === 'result_note' || n.note_type === 'observation')
+      .map((n) => n.note_text)
+      .join(' · '),
+    hasModification: s.notes.some((n) => n.note_type === 'modification'),
+  }
 }
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/

@@ -22,6 +22,7 @@ const item = (over: Partial<CoreFloodRunListItem> = {}): CoreFloodRunListItem =>
   last_sample_date: '2026-11-03T00:00:00',
   latest_cumulative_h2_grams_per_ton: 12.3456,
   warning_count: 0,
+  description: null,
   ...over,
 })
 

@@ -73,6 +73,8 @@ const sample = (over: Partial<CoreFloodSample>): CoreFloodSample => ({
   cumulative_h2_grams_per_ton: 2.5,
   h2_grams_per_ton_per_day: 2.5,
   is_hold_interval: false,
+  permeability_flow_rate_mL_min: null,
+  notes: [],
   ...over,
 })
 

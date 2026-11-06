@@ -8,7 +8,11 @@ import {
   emptyForm,
   fmt,
   formFromSample,
+  noteSummary,
+  prefillFromPrevious,
   validateForm,
+  validatePermeability,
+  withPressure,
   withSampleDate,
 } from '../fields'
 
@@ -44,6 +48,8 @@ function sample(over: Partial<CoreFloodSample> = {}): CoreFloodSample {
     cumulative_h2_grams_per_ton: null,
     h2_grams_per_ton_per_day: null,
     is_hold_interval: null,
+    permeability_flow_rate_mL_min: null,
+    notes: [],
     ...over,
   }
 }
@@ -205,5 +211,70 @@ describe('fmt', () => {
     expect(fmt(NaN)).toBe('—')
     expect(fmt(0)).toBe('0')
     expect(fmt(1.23456)).toBe('1.235')
+  })
+})
+
+describe('permeability and notes', () => {
+  const base = () => ({ ...emptyForm(), flow_rate_mL_min: '0.05' })
+
+  it('prefill no longer copies pressures', () => {
+    const next = prefillFromPrevious(emptyForm(), sample({ flow_rate_mL_min: 0.1 }))
+    expect(next.inlet_pressure_psi).toBe('')
+    expect(next.flow_rate_mL_min).toBe('0.1')
+  })
+
+  it('typing a pressure fills the test rate from a non-zero flow', () => {
+    const f = withPressure(base(), 'inlet_pressure_psi', '1520', { permEdited: false })
+    expect(f.inlet_pressure_psi).toBe('1520')
+    expect(f.permeability_flow_rate_mL_min).toBe('0.05')
+  })
+
+  it('pressure does not fill the test rate on a hold or after the user edited it', () => {
+    const hold = withPressure({ ...base(), flow_rate_mL_min: '0' }, 'outlet_pressure_psi', '10', {
+      permEdited: false,
+    })
+    expect(hold.permeability_flow_rate_mL_min).toBe('')
+    const edited = withPressure(base(), 'inlet_pressure_psi', '10', { permEdited: true })
+    expect(edited.permeability_flow_rate_mL_min).toBe('')
+    const blank = withPressure(base(), 'inlet_pressure_psi', ' ', { permEdited: false })
+    expect(blank.permeability_flow_rate_mL_min).toBe('')
+  })
+
+  it('pressures without a test rate is an error', () => {
+    const e = validatePermeability({ ...base(), outlet_pressure_psi: '5' })
+    expect(e.permeability_flow_rate_mL_min).toBe('Enter the test flow rate used for these pressures')
+  })
+
+  it('test rate without pressures is an error', () => {
+    const e = validatePermeability({ ...base(), permeability_flow_rate_mL_min: '0.2' })
+    expect(e.inlet_pressure_psi).toBe('Enter inlet or outlet pressure for this permeability test')
+  })
+
+  it('both blank or both present is fine', () => {
+    expect(validatePermeability(base())).toEqual({})
+    expect(
+      validatePermeability({
+        ...base(),
+        permeability_flow_rate_mL_min: '0.2',
+        inlet_pressure_psi: '5',
+      }),
+    ).toEqual({})
+  })
+
+  it('permeability rate must be > 0', () => {
+    const e = validateForm({ ...base(), permeability_flow_rate_mL_min: '0' })
+    expect(e.permeability_flow_rate_mL_min).toBe('Must be > 0')
+  })
+
+  it('noteSummary joins result and observation notes and flags modifications', () => {
+    const n = (id: number, note_type: 'observation' | 'result_note' | 'modification', note_text: string) => ({
+      id,
+      note_type,
+      note_text,
+      created_by: null,
+    })
+    const s = sample({ notes: [n(1, 'result_note', 'clear'), n(2, 'observation', 'bubbles'), n(3, 'modification', 'edit')] })
+    expect(noteSummary(s)).toEqual({ text: 'clear · bubbles', hasModification: true })
+    expect(noteSummary(sample())).toEqual({ text: '', hasModification: false })
   })
 })

@@ -68,6 +68,8 @@ function sample(over: Partial<CoreFloodSample> = {}): CoreFloodSample {
     cumulative_h2_grams_per_ton: null,
     h2_grams_per_ton_per_day: null,
     is_hold_interval: false,
+    permeability_flow_rate_mL_min: null,
+    notes: [],
     ...over,
   }
 }
