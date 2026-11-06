@@ -224,6 +224,15 @@ describe('CoreFloodRunPage', () => {
     expect(seg).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('segments table has no pore volume column', async () => {
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: /^Segments/ }))
+    const region = screen.getByRole('region', { name: 'Segments' })
+    const headers = within(region).getAllByRole('columnheader').map((h) => h.textContent)
+    expect(headers).toEqual(['Segment', 'Status', 'Description'])
+    expect(within(region).queryByLabelText(/pore volume/i)).not.toBeInTheDocument()
+  })
+
   it('an ICP failure does not break the page', async () => {
     vi.mocked(coreFloodsApi.icp).mockRejectedValue(new Error('icp down'))
     renderPage()

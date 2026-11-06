@@ -2,12 +2,10 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CoreFloodSegment } from '@/api/coreFloods'
-import { conditionsApi } from '@/api/conditions'
 import { experimentsApi } from '@/api/experiments'
 import { Button, Input, Table, TableBody, TableHead, TableRow, Td, Th, useToast } from '@/components/ui'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { DescriptionEditor } from '@/pages/ExperimentDetail/DescriptionEditor'
-import { fmt } from './fields'
 import { SegmentStatusSelect } from './SegmentStatusSelect'
 import { invalidateCoreFloodWrites } from './useCoreFloodWrites'
 
@@ -126,77 +124,7 @@ function DescribeCell({ baseId, segment, onDone }: SegmentProps & { onDone: () =
   )
 }
 
-/** Click-to-edit pore volume; disabled when the segment has no conditions row. */
-function PoreVolumeCell({ baseId, segment }: SegmentProps) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  const qc = useQueryClient()
-  const { error: toastError } = useToast()
-
-  const value = Number(draft.trim())
-  const valid = draft.trim() !== '' && Number.isFinite(value) && value > 0
-
-  const mutation = useMutation({
-    mutationFn: (v: number) => conditionsApi.patch(segment.conditions_id as number, { pore_volume_mL: v }),
-    onSuccess: () => {
-      setEditing(false)
-      return invalidateCoreFloodWrites(qc, baseId, [segment.experiment_id])
-    },
-    onError: (err: Error) => toastError('Pore volume not saved', err.message),
-  })
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        aria-label={`Edit pore volume of ${segment.experiment_id}`}
-        title={segment.conditions_id == null ? 'No conditions row' : 'Click to edit'}
-        disabled={segment.conditions_id == null}
-        onClick={() => {
-          setDraft(segment.pore_volume_mL == null ? '' : String(segment.pore_volume_mL))
-          setEditing(true)
-        }}
-        className="font-mono-data text-xs text-ink-primary hover:text-red-300 disabled:text-ink-muted disabled:cursor-not-allowed"
-      >
-        {fmt(segment.pore_volume_mL)}
-      </button>
-    )
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <Input
-        type="number"
-        aria-label={`Pore volume of ${segment.experiment_id}`}
-        className="font-mono-data text-xs"
-        value={draft}
-        min={0}
-        step="any"
-        error={draft.trim() !== '' && !valid ? 'Must be greater than 0' : undefined}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') setEditing(false)
-          if (e.key === 'Enter' && valid && !mutation.isPending) mutation.mutate(value)
-        }}
-        autoFocus
-      />
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          size="xs"
-          disabled={!valid}
-          loading={mutation.isPending}
-          onClick={() => mutation.mutate(value)}
-        >
-          Save
-        </Button>
-        <Button variant="ghost" size="xs" onClick={() => setEditing(false)}>Cancel</Button>
-      </div>
-    </div>
-  )
-}
-
-/** The run's segments, with inline status, description, rename and pore volume edits. */
+/** The run's segments, with inline status, description and rename edits. */
 export function SegmentsTable({ baseId, segments, renaming, setRenaming, describing, setDescribing }: Props) {
   return (
     <Table>
@@ -205,7 +133,6 @@ export function SegmentsTable({ baseId, segments, renaming, setRenaming, describ
           <Th>Segment</Th>
           <Th>Status</Th>
           <Th>Description</Th>
-          <Th>Pore volume (mL)</Th>
         </tr>
       </TableHead>
       <TableBody>
@@ -254,9 +181,6 @@ export function SegmentsTable({ baseId, segments, renaming, setRenaming, describ
                   {seg.description ?? <span className="text-ink-muted">Add description</span>}
                 </button>
               )}
-            </Td>
-            <Td>
-              <PoreVolumeCell baseId={baseId} segment={seg} />
             </Td>
           </TableRow>
         ))}
