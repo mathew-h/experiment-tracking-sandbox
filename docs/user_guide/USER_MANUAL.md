@@ -32,6 +32,7 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 | **Bulk Uploads** (`/bulk-uploads`) | Accordion panel for uploading analytical data in bulk (solution chemistry, ICP-OES, XRD, pXRF, and more). See the [Bulk Uploads Guide](BULK_UPLOADS.md). |
 | **Samples** (`/samples`) | Browse and manage geological sample inventory. |
 | **Chemicals** (`/chemicals`) | Browse the reagent/compound inventory used in experiment conditions. |
+| **Data Export** (`/data-export`) | Filter experiments (status, type, ID, sample, reactor, description, additive, researcher, dates), tick any number, and download one Excel workbook for all of them. |
 | **Notes review** (`/notes/review`) | Global queue of notes flagged for review after the typed-notes migration. Filter by researcher, experiment, type or text; select rows (or every row reading the same text) and mark reviewed, retype, or delete them in one audited action. |
 
 ---
@@ -80,6 +81,7 @@ Experiments move through a defined lifecycle from creation to completion:
 | Read or write notes on an experiment | Open an experiment → **Notes** tab. Every note — experiment-level and timepoint-scoped — is one timeline, newest first, each with a type badge, a `T+N` chip (on a timepoint) or a date chip (a dated modification), and its author. Filter by type or "Review queue only". To add one, pick a type: an Observation may name a timepoint; a Result note must; a Modification needs a timepoint **or** a date (defaults to today); a Description has neither |
 | Change a note's type | Open an experiment → **Notes** tab → use the type dropdown on the note. Experiment-level notes can be Observation or Description; notes on a timepoint can be Observation, Modification or Result note; a dated note can be Observation, Modification or Description. Only one Description is allowed per experiment |
 | Export an experiment's data to Excel | Open an experiment (or a run on **Core Floods**) → **Export all** in the header. One workbook downloads with Results, Conditions, Additives, Notes and Summary tabs (plus Core Flood for core flood runs), covering the experiment and every segment and side sample in its series. Values are the same as the Power BI report |
+| Export several experiments to one Excel workbook | **Data Export** → set filters (for example an Additive or a Researcher) → tick the experiments (**Select all shown** ticks every row listed; ticks survive changing the filters) → leave **Include whole series** on to bring each experiment's whole series, or untick it for just the ticked ones and their timepoint vials → **Export**. The page lists up to 500 matches; narrow the filters if it says "Showing N of M". An export is limited to 500 experiments after series expansion |
 | Attach an external analysis file | Open an experiment → **Analysis** tab → Add Analysis |
 | Search for a sample | Navigate to **Samples**, use the search bar |
 | Add a new user (admin only) | Run `python scripts/manage_users.py create <email> <password> <display_name>` on the lab PC, then `approve <request_id>` |

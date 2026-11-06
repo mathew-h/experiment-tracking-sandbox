@@ -28,6 +28,7 @@ describe('AppLayout navigation', () => {
     expect(screen.getByRole('link', { name: /^experiments$/i })).not.toHaveClass('border-red-500')
     // Second to last, just above Notes review.
     const navHrefs = within(screen.getByRole('navigation')).getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(navHrefs[navHrefs.indexOf('/chemicals') + 1]).toBe('/data-export')
     expect(navHrefs.slice(-2)).toEqual(['/core-floods', '/notes/review'])
   })
 })

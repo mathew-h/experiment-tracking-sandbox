@@ -11,6 +11,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}/export` | **Export all** (issue #141): one `.xlsx` for the experiment's whole lineage. See below. |
+| POST | `/api/experiments/export` | **Data Export** (issue #142): one `.xlsx` for a picked list of experiments. See below. |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. |
 | GET | `/api/experiments/notes/review` | Review queue: notes with `needs_review = true` across all experiments, with `experiment_id`, `researcher`, `time_post_reaction_days`. Query: `researcher` (exact), `note_type`, `q` and `experiment_id` (case-insensitive substrings; `%`/`_` literal), `order` = `experiment`\|`created_at`\|`text`, `desc`, `skip`, `limit` (≤1000). Response adds `distinct_texts`: top-50 `{text, count}` histogram over the current filter (issue #122 PR-A). |
@@ -308,6 +309,47 @@ time (a column whose every value is lab midnight is formatted `yyyy-mm-dd`, othe
 reading in the export, in `ICP_ELEMENTS` order. **S is never exported**:
 `v_results_icp` has no `s_ppm` column (known view gap, noted 2026-08-13).
 An experiment with no results still exports; its Results tab keeps the header row.
+
+### POST /api/experiments/export
+
+**Data Export** (issue #142). Returns one Excel workbook (same MIME type and view-backed
+tabs as the single-lineage export above) for a picked list of experiments. Read-only.
+Declared before `/{experiment_id}/export`, so `export` is never read as an experiment ID.
+
+**Body:**
+
+```json
+{ "experiment_ids": ["CF_027", "SERUM_X_001-t1"], "include_series": true }
+```
+
+`experiment_ids`: 1 to 500 strings (duplicates are ignored). `include_series`: boolean, default `true`.
+
+**Expansion rules** (`resolve_selection`):
+- A picked ID always brings every vial of its timepoint stem (`SERUM_X_001-t1` also brings `-t3`, `-t7`).
+- With `include_series` true, it also brings every experiment sharing the `base_experiment_id` of any of those (the whole lineage, replicate set and side samples).
+- Members are ordered series by series (`_series_order`). Side samples are flagged `is_variant`.
+- At most **500** experiments after expansion (`EXPORT_MAX_EXPERIMENTS`).
+
+- **Filename:** `Content-Disposition: attachment; filename="data_export_<YYYY-MM-DD>.xlsx"`, lab-local (America/New_York) date.
+- **Errors (`422`, `detail` is the message shown to the user):**
+  - `Unknown experiment IDs: <id>, <id>` when any picked ID does not exist.
+  - `Export too large: <n> experiments after expansion (limit 500). Narrow the selection or turn off Include whole series.`
+
+Tabs: **Experiments** first, then the same data tabs as the single-lineage export
+(Results, Core Flood when a member is a Core Flood, Conditions, Additives, Notes), then
+**Summary** last.
+
+| Experiments column | Source |
+|--------------------|--------|
+| Experiment ID, Status, Experiment type, Date, Researcher, Sample ID, Reactor number, Description | `v_experiments` |
+| Base ID, is_variant | computed from the lineage |
+
+Summary keys, in order: `Experiment count`, `Series count`, `Base IDs`,
+`Include whole series` (`Yes`/`No`), `Side samples (is_variant)`, `Exported at`
+(lab-local), `Exported by` (the caller's email), then one `Rows: <tab>` row per tab.
+
+The list endpoint `GET /api/experiments` also accepts `additive` (partial match on an
+additive compound name), which the Data Export page uses for its Additive filter.
 
 ### GET /api/experiments/{experiment_id}/delete-impact
 
