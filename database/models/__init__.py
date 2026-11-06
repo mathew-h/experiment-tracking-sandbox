@@ -8,6 +8,7 @@ from .xrd import XRDAnalysis, XRDPhase
 from .chemicals import Compound, ChemicalAdditive
 from .characterization import *  # Future characterization models
 from .app_config import AppConfig
+from .backgrounds import H2BackgroundLink
 from .enums import (
     ExperimentStatus, ExperimentType, FeedstockType, ComponentType,
     AnalysisType, AmmoniumQuantMethod, TitrationType, CharacterizationStatus,
@@ -31,6 +32,8 @@ __all__ = [
     'Compound', 'ChemicalAdditive',
     # App config
     'AppConfig',
+    # H2 background links
+    'H2BackgroundLink',
     # Enums
     'ExperimentStatus', 'ExperimentType', 'FeedstockType', 'ComponentType',
     'AnalysisType', 'AmmoniumQuantMethod', 'TitrationType', 'CharacterizationStatus',
