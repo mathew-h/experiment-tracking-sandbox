@@ -4,7 +4,8 @@ import {
 } from 'recharts'
 import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
 import { chartColors } from '@/assets/brand'
-import { chartPoints, defaultSelection, elementsPresent, lineStyles, segmentStarts } from './icpSeries'
+import { chartPoints, defaultSelection, elementsPresent, lineProps, lineStyles, segmentStarts } from './icpSeries'
+import { fmt } from './fields'
 
 const cap = (e: string) => e.charAt(0).toUpperCase() + e.slice(1)
 
@@ -76,6 +77,7 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
             <Tooltip
               contentStyle={{ background: chartColors.tooltipBg, border: 'none' }}
               labelFormatter={(d) => `Day ${d}`}
+              formatter={(v) => fmt(typeof v === 'number' ? v : null)}
             />
             <Legend formatter={(v) => cap(String(v))} />
             {starts.map((s) => (
@@ -95,7 +97,7 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
                 stroke={styles[el].color}
                 strokeDasharray={styles[el].dash}
                 dot={{ r: 2 }}
-                connectNulls
+                {...lineProps(log)}
                 isAnimationActive={false}
               />
             ))}

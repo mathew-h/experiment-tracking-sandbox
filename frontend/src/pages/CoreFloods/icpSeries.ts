@@ -50,6 +50,11 @@ export function segmentStarts(samples: CoreFloodSample[]): Array<{ day: number; 
 const LINE_COLORS: readonly string[] = [...chartColors.series, chartColors.mean]
 const LINE_DASHES: ReadonlyArray<string | undefined> = [undefined, '6 3', '2 2', '8 3 2 3']
 
+/** In log mode non-positive readings are nulls; bridging them would draw through below-detection gaps. */
+export function lineProps(log: boolean): { connectNulls: boolean } {
+  return { connectNulls: !log }
+}
+
 /** Colour per selected line by position; from the 6th line on, a new dash pattern per colour cycle. */
 export function lineStyles(
   selected: string[],

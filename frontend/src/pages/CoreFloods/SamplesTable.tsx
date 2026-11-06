@@ -105,9 +105,9 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                 </Td>
                 <Td className={CELL}>{fmt(s.cumulative_time_post_reaction_days)}</Td>
                 <Td className={CELL}>{fmt(s.sample_tube_number)}</Td>
-                <Td className="text-xs max-w-xs">
-                  <span className="inline-flex items-center gap-2 max-w-full">
-                    <span className="truncate" title={note.text}>{note.text}</span>
+                <Td className="text-xs">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="block max-w-xs truncate" title={note.text}>{note.text}</span>
                     {note.hasModification && <Badge variant="info">MOD</Badge>}
                   </span>
                 </Td>

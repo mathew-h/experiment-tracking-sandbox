@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
-import { chartPoints, defaultSelection, elementsPresent, lineStyles, segmentStarts } from '../icpSeries'
+import { chartPoints, defaultSelection, elementsPresent, lineProps, lineStyles, segmentStarts } from '../icpSeries'
 
 const row = (over: Partial<CoreFloodIcpRow>): CoreFloodIcpRow => ({
   result_id: 1,
@@ -57,6 +57,11 @@ describe('icpSeries', () => {
     const rows = [row({ elements: { fe: 0, ca: 4 } })]
     expect(chartPoints(rows, ['fe', 'ca'], true)).toEqual([{ day: 1, fe: null, ca: 4 }])
     expect(chartPoints(rows, ['fe', 'ca'], false)).toEqual([{ day: 1, fe: 0, ca: 4 }])
+  })
+
+  it('lineProps connects nulls only on the linear scale', () => {
+    expect(lineProps(false)).toEqual({ connectNulls: true })
+    expect(lineProps(true)).toEqual({ connectNulls: false })
   })
 
   it('segmentStarts skips the first segment', () => {

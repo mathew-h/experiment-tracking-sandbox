@@ -314,6 +314,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
           <textarea
             id="result-note"
             rows={3}
+            maxLength={2000}
             value={noteText}
             onChange={(e) => setNoteText(e.target.value)}
             className="w-full bg-surface-raised border border-surface-border hover:border-ink-muted rounded px-3 py-2 text-sm text-ink-primary placeholder-ink-muted transition-colors duration-100 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30"
