@@ -203,9 +203,11 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
 
   function handleSubmit() {
     setServerError(null)
+    const permKeys = ['inlet_pressure_psi', 'outlet_pressure_psi', 'permeability_flow_rate_mL_min'] as const
+    const permTouched = !editing || permKeys.some((k) => form[k].trim() !== initial[k].trim())
     const found: Errors = {
       ...validateForm(form, editing ? initial : undefined),
-      ...validatePermeability(form),
+      ...(permTouched ? validatePermeability(form) : {}),
     }
     if (!editing && !segment) found.segment = 'Choose a segment'
     if (!editing && segment && !segment.date && dayText === '') {

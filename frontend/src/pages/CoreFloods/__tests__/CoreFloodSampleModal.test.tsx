@@ -50,7 +50,7 @@ function sample(over: Partial<CoreFloodSample> = {}): CoreFloodSample {
     sample_tube_number: null,
     flow_rate_mL_min: 0.5,
     nitrogen_flow_rate_mL_min: null,
-    inlet_pressure_psi: null,
+    inlet_pressure_psi: 1500,
     outlet_pressure_psi: null,
     sampling_volume_mL: null,
     h2_concentration: null,
@@ -386,5 +386,26 @@ describe('CoreFloodSampleModal — regrouped form', () => {
     expect(screen.getByText('Observation')).toBeInTheDocument()
     expect(screen.getAllByRole('textbox', { name: /note/i })).toHaveLength(1)
     expect(screen.queryByText('first', { selector: 'p, li, span' })).not.toBeInTheDocument()
+  })
+})
+
+describe('CoreFloodSampleModal — legacy pressure rows', () => {
+  it('edit of a legacy row with pressures but no test rate saves other changes', async () => {
+    renderModal({ editing: sample() })
+    const ph = screen.getByLabelText('pH')
+    await userEvent.clear(ph)
+    await userEvent.type(ph, '7.4')
+    await submit()
+    await waitFor(() => expect(updateSample).toHaveBeenCalledWith(77, { final_ph: 7.4 }))
+  })
+
+  it('edit that changes a pressure without a test rate is blocked', async () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0 }) })
+    const inlet = screen.getByLabelText(/Inlet pressure/)
+    await userEvent.clear(inlet)
+    await userEvent.type(inlet, '1600')
+    await submit()
+    expect(screen.getByText('Enter the test flow rate used for these pressures')).toBeInTheDocument()
+    expect(updateSample).not.toHaveBeenCalled()
   })
 })
