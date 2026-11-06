@@ -1,4 +1,5 @@
 import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
+import { chartColors } from '@/assets/brand'
 import { ICP_ELEMENTS } from './icpElements'
 
 const PREFERRED = ['ca', 'si', 'fe', 'cu', 'ni']
@@ -44,4 +45,23 @@ export function segmentStarts(samples: CoreFloodSample[]): Array<{ day: number; 
     .map(([experimentId, day]) => ({ day, experimentId }))
     .sort((a, b) => a.day - b.day)
     .slice(1)
+}
+
+const LINE_COLORS: readonly string[] = [...chartColors.series, chartColors.mean]
+const LINE_DASHES: ReadonlyArray<string | undefined> = [undefined, '6 3', '2 2', '8 3 2 3']
+
+/** Colour per selected line by position; from the 6th line on, a new dash pattern per colour cycle. */
+export function lineStyles(
+  selected: string[],
+  colors: readonly string[] = LINE_COLORS,
+): Record<string, { color: string; dash?: string }> {
+  return Object.fromEntries(
+    selected.map((el, i) => [
+      el,
+      {
+        color: colors[i % colors.length],
+        dash: LINE_DASHES[Math.floor(i / colors.length) % LINE_DASHES.length],
+      },
+    ]),
+  )
 }

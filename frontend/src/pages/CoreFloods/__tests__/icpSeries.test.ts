@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
-import { chartPoints, defaultSelection, elementsPresent, segmentStarts } from '../icpSeries'
+import { chartPoints, defaultSelection, elementsPresent, lineStyles, segmentStarts } from '../icpSeries'
 
 const row = (over: Partial<CoreFloodIcpRow>): CoreFloodIcpRow => ({
   result_id: 1,
@@ -72,5 +72,16 @@ describe('icpSeries', () => {
       { day: 6, experimentId: 'B' },
       { day: 10, experimentId: 'C' },
     ])
+  })
+
+  it('lineStyles gives distinct colours to the first five', () => {
+    const st = lineStyles(['ca', 'si', 'fe', 'cu', 'ni'])
+    expect(new Set(Object.values(st).map((x) => x.color)).size).toBe(5)
+  })
+
+  it('lineStyles never repeats a colour+dash pair for up to 15 lines', () => {
+    const els = Array.from({ length: 15 }, (_, i) => `e${i}`)
+    const pairs = Object.values(lineStyles(els)).map((x) => `${x.color}|${x.dash ?? ''}`)
+    expect(new Set(pairs).size).toBe(15)
   })
 })

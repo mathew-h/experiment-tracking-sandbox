@@ -4,9 +4,8 @@ import {
 } from 'recharts'
 import type { CoreFloodIcpRow, CoreFloodSample } from '@/api/coreFloods'
 import { chartColors } from '@/assets/brand'
-import { chartPoints, defaultSelection, elementsPresent, segmentStarts } from './icpSeries'
+import { chartPoints, defaultSelection, elementsPresent, lineStyles, segmentStarts } from './icpSeries'
 
-const LINE_COLORS = [...chartColors.series, chartColors.mean]
 const cap = (e: string) => e.charAt(0).toUpperCase() + e.slice(1)
 
 const chip = (on: boolean) =>
@@ -22,9 +21,10 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
   const [selected, setSelected] = useState<string[] | null>(null)
   const [log, setLog] = useState(false)
   const active = selected ?? defaultSelection(present)
-  // Keep ICP_ELEMENTS order so line colours stay stable as chips toggle.
+  // ICP_ELEMENTS order; styles are assigned by position in this selected list.
   const ordered = present.filter((e) => active.includes(e))
   const points = useMemo(() => chartPoints(rows, ordered, log), [rows, ordered, log])
+  const styles = useMemo(() => lineStyles(ordered), [ordered])
   const starts = useMemo(() => segmentStarts(samples), [samples])
 
   const toggle = (el: string) =>
@@ -92,7 +92,8 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
                 key={el}
                 type="monotone"
                 dataKey={el}
-                stroke={LINE_COLORS[present.indexOf(el) % LINE_COLORS.length]}
+                stroke={styles[el].color}
+                strokeDasharray={styles[el].dash}
                 dot={{ r: 2 }}
                 connectNulls
                 isAnimationActive={false}
