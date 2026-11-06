@@ -361,3 +361,195 @@ def test_naive_utc_offset_check():
     """A Postgres timestamptz arrives aware; the cell is its lab wall clock."""
     aware = datetime(2026, 10, 2, 4, 0, tzinfo=timezone.utc)
     assert experiment_export._cell(aware) == datetime(2026, 10, 2, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Multi-experiment selection (issue #142): POST /api/experiments/export
+# ---------------------------------------------------------------------------
+
+
+def _post(client, ids, include_series=True):
+    resp = client.post("/api/experiments/export", json={
+        "experiment_ids": ids, "include_series": include_series})
+    assert resp.status_code == 200, resp.text
+    return resp, load_workbook(io.BytesIO(resp.content))
+
+
+def _seed_vials(db):
+    """Serum vials -t1/-t3/-t7 of one stem, plus the sequential re-run -2."""
+    vials = []
+    for exp_id, day in (("SERUM_X_001-t1", 1.0), ("SERUM_X_001-t3", 3.0),
+                        ("SERUM_X_001-t7", 7.0), ("SERUM_X_001-2", 2.0)):
+        exp = _experiment(db, exp_id, experiment_type="HPHT")
+        _sample(db, exp, day, measured=_lab(2026, 10, 3))
+        vials.append(exp)
+    assert vials[3].base_experiment_id == "SERUM_X_001"
+    return vials
+
+
+def _summary(wb):
+    _h, rows = _table(wb["Summary"])
+    return {r["Field"]: r["Value"] for r in rows}
+
+
+def test_selection_mixed_matches_views(client, db_session, reporting_views):
+    root, seg2, bypass = _seed_run(db_session)
+    hp = _experiment(db_session, "HPE_010", experiment_type="HPHT")
+    _sample(db_session, hp, 2.0, measured=_lab(2026, 10, 3), ph=6.5)
+    resp, wb = _post(client, ["CFE_001-2", "HPE_010"])
+    assert resp.headers["content-disposition"] == (
+        'attachment; filename="data_export_2026-11-06.xlsx"')
+    assert wb.sheetnames == ["Experiments", "Results", "Core Flood", "Conditions",
+                             "Additives", "Notes", "Summary"]
+    _h, exps = _table(wb["Experiments"])
+    assert [r["Experiment ID"] for r in exps] == [
+        "CFE_001", "CFE_001-2", "CFE_001-2_Bypass1", "HPE_010"]
+    assert [r["is_variant"] for r in exps] == [False, False, True, False]
+    assert exps[3]["Experiment type"] == "HPHT"
+    assert exps[0]["Description"] == "Olivine core, Ni catalyst"
+    fks = [root.id, seg2.id, bypass.id, hp.id]
+    view = {r["result_id"]: r for r in _view(
+        db_session, "SELECT * FROM v_results_scalar WHERE experiment_fk = ANY(:f)",
+        f=fks)}
+    _h, rows = _table(wb["Results"])
+    assert {r["Result ID"] for r in rows} == set(view)
+    assert [r["Experiment ID"] for r in rows][-1] == "HPE_010"
+    for r in rows:
+        assert r["pH"] == pytest.approx(view[r["Result ID"]]["final_ph"])
+    _h, cf = _table(wb["Core Flood"])
+    assert {r["Experiment ID"] for r in cf} == {
+        "CFE_001", "CFE_001-2", "CFE_001-2_Bypass1"}
+
+
+def test_selection_without_series_exports_exact_picks(
+        client, db_session, reporting_views):
+    _seed_run(db_session)
+    _resp, wb = _post(client, ["CFE_001-2"], include_series=False)
+    _h, exps = _table(wb["Experiments"])
+    assert [r["Experiment ID"] for r in exps] == ["CFE_001-2"]
+    _h, rows = _table(wb["Results"])
+    assert {r["Experiment ID"] for r in rows} == {"CFE_001-2"}
+    assert _summary(wb)["Include whole series"] == "No"
+
+
+def test_selection_stem_expands_vials_without_series(
+        client, db_session, reporting_views):
+    _seed_vials(db_session)
+    _resp, wb = _post(client, ["SERUM_X_001-t1"], False)
+    _h, exps = _table(wb["Experiments"])
+    assert [r["Experiment ID"] for r in exps] == [
+        "SERUM_X_001-t1", "SERUM_X_001-t3", "SERUM_X_001-t7"]
+    _resp, wb = _post(client, ["SERUM_X_001-t1"], True)
+    _h, exps = _table(wb["Experiments"])
+    assert [r["Experiment ID"] for r in exps] == [
+        "SERUM_X_001-2", "SERUM_X_001-t1", "SERUM_X_001-t3", "SERUM_X_001-t7"]
+
+
+def test_selection_overlapping_picks_dedupe(client, db_session, reporting_views):
+    _seed_run(db_session)
+    _resp, wb = _post(client, ["CFE_001", "CFE_001-2", "CFE_001-2"])
+    _h, exps = _table(wb["Experiments"])
+    assert len(exps) == 3
+    _h, rows = _table(wb["Results"])
+    ids = [r["Result ID"] for r in rows]
+    assert len(ids) == len(set(ids)) == 4
+
+
+def test_selection_hpht_only_has_no_core_flood_tab(
+        client, db_session, reporting_views):
+    hp = _experiment(db_session, "HPE_010", experiment_type="HPHT")
+    _sample(db_session, hp, 2.0)
+    _resp, wb = _post(client, ["HPE_010"])
+    assert wb.sheetnames == ["Experiments", "Results", "Conditions", "Additives",
+                             "Notes", "Summary"]
+
+
+def test_selection_experiment_without_conditions(
+        client, db_session, reporting_views):
+    _seed_run(db_session)
+    bare = Experiment(experiment_id="BARE_001", experiment_number=next(_NUM),
+                      status=ExperimentStatus.ONGOING)
+    db_session.add(bare)
+    db_session.flush()
+    _resp, wb = _post(client, ["CFE_001", "BARE_001"])
+    _h, exps = _table(wb["Experiments"])
+    by_id = {r["Experiment ID"]: r for r in exps}
+    assert set(by_id) == {"BARE_001", "CFE_001", "CFE_001-2", "CFE_001-2_Bypass1"}
+    assert by_id["BARE_001"]["Experiment type"] is None
+    _h, cond = _table(wb["Conditions"])
+    assert {r["Experiment ID"] for r in cond} == {
+        "CFE_001", "CFE_001-2", "CFE_001-2_Bypass1"}
+
+
+def test_selection_unknown_ids_422(client, db_session, reporting_views):
+    _seed_run(db_session)
+    resp = client.post("/api/experiments/export", json={
+        "experiment_ids": ["CFE_001", "NOPE_1", "NOPE_2"]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Unknown experiment IDs: NOPE_1, NOPE_2"
+
+
+def test_selection_cap_422(client, db_session, reporting_views, monkeypatch):
+    monkeypatch.setattr(experiment_export, "EXPORT_MAX_EXPERIMENTS", 2)
+    _seed_run(db_session)
+    resp = client.post("/api/experiments/export", json={
+        "experiment_ids": ["CFE_001"]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "Export too large: 3 experiments after expansion (limit 2). "
+        "Narrow the selection or turn off Include whole series.")
+
+
+def test_selection_empty_list_422(client, db_session, reporting_views):
+    resp = client.post("/api/experiments/export", json={"experiment_ids": []})
+    assert resp.status_code == 422
+
+
+def test_selection_summary(client, db_session, reporting_views):
+    _seed_run(db_session)
+    hp = _experiment(db_session, "HPE_010", experiment_type="HPHT")
+    _sample(db_session, hp, 2.0)
+    _resp, wb = _post(client, ["CFE_001", "HPE_010"])
+    summary = _summary(wb)
+    assert summary["Experiment count"] == 4
+    assert summary["Series count"] == 2
+    assert summary["Base IDs"] == "CFE_001, HPE_010"
+    assert summary["Include whole series"] == "Yes"
+    assert summary["Side samples (is_variant)"] == "CFE_001-2_Bypass1"
+    assert summary["Exported at"] == datetime(2026, 11, 6, 23, 30)
+    assert summary["Exported by"] == "test@addisenergy.com"
+    assert summary["Rows: Experiments"] == 4
+    assert summary["Rows: Results"] == 5
+
+
+def test_vials_sort_by_timepoint_not_text(client, db_session, reporting_views):
+    same_day = _lab(2026, 10, 1)
+    for exp_id, day in (("SERUM_Y_001-t20", 20.0), ("SERUM_Y_001-t1", 1.0),
+                        ("SERUM_Y_001-t3", 3.0)):
+        exp = _experiment(db_session, exp_id, date_=same_day,
+                          experiment_type="HPHT")
+        assert exp.base_experiment_id == "SERUM_Y_001"
+        _sample(db_session, exp, day, measured=_lab(2026, 10, 3))
+    want = ["SERUM_Y_001-t1", "SERUM_Y_001-t3", "SERUM_Y_001-t20"]
+
+    _resp, wb = _post(client, ["SERUM_Y_001-t1"], include_series=False)
+    _h, exps = _table(wb["Experiments"])
+    assert [r["Experiment ID"] for r in exps] == want
+    _h, rows = _table(wb["Results"])
+    assert [r["Experiment ID"] for r in rows] == want
+
+    _resp, wb = _get(client, "SERUM_Y_001-t3")
+    _h, rows = _table(wb["Results"])
+    assert [r["Experiment ID"] for r in rows] == want
+    _h, cond = _table(wb["Conditions"])
+    assert [r["Experiment ID"] for r in cond] == want
+
+
+def test_selection_more_than_500_ids_gets_string_detail(
+        client, db_session, reporting_views):
+    resp = client.post("/api/experiments/export", json={
+        "experiment_ids": [f"NOPE_{i}" for i in range(501)]})
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert detail.startswith("Unknown experiment IDs: ")

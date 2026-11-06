@@ -4,7 +4,7 @@ from typing import Literal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, text, case, or_
+from sqlalchemy import select, func, text, case, or_, exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -22,7 +22,7 @@ from backend.api.schemas.experiments import (
     ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
-    DeleteImpactResponse, ExperimentDeletedResponse,
+    DeleteImpactResponse, ExperimentDeletedResponse, ExperimentExportRequest,
 )
 from backend.services.replicate_groups import (
     GroupData, GroupMemberData, group_exists, resolve_group, resolve_rollup_rows,
@@ -110,6 +110,7 @@ def list_experiments(
     date_from: str | None = None,
     date_to: str | None = None,
     description: str | None = None,
+    additive: str | None = None,
     group_replicates: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
@@ -148,6 +149,18 @@ def list_experiments(
         stmt = stmt.where(ExperimentalConditions.reactor_number == reactor_number)
     if description:
         stmt = stmt.where(Experiment.description.ilike(f"%{description}%"))
+    if additive:
+        # ChemicalAdditive.experiment_id is the CONDITIONS row id.
+        stmt = stmt.where(
+            exists(
+                select(ChemicalAdditive.id)
+                .join(Compound, Compound.id == ChemicalAdditive.compound_id)
+                .where(
+                    ChemicalAdditive.experiment_id == ExperimentalConditions.id,
+                    Compound.name.ilike(f"%{additive}%"),
+                )
+            )
+        )
 
     if group_replicates:
         # Grouped mode: paginate over "top-level rows" (buckets). Bucket key
@@ -1129,6 +1142,29 @@ def set_experiment_background_ammonium(
         count=len(scalars),
     )
     return BackgroundAmmoniumUpdated(updated=len(scalars))
+
+
+@router.post("/export")
+def export_selection(
+    payload: ExperimentExportRequest,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> StreamingResponse:
+    """Download one .xlsx for a picked list of experiments (issue #142).
+
+    Read-only; same view-backed tabs as the single-lineage export.
+    """
+    try:
+        filename, content = experiment_export.build_selection_workbook(
+            db, payload.experiment_ids, payload.include_series,
+            exported_by=current_user.email)
+    except experiment_export.ExportRejected as exc:
+        raise HTTPException(status_code=422, detail=exc.detail)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=experiment_export.XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{experiment_id}/export")

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import { filenameFromDisposition, saveBlob } from '@/utils/download'
+import { blobErrorMessage, filenameFromDisposition, saveBlob } from '@/utils/download'
 
 export type ExperimentStatus = 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
 
@@ -220,6 +220,7 @@ export interface ExperimentListParams {
   date_from?: string
   date_to?: string
   description?: string
+  additive?: string
   skip?: number
   limit?: number
   group_replicates?: boolean
@@ -444,5 +445,27 @@ export const experimentsApi = {
     )
     saveBlob(response.data, filename)
     return filename
+  },
+
+  /**
+   * Download one workbook for a chosen set of experiments (issue #142).
+   * Resolves to the saved filename; rejects with the server's `detail` text on failure.
+   */
+  exportSelection: async (experimentIds: string[], includeSeries: boolean): Promise<string> => {
+    try {
+      const response = await apiClient.post<Blob>(
+        '/experiments/export',
+        { experiment_ids: experimentIds, include_series: includeSeries },
+        { responseType: 'blob' },
+      )
+      const filename = filenameFromDisposition(
+        response.headers['content-disposition'],
+        'data_export.xlsx',
+      )
+      saveBlob(response.data, filename)
+      return filename
+    } catch (err) {
+      throw new Error(await blobErrorMessage(err))
+    }
   },
 }

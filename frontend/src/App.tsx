@@ -12,6 +12,7 @@ import { BulkUploadsPage } from '@/pages/BulkUploads'
 import { SamplesPage } from '@/pages/Samples'
 import { SampleDetailPage } from '@/pages/SampleDetail'
 import { ChemicalsPage } from '@/pages/Chemicals'
+import { DataExportPage } from '@/pages/DataExport'
 import { AnalysisPage } from '@/pages/Analysis'
 import { NotesReviewPage } from '@/pages/NotesReview'
 import { CoreFloodListPage, CoreFloodRunPage } from '@/pages/CoreFloods'
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="/samples" element={<SamplesPage />} />
           <Route path="/samples/:sampleId" element={<SampleDetailPage />} />
           <Route path="/chemicals" element={<ChemicalsPage />} />
+          <Route path="/data-export" element={<DataExportPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
           <Route path="/notes/review" element={<NotesReviewPage />} />
         </Route>
