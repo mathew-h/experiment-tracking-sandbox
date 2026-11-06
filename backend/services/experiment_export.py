@@ -23,13 +23,15 @@ import structlog
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
-from sqlalchemy import or_, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.results import ICP_ELEMENTS
 from backend.services.core_flood_service import is_core_flood
+from backend.services.replicate_collapse import timepoint_stem_expr
 from backend.services.workdays import LAB_TZ
 from database.models.conditions import ExperimentalConditions
+from database.experiment_id_parser import split_timepoint_token
 from database.models.experiments import Experiment
 
 log = structlog.get_logger(__name__)
@@ -39,8 +41,19 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _EPOCH = datetime.min.replace(tzinfo=LAB_TZ)
 
 
+EXPORT_MAX_EXPERIMENTS: int = 500
+
+
 class ExportNotFound(Exception):
     """The requested experiment does not exist (maps to 404)."""
+
+
+class ExportRejected(Exception):
+    """The selection cannot be exported (maps to 422)."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
 
 
 @dataclass(frozen=True)
@@ -49,6 +62,8 @@ class Member:
 
     id: int
     experiment_id: str
+    base_id: str
+    experiment_type: str | None
     is_variant: bool
     status: str | None
     date: datetime | None
@@ -60,7 +75,6 @@ class Member:
 @dataclass(frozen=True)
 class Lineage:
     base_id: str
-    requested_id: str
     members: list[Member]
 
     @property
@@ -216,28 +230,8 @@ NOTE_COLUMNS: list[Column] = [
 # Lineage
 # ---------------------------------------------------------------------------
 
-def resolve_lineage(db: Session, experiment_id: str) -> Lineage:
-    """The requested experiment's lineage, ordered as segments.
-
-    Order: experiment date (undated last), then ID, so a side sample such as
-    CF_027-2_Bypass1 follows its parent segment when they share a start date.
-    """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise ExportNotFound(experiment_id)
-
-    base_id = exp.base_experiment_id or exp.experiment_id
-    stmt = select(Experiment).options(
-        selectinload(Experiment.parent), selectinload(Experiment.description_note))
-    if exp.base_experiment_id:
-        stmt = stmt.where(or_(Experiment.base_experiment_id == exp.base_experiment_id,
-                              Experiment.id == exp.id))
-    else:
-        stmt = stmt.where(Experiment.id == exp.id)
-    exps = list(db.execute(stmt).scalars())
-
+def _load_members(db: Session, exps: list[Experiment]) -> list[Member]:
+    """Members for `exps` (one conditions query). Unsorted; see _series_order."""
     conditions = {
         c.experiment_fk: c for c in db.execute(
             select(ExperimentalConditions)
@@ -249,20 +243,91 @@ def resolve_lineage(db: Session, experiment_id: str) -> Lineage:
     members: list[Member] = []
     for e in exps:
         parent = e.parent
+        cond = conditions.get(e.id)
         members.append(Member(
             id=e.id,
             experiment_id=e.experiment_id,
+            base_id=e.base_experiment_id or e.experiment_id,
+            experiment_type=cond.experiment_type if cond is not None else None,
             is_variant=parent is not None
             and e.experiment_id.startswith(parent.experiment_id + "_"),
             status=e.status.value if e.status is not None else None,
             date=e.date,
             description=e.description,
             is_root=parent is None,
-            is_core_flood=is_core_flood(conditions.get(e.id)),
+            is_core_flood=is_core_flood(cond),
         ))
-    members.sort(key=lambda m: (
-        m.date is None, m.date or _EPOCH, m.experiment_id))
-    return Lineage(base_id=base_id, requested_id=exp.experiment_id, members=members)
+    return members
+
+
+def _series_order(members: list[Member]) -> list[Member]:
+    """Series by base ID, then experiment date (undated last), then ID, so a
+    side sample such as CF_027-2_Bypass1 follows its parent segment when they
+    share a start date."""
+    return sorted(members, key=lambda m: (
+        m.base_id, m.date is None, m.date or _EPOCH, m.experiment_id))
+
+
+def _load_experiments(db: Session, clause) -> list[Experiment]:
+    return list(db.execute(
+        select(Experiment)
+        .options(selectinload(Experiment.parent),
+                 selectinload(Experiment.description_note))
+        .where(clause)
+    ).scalars())
+
+
+def resolve_lineage(db: Session, experiment_id: str) -> Lineage:
+    """The requested experiment's lineage, ordered as segments."""
+    exp = db.execute(
+        select(Experiment).where(Experiment.experiment_id == experiment_id)
+    ).scalar_one_or_none()
+    if exp is None:
+        raise ExportNotFound(experiment_id)
+
+    if exp.base_experiment_id:
+        exps = _load_experiments(
+            db, (Experiment.base_experiment_id == exp.base_experiment_id)
+            | (Experiment.id == exp.id))
+    else:
+        exps = _load_experiments(db, Experiment.id == exp.id)
+    members = _series_order(_load_members(db, exps))
+    return Lineage(base_id=exp.base_experiment_id or exp.experiment_id,
+                   members=members)
+
+
+def resolve_selection(db: Session, experiment_ids: list[str],
+                      include_series: bool) -> list[Member]:
+    """Members for a picked list of experiment IDs.
+
+    A pick expands to every vial of its timepoint stem (SERUM_001-t1 brings
+    -t3, -t7); with include_series, to every experiment sharing the base ID of
+    any of those.
+    """
+    picks = list(dict.fromkeys(experiment_ids))
+    found = _load_experiments(db, Experiment.experiment_id.in_(picks))
+    have = {e.experiment_id for e in found}
+    missing = [i for i in picks if i not in have]
+    if missing:
+        raise ExportRejected("Unknown experiment IDs: " + ", ".join(missing))
+
+    stems = {split_timepoint_token(e.experiment_id)[0] for e in found}
+    exps = {e.id: e for e in _load_experiments(
+        db, timepoint_stem_expr(Experiment).in_(stems))}
+    exps.update({e.id: e for e in found})
+    if include_series:
+        bases = {e.base_experiment_id for e in exps.values()
+                 if e.base_experiment_id}
+        if bases:
+            exps.update({e.id: e for e in _load_experiments(
+                db, Experiment.base_experiment_id.in_(bases))})
+
+    if len(exps) > EXPORT_MAX_EXPERIMENTS:
+        raise ExportRejected(
+            f"Export too large: {len(exps)} experiments after expansion "
+            f"(limit {EXPORT_MAX_EXPERIMENTS}). Narrow the selection or turn "
+            "off Include whole series.")
+    return _series_order(_load_members(db, list(exps.values())))
 
 
 # ---------------------------------------------------------------------------
@@ -277,9 +342,9 @@ def _by_result(rows: list[dict]) -> dict[int, dict]:
     return {r["result_id"]: r for r in rows}
 
 
-def results_rows(db: Session, lineage: Lineage) -> tuple[list[dict], list[str]]:
+def results_rows(db: Session, members: list[Member]) -> tuple[list[dict], list[str]]:
     """Results rows and the ICP elements (ICP_ELEMENTS order) with a reading."""
-    params = {"fks": lineage.fks}
+    params = {"fks": [m.id for m in members]}
     scalar = _rows(db, "SELECT * FROM v_results_scalar WHERE experiment_fk = ANY(:fks)",
                    params)
     h2 = _by_result(_rows(
@@ -290,8 +355,8 @@ def results_rows(db: Session, lineage: Lineage) -> tuple[list[dict], list[str]]:
         db, "SELECT t.* FROM v_dim_timepoints t JOIN experimental_results er"
             " ON er.id = t.result_id WHERE er.experiment_fk = ANY(:fks)", params))
 
-    order = {m.id: i for i, m in enumerate(lineage.members)}
-    variant = {m.id: m.is_variant for m in lineage.members}
+    order = {m.id: i for i, m in enumerate(members)}
+    variant = {m.id: m.is_variant for m in members}
     out: list[dict] = []
     for s in scalar:
         rid = s["result_id"]
@@ -314,38 +379,42 @@ def results_rows(db: Session, lineage: Lineage) -> tuple[list[dict], list[str]]:
     return out, elements
 
 
-def core_flood_rows(db: Session, lineage: Lineage) -> list[dict]:
+def core_flood_rows(db: Session, members: list[Member]) -> list[dict]:
     return _rows(
         db,
         "SELECT * FROM v_core_flood_samples WHERE experiment_fk = ANY(:fks)"
         " ORDER BY is_variant, cumulative_time_post_reaction_days NULLS LAST,"
         " result_id",
-        {"fks": lineage.fks})
+        {"fks": [m.id for m in members]})
 
 
-def _ordered_by_member(lineage: Lineage, rows: list[dict],
+def _ordered_by_member(members: list[Member], rows: list[dict],
                        key: Callable[[dict], Any]) -> list[dict]:
-    order = {eid: i for i, eid in enumerate(lineage.ids)}
+    order = {m.experiment_id: i for i, m in enumerate(members)}
     return sorted(rows, key=lambda r: (order[r["experiment_id"]], key(r)))
 
 
-def condition_rows(db: Session, lineage: Lineage) -> list[dict]:
+def _ids(members: list[Member]) -> list[str]:
+    return [m.experiment_id for m in members]
+
+
+def condition_rows(db: Session, members: list[Member]) -> list[dict]:
     rows = _rows(db, "SELECT * FROM v_experiment_conditions"
-                     " WHERE experiment_id = ANY(:ids)", {"ids": lineage.ids})
-    return _ordered_by_member(lineage, rows, lambda r: 0)
+                     " WHERE experiment_id = ANY(:ids)", {"ids": _ids(members)})
+    return _ordered_by_member(members, rows, lambda r: 0)
 
 
-def additive_rows(db: Session, lineage: Lineage) -> list[dict]:
+def additive_rows(db: Session, members: list[Member]) -> list[dict]:
     rows = _rows(db, "SELECT * FROM v_chemical_additives"
-                     " WHERE experiment_id = ANY(:ids)", {"ids": lineage.ids})
-    return _ordered_by_member(lineage, rows, lambda r: (
+                     " WHERE experiment_id = ANY(:ids)", {"ids": _ids(members)})
+    return _ordered_by_member(members, rows, lambda r: (
         r["addition_order"] is None, r["addition_order"] or 0, r["compound_name"]))
 
 
-def note_rows(db: Session, lineage: Lineage) -> list[dict]:
+def note_rows(db: Session, members: list[Member]) -> list[dict]:
     rows = _rows(db, "SELECT * FROM v_notes WHERE experiment_id = ANY(:ids)",
-                 {"ids": lineage.ids})
-    return _ordered_by_member(lineage, rows, lambda r: (
+                 {"ids": _ids(members)})
+    return _ordered_by_member(members, rows, lambda r: (
         r["created_at"] is None, r["created_at"] or _EPOCH, r["note_id"]))
 
 
@@ -417,6 +486,21 @@ def _root_description(lineage: Lineage) -> str | None:
     return next((m.description for m in lineage.members if m.description), None)
 
 
+def _data_tabs(db: Session, members: list[Member]
+               ) -> list[tuple[str, list[Column], list[dict]]]:
+    results, elements = results_rows(db, members)
+    tabs: list[tuple[str, list[Column], list[dict]]] = [
+        ("Results", _results_columns(elements), results)]
+    if any(m.is_core_flood for m in members):
+        tabs.append(("Core Flood", CORE_FLOOD_COLUMNS, core_flood_rows(db, members)))
+    tabs += [
+        ("Conditions", CONDITION_COLUMNS, condition_rows(db, members)),
+        ("Additives", ADDITIVE_COLUMNS, additive_rows(db, members)),
+        ("Notes", NOTE_COLUMNS, note_rows(db, members)),
+    ]
+    return tabs
+
+
 def build_workbook(db: Session, experiment_id: str,
                    exported_by: str | None = None) -> tuple[str, bytes]:
     """(filename, xlsx bytes) for the lineage of `experiment_id`.
@@ -426,16 +510,7 @@ def build_workbook(db: Session, experiment_id: str,
     lineage = resolve_lineage(db, experiment_id)
     now = lab_now()
 
-    results, elements = results_rows(db, lineage)
-    tabs: list[tuple[str, list[Column], list[dict]]] = [
-        ("Results", _results_columns(elements), results)]
-    if any(m.is_core_flood for m in lineage.members):
-        tabs.append(("Core Flood", CORE_FLOOD_COLUMNS, core_flood_rows(db, lineage)))
-    tabs += [
-        ("Conditions", CONDITION_COLUMNS, condition_rows(db, lineage)),
-        ("Additives", ADDITIVE_COLUMNS, additive_rows(db, lineage)),
-        ("Notes", NOTE_COLUMNS, note_rows(db, lineage)),
-    ]
+    tabs = _data_tabs(db, lineage.members)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -463,5 +538,66 @@ def build_workbook(db: Session, experiment_id: str,
     filename = f"{lineage.base_id}_export_{now.date().isoformat()}.xlsx"
     log.info("experiment_export_built", base_id=lineage.base_id,
              experiments=len(lineage.members),
+             rows={title: len(rows) for title, _, rows in tabs})
+    return filename, buf.getvalue()
+
+
+EXPERIMENT_COLUMNS: list[Column] = [
+    ("experiment_id", "Experiment ID"),
+    ("base_id", "Base ID"),
+    ("is_variant", "is_variant"),
+    ("status", "Status"),
+    ("experiment_type", "Experiment type"),
+    ("date", "Date"),
+    ("researcher", "Researcher"),
+    ("sample_id", "Sample ID"),
+    ("reactor_number", "Reactor number"),
+    ("description", "Description"),
+]
+
+
+def build_selection_workbook(db: Session, experiment_ids: list[str],
+                             include_series: bool,
+                             exported_by: str | None = None) -> tuple[str, bytes]:
+    """(filename, xlsx bytes) for a picked list of experiments.
+
+    Raises ExportRejected for unknown IDs or a selection over the cap.
+    """
+    members = resolve_selection(db, experiment_ids, include_series)
+    now = lab_now()
+
+    view = {r["experiment_id"]: r for r in _rows(
+        db, "SELECT * FROM v_experiments WHERE experiment_id = ANY(:ids)",
+        {"ids": [m.experiment_id for m in members]})}
+    experiments = [
+        {**view.get(m.experiment_id, {}), "base_id": m.base_id,
+         "is_variant": m.is_variant}
+        for m in members]
+    tabs = [("Experiments", EXPERIMENT_COLUMNS, experiments)
+            ] + _data_tabs(db, members)
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    for title, columns, rows in tabs:
+        _write_tab(wb, title, columns, rows)
+
+    base_ids = list(dict.fromkeys(m.base_id for m in members))
+    summary: list[dict] = [
+        {"key": "Experiment count", "value": len(members)},
+        {"key": "Series count", "value": len(base_ids)},
+        {"key": "Base IDs", "value": ", ".join(base_ids)},
+        {"key": "Include whole series", "value": "Yes" if include_series else "No"},
+        {"key": "Side samples (is_variant)", "value": ", ".join(
+            m.experiment_id for m in members if m.is_variant) or None},
+        {"key": "Exported at", "value": now},
+        {"key": "Exported by", "value": exported_by},
+    ] + [{"key": f"Rows: {title}", "value": len(rows)} for title, _, rows in tabs]
+    _write_tab(wb, "Summary", [("key", "Field"), ("value", "Value")], summary)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    filename = f"data_export_{now.date().isoformat()}.xlsx"
+    log.info("experiment_export_selection_built", experiments=len(members),
+             series=len(base_ids), include_series=include_series,
              rows={title: len(rows) for title, _, rows in tabs})
     return filename, buf.getvalue()

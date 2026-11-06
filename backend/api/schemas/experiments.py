@@ -342,3 +342,9 @@ class ExperimentDeletedResponse(BaseModel):
     experiment_id: str
     deleted: bool = True
     impact: DeleteImpactResponse
+
+
+class ExperimentExportRequest(BaseModel):
+    """POST /api/experiments/export (issue #142)."""
+    experiment_ids: list[str] = Field(min_length=1, max_length=500)
+    include_series: bool = True

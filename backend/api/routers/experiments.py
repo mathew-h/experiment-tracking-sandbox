@@ -22,7 +22,7 @@ from backend.api.schemas.experiments import (
     ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
-    DeleteImpactResponse, ExperimentDeletedResponse,
+    DeleteImpactResponse, ExperimentDeletedResponse, ExperimentExportRequest,
 )
 from backend.services.replicate_groups import (
     GroupData, GroupMemberData, group_exists, resolve_group, resolve_rollup_rows,
@@ -1129,6 +1129,29 @@ def set_experiment_background_ammonium(
         count=len(scalars),
     )
     return BackgroundAmmoniumUpdated(updated=len(scalars))
+
+
+@router.post("/export")
+def export_selection(
+    payload: ExperimentExportRequest,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> StreamingResponse:
+    """Download one .xlsx for a picked list of experiments (issue #142).
+
+    Read-only; same view-backed tabs as the single-lineage export.
+    """
+    try:
+        filename, content = experiment_export.build_selection_workbook(
+            db, payload.experiment_ids, payload.include_series,
+            exported_by=current_user.email)
+    except experiment_export.ExportRejected as exc:
+        raise HTTPException(status_code=422, detail=exc.detail)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=experiment_export.XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{experiment_id}/export")
