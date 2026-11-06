@@ -94,8 +94,8 @@ export const SAMPLE_FIELDS: readonly SampleFieldDef[] = [
 ]
 
 export const SAMPLE_GROUPS: Record<'gc' | 'solution' | 'coreflood', readonly SampleFieldKey[]> = {
-  gc: ['gc_run_date', 'h2_concentration', 'gas_sampling_volume_ml', 'gas_sampling_pressure_MPa'],
-  solution: ['sampling_volume_mL', 'final_ph', 'final_conductivity_mS_cm'],
+  gc: ['h2_concentration', 'gas_sampling_pressure_MPa', 'gas_sampling_volume_ml', 'gc_run_date'],
+  solution: ['final_ph', 'final_conductivity_mS_cm', 'sampling_volume_mL'],
   coreflood: [
     'flow_rate_mL_min',
     'permeability_flow_rate_mL_min',

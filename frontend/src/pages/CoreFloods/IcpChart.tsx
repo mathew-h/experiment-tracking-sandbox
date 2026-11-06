@@ -79,14 +79,14 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
               labelFormatter={(d) => `Day ${d}`}
               formatter={(v) => fmt(typeof v === 'number' ? v : null)}
             />
-            <Legend formatter={(v) => cap(String(v))} />
-            {starts.map((s) => (
+            <Legend verticalAlign="top" wrapperStyle={{ paddingBottom: 8 }} />
+            {starts.map((s, i) => (
               <ReferenceLine
                 key={s.experimentId}
                 x={s.day}
                 stroke={chartColors.axis}
                 strokeDasharray="4 4"
-                label={{ value: s.experimentId, position: 'top', fill: chartColors.label, fontSize: 10 }}
+                label={{ value: s.experimentId, position: i % 2 === 0 ? 'insideTopRight' : 'insideTopLeft', fill: chartColors.label, fontSize: 10 }}
               />
             ))}
             {ordered.map((el) => (
@@ -94,6 +94,7 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
                 key={el}
                 type="monotone"
                 dataKey={el}
+                name={cap(el)}
                 stroke={styles[el].color}
                 strokeDasharray={styles[el].dash}
                 dot={{ r: 2 }}

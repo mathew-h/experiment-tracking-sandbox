@@ -263,7 +263,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
     <Modal
       open
       onClose={handleClose}
-      size="lg"
+      size="xl"
       title={editing ? `Edit sample — ${editing.experiment_id}` : 'Add sample'}
       footer={
         <>

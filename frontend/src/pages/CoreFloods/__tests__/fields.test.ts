@@ -3,6 +3,7 @@ import type { CoreFloodSample } from '@/api/coreFloods'
 import { labDateOf } from '@/utils/labDate'
 import {
   FIELD_BY_KEY,
+  SAMPLE_GROUPS,
   buildCreateBody,
   buildPatchBody,
   emptyForm,
@@ -276,5 +277,19 @@ describe('permeability and notes', () => {
     const s = sample({ notes: [n(1, 'result_note', 'clear'), n(2, 'observation', 'bubbles'), n(3, 'modification', 'edit')] })
     expect(noteSummary(s)).toEqual({ text: 'clear · bubbles', hasModification: true })
     expect(noteSummary(sample())).toEqual({ text: '', hasModification: false })
+  })
+})
+
+describe('SAMPLE_GROUPS', () => {
+  it('SAMPLE_GROUPS follows the agreed order', () => {
+    expect(SAMPLE_GROUPS.gc).toEqual(['h2_concentration', 'gas_sampling_pressure_MPa', 'gas_sampling_volume_ml', 'gc_run_date'])
+    expect(SAMPLE_GROUPS.solution).toEqual(['final_ph', 'final_conductivity_mS_cm', 'sampling_volume_mL'])
+    expect(SAMPLE_GROUPS.coreflood).toEqual([
+      'flow_rate_mL_min',
+      'permeability_flow_rate_mL_min',
+      'inlet_pressure_psi',
+      'outlet_pressure_psi',
+      'nitrogen_flow_rate_mL_min',
+    ])
   })
 })
