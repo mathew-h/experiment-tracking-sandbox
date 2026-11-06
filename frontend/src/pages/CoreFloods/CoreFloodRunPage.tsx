@@ -9,6 +9,7 @@ import { CoreFloodSampleModal } from './CoreFloodSampleModal'
 import { SamplesTable } from './SamplesTable'
 import { SegmentsTable } from './SegmentsTable'
 import { fmt } from './fields'
+import { IcpChart } from './IcpChart'
 
 interface ApiError extends Error {
   response?: { status?: number }
@@ -123,7 +124,11 @@ export function CoreFloodRunPage() {
         </Collapsible>
       )}
 
-      {/* Task 7: "ICP over time" collapsible goes here. */}
+      {icpRows && icpRows.length > 0 && (
+        <Collapsible title="ICP over time" defaultOpen>
+          <IcpChart rows={icpRows} samples={run.samples} />
+        </Collapsible>
+      )}
 
       <Collapsible
         title="Segments"

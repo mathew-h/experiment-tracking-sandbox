@@ -237,6 +237,27 @@ describe('CoreFloodRunPage', () => {
     expect(screen.getByText('Fe 12.4')).toBeInTheDocument()
   })
 
+  it('shows ICP over time only when the run has ICP', async () => {
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([
+      {
+        result_id: 11,
+        experiment_id: 'CF_020-2',
+        is_variant: false,
+        cumulative_time_post_reaction_days: 5,
+        sample_date: '2026-10-24T00:00:00',
+        elements: { fe: 12.4 },
+      },
+    ])
+    const { unmount } = renderPage()
+    const btn = await screen.findByRole('button', { name: /^ICP over time/ })
+    expect(btn).toHaveAttribute('aria-expanded', 'true')
+    unmount()
+    vi.mocked(coreFloodsApi.icp).mockResolvedValue([])
+    renderPage()
+    await screen.findByRole('region', { name: 'Samples' })
+    expect(screen.queryByRole('button', { name: /^ICP over time/ })).not.toBeInTheDocument()
+  })
+
   it('a zero flow shows a HOLD badge', async () => {
     renderPage()
     const main = await screen.findByRole('region', { name: 'Samples' })
