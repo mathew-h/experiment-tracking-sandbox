@@ -165,6 +165,8 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
   function onFieldChange(key: SampleFieldKey, value: string) {
     setErrors((e) => ({ ...e, [key]: undefined }))
     if (key === 'permeability_flow_rate_mL_min') setPermEdited(true)
+    // A hand edit makes any value stored by the hold checkbox stale.
+    if (key === 'flow_rate_mL_min') setStoredFlow('')
     if (key === 'inlet_pressure_psi' || key === 'outlet_pressure_psi') {
       const next = withPressure(form, key, value, { permEdited })
       if (next.permeability_flow_rate_mL_min !== form.permeability_flow_rate_mL_min) {

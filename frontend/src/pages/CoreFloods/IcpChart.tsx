@@ -30,10 +30,15 @@ export function IcpChart({ rows, samples }: { rows: CoreFloodIcpRow[]; samples: 
 
   const toggle = (el: string) =>
     setSelected(active.includes(el) ? active.filter((e) => e !== el) : [...active, el])
+  const allOn = present.length > 0 && present.every((e) => active.includes(e))
+  const toggleAll = () => setSelected(allOn ? null : present)
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
+        <button type="button" aria-pressed={allOn} onClick={toggleAll} className={chip(allOn)}>
+          All
+        </button>
         {present.map((el) => (
           <button
             key={el}

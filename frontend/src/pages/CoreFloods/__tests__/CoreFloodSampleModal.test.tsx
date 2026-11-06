@@ -304,6 +304,20 @@ describe('CoreFloodSampleModal — regrouped form', () => {
     expect(flow).not.toBeDisabled()
   })
 
+  it('uncheck after typing 0 does not restore an earlier flow', async () => {
+    renderModal({ editing: sample({ flow_rate_mL_min: 0.1 }) })
+    const flow = screen.getByLabelText('Flow rate (mL/min)') as HTMLInputElement
+    const hold = screen.getByLabelText('Hold since last sample')
+    await userEvent.click(hold)
+    await userEvent.click(hold)
+    expect(flow.value).toBe('0.1')
+    await userEvent.clear(flow)
+    await userEvent.type(flow, '0')
+    expect(hold).toBeChecked()
+    await userEvent.click(hold)
+    expect(flow.value).toBe('')
+  })
+
   it('starts checked when flow is 0', () => {
     renderModal({ editing: sample({ flow_rate_mL_min: 0 }) })
     expect(screen.getByLabelText('Hold since last sample')).toBeChecked()

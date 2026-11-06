@@ -105,4 +105,67 @@ describe('SamplesTable', () => {
     await userEvent.click(screen.getAllByRole('row')[2])
     expect(onEdit).toHaveBeenCalledWith(s)
   })
+
+  it('Enter on a row opens edit', async () => {
+    const onEdit = vi.fn()
+    const s = sample({ result_id: 1 })
+    render(<SamplesTable samples={[s]} variant={false} onEdit={onEdit} icpByResult={noIcp} />)
+    screen.getAllByRole('row')[2].focus()
+    await userEvent.keyboard('{Enter}')
+    expect(onEdit).toHaveBeenCalledWith(s)
+  })
+
+  it('Enter on the ICP expander does not open edit', async () => {
+    const onEdit = vi.fn()
+    const icp = new Map([[1, { fe: 1 }]])
+    render(<SamplesTable samples={[sample({ result_id: 1 })]} variant={false} onEdit={onEdit} icpByResult={icp} />)
+    screen.getByRole('button', { name: /Show ICP for/ }).focus()
+    await userEvent.keyboard('{Enter}')
+    expect(onEdit).not.toHaveBeenCalled()
+    expect(screen.getByText('Fe 1')).toBeInTheDocument()
+  })
+
+  it('ICP elements render in ICP_ELEMENTS order', async () => {
+    const icp = new Map([[1, { si: 1, fe: 2 }]])
+    render(<SamplesTable samples={[sample({ result_id: 1 })]} variant={false} onEdit={vi.fn()} icpByResult={icp} />)
+    await userEvent.click(screen.getByRole('button', { name: /Show ICP for/ }))
+    const fe = screen.getByText('Fe 2')
+    const si = screen.getByText('Si 1')
+    expect(fe.compareDocumentPosition(si) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('expander labels are unique per row (date and tube)', () => {
+    const icp = new Map([[1, { fe: 1 }], [2, { fe: 1 }]])
+    const samples = [
+      sample({ result_id: 1, sample_tube_number: 7 }),
+      sample({ result_id: 2, sample_tube_number: 8 }),
+    ]
+    render(<SamplesTable samples={samples} variant={false} onEdit={vi.fn()} icpByResult={icp} />)
+    expect(screen.getByRole('button', { name: /^Show ICP for .+, tube 7$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Show ICP for .+, tube 8$/ })).toBeInTheDocument()
+  })
+
+  it('variant expander label names the experiment and date', () => {
+    const icp = new Map([[1, { fe: 1 }]])
+    const s = sample({ result_id: 1, experiment_id: 'CF_020-5_Bypass1', is_variant: true })
+    render(<SamplesTable samples={[s]} variant onEdit={vi.fn()} icpByResult={icp} />)
+    expect(
+      screen.getByRole('button', { name: /^Show ICP for CF_020-5_Bypass1 \d{4}-\d{2}-\d{2}$/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('the leading group-header cell is not an empty column header', () => {
+    render(<SamplesTable samples={[]} variant={false} onEdit={vi.fn()} icpByResult={noIcp} />)
+    const empty = screen.getAllByRole('columnheader').filter((h) => (h.textContent ?? '') === '')
+    expect(empty).toHaveLength(0)
+  })
+
+  it('the expander and date columns are sticky', () => {
+    const icp = new Map([[1, { fe: 1 }]])
+    render(<SamplesTable samples={[sample({ result_id: 1 })]} variant={false} onEdit={vi.fn()} icpByResult={icp} />)
+    const cells = within(screen.getAllByRole('row')[2]).getAllByRole('cell')
+    expect(cells[0].className).toMatch(/sticky left-0/)
+    expect(cells[1].className).toMatch(/sticky/)
+    expect(screen.getByRole('columnheader', { name: 'Date' }).className).toMatch(/sticky/)
+  })
 })

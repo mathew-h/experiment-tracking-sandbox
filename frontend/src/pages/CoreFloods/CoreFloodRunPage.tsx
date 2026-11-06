@@ -23,7 +23,7 @@ function runDescription(segments: CoreFloodSegment[]): string | null {
   const roots = segments
     .filter((s) => !s.is_variant && s.parent_experiment_id == null)
     .sort((a, b) => date(a) - date(b))
-  return roots[0]?.description ?? segments.find((s) => s.description)?.description ?? null
+  return roots[0]?.description || segments.find((s) => s.description)?.description || null
 }
 
 /** One core flood run: header metrics, segments, samples and side samples. */

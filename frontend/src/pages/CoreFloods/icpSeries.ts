@@ -47,15 +47,16 @@ export function segmentStarts(samples: CoreFloodSample[]): Array<{ day: number; 
     .slice(1)
 }
 
-const LINE_COLORS: readonly string[] = [...chartColors.series, chartColors.mean]
-const LINE_DASHES: ReadonlyArray<string | undefined> = [undefined, '6 3', '2 2', '8 3 2 3']
+// chartColors.mean is reserved for aggregate/mean series, so ICP lines use the 4 series colours only.
+const LINE_COLORS: readonly string[] = chartColors.series
+const LINE_DASHES: ReadonlyArray<string | undefined> = [undefined, '6 3', '2 2', '8 3 2 3', '4 4', '10 4']
 
 /** In log mode non-positive readings are nulls; bridging them would draw through below-detection gaps. */
 export function lineProps(log: boolean): { connectNulls: boolean } {
   return { connectNulls: !log }
 }
 
-/** Colour per selected line by position; from the 6th line on, a new dash pattern per colour cycle. */
+/** Colour per selected line by position (4 colours); from the 5th line on, a new dash pattern per colour cycle. 24 unique styles. */
 export function lineStyles(
   selected: string[],
   colors: readonly string[] = LINE_COLORS,

@@ -41,4 +41,36 @@ describe('IcpChart', () => {
     await userEvent.click(log)
     expect(log).toHaveAttribute('aria-pressed', 'true')
   })
+
+  it('All selects every present element', async () => {
+    render(<IcpChart rows={rows} samples={[]} />)
+    const all = screen.getByRole('button', { name: 'All' })
+    expect(all).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.click(all)
+    expect(all).toHaveAttribute('aria-pressed', 'true')
+    for (const n of ['Fe', 'Ca', 'Mg']) {
+      expect(screen.getByRole('button', { name: n })).toHaveAttribute('aria-pressed', 'true')
+    }
+  })
+
+  it('All again restores the default selection', async () => {
+    render(<IcpChart rows={rows} samples={[]} />)
+    const all = screen.getByRole('button', { name: 'All' })
+    await userEvent.click(all)
+    await userEvent.click(all)
+    expect(all).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Mg' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Fe' })).toHaveAttribute('aria-pressed', 'true')
+    // chips keep working afterwards
+    await userEvent.click(screen.getByRole('button', { name: 'Mg' }))
+    expect(screen.getByRole('button', { name: 'Mg' })).toHaveAttribute('aria-pressed', 'true')
+    expect(all).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('All is pressed when every chip is selected by hand', async () => {
+    render(<IcpChart rows={rows} samples={[]} />)
+    const all = screen.getByRole('button', { name: 'All' })
+    await userEvent.click(screen.getByRole('button', { name: 'Mg' }))
+    expect(all).toHaveAttribute('aria-pressed', 'true')
+  })
 })

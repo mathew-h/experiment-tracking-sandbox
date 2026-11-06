@@ -221,6 +221,44 @@ describe('CoreFloodRunPage', () => {
     expect(await screen.findByRole('region', { name: 'Samples' })).toBeInTheDocument()
   })
 
+  it('ICP fetch failure keeps the page and shows no expander', async () => {
+    const rejected = new Error('icp down')
+    const failing = Promise.reject(rejected)
+    failing.catch(() => {})
+    vi.mocked(coreFloodsApi.icp).mockReturnValue(failing)
+    renderPage()
+    expect(await screen.findByRole('region', { name: 'Samples' })).toBeInTheDocument()
+    await waitFor(() => expect(coreFloodsApi.icp).toHaveBeenCalled())
+    await expect(failing).rejects.toBe(rejected)
+    expect(screen.queryByRole('button', { name: /Show ICP for/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^ICP over time/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Samples' })).toBeInTheDocument()
+  })
+
+  it('empty root description falls back', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings([], [
+        segment({ id: 1, description: '' }),
+        segment({ id: 2, experiment_id: 'CF_020-2', parent_experiment_id: 'CF_020', description: 'Second segment' }),
+      ]),
+    )
+    renderPage()
+    expect(await screen.findByText('Second segment', { selector: 'p' })).toBeInTheDocument()
+  })
+
+  it('editing a description from Data checks opens Segments', async () => {
+    vi.mocked(coreFloodsApi.get).mockResolvedValue(
+      withWarnings([{ code: 'missing_description', experiment_ids: ['CF_020-2'] }]),
+    )
+    vi.mocked(experimentsApi.get).mockResolvedValue({ notes: [] } as never)
+    renderPage()
+    const seg = await screen.findByRole('button', { name: /^Segments/ })
+    expect(seg).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(screen.getByRole('button', { name: /^Data checks/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Describe CF_020-2' }))
+    expect(seg).toHaveAttribute('aria-expanded', 'true')
+  })
+
   it('ICP rows get an expander in the samples table', async () => {
     vi.mocked(coreFloodsApi.icp).mockResolvedValue([
       {

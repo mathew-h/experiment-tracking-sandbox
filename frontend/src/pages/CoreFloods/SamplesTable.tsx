@@ -17,6 +17,11 @@ interface Props {
 const CELL = 'font-mono-data text-xs'
 const COLS = 14
 const GROUP = 'text-center border-l border-surface-border'
+// Expander and Date stay put while the table scrolls sideways; opaque so cells do not show through.
+const STICKY_EXPANDER = 'sticky left-0 z-10 w-10 min-w-[2.5rem] max-w-[2.5rem]'
+const STICKY_DATE = 'sticky left-10 z-10'
+const STICKY_HEAD_BG = 'bg-surface-overlay'
+const STICKY_ROW_BG = 'bg-surface-raised group-hover:bg-surface-overlay'
 
 function IcpList({ elements }: { elements: Record<string, number> }) {
   const items = ICP_ELEMENTS.filter((k) => elements[k] != null)
@@ -45,14 +50,14 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
     <Table>
       <TableHead>
         <tr>
-          <Th colSpan={5} />
+          <td colSpan={5} aria-hidden="true" />
           <Th colSpan={2} className={GROUP}>GC</Th>
           <Th colSpan={3} className={GROUP}>Solution</Th>
           <Th colSpan={4} className={GROUP}>Core flood</Th>
         </tr>
         <tr>
-          <Th><span className="sr-only">ICP</span></Th>
-          <Th>Date</Th>
+          <Th className={`${STICKY_EXPANDER} ${STICKY_HEAD_BG}`}><span className="sr-only">ICP</span></Th>
+          <Th className={`${STICKY_DATE} ${STICKY_HEAD_BG}`}>Date</Th>
           <Th>Day</Th>
           <Th>Tube</Th>
           <Th>Result note</Th>
@@ -76,18 +81,24 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
           return (
             <Fragment key={s.result_id}>
               <TableRow
-                className="cursor-pointer"
+                className="group cursor-pointer"
                 tabIndex={0}
                 onClick={() => onEdit(s)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && e.target === e.currentTarget) onEdit(s)
                 }}
               >
-                <Td className="w-6">
+                <Td className={`${STICKY_EXPANDER} ${STICKY_ROW_BG}`}>
                   {icp !== undefined && (
                     <button
                       type="button"
-                      aria-label={`Show ICP for ${date}`}
+                      aria-label={
+                        variant
+                          ? `Show ICP for ${s.experiment_id} ${date}`
+                          : s.sample_tube_number != null
+                            ? `Show ICP for ${date}, tube ${s.sample_tube_number}`
+                            : `Show ICP for ${date}`
+                      }
                       aria-expanded={isOpen}
                       className="text-ink-muted hover:text-ink-primary px-1"
                       onClick={(e) => {
@@ -99,7 +110,7 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                     </button>
                   )}
                 </Td>
-                <Td className={`${CELL} text-ink-muted`}>
+                <Td className={`${CELL} text-ink-muted ${STICKY_DATE} ${STICKY_ROW_BG}`}>
                   {date}
                   {variant && <div className="text-ink-secondary">{s.experiment_id}</div>}
                 </Td>
@@ -107,7 +118,7 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                 <Td className={CELL}>{fmt(s.sample_tube_number)}</Td>
                 <Td className="text-xs">
                   <span className="inline-flex items-center gap-2">
-                    <span className="block max-w-xs truncate" title={note.text}>{note.text}</span>
+                    <span className="block max-w-[16rem] truncate" title={note.text}>{note.text}</span>
                     {note.hasModification && <Badge variant="info">MOD</Badge>}
                   </span>
                 </Td>
