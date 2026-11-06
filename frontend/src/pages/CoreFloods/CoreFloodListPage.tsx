@@ -7,7 +7,6 @@ import {
   Badge, Input, PageSpinner,
 } from '@/components/ui'
 import { labDateOf } from '@/utils/labDate'
-import { fmt } from './fields'
 
 const SEARCH_DEBOUNCE_MS = 250
 
@@ -87,18 +86,17 @@ export function CoreFloodListPage() {
             <TableHead>
               <tr>
                 <Th>Run</Th>
+                <Th>Description</Th>
                 <Th>Rig</Th>
-                <Th>Segments</Th>
                 <Th>Samples</Th>
                 <Th>Last sample</Th>
-                <Th>Cum. H₂ (g/t)</Th>
-                <Th>Warnings</Th>
+                <Th>Status</Th>
               </tr>
             </TableHead>
             <TableBody>
               {data.length === 0 ? (
                 <TableRow>
-                  <Td colSpan={7} className="text-center py-8 text-ink-muted">
+                  <Td colSpan={6} className="text-center py-8 text-ink-muted">
                     {q || scope === 'all' ? 'No core floods match' : 'No active core floods'}
                   </Td>
                 </TableRow>
@@ -113,22 +111,21 @@ export function CoreFloodListPage() {
                         {run.base_id}
                       </Link>
                     </Td>
+                    <Td className="text-xs max-w-md">
+                      {run.description ?? <span className="text-ink-muted">—</span>}
+                    </Td>
                     <Td className="font-mono-data text-xs">
                       {run.rig ?? <span className="text-ink-muted">—</span>}
                     </Td>
-                    <Td className="font-mono-data text-xs">{run.segment_count}</Td>
                     <Td className="font-mono-data text-xs">{run.sample_count}</Td>
                     <Td className="font-mono-data text-xs text-ink-muted">
                       {run.last_sample_date ? labDateOf(run.last_sample_date) : '—'}
                     </Td>
-                    <Td className="font-mono-data text-xs">
-                      {fmt(run.latest_cumulative_h2_grams_per_ton)}
-                    </Td>
                     <Td>
-                      {run.warning_count > 0 ? (
-                        <Badge variant="warning">{run.warning_count}</Badge>
+                      {run.ongoing_experiment_ids.length > 0 ? (
+                        <Badge variant="ongoing">Ongoing</Badge>
                       ) : (
-                        <span className="text-ink-muted">—</span>
+                        <span className="text-xs text-ink-muted">Completed</span>
                       )}
                     </Td>
                   </TableRow>

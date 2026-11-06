@@ -52,14 +52,34 @@ describe('CoreFloodListPage', () => {
     )
   })
 
-  it('renders a warnings badge and links runs', async () => {
-    vi.mocked(coreFloodsApi.list).mockResolvedValue([item({ warning_count: 2 })])
+  it('links runs', async () => {
     renderPage()
-    expect(await screen.findByText('2')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'CF_027' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'CF_027' })).toHaveAttribute(
       'href',
       '/core-floods/CF_027',
     )
+  })
+
+  it('shows description column and no segments, H₂ or warnings columns', async () => {
+    vi.mocked(coreFloodsApi.list).mockResolvedValue([item({ description: 'Brine at 200C' })])
+    renderPage()
+    expect(await screen.findByText('Brine at 200C')).toBeInTheDocument()
+    for (const name of ['Run', 'Description', 'Rig', 'Samples', 'Last sample', 'Status']) {
+      expect(screen.getByRole('columnheader', { name })).toBeInTheDocument()
+    }
+    for (const name of ['Segments', 'Warnings', 'Cum. H₂ (g/t)']) {
+      expect(screen.queryByRole('columnheader', { name })).not.toBeInTheDocument()
+    }
+  })
+
+  it('shows Ongoing status for runs with an ongoing segment', async () => {
+    vi.mocked(coreFloodsApi.list).mockResolvedValue([
+      item({ base_id: 'CF_027', ongoing_experiment_ids: ['CF_027-2'] }),
+      item({ base_id: 'CF_026' }),
+    ])
+    renderPage()
+    expect(await screen.findByText('Ongoing')).toBeInTheDocument()
+    expect(screen.getByText('Completed')).toBeInTheDocument()
   })
 
   it('shows an empty state', async () => {
