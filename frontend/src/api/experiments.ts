@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { filenameFromDisposition, saveBlob } from '@/utils/download'
 
 export type ExperimentStatus = 'ONGOING' | 'COMPLETED' | 'CANCELLED' | 'QUEUED'
 
@@ -426,4 +427,22 @@ export const experimentsApi = {
     apiClient
       .get<RollupTimepoint[]>(`/experiments/groups/${encodeURIComponent(baseId)}/rollup`)
       .then((r) => r.data),
+
+  /**
+   * Download the Export all workbook for an experiment's whole lineage (issue #141).
+   * Fetched as a blob through apiClient so the Firebase token is attached.
+   * Resolves to the saved filename.
+   */
+  exportAll: async (experimentId: string): Promise<string> => {
+    const response = await apiClient.get<Blob>(
+      `/experiments/${encodeURIComponent(experimentId)}/export`,
+      { responseType: 'blob' },
+    )
+    const filename = filenameFromDisposition(
+      response.headers['content-disposition'],
+      `${experimentId}_export.xlsx`,
+    )
+    saveBlob(response.data, filename)
+    return filename
+  },
 }
