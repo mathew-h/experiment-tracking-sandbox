@@ -22,6 +22,7 @@ from backend.api.schemas.experiments import (
     ReplicateGroupMember, ReplicateGroupResponse,
     ReplicateGroupMemberDetail, ReplicateGroupDetailResponse, ReplicateLetterGroup,
     ReplicateCreateRequest, ReplicateCreateResponse,
+    H2BackgroundLinkResponse, H2BackgroundSetRequest, H2BackgroundRollupResponse,
     DeleteImpactResponse, ExperimentDeletedResponse, ExperimentExportRequest,
 )
 from backend.services.replicate_groups import (
@@ -32,6 +33,7 @@ from backend.api.schemas.results import (
     RollupTimepointResponse, ExperimentIcpResponse,
 )
 from backend.services import icp_series
+from backend.services import h2_background as h2_bkg
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
 from database.models.conditions import ExperimentalConditions
@@ -464,7 +466,14 @@ def _group_data_to_detail_response(group: GroupData) -> ReplicateGroupDetailResp
     )
 
 
-# NOTE: these two routes MUST stay registered before any "/{experiment_id}..."
+def _h2_link_response(link) -> H2BackgroundLinkResponse:
+    return H2BackgroundLinkResponse(
+        mode=h2_bkg.link_mode(link), background_ref=h2_bkg.link_ref(link),
+        created_by=link.created_by, updated_at=link.updated_at,
+    )
+
+
+# NOTE: these routes MUST stay registered before any "/{experiment_id}..."
 # route below — FastAPI matches in declaration order, and /{experiment_id}
 # would otherwise capture the literal path segment "groups".
 @router.get("/groups/{base_id}", response_model=ReplicateGroupDetailResponse)
@@ -483,7 +492,11 @@ def get_replicate_group_detail(
     group = resolve_group(db, base_id)
     if group.parent is None and not group.members:
         raise HTTPException(status_code=404, detail="Replicate group not found")
-    return _group_data_to_detail_response(group)
+    resp = _group_data_to_detail_response(group)
+    link = h2_bkg.get_link(db, base_id)
+    if link is not None:
+        resp.h2_background = _h2_link_response(link)
+    return resp
 
 
 @router.get("/groups/{base_id}/rollup", response_model=list[RollupTimepointResponse])
@@ -497,6 +510,51 @@ def get_group_rollup(
         raise HTTPException(status_code=404, detail="Replicate group not found")
     rows = resolve_rollup_rows(db, base_id)
     return [RollupTimepointResponse(**dict(r)) for r in rows]
+
+
+@router.put("/groups/{base_id}/h2-background", response_model=H2BackgroundLinkResponse)
+def put_group_h2_background(
+    base_id: str,
+    body: H2BackgroundSetRequest,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> H2BackgroundLinkResponse:
+    """Link a replicate group to its serum-vial H2 background (issue #144)."""
+    if not group_exists(db, base_id):
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    try:
+        link = h2_bkg.set_link(db, base_id, body.experiment_id, body.mode, current_user.email)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return _h2_link_response(link)
+
+
+@router.delete("/groups/{base_id}/h2-background", status_code=204)
+def delete_group_h2_background(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> Response:
+    if not group_exists(db, base_id):
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    if h2_bkg.clear_link(db, base_id, current_user.email):
+        db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/groups/{base_id}/h2-background/rollup",
+            response_model=list[H2BackgroundRollupResponse])
+def get_group_h2_background_rollup(
+    base_id: str,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> list[H2BackgroundRollupResponse]:
+    if not group_exists(db, base_id):
+        raise HTTPException(status_code=404, detail="Replicate group not found")
+    return [H2BackgroundRollupResponse(**dict(r)) for r in h2_bkg.rollup_rows(db, base_id)]
 
 
 def _escape_like(s: str) -> str:

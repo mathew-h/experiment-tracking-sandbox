@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from database.models.enums import ExperimentStatus, NoteType
 
@@ -270,6 +270,36 @@ class ReplicateLetterGroup(BaseModel):
     vials: list[ReplicateGroupMemberDetail] = []
 
 
+class H2BackgroundLinkResponse(BaseModel):
+    mode: Literal["group", "vial"]
+    background_ref: str
+    created_by: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+
+class H2BackgroundSetRequest(BaseModel):
+    experiment_id: str
+    mode: Literal["group", "vial"]
+
+
+class H2BackgroundRollupResponse(BaseModel):
+    base_experiment_id: str
+    time_post_reaction_bucket_days: Optional[float] = None
+    n_values: int
+    bkg_time_bucket_days: Optional[float] = None
+    bkg_time_gap_days: Optional[float] = None
+    bkg_n_values: Optional[int] = None
+    bkg_mean_h2_micromoles: Optional[float] = None
+    bkg_sd_h2_micromoles: Optional[float] = None
+    mean_net_h2_micromoles: Optional[float] = None
+    sd_net_h2_micromoles: Optional[float] = None
+    mean_net_h2_grams_per_ton: Optional[float] = None
+    sd_net_h2_grams_per_ton: Optional[float] = None
+    mean_net_fe_yield_h2_pct: Optional[float] = None
+    sd_net_fe_yield_h2_pct: Optional[float] = None
+    below_background: Optional[bool] = None
+
+
 class ReplicateGroupDetailResponse(BaseModel):
     """Response for GET /api/experiments/groups/{base_id}.
 
@@ -294,6 +324,7 @@ class ReplicateGroupDetailResponse(BaseModel):
     additives_summary: Optional[str] = None
     additive_names: Optional[str] = None
     additives_diverge: bool = False
+    h2_background: Optional[H2BackgroundLinkResponse] = None
 
 
 class ReplicateCreateRequest(BaseModel):
