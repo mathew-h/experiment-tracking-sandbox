@@ -36,7 +36,7 @@ function renderRow(link: H2BackgroundLink | null) {
 }
 
 function item(experiment_id: string, base: string | null): ExperimentListItem {
-  return { experiment_id, base_experiment_id: base } as ExperimentListItem
+  return { experiment_id, base_experiment_id: base, experiment_type: 'Serum' } as ExperimentListItem
 }
 
 function rollupRow(bkg_n_values: number | null): H2BackgroundRollup {
@@ -108,7 +108,7 @@ describe('H2BackgroundRow', () => {
     renderRow(null)
     await searchAndPick(user)
     expect(experimentsApi.list).toHaveBeenCalledWith({
-      search: 'SERUM_009', experiment_type: 'Serum',
+      search: 'SERUM_009',
     })
     await user.click(screen.getByRole('radio', { name: 'Whole group (SERUM_009, 4 vials)' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
@@ -248,5 +248,24 @@ describe('H2BackgroundRow', () => {
     renderRow(GROUP_LINK)
     await waitFor(() => expect(experimentsApi.getGroupH2BackgroundRollup).toHaveBeenCalled())
     expect(screen.queryByText('background has no H₂ data')).not.toBeInTheDocument()
+  })
+
+  it('searches without experiment_type and offers only serum-type results', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [
+        { experiment_id: 'SERUM_009a', base_experiment_id: 'SERUM_009', experiment_type: 'SERUM' },
+        { experiment_id: 'HPHT_009a', base_experiment_id: 'HPHT_009', experiment_type: 'HPHT' },
+        { experiment_id: 'SERUM_009b', base_experiment_id: 'SERUM_009', experiment_type: 'Serum Vial' },
+      ] as ExperimentListItem[],
+      total: 3, skip: 0, limit: 50,
+    })
+    renderRow(null)
+    await user.click(screen.getByRole('button', { name: 'Set' }))
+    await user.type(screen.getByRole('textbox'), '009')
+    expect(await screen.findByRole('button', { name: 'SERUM_009a' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'SERUM_009b' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'HPHT_009a' })).not.toBeInTheDocument()
+    expect(experimentsApi.list).toHaveBeenCalledWith({ search: '009' })
   })
 })

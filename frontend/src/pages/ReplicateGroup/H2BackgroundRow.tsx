@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import type { ExperimentListItem, H2BackgroundLink } from '@/api/experiments'
 import { Button, ConfirmModal, Input, Modal } from '@/components/ui'
-import { splitTimepointToken } from '@/utils/experimentId'
+import { isSerumType, splitTimepointToken } from '@/utils/experimentId'
 
 type Mode = 'group' | 'vial'
 
@@ -44,7 +44,7 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
   const searchEnabled = open && search.trim().length >= MIN_SEARCH_CHARS
   const { data: results } = useQuery({
     queryKey: ['h2-bkg-search', search.trim()],
-    queryFn: () => experimentsApi.list({ search: search.trim(), experiment_type: 'Serum' }),
+    queryFn: () => experimentsApi.list({ search: search.trim() }),
     enabled: searchEnabled,
   })
 
@@ -89,7 +89,9 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
     },
   })
 
-  const items = searchEnabled ? (results?.items ?? []) : []
+  const items = searchEnabled
+    ? (results?.items ?? []).filter((i) => isSerumType(i.experiment_type))
+    : []
   const groupKey = picked ? groupKeyOf(picked) : ''
   const { data: pickedGroup } = useQuery({
     queryKey: ['replicate-group-detail', groupKey],

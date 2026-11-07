@@ -381,4 +381,13 @@ describe('ReplicateGroupPage — issue #101: a group with no replicate letters',
     renderAtBase('SERUM_001')
     expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
   })
+
+  it.each(['SERUM', 'Serum Vial'])('renders the H2 background control for experiment_type %s', async (type) => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      shared_conditions: { experiment_type: type },
+    })
+    renderAtBase('SERUM_001')
+    expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
+  })
 })

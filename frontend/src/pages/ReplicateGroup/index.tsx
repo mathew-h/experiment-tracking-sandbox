@@ -23,6 +23,7 @@ import {
 } from '@/components/ui'
 import { GroupedResultsView } from '@/pages/ExperimentDetail/GroupedResultsView'
 import { H2BackgroundRow } from './H2BackgroundRow'
+import { isSerumType } from '@/utils/experimentId'
 
 const READ_ONLY_NOTICE =
   'Replicates are edited individually; only the H₂ background is set here.'
@@ -179,7 +180,7 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
           )}
         </div>
         <p className="text-xs text-ink-muted mt-1">{READ_ONLY_NOTICE}</p>
-        {experimentType === 'Serum' && <H2BackgroundRow baseId={baseId} link={group.h2_background} />}
+        {isSerumType(experimentType) && <H2BackgroundRow baseId={baseId} link={group.h2_background} />}
       </div>
 
       {/* Members table */}

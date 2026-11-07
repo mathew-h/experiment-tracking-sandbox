@@ -14,3 +14,12 @@ export function splitTimepointToken(experimentId: string): {
     timepointDays: parseFloat(match[1]),
   }
 }
+
+/** True for the serum experiment types in real data (`SERUM`, `Serum`, `Serum Vial`).
+ *  Case-, whitespace- and padding-insensitive; mirrors
+ *  database/reactor_slot.py::normalize_experiment_type (issue #144). */
+export function isSerumType(t: unknown): boolean {
+  if (typeof t !== 'string') return false
+  const norm = t.trim().replace(/\s+/g, ' ').toLowerCase()
+  return norm === 'serum' || norm === 'serum vial'
+}
