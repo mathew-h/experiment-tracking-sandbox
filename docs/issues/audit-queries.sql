@@ -89,3 +89,24 @@ WHERE n.result_id IS NOT NULL
   AND (ml.new_values ->> 'note_text' = n.note_text
        OR ml.new_values ->> 'note_type' = n.note_type::text)
 ORDER BY n.experiment_id, n.id, ml.created_at;
+
+\echo ''
+\echo '=== Q6. Primary results with a day but no cumulative time (issue #146) ==='
+\echo '=== Hand entry via POST /api/results never set it. If any sit on ONGOING HPHT runs, ==='
+\echo '=== run update_cumulative_times_for_chain for those experiments as a one-off. ==='
+SELECT
+  lower(btrim(regexp_replace(coalesce(ec.experiment_type, '(no conditions)'), '\s+', ' ', 'g')))
+                                       AS experiment_type,
+  count(*)                             AS null_cumulative_rows,
+  count(*) FILTER (WHERE e.status = 'ONGOING') AS on_ongoing,
+  count(DISTINCT e.id)                 AS experiments,
+  (array_agg(DISTINCT e.experiment_id) FILTER (WHERE e.status = 'ONGOING'))[1:20]
+                                       AS ongoing_ids_sample
+FROM experimental_results er
+JOIN experiments e ON e.id = er.experiment_fk
+LEFT JOIN experimental_conditions ec ON ec.experiment_fk = e.id
+WHERE er.is_primary_timepoint_result
+  AND er.cumulative_time_post_reaction_days IS NULL
+  AND er.time_post_reaction_days IS NOT NULL
+GROUP BY 1
+ORDER BY 2 DESC;

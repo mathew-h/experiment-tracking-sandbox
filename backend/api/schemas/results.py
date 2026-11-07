@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from database.models.enums import AmmoniumQuantMethod
 from backend.api.schemas.experiments import NoteResponse
 
@@ -123,6 +123,8 @@ class ResultWithFlagsResponse(BaseModel):
     cumulative_time_post_reaction_days: Optional[float] = None
     is_primary_timepoint_result: bool
     created_at: datetime
+    # Read-only here (issue #146); written by the result-entry endpoints.
+    sample_tube_number: Optional[int] = None
     has_scalar: bool = False
     has_icp: bool = False
     # Issue #118 PR3: the MOD badge is now "this timepoint has a 'modification'
@@ -148,6 +150,48 @@ class ResultWithFlagsResponse(BaseModel):
     icp_run_date: Optional[datetime] = None
     gc_run_date: Optional[datetime] = None
     xrd_run_date: Optional[datetime] = None
+
+
+class _ResultEntryFields(BaseModel):
+    """Optional fields shared by hand-entry create and edit (STANDARD_PROFILE in
+    backend/services/result_entry_service.py; one definition of each constraint)."""
+    model_config = ConfigDict(extra="forbid")
+
+    gc_run_date: Optional[datetime] = None
+    sample_tube_number: Optional[int] = Field(None, gt=0)
+    sampling_volume_mL: Optional[float] = Field(None, ge=0)
+    h2_concentration: Optional[float] = Field(None, ge=0)
+    gas_sampling_volume_ml: Optional[float] = Field(None, ge=0)
+    gas_sampling_pressure_MPa: Optional[float] = Field(None, ge=0)
+    final_ph: Optional[float] = None
+    final_conductivity_mS_cm: Optional[float] = None
+    gross_ammonium_concentration_mM: Optional[float] = Field(None, ge=0)
+    # The sample's first result_note; blank on edit deletes it.
+    result_note: Optional[str] = Field(None, max_length=2000)
+    # Non-blank appends a new 'modification' note; existing ones are never edited.
+    modification_note: Optional[str] = Field(None, max_length=2000)
+
+
+class ResultEntryCreate(_ResultEntryFields):
+    """Body of POST /api/experiments/{experiment_id}/results (not Core Flood)."""
+    measurement_date: datetime
+    # Omitted: derived from measurement_date - experiment start (lab-local).
+    time_post_reaction_days: Optional[float] = Field(None, ge=0)
+
+
+class ResultEntryUpdate(_ResultEntryFields):
+    """Body of PATCH /api/experiments/{experiment_id}/results/{result_id}; the day
+    is not editable."""
+    measurement_date: Optional[datetime] = None
+
+    @field_validator("measurement_date")
+    @classmethod
+    def _omittable_not_nullable(cls, v):
+        # Omitting it leaves the date alone (validators skip unset defaults);
+        # an explicit null is rejected.
+        if v is None:
+            raise ValueError("may be omitted but not null")
+        return v
 
 
 class BackgroundAmmoniumUpdate(BaseModel):

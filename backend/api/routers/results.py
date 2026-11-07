@@ -80,7 +80,12 @@ def create_result(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ResultResponse:
-    """Create a new result timepoint for an experiment."""
+    """Create a new result timepoint for an experiment.
+
+    Not for UI use (issue #146): it commits on its own, never sets cumulative
+    time and writes no audit row. Kept for Master Results tooling and tests.
+    UI callers use POST /api/experiments/{experiment_id}/results.
+    """
     # Validate that experiment_fk references experiments.id (integer PK).
     # The frontend must never pass the string experiment_id in this field.
     exp = db.get(Experiment, payload.experiment_fk)
@@ -115,7 +120,12 @@ def create_scalar(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ScalarResponse:
-    """Create scalar results and trigger H2 + ammonium yield calculations."""
+    """Create scalar results and trigger H2 + ammonium yield calculations.
+
+    Not for UI use (issue #146); UI callers use
+    POST /api/experiments/{experiment_id}/results, which writes the result and
+    scalar rows in one transaction.
+    """
     result_entry = db.get(ExperimentalResults, payload.result_id)
     if result_entry is None:
         raise HTTPException(status_code=404, detail="Result entry not found")
