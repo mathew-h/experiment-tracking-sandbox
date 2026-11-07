@@ -1656,6 +1656,20 @@ def test_delete_impact_lists_background_dependents(client, db_session):
     assert body["background_for"] == ["IMPACT_BG_USER"]
 
 
+def test_delete_impact_lists_h2_background_links(client, db_session):
+    from database.models import H2BackgroundLink
+
+    db_session.add(Experiment(experiment_id="SERUM_009a-t3", experiment_number=7305,
+                              status=ExperimentStatus.ONGOING))
+    db_session.add(H2BackgroundLink(base_experiment_id="SERUM_010",
+                                    background_stem_id="SERUM_009a"))
+    db_session.commit()
+
+    body = client.get("/api/experiments/SERUM_009a-t3/delete-impact").json()
+    assert body["h2_background_for"] == ["SERUM_010"]
+    assert body["total"] == 0
+
+
 # ---------------------------------------------------------------------------
 # PATCH /status occupancy rejection (issue #97, Defect 4)
 # ---------------------------------------------------------------------------

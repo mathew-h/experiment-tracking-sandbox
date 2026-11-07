@@ -83,6 +83,7 @@ from database.models.results import (
     ExperimentalResults, ICPResults, ResultFiles, ScalarResults,
 )
 from database.models.xrd import XRDPhase
+from backend.services.h2_background import groups_using_background
 
 log = structlog.get_logger(__name__)
 
@@ -108,6 +109,10 @@ class DeleteImpact:
     xrd_phases: int = 0
     # Other experiments that name this one as their ammonium background.
     background_for: list[str] = field(default_factory=list)
+    # Sample groups whose H2 background link (issue #144) resolves to this
+    # experiment. The link row has no FK and survives the delete; it then
+    # points at nothing (its adjusted values go NULL).
+    h2_background_for: list[str] = field(default_factory=list)
     # Experiments whose parent_experiment_fk points at this one. Their
     # base_experiment_id STRING is untouched, so replicate groups -- addressed
     # by that string, not by a row lookup (MODELS.md, issue #87) -- keep
@@ -116,7 +121,7 @@ class DeleteImpact:
 
     @property
     def total(self) -> int:
-        """Rows destroyed. Excludes background_for/replicate_children, which
+        """Rows destroyed. Excludes background_for/h2_background_for/replicate_children, which
         are decoupled and survive. The UI gates typed-ID confirmation on this.
         """
         return (
@@ -185,6 +190,8 @@ def collect_delete_impact(db: Session, exp: Experiment) -> DeleteImpact:
             Experiment.id != exp.id,
         )
     ).scalars().all()))
+
+    impact.h2_background_for = groups_using_background(db, exp)
 
     impact.replicate_children = sorted(db.execute(
         select(Experiment.experiment_id).where(

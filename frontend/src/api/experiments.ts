@@ -170,6 +170,8 @@ export interface DeleteImpact {
   total: number
   /** Other experiments that named this one as their ammonium background. */
   background_for: string[]
+  /** Sample groups whose H2 background link points at this experiment; links are kept. */
+  h2_background_for: string[]
   /** Replicates whose parent pointer is dropped; their group ID is unaffected. */
   replicate_children: string[]
 }

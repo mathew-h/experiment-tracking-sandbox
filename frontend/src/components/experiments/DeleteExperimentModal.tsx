@@ -78,6 +78,7 @@ export function DeleteExperimentModal({
   const needsTypedId =
     (impact?.total ?? 0) > 0 ||
     (impact?.background_for.length ?? 0) > 0 ||
+    (impact?.h2_background_for.length ?? 0) > 0 ||
     (impact?.replicate_children.length ?? 0) > 0
   const canDelete =
     Boolean(impact) && !deleteMutation.isPending &&
@@ -144,6 +145,14 @@ export function DeleteExperimentModal({
               Used as the ammonium background by{' '}
               <span className="font-mono-data">{impact.background_for.join(', ')}</span>.
               That reference is cleared; the stored background values are unchanged.
+            </p>
+          )}
+
+          {impact.h2_background_for.length > 0 && (
+            <p className="text-ink-muted">
+              Used as the H₂ background for groups:{' '}
+              <span className="font-mono-data">{impact.h2_background_for.join(', ')}</span>.
+              The links are kept, but those groups lose their background-adjusted H₂ values.
             </p>
           )}
 

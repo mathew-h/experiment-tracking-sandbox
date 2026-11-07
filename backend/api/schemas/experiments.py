@@ -340,8 +340,8 @@ class ReplicateCreateResponse(BaseModel):
 class DeleteImpactResponse(BaseModel):
     """What deleting an experiment destroys and decouples (issue #99).
 
-    `total` sums the counts only. `background_for` and `replicate_children`
-    are decoupled -- those experiments survive -- so they are excluded from it.
+    `total` sums the counts only. `background_for`, `h2_background_for` and
+    `replicate_children` are decoupled -- those experiments survive -- so they are excluded from it.
     The UI demands a typed-ID confirmation when anything is destroyed OR
     decoupled.
     """
@@ -359,6 +359,7 @@ class DeleteImpactResponse(BaseModel):
     xrd_phases: int = 0
     total: int = 0
     background_for: list[str] = []
+    h2_background_for: list[str] = []
     replicate_children: list[str] = []
 
 
