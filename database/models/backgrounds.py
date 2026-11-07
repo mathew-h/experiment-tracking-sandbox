@@ -1,4 +1,6 @@
-"""H2BackgroundLink — which background serum vial set to subtract from a sample's H2 (issue #144).
+"""H2BackgroundLink — the background serum vials to subtract from a group's H2.
+
+Issue #144.
 
 One row per sample base experiment. Exactly one of background_base_id (a whole
 background replicate set, averaged) or background_stem_id (a single background
@@ -30,4 +32,6 @@ class H2BackgroundLink(Base):
     background_stem_id = Column(String, nullable=True)
     created_by = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

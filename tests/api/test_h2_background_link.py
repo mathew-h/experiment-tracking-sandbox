@@ -4,7 +4,9 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 
-from database.models import Experiment, ExperimentalResults, H2BackgroundLink, ScalarResults
+from database.models import (
+    Experiment, ExperimentalResults, H2BackgroundLink, ScalarResults,
+)
 from database.models.enums import ExperimentStatus
 from database.models.experiments import ModificationsLog
 
@@ -39,8 +41,11 @@ def _h2(db, exp, bucket, umol):
     db.flush()
     db.add(ScalarResults(result_id=r.id, h2_concentration=100.0, h2_micromoles=umol))
     db.flush()
-    db.execute(text("UPDATE scalar_results SET h2_concentration = 100, h2_micromoles = :u WHERE result_id = :r"),
-               {"u": umol, "r": r.id})
+    db.execute(
+        text("UPDATE scalar_results SET h2_concentration = 100, "
+             "h2_micromoles = :u WHERE result_id = :r"),
+        {"u": umol, "r": r.id},
+    )
 
 
 @pytest.fixture()
@@ -145,13 +150,15 @@ def test_delete_204(client, seeded):
 
 
 def test_delete_unknown_group_404(client, seeded):
-    assert client.delete("/api/experiments/groups/H2L_NOGROUP/h2-background").status_code == 404
+    resp = client.delete("/api/experiments/groups/H2L_NOGROUP/h2-background")
+    assert resp.status_code == 404
 
 
 def test_rollup_endpoint_ordered(client, seeded, reporting_views):
     sample = _exp(seeded, "H2L_001c", 95010, base="H2L_001")
     _h2(seeded, sample, 14, 10.0)
-    _h2(seeded, seeded.query(Experiment).filter_by(experiment_id="H2L_001a").one(), 7, 8.0)
+    exp = seeded.query(Experiment).filter_by(experiment_id="H2L_001a").one()
+    _h2(seeded, exp, 7, 8.0)
     client.put(URL, json={"experiment_id": "H2L_002a-t7", "mode": "group"})
     resp = client.get(URL + "/rollup")
     assert resp.status_code == 200

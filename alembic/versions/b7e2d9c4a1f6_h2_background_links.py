@@ -32,8 +32,12 @@ def upgrade() -> None:
         sa.Column("background_base_id", sa.String(), nullable=True),
         sa.Column("background_stem_id", sa.String(), nullable=True),
         sa.Column("created_by", sa.String(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("base_experiment_id"),
         sa.CheckConstraint(
             "num_nonnulls(background_base_id, background_stem_id) = 1",

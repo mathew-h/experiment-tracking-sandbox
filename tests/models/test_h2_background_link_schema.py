@@ -24,7 +24,9 @@ def _script_dir():
 
 def _load_migration():
     path = REPO_ROOT / "alembic" / "versions" / f"{REVISION}_h2_background_links.py"
-    spec = importlib.util.spec_from_file_location("_h2_background_links_migration", path)
+    spec = importlib.util.spec_from_file_location(
+        "_h2_background_links_migration", path
+    )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

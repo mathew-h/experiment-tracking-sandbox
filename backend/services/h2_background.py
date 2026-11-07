@@ -37,14 +37,17 @@ def link_mode(link: H2BackgroundLink) -> LinkMode:
 
 
 def link_ref(link: H2BackgroundLink) -> str:
-    return link.background_base_id if link.background_base_id is not None else link.background_stem_id
+    if link.background_base_id is not None:
+        return link.background_base_id
+    return link.background_stem_id
 
 
 def _has_usable_background(db: Session, mode: LinkMode, ref: str) -> bool:
     """Mirror the view's bkg CTE filter: primary row, non-null H2 and bucket,
     non-outlier experiment."""
     if mode == "group":
-        match = func.coalesce(Experiment.base_experiment_id, Experiment.experiment_id) == ref
+        key = func.coalesce(Experiment.base_experiment_id, Experiment.experiment_id)
+        match = key == ref
     else:
         match = timepoint_stem_expr(Experiment) == ref
     q = (
@@ -73,7 +76,10 @@ def set_link(db: Session, base_id: str, experiment_id: str, mode: LinkMode,
     if group_key(bg_exp) == base_id:
         raise ValueError("A group cannot be its own H2 background")
 
-    ref = group_key(bg_exp) if mode == "group" else split_timepoint_token(experiment_id)[0]
+    if mode == "group":
+        ref = group_key(bg_exp)
+    else:
+        ref = split_timepoint_token(experiment_id)[0]
     if not _has_usable_background(db, mode, ref):
         raise ValueError(
             f"Background '{ref}' has no primary H2 (micromoles) results with a "

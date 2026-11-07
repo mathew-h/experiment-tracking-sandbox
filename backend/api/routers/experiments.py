@@ -538,6 +538,11 @@ def delete_group_h2_background(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> Response:
+    """Remove a group's H2 background link (issue #144).
+
+    204 whether or not a link existed; only a real removal is audited. No
+    recalculate(): nothing derived is stored (the net values are view columns).
+    """
     if not group_exists(db, base_id):
         raise HTTPException(status_code=404, detail="Replicate group not found")
     if h2_bkg.clear_link(db, base_id, current_user.email):
@@ -552,6 +557,11 @@ def get_group_h2_background_rollup(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[H2BackgroundRollupResponse]:
+    """Background-adjusted H2 per timepoint bucket (issue #144).
+
+    Reads v_results_h2_bkg_adjusted_rollup. Empty list when the group has no
+    link. Ordered by bucket.
+    """
     if not group_exists(db, base_id):
         raise HTTPException(status_code=404, detail="Replicate group not found")
     return [H2BackgroundRollupResponse(**dict(r)) for r in h2_bkg.rollup_rows(db, base_id)]

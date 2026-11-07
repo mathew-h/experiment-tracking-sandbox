@@ -19,7 +19,9 @@ from sqlalchemy import text
 
 from backend.services.calculations.scalar_calcs import calculate_ferrous_iron_yield_h2
 from database.experiment_id_parser import split_timepoint_token
-from database.models import Experiment, ExperimentalResults, H2BackgroundLink, ScalarResults
+from database.models import (
+    Experiment, ExperimentalResults, H2BackgroundLink, ScalarResults,
+)
 from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 
@@ -134,7 +136,8 @@ def _view_columns(db, view):
 
 def test_view_columns_exact(db_session, reporting_views):
     assert _view_columns(db_session, "v_results_h2_bkg_adjusted") == PER_ROW_COLUMNS
-    assert _view_columns(db_session, "v_results_h2_bkg_adjusted_rollup") == ROLLUP_COLUMNS
+    cols = _view_columns(db_session, "v_results_h2_bkg_adjusted_rollup")
+    assert cols == ROLLUP_COLUMNS
 
 
 def test_group_mode_t7(db_session, reporting_views):
@@ -160,7 +163,8 @@ def test_group_mode_t7(db_session, reporting_views):
     assert r["mean_net_h2_micromoles"] == pytest.approx(9.0)
     assert r["sd_net_h2_micromoles"] == pytest.approx(5 ** 0.5, abs=1e-3)
     assert r["mean_net_h2_grams_per_ton"] == pytest.approx(18.143, abs=1e-3)
-    assert r["sd_net_h2_grams_per_ton"] == pytest.approx(H2_MOLAR_MASS * 5 ** 0.5, abs=1e-3)
+    expected = H2_MOLAR_MASS * 5 ** 0.5
+    assert r["sd_net_h2_grams_per_ton"] == pytest.approx(expected, abs=1e-3)
     assert r["below_background"] is False
 
 
@@ -378,7 +382,9 @@ def _norm(sql: str) -> str:
     return " ".join(sql.split())
 
 
-@pytest.mark.parametrize("name", ["v_results_scalar", "v_results_h2", "v_results_scalar_rollup"])
+@pytest.mark.parametrize(
+    "name", ["v_results_scalar", "v_results_h2", "v_results_scalar_rollup"]
+)
 def test_existing_views_untouched(name):
     """One-time #144 guard: this branch left v_results_scalar, v_results_h2 and
     v_results_scalar_rollup unchanged versus 1817bed, the develop head it
