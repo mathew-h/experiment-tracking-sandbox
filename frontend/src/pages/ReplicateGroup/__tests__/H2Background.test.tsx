@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
+import { within } from '@testing-library/react'
 
 vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     list: vi.fn(),
+    getGroup: vi.fn(),
     setGroupH2Background: vi.fn(),
     clearGroupH2Background: vi.fn(),
     getGroupH2BackgroundRollup: vi.fn(),
@@ -18,6 +20,7 @@ import type {
   ExperimentListItem,
   H2BackgroundLink,
   H2BackgroundRollup,
+  ReplicateGroupDetail,
 } from '@/api/experiments'
 
 const queryClient = new QueryClient({
@@ -64,6 +67,7 @@ beforeEach(() => {
   queryClient.clear()
   vi.clearAllMocks()
   vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([rollupRow(2)])
+  vi.mocked(experimentsApi.getGroup).mockResolvedValue({ member_count: 4 } as ReplicateGroupDetail)
   vi.mocked(experimentsApi.list).mockResolvedValue({
     items: [item('SERUM_009a', 'SERUM_009'), item('SERUM_009b', 'SERUM_009')],
     total: 2, skip: 0, limit: 50,
@@ -106,7 +110,7 @@ describe('H2BackgroundRow', () => {
     expect(experimentsApi.list).toHaveBeenCalledWith({
       search: 'SERUM_009', experiment_type: 'Serum',
     })
-    await user.click(screen.getByRole('radio', { name: 'Whole group (SERUM_009, 2 vials)' }))
+    await user.click(screen.getByRole('radio', { name: 'Whole group (SERUM_009, 4 vials)' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(experimentsApi.setGroupH2Background).toHaveBeenCalledWith('SERUM_010', {
@@ -136,20 +140,102 @@ describe('H2BackgroundRow', () => {
     })
     renderRow(null)
     await searchAndPick(user)
-    await user.click(screen.getByRole('radio', { name: 'Whole group (SERUM_009, 2 vials)' }))
+    await user.click(screen.getByRole('radio', { name: 'Whole group (SERUM_009, 4 vials)' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Background has no H2 data')).toBeInTheDocument()
   })
 
-  it('clears the background', async () => {
+  it('asks for confirmation before clearing, and only confirming calls the API', async () => {
     const user = userEvent.setup()
     vi.mocked(experimentsApi.clearGroupH2Background).mockResolvedValue(undefined)
     renderRow(GROUP_LINK)
     await user.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(experimentsApi.clearGroupH2Background).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Clear H₂ background')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        'Remove the H₂ background link for SERUM_010? Background-adjusted H₂ values for this group will no longer be shown.',
+      ),
+    ).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Clear' }))
     await waitFor(() =>
       expect(experimentsApi.clearGroupH2Background).toHaveBeenCalledWith('SERUM_010'),
     )
   })
+
+  it('does not clear when the confirmation is cancelled', async () => {
+    const user = userEvent.setup()
+    renderRow(GROUP_LINK)
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(experimentsApi.clearGroupH2Background).not.toHaveBeenCalled()
+  })
+
+  it('shows the server detail next to the row when clear fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.clearGroupH2Background).mockRejectedValue({
+      response: { data: { detail: 'Clear refused' } },
+    })
+    renderRow(GROUP_LINK)
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Clear' }))
+    expect(await screen.findByText('Clear refused')).toBeInTheDocument()
+  })
+
+  it('invalidates the detail, rollup and background-rollup queries after clear', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    vi.mocked(experimentsApi.clearGroupH2Background).mockResolvedValue(undefined)
+    renderRow(GROUP_LINK)
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Clear' }))
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(3))
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey)
+    expect(keys).toContainEqual(['replicate-group-detail', 'SERUM_010'])
+    expect(keys).toContainEqual(['group-rollup', 'SERUM_010'])
+    expect(keys).toContainEqual(['group-h2-bkg-rollup', 'SERUM_010'])
+    spy.mockRestore()
+  })
+
+  it('invalidates all three queries and closes the modal after a save', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    vi.mocked(experimentsApi.setGroupH2Background).mockResolvedValue(GROUP_LINK)
+    renderRow(null)
+    await searchAndPick(user)
+    await user.click(screen.getByRole('radio', { name: 'Whole group (SERUM_009, 4 vials)' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey)
+    expect(keys).toContainEqual(['replicate-group-detail', 'SERUM_010'])
+    expect(keys).toContainEqual(['group-rollup', 'SERUM_010'])
+    expect(keys).toContainEqual(['group-h2-bkg-rollup', 'SERUM_010'])
+    spy.mockRestore()
+  })
+
+  it('labels a pick with no base_experiment_id by its own experiment id', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [item('SERUM_009-t5', null)], total: 1, skip: 0, limit: 50,
+    })
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({ member_count: 1 } as ReplicateGroupDetail)
+    renderRow(null)
+    await user.click(screen.getByRole('button', { name: 'Set' }))
+    await user.type(screen.getByRole('textbox'), 'SERUM_009')
+    await user.click(await screen.findByRole('button', { name: 'SERUM_009-t5' }))
+    expect(await screen.findByRole('radio', { name: 'Whole group (SERUM_009-t5, 1 vial)' })).toBeInTheDocument()
+    expect(experimentsApi.getGroup).toHaveBeenCalledWith('SERUM_009-t5')
+  })
+
+  it('falls back to a count-free label while the group fetch fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.getGroup).mockRejectedValue(new Error('nope'))
+    renderRow(null)
+    await searchAndPick(user)
+    expect(screen.getByRole('radio', { name: 'Whole group (SERUM_009)' })).toBeInTheDocument()
+  })
+
 
   it('warns when the linked background has no H2 data', async () => {
     vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([rollupRow(null)])

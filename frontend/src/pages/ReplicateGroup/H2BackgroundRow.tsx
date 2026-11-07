@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import type { ExperimentListItem, H2BackgroundLink } from '@/api/experiments'
-import { Button, Input, Modal } from '@/components/ui'
+import { Button, ConfirmModal, Input, Modal } from '@/components/ui'
 import { splitTimepointToken } from '@/utils/experimentId'
 
 type Mode = 'group' | 'vial'
@@ -19,9 +19,9 @@ function errorDetail(err: unknown, fallback: string): string {
   return typeof detail === 'string' ? detail : fallback
 }
 
-/** The picked result's group key: its base experiment ID, else its timepoint-stripped stem. */
+/** The key the server stores for whole-group mode: COALESCE(base_experiment_id, experiment_id). */
 function groupKeyOf(item: ExperimentListItem): string {
-  return item.base_experiment_id ?? splitTimepointToken(item.experiment_id).stem
+  return item.base_experiment_id ?? item.experiment_id
 }
 
 /** Serum-vial H2 background control for a replicate group (issue #144). */
@@ -32,6 +32,8 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
   const [picked, setPicked] = useState<ExperimentListItem | null>(null)
   const [mode, setMode] = useState<Mode>('group')
   const [serverError, setServerError] = useState<string | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearError, setClearError] = useState<string | null>(null)
 
   const { data: rollup } = useQuery({
     queryKey: ['group-h2-bkg-rollup', baseId],
@@ -76,15 +78,29 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
 
   const clearMutation = useMutation({
     mutationFn: () => experimentsApi.clearGroupH2Background(baseId),
-    onSuccess: () => invalidate(),
+    onSuccess: async () => {
+      setClearError(null)
+      setConfirmClear(false)
+      await invalidate()
+    },
+    onError: (err: unknown) => {
+      setConfirmClear(false)
+      setClearError(errorDetail(err, 'Could not clear the H₂ background'))
+    },
   })
 
   const items = searchEnabled ? (results?.items ?? []) : []
   const groupKey = picked ? groupKeyOf(picked) : ''
-  const sameGroupCount = picked ? items.filter((i) => groupKeyOf(i) === groupKey).length : 0
+  const { data: pickedGroup } = useQuery({
+    queryKey: ['replicate-group-detail', groupKey],
+    queryFn: () => experimentsApi.getGroup(groupKey),
+    enabled: picked !== null,
+    retry: false,
+  })
+  const memberCount = pickedGroup?.member_count
   const groupLabel =
-    sameGroupCount > 0
-      ? `Whole group (${groupKey}, ${sameGroupCount} ${sameGroupCount === 1 ? 'vial' : 'vials'})`
+    memberCount !== undefined
+      ? `Whole group (${groupKey}, ${memberCount} ${memberCount === 1 ? 'vial' : 'vials'})`
       : `Whole group (${groupKey})`
   const stem = picked ? splitTimepointToken(picked.experiment_id).stem : ''
 
@@ -104,12 +120,7 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
           <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
             Change
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            loading={clearMutation.isPending}
-            onClick={() => clearMutation.mutate()}
-          >
+          <Button size="sm" variant="ghost" onClick={() => setConfirmClear(true)}>
             Clear
           </Button>
         </>
@@ -119,6 +130,18 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
         </Button>
       )}
       {noData && <span className="text-status-warning">background has no H₂ data</span>}
+      {clearError && <span className="text-red-400">{clearError}</span>}
+
+      <ConfirmModal
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={() => clearMutation.mutate()}
+        title="Clear H₂ background"
+        description={`Remove the H₂ background link for ${baseId}? Background-adjusted H₂ values for this group will no longer be shown.`}
+        confirmLabel="Clear"
+        loading={clearMutation.isPending}
+        danger
+      />
 
       <Modal
         open={open}
