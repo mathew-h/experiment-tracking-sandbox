@@ -30,14 +30,18 @@ from typing import Sequence
 
 from sqlalchemy import func
 
-from database.experiment_id_parser import split_timepoint_token
-from database.models.experiments import Experiment
-
 # POSIX-ERE equivalent of database/experiment_id_parser.py::_TIMEPOINT_TOKEN_RE:
 # '-t' + digits + an optional decimal part, anchored to end-of-string. Lowercase
 # 't' only. Anchoring means regexp_replace can match at most once, so its
 # replace-first-only default is what we want.
 TIMEPOINT_TOKEN_SQL_PATTERN = r"-t[0-9]+(\.[0-9]+)?$"
+# Defined BEFORE the database imports below: database.event_listeners imports
+# this constant at module level (issue #144 views), and importing this module
+# first re-enters it through database/__init__ -> database.database ->
+# event_listeners while it is only partially initialised.
+
+from database.experiment_id_parser import split_timepoint_token
+from database.models.experiments import Experiment
 
 
 def timepoint_stem_expr(col):

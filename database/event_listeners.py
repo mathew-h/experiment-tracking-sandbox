@@ -7,6 +7,7 @@ from .models import (
 )
 from .database import engine
 from .lineage_utils import update_experiment_lineage, update_orphaned_derivations
+from backend.services.replicate_collapse import TIMEPOINT_TOKEN_SQL_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -620,6 +621,189 @@ _VIEWS = [
         JOIN scalar_results sr  ON sr.result_id = er.id
         WHERE er.is_primary_timepoint_result = TRUE
           AND sr.h2_concentration IS NOT NULL
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_h2_bkg_adjusted (issue #144)
+    # One row per primary H2 result (same population as v_results_h2) of a
+    # sample group that has an h2_background_links row, with the linked
+    # serum vial background subtracted. Sample outliers stay in (per-row).
+    # Background modes:
+    #   group - every experiment whose COALESCE(base_experiment_id,
+    #           experiment_id) = background_base_id
+    #   vial  - every experiment whose experiment_id with the '-t<days>'
+    #           token peeled off (TIMEPOINT_TOKEN_SQL_PATTERN) =
+    #           background_stem_id
+    # Background stats (bkg CTE) are per (sample group, bucket) and EXCLUDE
+    # is_outlier background vials. Each sample row takes the nearest
+    # background bucket (ties go to the earlier bucket, no maximum gap);
+    # bkg_time_gap_days = background bucket - sample bucket (signed).
+    # A sample row with a NULL bucket, or no background bucket, or NULL
+    # h2_micromoles, gets NULL net values.
+    # Math (issue #144 spec): d = h2_micromoles - bkg mean (unclamped),
+    # net = GREATEST(0, d), u = bkg stddev_samp (NULL when bkg n = 1).
+    # g/t and Fe(II) yield scale d and u by 2.01588 / rock_mass_g and
+    # 3 * 55.845 / 1e6 / total_ferrous_iron_g * 100, read from the SAMPLE's
+    # experimental_conditions (1:1 via uq_conditions_experiment_fk); a zero
+    # rock mass or Fe(II) gives NULL (NULLIF), matching Python's > 0 guard.
+    # No adjusted ppm: bkg_mean_h2_ppm is reference only.
+    # GREATEST ignores NULLs in Postgres (GREATEST(0, NULL) = 0), so every
+    # clamp is wrapped in CASE WHEN x IS NOT NULL to keep a missing value NULL.
+    # ------------------------------------------------------------------
+    ("v_results_h2_bkg_adjusted", f"""
+        CREATE VIEW v_results_h2_bkg_adjusted AS
+        WITH s AS (
+            SELECT
+                er.id                                AS result_id,
+                e.experiment_id,
+                er.experiment_fk,
+                l.base_experiment_id,
+                er.time_post_reaction_bucket_days,
+                CASE WHEN l.background_base_id IS NOT NULL
+                     THEN 'group' ELSE 'vial' END    AS background_mode,
+                COALESCE(l.background_base_id, l.background_stem_id)
+                                                     AS background_ref,
+                sr.h2_micromoles,
+                2.01588 / NULLIF(ec.rock_mass_g, 0)  AS k_gpt,
+                3 * 55.845 / 1e6 / NULLIF(ec.total_ferrous_iron_g, 0) * 100
+                                                     AS k_fe
+            FROM experimental_results er
+            JOIN experiments e          ON e.id = er.experiment_fk
+            JOIN scalar_results sr      ON sr.result_id = er.id
+            JOIN h2_background_links l
+                 ON l.base_experiment_id = COALESCE(e.base_experiment_id, e.experiment_id)
+            LEFT JOIN experimental_conditions ec ON ec.experiment_fk = e.id
+            WHERE er.is_primary_timepoint_result = TRUE
+              AND sr.h2_concentration IS NOT NULL
+        ),
+        bkg AS (
+            SELECT
+                l.base_experiment_id                 AS sample_base,
+                er.time_post_reaction_bucket_days    AS bucket,
+                COUNT(*)                             AS n_values,
+                AVG(sr.h2_concentration)             AS mean_ppm,
+                AVG(sr.h2_micromoles)                AS mean_umol,
+                stddev_samp(sr.h2_micromoles)        AS sd_umol
+            FROM h2_background_links l
+            JOIN experiments e ON
+                 (l.background_base_id IS NOT NULL
+                  AND COALESCE(e.base_experiment_id, e.experiment_id) = l.background_base_id)
+              OR (l.background_stem_id IS NOT NULL
+                  AND regexp_replace(e.experiment_id, '{TIMEPOINT_TOKEN_SQL_PATTERN}', '') = l.background_stem_id)
+            JOIN experimental_results er ON er.experiment_fk = e.id
+            JOIN scalar_results sr       ON sr.result_id = er.id
+            WHERE er.is_primary_timepoint_result = TRUE
+              AND sr.h2_micromoles IS NOT NULL
+              AND er.time_post_reaction_bucket_days IS NOT NULL
+              AND NOT COALESCE(e.is_outlier, false)
+            GROUP BY l.base_experiment_id, er.time_post_reaction_bucket_days
+        ),
+        d AS (
+            SELECT
+                s.*,
+                m.bucket                             AS bkg_time_bucket_days,
+                m.bucket - s.time_post_reaction_bucket_days
+                                                     AS bkg_time_gap_days,
+                m.n_values                           AS bkg_n_values,
+                m.mean_ppm                           AS bkg_mean_h2_ppm,
+                m.mean_umol                          AS bkg_mean_h2_micromoles,
+                m.sd_umol                            AS bkg_sd_h2_micromoles,
+                s.h2_micromoles - m.mean_umol        AS d_umol
+            FROM s
+            LEFT JOIN LATERAL (
+                SELECT b.bucket, b.n_values, b.mean_ppm, b.mean_umol, b.sd_umol
+                FROM bkg b
+                WHERE b.sample_base = s.base_experiment_id
+                  AND s.time_post_reaction_bucket_days IS NOT NULL
+                ORDER BY abs(b.bucket - s.time_post_reaction_bucket_days), b.bucket
+                LIMIT 1
+            ) m ON true
+        )
+        SELECT
+            result_id,
+            experiment_id,
+            experiment_fk,
+            base_experiment_id,
+            time_post_reaction_bucket_days,
+            background_mode,
+            background_ref,
+            bkg_time_bucket_days,
+            bkg_time_gap_days,
+            bkg_n_values,
+            bkg_mean_h2_ppm,
+            bkg_mean_h2_micromoles,
+            bkg_sd_h2_micromoles,
+            h2_micromoles,
+            d_umol                                   AS net_h2_micromoles_unclamped,
+            CASE WHEN d_umol IS NOT NULL THEN GREATEST(0, d_umol) END
+                                                     AS net_h2_micromoles,
+            bkg_sd_h2_micromoles                     AS u_bkg_h2_micromoles,
+            CASE WHEN d_umol IS NOT NULL THEN GREATEST(0, d_umol) END * 2.01588
+                                                     AS net_h2_mass_ug,
+            d_umol * k_gpt                           AS net_h2_grams_per_ton_unclamped,
+            CASE WHEN d_umol * k_gpt IS NOT NULL THEN GREATEST(0, d_umol * k_gpt) END
+                                                     AS net_h2_grams_per_ton,
+            bkg_sd_h2_micromoles * k_gpt             AS u_bkg_h2_grams_per_ton,
+            d_umol * k_fe                            AS net_fe_yield_h2_pct_unclamped,
+            CASE WHEN d_umol * k_fe IS NOT NULL THEN GREATEST(0, d_umol * k_fe) END
+                                                     AS net_fe_yield_h2_pct,
+            bkg_sd_h2_micromoles * k_fe              AS u_bkg_fe_yield_h2_pct,
+            d_umol < 0                               AS below_background
+        FROM d
+    """),
+
+    # ------------------------------------------------------------------
+    # v_results_h2_bkg_adjusted_rollup (issue #144)
+    # One row per (base_experiment_id, timepoint bucket) of a linked sample
+    # group, read from v_results_h2_bkg_adjusted. Sample experiments flagged
+    # is_outlier are excluded (as in v_results_scalar_rollup); rows with a
+    # NULL bucket are dropped. n_values counts rows with a net value.
+    # Background columns are constant within a sample bucket, so MIN() just
+    # carries them through.
+    # Mean: GREATEST(0, AVG(unclamped)), so negative replicates pull the
+    # mean down before the clamp. SD combines replicate scatter with the
+    # background SD: sqrt(stddev_samp(d)^2 + AVG(u)^2), each term COALESCEd
+    # to 0, and NULL only when both terms are NULL.
+    # The mean clamps are CASE-guarded too: no values gives NULL, not 0.
+    # ------------------------------------------------------------------
+    ("v_results_h2_bkg_adjusted_rollup", """
+        CREATE VIEW v_results_h2_bkg_adjusted_rollup AS
+        SELECT
+            v.base_experiment_id,
+            v.time_post_reaction_bucket_days,
+            COUNT(v.net_h2_micromoles_unclamped)                        AS n_values,
+            MIN(v.bkg_time_bucket_days)                                 AS bkg_time_bucket_days,
+            MIN(v.bkg_time_gap_days)                                    AS bkg_time_gap_days,
+            MIN(v.bkg_n_values)                                         AS bkg_n_values,
+            MIN(v.bkg_mean_h2_micromoles)                               AS bkg_mean_h2_micromoles,
+            MIN(v.bkg_sd_h2_micromoles)                                 AS bkg_sd_h2_micromoles,
+            CASE WHEN AVG(v.net_h2_micromoles_unclamped) IS NOT NULL
+                 THEN GREATEST(0, AVG(v.net_h2_micromoles_unclamped)) END             AS mean_net_h2_micromoles,
+            CASE WHEN stddev_samp(v.net_h2_micromoles_unclamped) IS NULL
+                      AND AVG(v.u_bkg_h2_micromoles) IS NULL THEN NULL
+                 ELSE sqrt(power(COALESCE(stddev_samp(v.net_h2_micromoles_unclamped), 0), 2)
+                           + power(COALESCE(AVG(v.u_bkg_h2_micromoles), 0), 2))
+            END                                                         AS sd_net_h2_micromoles,
+            CASE WHEN AVG(v.net_h2_grams_per_ton_unclamped) IS NOT NULL
+                 THEN GREATEST(0, AVG(v.net_h2_grams_per_ton_unclamped)) END          AS mean_net_h2_grams_per_ton,
+            CASE WHEN stddev_samp(v.net_h2_grams_per_ton_unclamped) IS NULL
+                      AND AVG(v.u_bkg_h2_grams_per_ton) IS NULL THEN NULL
+                 ELSE sqrt(power(COALESCE(stddev_samp(v.net_h2_grams_per_ton_unclamped), 0), 2)
+                           + power(COALESCE(AVG(v.u_bkg_h2_grams_per_ton), 0), 2))
+            END                                                         AS sd_net_h2_grams_per_ton,
+            CASE WHEN AVG(v.net_fe_yield_h2_pct_unclamped) IS NOT NULL
+                 THEN GREATEST(0, AVG(v.net_fe_yield_h2_pct_unclamped)) END           AS mean_net_fe_yield_h2_pct,
+            CASE WHEN stddev_samp(v.net_fe_yield_h2_pct_unclamped) IS NULL
+                      AND AVG(v.u_bkg_fe_yield_h2_pct) IS NULL THEN NULL
+                 ELSE sqrt(power(COALESCE(stddev_samp(v.net_fe_yield_h2_pct_unclamped), 0), 2)
+                           + power(COALESCE(AVG(v.u_bkg_fe_yield_h2_pct), 0), 2))
+            END                                                         AS sd_net_fe_yield_h2_pct,
+            AVG(v.net_h2_micromoles_unclamped) < 0                      AS below_background
+        FROM v_results_h2_bkg_adjusted v
+        JOIN experiments e ON e.id = v.experiment_fk
+        WHERE NOT COALESCE(e.is_outlier, false)
+          AND v.time_post_reaction_bucket_days IS NOT NULL
+        GROUP BY v.base_experiment_id, v.time_post_reaction_bucket_days
     """),
 
     # ------------------------------------------------------------------
