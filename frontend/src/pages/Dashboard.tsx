@@ -10,6 +10,7 @@ import { ActivityFeed } from './ActivityFeed'
 import { DashboardFilters, type DashboardFilterState } from './DashboardFilters'
 
 const R_FALLBACK = 16
+const P_FALLBACK = 6
 const CF_FALLBACK = 3
 
 function occupancySegments(o?: SlotOccupancy): SlotSegment[] {
@@ -59,7 +60,7 @@ export function DashboardPage() {
       </div>
 
       {/* Summary metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <MetricCard
           label="Reactor Occupancy"
           value={data?.summary.reactors.ongoing ?? '—'}
@@ -71,6 +72,19 @@ export function DashboardPage() {
           }
         >
           {data && <SlotBar total={data.summary.reactors.total} segments={occupancySegments(data.summary.reactors)} />}
+        </MetricCard>
+
+        <MetricCard
+          label="Parr Reactors"
+          value={data?.summary.parr.ongoing ?? '—'}
+          unit={`/ ${data?.summary.parr.total ?? P_FALLBACK} ongoing`}
+          sub={
+            data
+              ? `${data.summary.parr.queued} queued · ${data.summary.parr.empty} empty`
+              : undefined
+          }
+        >
+          {data && <SlotBar total={data.summary.parr.total} segments={occupancySegments(data.summary.parr)} />}
         </MetricCard>
 
         <MetricCard
@@ -127,7 +141,9 @@ export function DashboardPage() {
             <ReactorGrid
               cards={data.reactors}
               rSlotCount={data.summary.reactors.total}
+              pSlotCount={data.summary.parr.total}
               cfSlotCount={data.summary.core_floods.total}
+              specs={data.reactor_specs}
             />
           )}
         </CardBody>

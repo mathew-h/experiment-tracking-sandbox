@@ -13,40 +13,50 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.dashboard import (
     ReactorStatusResponse, ExperimentTimelineResponse, TimelinePoint,
     DashboardResponse, DashboardSummary, SlotOccupancy, ReactorCardData, GanttEntry, ActivityEntry,
-    LatestModification,
+    LatestModification, ReactorSpec,
 )
 from backend.services.workdays import workday_window, LAB_TZ
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
-# Static reactor hardware specs — keyed by reactor_number (int).
-# Source: lab hardware inventory (issue #2).
-REACTOR_SPECS: dict[int, dict[str, object]] = {
-    1:  {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
-    2:  {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
-    3:  {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
-    4:  {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
-    5:  {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
-    6:  {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
-    7:  {"volume_mL": 300, "material": "Titanium",  "vendor": "Tan"},
-    8:  {"volume_mL": 100, "material": "Titanium",  "vendor": "Tan"},
-    9:  {"volume_mL": 100, "material": "Titanium",  "vendor": "Tan"},
-    10: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
-    11: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
-    12: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
-    13: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
-    14: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
-    15: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
-    16: {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+# Static reactor hardware specs, keyed by slot label (issue #147). The single
+# source of truth: the dashboard payload carries this table (`reactor_specs`),
+# so the frontend no longer keeps a copy. Core Flood labels have no entry.
+# Source: lab hardware inventory (issue #2); Parr specs confirmed by Mat
+# 2026-11-06 (all six 75 mL Hastelloy).
+REACTOR_SPECS: dict[str, dict[str, object]] = {
+    "R01": {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
+    "R02": {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
+    "R03": {"volume_mL": 100, "material": "Hastelloy", "vendor": "Yushen"},
+    "R04": {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
+    "R05": {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
+    "R06": {"volume_mL": 500, "material": "Titanium",  "vendor": "Yushen"},
+    "R07": {"volume_mL": 300, "material": "Titanium",  "vendor": "Tan"},
+    "R08": {"volume_mL": 100, "material": "Titanium",  "vendor": "Tan"},
+    "R09": {"volume_mL": 100, "material": "Titanium",  "vendor": "Tan"},
+    "R10": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "R11": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "R12": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "R13": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "R14": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "R15": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "R16": {"volume_mL": 100, "material": "Titanium",  "vendor": "Yushen"},
+    "P01": {"volume_mL": 75,  "material": "Hastelloy", "vendor": "Parr"},
+    "P02": {"volume_mL": 75,  "material": "Hastelloy", "vendor": "Parr"},
+    "P03": {"volume_mL": 75,  "material": "Hastelloy", "vendor": "Parr"},
+    "P04": {"volume_mL": 75,  "material": "Hastelloy", "vendor": "Parr"},
+    "P05": {"volume_mL": 75,  "material": "Hastelloy", "vendor": "Parr"},
+    "P06": {"volume_mL": 75,  "material": "Hastelloy", "vendor": "Parr"},
 }
 
-R_SLOT_COUNT = 16    # HPHT vessels R01-R16; must stay in sync with REACTOR_SPECS
+R_SLOT_COUNT = 16    # Yushen/Tan HPHT vessels R01-R16
+P_SLOT_COUNT = 6     # Parr HPHT vessels P01-P06
 CF_SLOT_COUNT = 3    # Core flood rigs CF01-CF03
 
 
 def _occupancy(cards: list[ReactorCardData], prefix: str, total: int) -> SlotOccupancy:
-    """Derive ongoing/queued/empty counts for a fixed slot-label prefix ('R' or 'CF').
+    """Derive ongoing/queued/empty counts for a fixed slot-label prefix ('R', 'P' or 'CF').
 
     Filters against the valid label set (not just a startswith check) so an
     out-of-range reactor_number (no CHECK constraint exists on that column)
@@ -126,20 +136,16 @@ def get_dashboard(
             else str(row.experiment_type)
             if row.experiment_type else None
         )
-        # Stored, not re-derived (issue #97). is_cf is still needed below to keep
-        # REACTOR_SPECS off the Core Flood cards.
+        # Stored, not re-derived (issue #97).
         label = row.reactor_slot
-        is_cf = label.startswith("CF")
         if label in seen_labels:
             continue
         seen_labels.add(label)
         start = row.date or row.created_at
         status_val = row.status.value if hasattr(row.status, "value") else str(row.status)
         days = (now - start).days if (start and status_val == "ONGOING") else None
-        # REACTOR_SPECS is keyed by bare reactor_number and only covers the R01-R16
-        # HPHT vessels. Core Flood rigs reuse the same numbering (CF01-CF03), so
-        # this must be skipped for CF or it silently inherits R01-R03's HPHT spec.
-        specs = REACTOR_SPECS.get(rn, {}) if not is_cf else {}
+        # Keyed by label, so CF01 and P01 can never inherit R01's spec (#147).
+        specs = REACTOR_SPECS.get(label, {})
         reactor_cards.append(ReactorCardData(
             reactor_number=rn,
             reactor_label=label,
@@ -235,6 +241,7 @@ def get_dashboard(
 
     summary = DashboardSummary(
         reactors=_occupancy(reactor_cards, "R", R_SLOT_COUNT),
+        parr=_occupancy(reactor_cards, "P", P_SLOT_COUNT),
         core_floods=_occupancy(reactor_cards, "CF", CF_SLOT_COUNT),
         gc_measurements_7wd=gc_row.measurements,
         gc_experiments_7wd=gc_row.experiments,
@@ -318,6 +325,7 @@ def get_dashboard(
     return DashboardResponse(
         summary=summary,
         reactors=reactor_cards,
+        reactor_specs={label: ReactorSpec(**spec) for label, spec in REACTOR_SPECS.items()},
         timeline=timeline,
         recent_activity=recent_activity,
     )

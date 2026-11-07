@@ -206,3 +206,52 @@ describe('ConditionsTab — pore volume', () => {
     expect(payload).toHaveProperty('experiment_type', 'HPHT')
   })
 })
+
+describe('ConditionsTab — reactor slot (issue #147)', () => {
+  const parr = { ...mockConditions, reactor_number: 3, reactor_series: 'P', reactor_slot: 'P03' }
+
+  async function editAndSave(picked?: string) {
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    if (picked !== undefined) await userEvent.selectOptions(screen.getByLabelText('Reactor'), picked)
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => expect(conditionsApi.patch).toHaveBeenCalled())
+    return vi.mocked(conditionsApi.patch).mock.calls.at(-1)![1]
+  }
+
+  it('shows the slot label, not the bare number', () => {
+    wrap(<ConditionsTab conditions={parr} experimentId="HPHT_001" experimentFk={1} />)
+    expect(screen.getByText('P03')).toBeInTheDocument()
+  })
+
+  it('seeds the picker with the stored slot and leaves it out of an unrelated save', async () => {
+    vi.mocked(conditionsApi.patch).mockClear()
+    wrap(<ConditionsTab conditions={parr} experimentId="HPHT_001" experimentFk={1} />)
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+    expect(screen.getByLabelText('Reactor')).toHaveValue('P03')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => expect(conditionsApi.patch).toHaveBeenCalled())
+    const payload = vi.mocked(conditionsApi.patch).mock.calls[0][1]
+    expect(payload).not.toHaveProperty('reactor_number')
+    expect(payload).not.toHaveProperty('reactor_series')
+  })
+
+  it('sends number and series when moving from P03 to R05', async () => {
+    vi.mocked(conditionsApi.patch).mockClear()
+    wrap(<ConditionsTab conditions={parr} experimentId="HPHT_001" experimentFk={1} />)
+    const payload = await editAndSave('R05')
+    expect(payload).toMatchObject({ reactor_number: 5, reactor_series: null })
+  })
+
+  it('sends the Parr series when picking P02', async () => {
+    vi.mocked(conditionsApi.patch).mockClear()
+    wrap(
+      <ConditionsTab
+        conditions={{ ...mockConditions, reactor_number: 7, reactor_slot: 'R07' }}
+        experimentId="HPHT_001"
+        experimentFk={1}
+      />,
+    )
+    const payload = await editAndSave('P02')
+    expect(payload).toMatchObject({ reactor_number: 2, reactor_series: 'P' })
+  })
+})

@@ -21,7 +21,8 @@ export interface SlotOccupancy {
 }
 
 export interface DashboardSummary {
-  reactors: SlotOccupancy
+  reactors: SlotOccupancy   // R01-R16, Yushen/Tan HPHT vessels
+  parr: SlotOccupancy       // P01-P06, Parr HPHT vessels (issue #147)
   core_floods: SlotOccupancy
   gc_measurements_7wd: number
   gc_experiments_7wd: number
@@ -73,9 +74,18 @@ export interface ActivityEntry {
   created_at: string
 }
 
+/** Static hardware spec for one slot label (issue #147). */
+export interface ReactorSpec {
+  volume_mL: number | null
+  material: string | null
+  vendor: string | null
+}
+
 export interface DashboardData {
   summary: DashboardSummary
   reactors: ReactorCardData[]
+  /** Spec per slot label (R01-R16, P01-P06); the only copy of the table. */
+  reactor_specs: Record<string, ReactorSpec>
   timeline: GanttEntry[]
   recent_activity: ActivityEntry[]
 }

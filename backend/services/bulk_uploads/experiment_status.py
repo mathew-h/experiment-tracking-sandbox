@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from database import Experiment
 from database.models import ExperimentalConditions
 from database.models.enums import ExperimentStatus
-from database.reactor_slot import derive_reactor_slot
+from database.reactor_slot import derive_reactor_slot, parse_reactor_cell, series_for_label
 
 log = structlog.get_logger(__name__)
 
@@ -53,6 +53,11 @@ class PlannedChange:
     reactor_number: int | None       # current ExperimentalConditions.reactor_number
     new_reactor_number: int | None   # value from the row, if provided
     new_date: pd.Timestamp | None    # value from the row, if provided
+    # reactor_series the row's label sets (issue #147): 'P' for a P01-P06 cell,
+    # None for an R/CF label. Only applied when reactor_series_given is True; a
+    # plain number keeps the experiment's current series.
+    new_reactor_series: str | None = None
+    reactor_series_given: bool = False
 
 
 @dataclass
@@ -100,7 +105,10 @@ class ExperimentStatusService:
         Args:
             db: Database session
             file_bytes: Excel file bytes with 'experiment_id' (required), 'status'
-                       (required), 'reactor_number' (optional), 'date' (optional) columns
+                       (required), 'reactor_number' (optional), 'date' (optional) columns.
+                       A reactor cell is a plain number (series unchanged) or a slot
+                       label: 'R07' / 'CF02' (must match the experiment type) or
+                       'P01'-'P06' (Parr, HPHT only; issue #147).
 
         Returns:
             StatusChangePreview with planned per-row changes, planned reactor
@@ -143,11 +151,12 @@ class ExperimentStatusService:
                 row_errors.append(f"Invalid status for {exp_id}: {raw_status!r}")
 
             reactor_number = None
+            reactor_prefix = None
             if "reactor_number" in df.columns:
                 reactor_val = row.get("reactor_number")
                 if pd.notna(reactor_val):
                     try:
-                        reactor_number = int(reactor_val)
+                        reactor_number, reactor_prefix = parse_reactor_cell(reactor_val)
                     except (ValueError, TypeError):
                         row_errors.append(f"Invalid reactor_number for {exp_id}: {reactor_val}")
 
@@ -168,6 +177,7 @@ class ExperimentStatusService:
                 "experiment_id": exp_id,
                 "status": status_str,
                 "reactor_number": reactor_number,
+                "reactor_prefix": reactor_prefix,
                 "date": new_date,
             })
 
@@ -191,6 +201,8 @@ class ExperimentStatusService:
         # and must not collide (issue #97, Defect 2).
         reactor_targets: Dict[str, str] = {}
         conflict_errors: List[str] = []
+        # experiment_id -> the slot the row claims, with its series resolved.
+        incoming_slots: Dict[str, str | None] = {}
 
         for r in parsed_rows:
             exp = exp_by_id.get(r["experiment_id"])
@@ -198,6 +210,15 @@ class ExperimentStatusService:
                 continue
 
             exp_type = exp.conditions.experiment_type if exp.conditions else None
+            current_series = exp.conditions.reactor_series if exp.conditions else None
+            series_given = r["reactor_prefix"] is not None
+            new_series = current_series
+            if series_given:
+                try:
+                    new_series = series_for_label(r["reactor_prefix"], exp_type)
+                except ValueError as e:
+                    conflict_errors.append(f"Invalid reactor for {exp.experiment_id}: {e}")
+                    continue
             changes.append(PlannedChange(
                 experiment_id=exp.experiment_id,
                 experiment_pk=exp.id,
@@ -207,9 +228,12 @@ class ExperimentStatusService:
                 reactor_number=exp.conditions.reactor_number if exp.conditions else None,
                 new_reactor_number=r["reactor_number"],
                 new_date=r["date"],
+                new_reactor_series=new_series if series_given else None,
+                reactor_series_given=series_given,
             ))
 
-            incoming_slot = derive_reactor_slot(r["reactor_number"], exp_type)
+            incoming_slot = derive_reactor_slot(r["reactor_number"], exp_type, new_series)
+            incoming_slots[exp.experiment_id] = incoming_slot
             if (
                 r["status"] == ExperimentStatus.ONGOING.value
                 and incoming_slot is not None
@@ -233,8 +257,7 @@ class ExperimentStatusService:
             exp = exp_by_id.get(r["experiment_id"])
             if exp is None or r["status"] != ExperimentStatus.ONGOING.value:
                 continue
-            exp_type = exp.conditions.experiment_type if exp.conditions else None
-            incoming_slot = derive_reactor_slot(r["reactor_number"], exp_type)
+            incoming_slot = incoming_slots.get(exp.experiment_id)
             if incoming_slot is None:
                 continue
 
@@ -312,16 +335,28 @@ class ExperimentStatusService:
                     date_updates += 1
 
                 if change.new_reactor_number is not None and exp.conditions:
-                    if exp.conditions.reactor_number != change.new_reactor_number:
+                    number_changed = exp.conditions.reactor_number != change.new_reactor_number
+                    series_changed = (
+                        change.reactor_series_given
+                        and exp.conditions.reactor_series != change.new_reactor_series
+                    )
+                    if number_changed:
                         exp.conditions.reactor_number = change.new_reactor_number
+                    if series_changed:
+                        exp.conditions.reactor_series = change.new_reactor_series
+                    if number_changed or series_changed:
                         reactor_updates += 1
 
                 # Derived here rather than read off exp.conditions.reactor_slot:
                 # the assignment above has just changed reactor_number in-session
                 # and the before_flush listener has not run yet (issue #97
                 # pre-flush rule).
+                if change.reactor_series_given:
+                    series = change.new_reactor_series
+                else:
+                    series = exp.conditions.reactor_series if exp.conditions else None
                 incoming_slot = derive_reactor_slot(
-                    change.new_reactor_number, change.experiment_type
+                    change.new_reactor_number, change.experiment_type, series
                 )
                 if change.new_status == ExperimentStatus.ONGOING.value and incoming_slot is not None:
                     newer_than = change.new_date.to_pydatetime() if change.new_date is not None else None
@@ -358,7 +393,7 @@ class ExperimentStatusService:
         """
         Ensure only one experiment is ONGOING per physical reactor slot at a time.
 
-        Occupancy is keyed on `reactor_slot` (e.g. 'R01', 'CF01'), not on the bare
+        Occupancy is keyed on `reactor_slot` (e.g. 'R01', 'P01', 'CF01'), not on the bare
         `reactor_number` — R01 and CF01 are different vessels that share the number
         1, and keying on the integer let a Core Flood auto-complete a running HPHT
         (issue #97, Defect 1).
@@ -405,6 +440,7 @@ class ExperimentStatusService:
                 slot = derive_reactor_slot(
                     reactor_number,
                     conditions.experiment_type if conditions is not None else None,
+                    conditions.reactor_series if conditions is not None else None,
                 )
             if slot is None:
                 # No physical slot to contest — nothing to demote, and nothing

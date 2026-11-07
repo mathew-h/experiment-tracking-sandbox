@@ -23,7 +23,7 @@ This file is the index. The detailed notes are split into rule files that load o
 | Experiment deletion (single + bulk), impact counts, audit row (issues #99, #109) | `.claude/rules/MODELS-deletion.md` |
 | Lineage, ID grammar, `-t` timepoint tokens, letter vs vial, group addressing (issues #86, #87, #98, #101) | `.claude/rules/MODELS-lineage.md` |
 | `ExperimentNotes` — typed notes, scope rules, write paths (issues #118, #122) | `.claude/rules/MODELS-notes.md` |
-| `ExperimentalConditions` — vial size, pore volume, `reactor_slot`, `total_ferrous_iron_g`, 1:1 identity | `.claude/rules/MODELS-conditions.md` |
+| `ExperimentalConditions` — vial size, pore volume, `reactor_series` (Parr), `reactor_slot`, `total_ferrous_iron_g`, 1:1 identity | `.claude/rules/MODELS-conditions.md` |
 | `ExperimentalResults`, `ScalarResults` (H2, merge, dates, overwrite), `ICPResults` | `.claude/rules/MODELS-results.md` |
 | Power BI views, rollup statistics, `v_core_flood_samples`, `v_results_h2_bkg_adjusted*` | `.claude/rules/MODELS-views.md` |
 

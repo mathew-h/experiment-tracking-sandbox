@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Integer, String, DateTime, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database import Base
@@ -16,6 +16,10 @@ class ExperimentalConditions(Base):
     # See docs/issues/issue-duplicate-conditions-rows-and-stale-experiment-id-strings.md
     __table_args__ = (
         UniqueConstraint("experiment_fk", name="uq_conditions_experiment_fk"),
+        CheckConstraint(
+            "reactor_series IS NULL OR reactor_series IN ('P')",
+            name="ck_conditions_reactor_series",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -29,13 +33,18 @@ class ExperimentalConditions(Base):
     temperature_c = Column(Float)
     experiment_type = Column(String)
     reactor_number = Column(Integer, nullable=True)
-    # Canonical physical slot label — 'R01'..'R16' (HPHT vessels) or 'CF01'..'CF03'
-    # (Core Flood rigs). NULL whenever the experiment holds no physical slot:
+    # Which vessel series reactor_number counts in (issue #147). NULL = the type's
+    # default series ('R' for HPHT, 'CF' for Core Flood). 'P' = the Parr HPHT
+    # vessels P01-P06; HPHT only (the API rejects it on other types). The CHECK
+    # ck_conditions_reactor_series allows only NULL or 'P'.
+    reactor_series = Column(String(4), nullable=True)
+    # Canonical physical slot label — 'R01'..'R16' / 'P01'..'P06' (HPHT vessels)
+    # or 'CF01'..'CF03' (Core Flood rigs). NULL whenever the experiment holds no physical slot:
     # a non-occupancy type (Serum / Autoclave / Other), a missing reactor_number,
     # or reactor_number <= 0.
     #
     # DO NOT SET THIS BY HAND. It is derived from (reactor_number,
-    # experiment_type) by database.reactor_slot.derive_reactor_slot and written
+    # experiment_type, reactor_series) by database.reactor_slot.derive_reactor_slot and written
     # on every ORM write by the before_insert/before_update listener
     # `set_reactor_slot` in database/event_listeners.py. Assigning it directly
     # will be silently overwritten on the next flush.

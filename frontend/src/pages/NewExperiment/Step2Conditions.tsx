@@ -2,6 +2,7 @@ import { Input, Select, Button } from '@/components/ui'
 import { isVisible } from './fieldVisibility'
 import type { ExperimentType } from './fieldVisibility'
 import { parseVialSize, VIAL_SIZE_MAX_ML } from './vialSize'
+import { slotOptionsFor } from '@/utils/reactorSlots'
 
 const FEEDSTOCK_OPTIONS = [
   { value: 'Nitrogen', label: 'Nitrogen' },
@@ -17,7 +18,9 @@ export interface Step2Data {
   serum_vial_size_mL: string
   particle_size: string
   feedstock: string
-  reactor_number: string
+  /** Picked slot label ('R03', 'P03', 'CF01'); split into reactor_number +
+   *  reactor_series on submit (issue #147). */
+  reactor_slot: string
   stir_speed_rpm: string
   initial_conductivity_mS_cm: string
   room_temp_pressure_psi: string
@@ -113,7 +116,15 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
             onChange={(e) => onChange({ feedstock: e.target.value })}
           />
         )}
-        {field('Reactor Number', 'reactor_number', experimentType, data, onChange)}
+        {isVisible('reactor_number', experimentType) && (
+          <Select
+            label="Reactor"
+            options={slotOptionsFor(experimentType)}
+            placeholder="Select…"
+            value={data.reactor_slot}
+            onChange={(e) => onChange({ reactor_slot: e.target.value })}
+          />
+        )}
         {field('Stir Speed', 'stir_speed_rpm', experimentType, data, onChange, 'RPM')}
         {field('Initial Conductivity', 'initial_conductivity_mS_cm', experimentType, data, onChange, 'mS/cm')}
         {field('Room Temp Pressure', 'room_temp_pressure_psi', experimentType, data, onChange, 'psi')}

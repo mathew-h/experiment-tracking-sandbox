@@ -42,7 +42,8 @@ class SlotOccupancy(BaseModel):
 
 
 class DashboardSummary(BaseModel):
-    reactors: SlotOccupancy                  # R01-R16 (HPHT only)
+    reactors: SlotOccupancy                  # R01-R16, Yushen/Tan HPHT vessels (not Parr)
+    parr: SlotOccupancy                      # P01-P06, Parr HPHT vessels (issue #147)
     core_floods: SlotOccupancy               # CF01-CF03
     gc_measurements_7wd: int                 # scalar_results rows with gc_run_date in window
     gc_experiments_7wd: int                  # distinct experiments behind those rows
@@ -60,9 +61,16 @@ class LatestModification(BaseModel):
     created_at: datetime
 
 
+class ReactorSpec(BaseModel):
+    """Static hardware spec for one slot label (issue #147)."""
+    volume_mL: Optional[int] = None
+    material: Optional[str] = None
+    vendor: Optional[str] = None
+
+
 class ReactorCardData(BaseModel):
     reactor_number: int
-    reactor_label: str              # "R05" or "CF01"
+    reactor_label: str              # "R05", "P03" or "CF01"
     experiment_id: Optional[str] = None
     experiment_db_id: Optional[int] = None
     status: Optional[ExperimentStatus] = None
@@ -105,5 +113,8 @@ class ActivityEntry(BaseModel):
 class DashboardResponse(BaseModel):
     summary: DashboardSummary
     reactors: list[ReactorCardData]      # occupied slots only; frontend fills empties
+    # Hardware spec per slot label ("R01".."R16", "P01".."P06"), so empty slots
+    # can show specs without a frontend copy of the table (issue #147).
+    reactor_specs: dict[str, ReactorSpec]
     timeline: list[GanttEntry]           # all experiments for Gantt, newest first, limit 100
     recent_activity: list[ActivityEntry] # last 20 modification log entries

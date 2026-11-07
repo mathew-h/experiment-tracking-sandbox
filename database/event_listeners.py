@@ -162,6 +162,8 @@ _VIEWS = [
             ec."serum_vial_size_mL",
             ec.water_to_rock_ratio,
             ec.reactor_number,
+            ec.reactor_series,
+            ec.reactor_slot,
             ec.feedstock,
             ec.stir_speed_rpm,
             ec.room_temp_pressure_psi,
@@ -1088,7 +1090,9 @@ def set_reactor_slot(mapper, connection, target):
     flushing, must call derive_reactor_slot directly.
     """
     from .reactor_slot import derive_reactor_slot
-    target.reactor_slot = derive_reactor_slot(target.reactor_number, target.experiment_type)
+    target.reactor_slot = derive_reactor_slot(
+        target.reactor_number, target.experiment_type, target.reactor_series
+    )
 
 @event.listens_for(Session, 'before_flush')
 def update_experiment_lineage_on_flush(session, flush_context, instances):
