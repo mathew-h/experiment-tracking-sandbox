@@ -228,3 +228,61 @@ describe('ReactorCard — reactor modification saves a dated note (issue #122 PR
     expect(screen.queryByText('Replaced septum')).toBeNull()
   })
 })
+
+describe('ReactorGrid — Parr group (issue #147)', () => {
+  function renderWithParr(cards: ReactorCardData[]) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <ReactorGrid
+              cards={cards}
+              rSlotCount={16}
+              pSlotCount={6}
+              cfSlotCount={3}
+              specs={{
+                R03: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
+                P02: { volume_mL: 75, material: 'Hastelloy', vendor: 'Parr' },
+              }}
+            />
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+  }
+  const labelsIn = (el: HTMLElement) =>
+    Array.from(el.querySelectorAll('p.font-mono-data.text-xl')).map((n) => n.textContent)
+
+  it('renders six Parr slots in their own group between HPHT and Core Flood', () => {
+    const { container } = renderWithParr([])
+    const groups = Array.from(container.querySelectorAll('section[data-testid^="reactor-group-"]'))
+    expect(groups.map((g) => g.getAttribute('data-testid'))).toEqual([
+      'reactor-group-R',
+      'reactor-group-P',
+      'reactor-group-CF',
+    ])
+    expect(labelsIn(groups[1] as HTMLElement)).toEqual(['P01', 'P02', 'P03', 'P04', 'P05', 'P06'])
+    expect(labelsIn(groups[0] as HTMLElement)).toHaveLength(16)
+  })
+
+  it('places a P03 card in the Parr group, not on R03', () => {
+    const { container } = renderWithParr([
+      makeCard({ reactor_number: 3, reactor_label: 'P03', experiment_id: 'HPHT_PARR_1' }),
+    ])
+    const parr = container.querySelector('[data-testid="reactor-group-P"]') as HTMLElement
+    const hpht = container.querySelector('[data-testid="reactor-group-R"]') as HTMLElement
+    expect(parr.textContent).toContain('HPHT_PARR_1')
+    expect(hpht.textContent).not.toContain('HPHT_PARR_1')
+  })
+
+  it('shows empty-slot specs from the payload', () => {
+    const { container } = renderWithParr([])
+    const parr = container.querySelector('[data-testid="reactor-group-P"]') as HTMLElement
+    // Only P02 has a spec in this payload; Hastelloy can only come from it.
+    expect(parr.textContent).toContain('Hastelloy')
+    expect(parr.textContent).toContain('75')
+  })
+})

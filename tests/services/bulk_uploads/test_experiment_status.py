@@ -805,3 +805,97 @@ def test_cf_spelled_type_is_occupancy_bearing(db_session: Session):
     assert result.demotions_applied == 1
     db_session.refresh(cf_spelled)
     assert cf_spelled.status == ExperimentStatus.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# Parr series P01-P06 (issue #147)
+# ---------------------------------------------------------------------------
+
+def _set_series(db: Session, exp: Experiment, series: str | None) -> None:
+    exp.conditions.reactor_series = series
+    db.flush()
+
+
+def test_p03_ongoing_skips_r03_and_demotes_older_p03(db_session: Session):
+    from datetime import datetime
+
+    r03 = _seed_experiment(
+        db_session, "HPHT_ST147_R03", 147301, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=3, date=datetime(2026, 1, 1),
+    )
+    old_p03 = _seed_experiment(
+        db_session, "HPHT_ST147_P03", 147302, ExperimentStatus.ONGOING, "HPHT",
+        reactor_number=3, date=datetime(2026, 1, 1),
+    )
+    _set_series(db_session, old_p03, "P")
+    new_exp = _seed_experiment(
+        db_session, "HPHT_ST147_NEW", 147303, ExperimentStatus.QUEUED, "HPHT"
+    )
+
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number", "date"],
+        [["HPHT_ST147_NEW", "ONGOING", "P03", "2026-06-01"]],
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert preview.errors == []
+    assert [d.experiment_id for d in preview.demotions] == ["HPHT_ST147_P03"]
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+    assert result.errors == []
+    db_session.flush()
+
+    for e in (r03, old_p03, new_exp):
+        db_session.refresh(e)
+    assert r03.status == ExperimentStatus.ONGOING
+    assert old_p03.status == ExperimentStatus.COMPLETED
+    assert new_exp.status == ExperimentStatus.ONGOING
+    assert (new_exp.conditions.reactor_series, new_exp.conditions.reactor_slot) == ("P", "P03")
+
+
+def test_parr_label_on_core_flood_row_is_an_error(db_session: Session):
+    _seed_experiment(db_session, "CF_ST147_001", 147304, ExperimentStatus.QUEUED, "Core Flood")
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number"], [["CF_ST147_001", "ONGOING", "P01"]]
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert preview.changes == []
+    assert any("only valid for HPHT" in e for e in preview.errors), preview.errors
+
+
+def test_mismatched_series_label_is_an_error(db_session: Session):
+    _seed_experiment(db_session, "HPHT_ST147_005", 147305, ExperimentStatus.QUEUED, "HPHT")
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number"], [["HPHT_ST147_005", "ONGOING", "CF02"]]
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    assert any("does not match experiment type" in e for e in preview.errors), preview.errors
+
+
+def test_r_label_moves_a_parr_run_back_to_r_series(db_session: Session):
+    exp = _seed_experiment(
+        db_session, "HPHT_ST147_006", 147306, ExperimentStatus.QUEUED, "HPHT", reactor_number=2,
+    )
+    _set_series(db_session, exp, "P")
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number"], [["HPHT_ST147_006", "QUEUED", "R02"]]
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    result = ExperimentStatusService.apply_status_changes(db_session, preview)
+    assert result.reactor_updates == 1
+    db_session.flush()
+    db_session.refresh(exp.conditions)
+    assert (exp.conditions.reactor_series, exp.conditions.reactor_slot) == (None, "R02")
+
+
+def test_plain_number_keeps_the_current_series(db_session: Session):
+    exp = _seed_experiment(
+        db_session, "HPHT_ST147_007", 147307, ExperimentStatus.QUEUED, "HPHT", reactor_number=2,
+    )
+    _set_series(db_session, exp, "P")
+    xlsx = make_excel(
+        ["experiment_id", "status", "reactor_number"], [["HPHT_ST147_007", "QUEUED", 4]]
+    )
+    preview = ExperimentStatusService.preview_status_changes_from_excel(db_session, xlsx)
+    ExperimentStatusService.apply_status_changes(db_session, preview)
+    db_session.flush()
+    db_session.refresh(exp.conditions)
+    assert exp.conditions.reactor_slot == "P04"

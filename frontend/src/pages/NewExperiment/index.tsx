@@ -12,6 +12,7 @@ import { Step4Review } from './Step4Review'
 import { CopyFromExisting } from './CopyFromExisting'
 import { isVisible, type ExperimentType } from './fieldVisibility'
 import { vialSizeForPayload } from './vialSize'
+import { slotToConditions } from '@/utils/reactorSlots'
 
 const STEPS = ['Basic Info', 'Conditions', 'Additives', 'Review']
 
@@ -26,7 +27,7 @@ const defaultStep1 = (): Step1Data => ({
 
 const defaultStep2 = (): Step2Data => ({
   temperature_c: '', initial_ph: '', rock_mass_g: '', water_volume_mL: '', serum_vial_size_mL: '',
-  particle_size: '', feedstock: '', reactor_number: '', stir_speed_rpm: '',
+  particle_size: '', feedstock: '', reactor_slot: '', stir_speed_rpm: '',
   initial_conductivity_mS_cm: '', room_temp_pressure_psi: '', rxn_temp_pressure_psi: '',
   co2_partial_pressure_MPa: '', core_height_cm: '', core_width_cm: '',
   pore_volume_mL: '', confining_pressure: '', pore_pressure: '',
@@ -81,7 +82,7 @@ export function NewExperimentPage() {
           serum_vial_size_mL: numToStr(conditions.serum_vial_size_mL),
           particle_size: conditions.particle_size ?? '',
           feedstock: conditions.feedstock ?? '',
-          reactor_number: conditions.reactor_number != null ? String(conditions.reactor_number) : '',
+          reactor_slot: conditions.reactor_slot ?? '',
           stir_speed_rpm: numToStr(conditions.stir_speed_rpm),
           initial_conductivity_mS_cm: numToStr(conditions.initial_conductivity_mS_cm),
           room_temp_pressure_psi: numToStr(conditions.room_temp_pressure_psi),
@@ -156,7 +157,8 @@ export function NewExperimentPage() {
         serum_vial_size_mL: serumVialSize,
         particle_size: step2.particle_size || undefined,
         feedstock: step2.feedstock || undefined,
-        reactor_number: step2.reactor_number ? parseInt(step2.reactor_number) : undefined,
+        // A slot left over from another type maps to null and is not sent.
+        ...(slotToConditions(step2.reactor_slot, step1.experimentType) ?? {}),
         stir_speed_rpm: toFloat(step2.stir_speed_rpm),
         initial_conductivity_mS_cm: toFloat(step2.initial_conductivity_mS_cm),
         room_temp_pressure_psi: toFloat(step2.room_temp_pressure_psi),

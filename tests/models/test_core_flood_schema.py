@@ -77,7 +77,9 @@ def test_dim_and_conditions_views_match_startup():
     mod = _migration_module()
     views = dict(_VIEWS)
     assert _norm(mod._V_DIM_NEW) == _norm(views["v_dim_timepoints"])
-    assert _norm(mod._V_CONDITIONS_NEW) == _norm(views["v_experiment_conditions"])
+    # Only the newest migration compares to the startup _VIEWS; since #147 the
+    # conditions view is checked against c6d2f8a4e1b9's _V_CONDITIONS_OLD in
+    # tests/models/test_reactor_series_schema.py.
 
 
 def test_old_views_are_new_minus_column():

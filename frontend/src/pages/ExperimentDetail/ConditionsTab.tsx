@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { VIAL_SIZE_MAX_ML } from '@/pages/NewExperiment/vialSize'
+import { slotOptionsFor, slotToConditions } from '@/utils/reactorSlots'
+import { isCoreFloodType, isHphtType } from '@/utils/experimentId'
 import { conditionsApi, type ConditionsResponse, type ConditionsPayload } from '@/api/conditions'
 import { chemicalsApi, type Compound, type ChemicalAdditive, type AdditiveUpdatePayload } from '@/api/chemicals'
 import { Button, Input, Select, Modal, ConfirmModal, useToast } from '@/components/ui'
@@ -50,6 +52,8 @@ function Row({ label, value, unit }: { label: string; value: unknown; unit?: str
 export function ConditionsTab({ conditions, experimentId, experimentFk }: Props) {
   const [editOpen, setEditOpen] = useState(false)
   const [form, setForm] = useState<Partial<ConditionsPayload>>({})
+  /** Picked slot label; only sent when it differs from the stored slot (issue #147). */
+  const [slot, setSlot] = useState('')
 
   // Add additive modal state
   const [addAdditiveOpen, setAddAdditiveOpen] = useState(false)
@@ -147,12 +151,33 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
   // input does not vanish while the user clears it.
   const showVialSize = form.experiment_type === 'Serum' || conditions?.serum_vial_size_mL != null
   const showPoreVolume = form.experiment_type === 'Core Flood' || conditions?.pore_volume_mL != null
+  // HPHT / Core Flood pick a slot (R01-R16, P01-P06, CF01-CF03). Any other type
+  // keeps the bare number input so a legacy stray reactor_number stays editable.
+  const slotPicker = isHphtType(form.experiment_type) || isCoreFloodType(form.experiment_type)
+  const storedSlot = conditions?.reactor_slot ?? ''
+  const slotOptions = slotOptionsFor(form.experiment_type)
+  // A stored out-of-range slot (e.g. R17) still shows as the current value.
+  if (storedSlot && slotPicker && !slotOptions.some((o) => o.value === storedSlot)) {
+    slotOptions.unshift({ value: storedSlot, label: storedSlot })
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = { ...form }
       if (!showVialSize) delete body.serum_vial_size_mL
       if (!showPoreVolume) delete body.pore_volume_mL
+      if (slotPicker) {
+        delete body.reactor_number
+        if (slot !== storedSlot) {
+          const picked = slotToConditions(slot, form.experiment_type)
+          if (picked) Object.assign(body, picked)
+          else if (slot === '') Object.assign(body, { reactor_number: null, reactor_series: null })
+        }
+      }
+      // A Parr series is HPHT-only; moving the run to another type drops it.
+      if (conditions?.reactor_series === 'P' && !isHphtType(form.experiment_type) && !body.reactor_series) {
+        body.reactor_series = null
+      }
       if (!conditions) {
         return conditionsApi.create({
           ...body,
@@ -193,6 +218,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
       core_width_cm: conditions?.core_width_cm ?? undefined,
       pore_volume_mL: conditions?.pore_volume_mL ?? undefined,
     })
+    setSlot(conditions?.reactor_slot ?? '')
     setEditOpen(true)
   }
 
@@ -256,7 +282,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
         )}
         <Row label="Particle Size" value={conditions.particle_size} />
         <Row label="Feedstock" value={conditions.feedstock} />
-        <Row label="Reactor" value={conditions.reactor_number} />
+        <Row label="Reactor" value={conditions.reactor_slot ?? conditions.reactor_number} />
         <Row label="Stir Speed" value={conditions.stir_speed_rpm} unit="RPM" />
         <Row label="Initial Conductivity" value={conditions.initial_conductivity_mS_cm} unit="mS/cm" />
         <Row label="Room Temp Pressure" value={conditions.room_temp_pressure_psi} unit="psi" />
@@ -341,7 +367,17 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
             )}
             <Select label="Feedstock" options={FEEDSTOCK_OPTIONS} value={form.feedstock ?? ''} onChange={set('feedstock')} placeholder="Select…" />
             <Input label="Stir Speed (RPM)" type="number" value={form.stir_speed_rpm ?? ''} onChange={set('stir_speed_rpm')} />
-            <Input label="Reactor #" type="number" value={form.reactor_number ?? ''} onChange={set('reactor_number')} />
+            {slotPicker ? (
+              <Select
+                label="Reactor"
+                options={slotOptions}
+                value={slot}
+                onChange={(e) => setSlot(e.target.value)}
+                placeholder="None"
+              />
+            ) : (
+              <Input label="Reactor #" type="number" value={form.reactor_number ?? ''} onChange={set('reactor_number')} />
+            )}
             <Input label="Initial Conductivity" type="number" value={form.initial_conductivity_mS_cm ?? ''} onChange={set('initial_conductivity_mS_cm')} />
             <Input label="Room Temp Pressure (psi)" type="number" value={form.room_temp_pressure_psi ?? ''} onChange={set('room_temp_pressure_psi')} />
             <Input label="Rxn Temp Pressure (psi)" type="number" value={form.rxn_temp_pressure_psi ?? ''} onChange={set('rxn_temp_pressure_psi')} />

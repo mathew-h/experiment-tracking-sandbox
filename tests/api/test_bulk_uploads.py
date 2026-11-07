@@ -1435,18 +1435,21 @@ def test_pxrf_data_importable_without_utils_storage():
 
 
 def test_new_experiments_template_has_pore_volume(client):
-    """pore_volume_mL is the last conditions header, blank in the HPHT example,
-    and documented on the INSTRUCTIONS sheet (issue #132)."""
+    """pore_volume_mL is a conditions header documented on the INSTRUCTIONS sheet
+    (issue #132); reactor_series follows it as the last header (issue #147). Both
+    are blank in the HPHT example."""
     import openpyxl, io as _io
     resp = client.get("/api/bulk-uploads/templates/new-experiments")
     assert resp.status_code == 200
     wb = openpyxl.load_workbook(_io.BytesIO(resp.content))
     ws = next(s for s in wb.worksheets if s.title.lower() == "conditions")
     headers = [str(c.value).replace("*", "").split("(")[0].strip() for c in ws[1] if c.value]
-    assert headers[-1] == "pore_volume_mL"
+    assert headers[-2:] == ["pore_volume_mL", "reactor_series"]
+    assert ws.cell(row=2, column=len(headers) - 1).value is None
     assert ws.cell(row=2, column=len(headers)).value is None
     assert ws.cell(row=2, column=len(headers) + 1).value is None
     inst = next(s for s in wb.worksheets if s.title.upper() == "INSTRUCTIONS")
     notes = {r[0].value: r[1].value for r in inst.iter_rows(min_row=1) if r[0].value}
     assert "pore_volume_mL" in notes
     assert "Core Flood only" in notes["pore_volume_mL"]
+    assert "P01-P06" in notes["reactor_series"]

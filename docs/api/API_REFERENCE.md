@@ -599,7 +599,9 @@ Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
 | POST | `/api/conditions` | Create conditions (triggers `water_to_rock_ratio` calc) |
 | PATCH | `/api/conditions/{id}` | Update conditions (recalculates derived fields) |
 
-`ConditionsResponse` also includes `reactor_slot` (string, nullable, **read-only/derived** — issue #97). It is never accepted on `ConditionsCreate`/`ConditionsUpdate`; the backend derives and overwrites it from `(reactor_number, experiment_type)` on every write via `database/reactor_slot.py::derive_reactor_slot`. See `.claude/rules/MODELS.md` for the full mapping and caveats.
+`ConditionsResponse` also includes `reactor_slot` (string, nullable, **read-only/derived** — issue #97). It is never accepted on `ConditionsCreate`/`ConditionsUpdate`; the backend derives and overwrites it from `(reactor_number, experiment_type, reactor_series)` on every write via `database/reactor_slot.py::derive_reactor_slot`. See `.claude/rules/MODELS.md` for the full mapping and caveats.
+
+**`reactor_series`** (string, nullable; issue #147) is accepted on `ConditionsCreate` and `ConditionsUpdate` and returned on `ConditionsResponse`. `null` (or blank) means the type's default series: `R01`–`R16` for HPHT, `CF01`–`CF03` for Core Flood. `"P"` marks the Parr HPHT vessels, so HPHT + `reactor_number: 3` + `reactor_series: "P"` derives `reactor_slot: "P03"`. The value is trimmed and upper-cased (`" p "` is stored as `"P"`). **422** for an unknown value (`"Unknown reactor series 'Q'; allowed: P"`) and for `"P"` on a non-HPHT type (`"Reactor series 'P' (Parr) is only valid for HPHT experiments"`). On PATCH the check runs against the merged type and series before anything is written, so moving a Parr run to another type must also send `reactor_series: null`. The DB enforces the same set with `CHECK ck_conditions_reactor_series`. The UI writes both columns from one "Reactor" select (R01–R16 and P01–P06 for HPHT, CF01–CF03 for Core Flood).
 
 **`serum_vial_size_mL`** (integer, nullable) is accepted on `ConditionsCreate` and `ConditionsUpdate` and returned on `ConditionsResponse`. It is the nominal serum vial size in whole mL. It must be a positive integer no greater than 10,000: `0`, `-1`, `120.5` and `10001` (or anything above int4 range) return **422** (Pydantic `gt=0, le=10_000` on `Optional[int]`, constant `SERUM_VIAL_SIZE_MAX_ML`); `10000` is accepted and `120.0` is coerced to `120`. It is accepted for **any** `experiment_type` — "Serum only" is a UI rule, unlike `reactor_number`'s 422 check. A rejected PATCH writes nothing. No derived field reads it.
 
@@ -777,6 +779,7 @@ Returns all dashboard data in a single call. Response shape:
 {
   "summary": {
     "reactors": { "total": 16, "ongoing": 8, "queued": 4, "empty": 4 },
+    "parr": { "total": 6, "ongoing": 1, "queued": 0, "empty": 5 },
     "core_floods": { "total": 3, "ongoing": 1, "queued": 0, "empty": 2 },
     "gc_measurements_7wd": 5,
     "gc_experiments_7wd": 3,
@@ -807,6 +810,10 @@ Returns all dashboard data in a single call. Response shape:
       }
     }
   ],
+  "reactor_specs": {
+    "R05": { "volume_mL": 500, "material": "Titanium", "vendor": "Yushen" },
+    "P01": { "volume_mL": 75, "material": "Hastelloy", "vendor": "Parr" }
+  },
   "timeline": [
     {
       "experiment_id": "HPHT_MH_072",
@@ -834,7 +841,9 @@ Returns all dashboard data in a single call. Response shape:
 ```
 
 **Notes:**
-- Only occupied reactor slots are returned; the frontend renders all 18 fixed slots
+- Only occupied reactor slots are returned; the frontend renders every fixed slot from the summary totals, in three groups: HPHT `R01`–`R16`, Parr `P01`–`P06` and Core Flood `CF01`–`CF03` (issue #147)
+- `summary.reactors` counts only `R01`–`R16` (Yushen/Tan); the Parr vessels are counted separately in `summary.parr`
+- `reactor_specs` is the hardware spec per slot label (`R01`–`R16`, `P01`–`P06`; Core Flood labels have none). It is the only copy of the table (`REACTOR_SPECS` in `backend/api/routers/dashboard.py`); the frontend reads empty-slot specs from it. Each card's `volume_mL` / `material` / `vendor` is looked up by `reactor_label`, so CF01 and P01 never inherit R01's spec
 - `description` is the text of the oldest note for the experiment
 - Timeline limited to 100 most recent experiments
 - Activity limited to last 20 modification log entries

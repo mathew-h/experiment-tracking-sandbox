@@ -2,33 +2,12 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, useToast } from '@/components/ui'
-import type { ReactorCardData } from '@/api/dashboard'
+import type { ReactorCardData, ReactorSpec } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 import { labTodayISO } from '@/utils/labDate'
 
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
 type _ExperimentStatus = typeof STATUS_OPTIONS[number]
-
-// Static hardware specs — used for both occupied and empty slots.
-// Source: lab hardware inventory (issue #2).
-const REACTOR_SPECS: Record<string, { volume_mL: number; material: string; vendor: string }> = {
-  R01: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
-  R02: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
-  R03: { volume_mL: 100, material: 'Hastelloy', vendor: 'Yushen' },
-  R04: { volume_mL: 500, material: 'Titanium',  vendor: 'Yushen' },
-  R05: { volume_mL: 500, material: 'Titanium',  vendor: 'Yushen' },
-  R06: { volume_mL: 500, material: 'Titanium',  vendor: 'Yushen' },
-  R07: { volume_mL: 300, material: 'Titanium',  vendor: 'Tan' },
-  R08: { volume_mL: 100, material: 'Titanium',  vendor: 'Tan' },
-  R09: { volume_mL: 100, material: 'Titanium',  vendor: 'Tan' },
-  R10: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-  R11: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-  R12: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-  R13: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-  R14: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-  R15: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-  R16: { volume_mL: 100, material: 'Titanium',  vendor: 'Yushen' },
-}
 
 function statusColors(status: string | null) {
   switch (status) {
@@ -166,10 +145,13 @@ function ReactorSpecsBadge({
 function ReactorCard({
   label,
   card,
+  spec,
   onClick,
 }: {
   label: string
   card: ReactorCardData | null
+  /** Hardware spec from the dashboard payload; undefined for CF rigs. */
+  spec: ReactorSpec | undefined
   onClick: (card: ReactorCardData) => void
 }) {
   const occupied = card !== null
@@ -241,9 +223,9 @@ function ReactorCard({
           </div>
           {showSpecsBadge && (
             <ReactorSpecsBadge
-              volume_mL={card!.volume_mL ?? REACTOR_SPECS[label]?.volume_mL ?? null}
-              material={card!.material ?? REACTOR_SPECS[label]?.material ?? null}
-              vendor={card!.vendor ?? REACTOR_SPECS[label]?.vendor ?? null}
+              volume_mL={card!.volume_mL ?? spec?.volume_mL ?? null}
+              material={card!.material ?? spec?.material ?? null}
+              vendor={card!.vendor ?? spec?.vendor ?? null}
             />
           )}
         </div>
@@ -252,9 +234,9 @@ function ReactorCard({
           <p className="text-xs text-ink-muted mt-1">No experiment assigned</p>
           {showSpecsBadge && (
             <ReactorSpecsBadge
-              volume_mL={REACTOR_SPECS[label]?.volume_mL ?? null}
-              material={REACTOR_SPECS[label]?.material ?? null}
-              vendor={REACTOR_SPECS[label]?.vendor ?? null}
+              volume_mL={spec?.volume_mL ?? null}
+              material={spec?.material ?? null}
+              vendor={spec?.vendor ?? null}
             />
           )}
         </div>
@@ -558,11 +540,17 @@ function ReactorDetailModal({
 export function ReactorGrid({
   cards,
   rSlotCount,
+  pSlotCount = 0,
   cfSlotCount,
+  specs = {},
 }: {
   cards: ReactorCardData[]
   rSlotCount: number
+  /** Parr vessels P01-P06 (issue #147); 0 renders no Parr group. */
+  pSlotCount?: number
   cfSlotCount: number
+  /** Hardware spec per slot label, from the dashboard payload. */
+  specs?: Record<string, ReactorSpec>
 }) {
   const [selected, setSelected] = useState<ReactorCardData | null>(null)
 
@@ -573,25 +561,42 @@ export function ReactorGrid({
   }
 
   const pad = (i: number) => String(i).padStart(2, '0')
-  const R_SLOTS = Array.from({ length: rSlotCount }, (_, i) => `R${pad(i + 1)}`)
-  const CF_SLOTS = Array.from({ length: cfSlotCount }, (_, i) => `CF${pad(i + 1)}`)
+  const slots = (prefix: string, count: number) =>
+    Array.from({ length: count }, (_, i) => `${prefix}${pad(i + 1)}`)
 
-  // Single unified grid: R01-R16 then CF01-CF03, in slot order — the 19-slot
-  // total no longer divides evenly into a 6-column grid, so this uses 5
-  // columns to keep R and CF rows breaking more naturally.
-  const ALL_SLOTS = [...R_SLOTS, ...CF_SLOTS]
+  // One labelled group per vessel series (issue #147): the Yushen/Tan HPHT
+  // vessels, the Parr HPHT vessels, then the Core Flood rigs. A group with no
+  // slots is not rendered.
+  const groups = [
+    { key: 'R', title: 'HPHT', slots: slots('R', rSlotCount) },
+    { key: 'P', title: 'Parr', slots: slots('P', pSlotCount) },
+    { key: 'CF', title: 'Core Flood', slots: slots('CF', cfSlotCount) },
+  ].filter((g) => g.slots.length > 0)
 
   return (
     <>
       {/* Section title lives in the enclosing Dashboard CardHeader ("Reactor Status") */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-        {ALL_SLOTS.map((label) => (
-          <ReactorCard
-            key={label}
-            label={label}
-            card={byLabel[label] ?? null}
-            onClick={setSelected}
-          />
+      <div className="space-y-4">
+        {groups.map((g) => (
+          <section key={g.key} aria-label={`${g.title} reactors`} data-testid={`reactor-group-${g.key}`}>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+              {g.title}
+              <span className="ml-2 font-mono-data normal-case tracking-normal">
+                {g.slots[0]}–{g.slots[g.slots.length - 1]}
+              </span>
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {g.slots.map((label) => (
+                <ReactorCard
+                  key={label}
+                  label={label}
+                  card={byLabel[label] ?? null}
+                  spec={specs[label]}
+                  onClick={setSelected}
+                />
+              ))}
+            </div>
+          </section>
         ))}
       </div>
 

@@ -21,7 +21,12 @@ from backend.services.notes import add_note
 from database.models.enums import NoteType
 from database.models.experiments import ModificationsLog
 from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
-from database.reactor_slot import derive_reactor_slot
+from database.reactor_slot import (
+    derive_reactor_slot,
+    parse_reactor_cell,
+    reactor_series_error,
+    series_for_label,
+)
 from backend.services.bulk_uploads.chemical_inventory import ChemicalInventoryService
 from backend.services.bulk_uploads.experiment_status import ExperimentStatusService
 from backend.services.experiment_validation import parse_experiment_id as parse_exp_id_validation, validate_experiment_id, extract_lineage_info
@@ -32,6 +37,61 @@ from backend.services.denormalized_ids import sync_denormalized_experiment_id
 
 # Provenance tag on the note rows this parser writes (experiment_notes.created_by).
 _NOTE_SOURCE = "new_experiments"
+
+
+_REACTOR_KEYS = ("reactor_number", "reactor_series")
+
+
+def _is_blank_cell(val: Any) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, str):
+        return val.strip() == ""
+    try:
+        return bool(pd.isna(val))
+    except (TypeError, ValueError):
+        return False
+
+
+def _resolve_reactor_cells(row: Any, experiment_type: Any) -> Dict[str, Any]:
+    """Read a conditions row's reactor cells into column values (issue #147).
+
+    `reactor_number` may be a plain number (series untouched), or a slot label:
+    'R07' / 'CF02' must match the experiment type and clear reactor_series;
+    'P01'-'P06' sets reactor_series = 'P' and is HPHT-only. A `reactor_series`
+    cell may also name the series directly. Returns only the keys the row sets;
+    a returned None means "clear it". Raises ValueError with a row-level message
+    so the row is rejected before anything is written (the conditions loop has
+    no per-row SAVEPOINT, so a CHECK violation at flush would break every
+    remaining row of the sheet).
+    """
+    out: Dict[str, Any] = {}
+    series_cell = row.get("reactor_series")
+    if not _is_blank_cell(series_cell):
+        series = str(series_cell).strip().upper()
+        error = reactor_series_error(experiment_type, series)
+        if error is not None:
+            raise ValueError(error)
+        out["reactor_series"] = series
+    number_cell = row.get("reactor_number")
+    if not _is_blank_cell(number_cell):
+        try:
+            number, prefix = parse_reactor_cell(number_cell)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Invalid reactor_number {number_cell!r}: use a number or a slot label "
+                "such as R07, P01 or CF02"
+            ) from None
+        out["reactor_number"] = number
+        if prefix is not None:
+            label_series = series_for_label(prefix, experiment_type)
+            if "reactor_series" in out and out["reactor_series"] != label_series:
+                raise ValueError(
+                    f"reactor_number {number_cell!r} and reactor_series "
+                    f"{series_cell!r} name different series"
+                )
+            out["reactor_series"] = label_series
+    return out
 
 
 def find_parent_for_copy(db: Session, experiment_id: str) -> Optional[Experiment]:
@@ -909,10 +969,32 @@ class NewExperimentsUploadService:
                             db.add(conditions)
                             db.flush()
 
-                        touched_conditions_ids.add(conditions.id)
-
                         # Auto-copy from parent if experiment is flagged for copying
                         parent = parent_for_copy.get(exp_id)
+
+                        # Reactor cells are validated before anything is written to
+                        # the row (issue #147). The type is what the row will end up
+                        # with: its own cell, else the stored / parent / ID-derived one.
+                        row_type = row.get('experiment_type')
+                        if _is_blank_cell(row_type):
+                            row_type = conditions.experiment_type or (
+                                parent.conditions.experiment_type
+                                if parent and parent.conditions else None
+                            )
+                        if not row_type:
+                            _parsed_type = parse_exp_id_validation(exp_id).experiment_type
+                            row_type = _parsed_type.value if _parsed_type else None
+                        try:
+                            reactor_values = _resolve_reactor_cells(row, row_type)
+                        except ValueError as reactor_error:
+                            errors.append(f"[conditions] Row {idx+2} ({exp_id}): {reactor_error}")
+                            if conditions_was_new:
+                                # Don't leave the blank row created above behind.
+                                db.delete(conditions)
+                                db.flush()
+                            continue
+
+                        touched_conditions_ids.add(conditions.id)
                         if parent and parent.conditions:
                             # Copy all condition fields from parent first (requirement 2a: merge)
                             for attr in updatable_attrs:
@@ -926,6 +1008,8 @@ class NewExperimentsUploadService:
                         _cond_fields_changed: List[FieldChange] = []
                         for col_name, val in row.items():
                             actual_attr = lower_to_actual.get(col_name)
+                            if actual_attr in _REACTOR_KEYS:
+                                continue  # applied from reactor_values below
                             if actual_attr:
                                 _old_val = getattr(conditions, actual_attr, None)
                                 # Convert empty strings to None
@@ -945,6 +1029,16 @@ class NewExperimentsUploadService:
                                             )
                                     except Exception as set_error:
                                         warnings.append(f"[conditions] Row {idx+2}: Failed to set {actual_attr}={val}: {set_error}")
+                        for actual_attr, val in reactor_values.items():
+                            _old_val = getattr(conditions, actual_attr, None)
+                            if _old_val == val:
+                                continue
+                            setattr(conditions, actual_attr, val)
+                            updated_fields.append(f"{actual_attr}={val}")
+                            if not conditions_was_new:
+                                _cond_fields_changed.append(
+                                    FieldChange(field=actual_attr, old=_old_val, new=val)
+                                )
                         if _cond_fields_changed:
                             overwrite_plan_by_exp_id.setdefault(
                                 exp_id, PlanOverwrite(row=idx + 2, experiment_id=exp_id)
@@ -990,7 +1084,9 @@ class NewExperimentsUploadService:
                         # same change that adds the trigger, not before. Tracked in
                         # docs/issues/issue-reactor-occupancy-uniqueness-trigger.md.
                         incoming_slot = derive_reactor_slot(
-                            conditions.reactor_number, conditions.experiment_type
+                            conditions.reactor_number,
+                            conditions.experiment_type,
+                            conditions.reactor_series,
                         )
                         if incoming_slot is not None and experiment.status == ExperimentStatus.ONGOING:
                             marked, reactor_warnings = ExperimentStatusService.manage_reactor_occupancy(
@@ -1070,7 +1166,9 @@ class NewExperimentsUploadService:
                 # slot-scoped, non-occupancy types excluded, zero excluded. `newer_than`
                 # is omitted here for the same reason — see the comment on that path.
                 incoming_slot = derive_reactor_slot(
-                    conditions.reactor_number, conditions.experiment_type
+                    conditions.reactor_number,
+                    conditions.experiment_type,
+                    conditions.reactor_series,
                 )
                 if incoming_slot is not None and experiment.status == ExperimentStatus.ONGOING:
                     marked, reactor_warnings = ExperimentStatusService.manage_reactor_occupancy(

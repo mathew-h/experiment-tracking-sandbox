@@ -7,7 +7,7 @@ import { VIAL_SIZE_ERROR } from '../vialSize'
 const empty: Step2Data = {
   temperature_c: '', initial_ph: '', rock_mass_g: '', water_volume_mL: '',
   serum_vial_size_mL: '',
-  particle_size: '', feedstock: '', reactor_number: '', stir_speed_rpm: '',
+  particle_size: '', feedstock: '', reactor_slot: '', stir_speed_rpm: '',
   initial_conductivity_mS_cm: '', room_temp_pressure_psi: '', rxn_temp_pressure_psi: '',
   co2_partial_pressure_MPa: '', core_height_cm: '', core_width_cm: '',
   confining_pressure: '', pore_pressure: '', pore_volume_mL: '',
@@ -99,5 +99,37 @@ describe('Step2Conditions — pore volume', () => {
     const { next } = renderStep2('HPHT', { pore_volume_mL: '0' })
     expect(next).toBeEnabled()
     expect(screen.queryByText(ERR)).not.toBeInTheDocument()
+  })
+})
+
+describe('Step2Conditions — reactor slot picker (issue #147)', () => {
+  const optionValues = () =>
+    Array.from((screen.getByLabelText('Reactor') as HTMLSelectElement).options)
+      .map((o) => o.value)
+      .filter(Boolean)
+
+  it('lists R01-R16 then P01-P06 for HPHT', () => {
+    renderStep2('HPHT')
+    const values = optionValues()
+    expect(values).toHaveLength(22)
+    expect(values.slice(0, 2)).toEqual(['R01', 'R02'])
+    expect(values.slice(-6)).toEqual(['P01', 'P02', 'P03', 'P04', 'P05', 'P06'])
+    expect(screen.getByRole('option', { name: 'P03 (Parr)' })).toBeInTheDocument()
+  })
+
+  it('lists only CF01-CF03 for Core Flood', () => {
+    renderStep2('Core Flood')
+    expect(optionValues()).toEqual(['CF01', 'CF02', 'CF03'])
+  })
+
+  it.each<ExperimentType>(['Serum', 'Autoclave'])('shows no reactor picker for %s', (type) => {
+    renderStep2(type)
+    expect(screen.queryByLabelText('Reactor')).not.toBeInTheDocument()
+  })
+
+  it('reports the picked label through onChange', () => {
+    const { onChange } = renderStep2('HPHT')
+    fireEvent.change(screen.getByLabelText('Reactor'), { target: { value: 'P02' } })
+    expect(onChange).toHaveBeenCalledWith({ reactor_slot: 'P02' })
   })
 })

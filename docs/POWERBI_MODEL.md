@@ -14,13 +14,15 @@ PostgreSQL database on the lab PC and import these views as tables.
 | View | Key columns |
 |---|---|
 | `public.v_experiments` | `experiment_id`, `experiment_number`, `status`, `researcher`, `date`, `sample_id`, `base_experiment_id`, `reactor_number`, `rock_mass_g`, `water_volume_mL`, `initial_ph`, `experiment_type`, `feedstock`, `description` |
-| `public.v_experiment_conditions` | `experiment_id`, `experiment_type`, `temperature_c`, `particle_size`, `initial_ph`, `rock_mass_g`, `water_volume_mL`, `serum_vial_size_mL`, `pore_volume_mL`, `water_to_rock_ratio`, `reactor_number`, `feedstock`, `stir_speed_rpm`, `room_temp_pressure_psi`, `rxn_temp_pressure_psi`, `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`, `initial_conductivity_mS_cm`, `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`, `total_ferrous_iron_g`, `total_ferrous_iron` |
+| `public.v_experiment_conditions` | `experiment_id`, `experiment_type`, `temperature_c`, `particle_size`, `initial_ph`, `rock_mass_g`, `water_volume_mL`, `serum_vial_size_mL`, `pore_volume_mL`, `water_to_rock_ratio`, `reactor_number`, `reactor_series`, `reactor_slot`, `feedstock`, `stir_speed_rpm`, `room_temp_pressure_psi`, `rxn_temp_pressure_psi`, `co2_partial_pressure_MPa`, `confining_pressure`, `pore_pressure`, `flow_rate`, `initial_conductivity_mS_cm`, `initial_nitrate_concentration`, `initial_dissolved_oxygen`, `initial_alkalinity`, `core_height_cm`, `core_width_cm`, `core_volume_cm3`, `total_ferrous_iron_g`, `total_ferrous_iron` |
 | `public.v_chemical_additives` | `experiment_id`, `compound_name`, `formula`, `amount`, `unit`, `addition_order`, `addition_method`, `purity`, `mass_in_grams`, `moles_added`, `final_concentration`, `concentration_units`, `elemental_metal_mass`, `catalyst_percentage`, `catalyst_ppm` |
 | `public.v_experiment_additives_summary` | `experiment_id`, `additives_summary` |
 | `public.v_experiment_additive_names_summary` | `experiment_id`, `additive_names` |
 | `public.v_dim_timepoints` | `result_id`, `experiment_id`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `cumulative_time_post_reaction_days`, `sample_tube_number`, `modification_note` |
 | `public.v_notes` | `note_id`, `experiment_id`, `result_id`, `event_date`, `note_type`, `note_text`, `created_at`, `created_by`, `needs_review` |
 | `public.v_experiment_xrd` | `experiment_id`, `time_post_reaction_days`, `mineral_name`, `amount_pct`, `rwp`, `measurement_date` |
+
+- **Reactor slot (issue #147).** Use `v_experiment_conditions.reactor_slot` (`R01`–`R16`, `P01`–`P06`, `CF01`–`CF03`, NULL when the experiment holds no vessel) to identify a physical reactor, not `reactor_number`. Parr runs are HPHT with `reactor_series = 'P'`, so `reactor_number = 3` is both Yushen/Tan `R03` and Parr `P03`. `reactor_series` is NULL for every non-Parr row. `v_experiments` still exposes only `reactor_number`. Refresh the schema after the `c6d2f8a4e1b9` migration to pick up the two columns.
 
 ---
 

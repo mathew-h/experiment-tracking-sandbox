@@ -968,11 +968,15 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
                 "initial_dissolved_oxygen",
                 "initial_alkalinity",
                 "pore_volume_mL",
+                # Blank = the type's default series (R / CF); "P" = Parr P01-P06,
+                # HPHT only. reactor_number also accepts a label such as P03 (#147).
+                "reactor_series",
             ],
             required={"experiment_id*"},
             example_row=[
                 "HPHT_001", "HPHT", 200.0, 7.0, 5.0, 50.0, 3, 300,
                 100.0, 1450.0, "< 150 μm", "Nitrogen", None, None, None, None, None, None, None,
+                None,
             ],
         )
 
@@ -1014,7 +1018,12 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("initial_ph", "Initial solution pH."),
             ("rock_mass_g", "Rock mass in grams."),
             ("water_volume_mL", "Water/brine volume in mL."),
-            ("reactor_number", "Reactor vessel number (integer). Setting ONGOING status auto-completes conflicting experiments."),
+            ("reactor_number", (
+                "Reactor vessel: a number (e.g. 3) or a slot label (R03, P03, CF01). "
+                "P01-P06 are the Parr vessels (HPHT only); R/CF labels must match "
+                "experiment_type. Setting ONGOING status auto-completes conflicting "
+                "experiments in the same slot."
+            )),
             ("stir_speed_rpm", "Stir bar speed in RPM."),
             ("room_temp_pressure_psi", "Headspace pressure at room temperature (psi)."),
             ("rxn_temp_pressure_psi", "Headspace pressure at reaction temperature (psi)."),
@@ -1022,6 +1031,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("feedstock", "Nitrogen, Nitrate, or Blank."),
             ("serum_vial_size_mL", "Serum experiments only. Nominal vial size in whole mL (e.g. 20, 60, 120, 160). Leave blank for other types."),
             ("pore_volume_mL", "Core Flood only. Pore volume of the core in mL (> 0). Pore volumes flushed = cumulative liquid sample volume / this value. Leave blank for other types."),
+            ("reactor_series", (
+                "HPHT only. Blank = Yushen/Tan vessels R01-R16; P = Parr vessels "
+                "P01-P06. A P-label in reactor_number (e.g. P03) sets this for you."
+            )),
             ("--- additives sheet ---", ""),
             ("experiment_id*", "REQUIRED. Must match an experiment in the experiments sheet or exist in database."),
             ("compound*", "REQUIRED. Chemical compound name. Auto-created in compound inventory if not found."),
@@ -1182,7 +1195,11 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("Column", "Notes"),
             ("experiment_id", "REQUIRED. Must match an existing experiment_id."),
             ("status", "REQUIRED. One of ONGOING, COMPLETED, CANCELLED, QUEUED (case-insensitive)."),
-            ("reactor_number", "Integer. Only meaningful for HPHT / Core Flood experiments."),
+            ("reactor_number", (
+                "A number (keeps the experiment's series) or a slot label: R07 / CF02 "
+                "(must match the experiment type) or P01-P06 (Parr, HPHT only). Only "
+                "meaningful for HPHT / Core Flood experiments."
+            )),
             (
                 "date",
                 "Experiment start date (YYYY-MM-DD or Excel date). Used both to set the "

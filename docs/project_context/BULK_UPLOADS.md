@@ -239,7 +239,10 @@ so you can fill the template with the correct experiment IDs before uploading.
 | initial_ph | | |
 | rock_mass_g | | |
 | water_volume_mL | | |
-| reactor_number | | |
+| reactor_number | | A number (e.g. `3`) or a slot label: `R03` / `CF01` (must match the experiment type) or `P01`–`P06` for the Parr HPHT vessels (issue #147). A plain number leaves the series alone |
+| reactor_series | | Last column of the conditions sheet. Blank = the type's default vessels (R / CF); `P` = Parr, HPHT only. A `P` label in `reactor_number` fills this in for you |
+
+**Reactor cells are checked before the row is written.** `P01` on a Serum, Autoclave or Core Flood row, an `R`/`CF` label that doesn't match the row's type, an unknown `reactor_series`, or a label and a `reactor_series` that disagree each give a `[conditions] Row N (<experiment_id>): …` error. That row's conditions are skipped and the rest of the file goes ahead. The row's type is its own `experiment_type` cell, else the stored or parent type, else the type read from the experiment ID.
 
 ---
 
@@ -371,8 +374,14 @@ Logic:
 - Each row sets its own `status` (`ONGOING`, `COMPLETED`, `CANCELLED`, or `QUEUED`; case-insensitive).
 - If `date` is provided, it updates the experiment's start date (`Experiment.date`).
 - If `reactor_number` is provided, it updates `ExperimentalConditions.reactor_number`.
+  The cell may be a plain number, which keeps the experiment's current series, or a
+  slot label (issue #147): `R07` / `CF02` must match the experiment's type and put it
+  in the default series; `P01`–`P06` move an HPHT experiment to the Parr vessels.
+  A label that doesn't fit the type (`P01` on a Core Flood, `CF02` on an HPHT) fails
+  the upload like any invalid value.
 - Setting an **HPHT or Core Flood** row to `ONGOING` with a `reactor_number` completes
-  an experiment already `ONGOING` in that same reactor, **only if** the occupant's
+  an experiment already `ONGOING` in that same reactor slot (P03 and R03 are
+  different vessels), **only if** the occupant's
   start date is older than the incoming row's start date.
 - If the reactor is held by a newer-or-equal-dated experiment (or either date is
   missing), nothing is demoted and a warning names both experiments and the reactor.
@@ -390,7 +399,7 @@ confirm step): upload the file and the response reports what was applied.
 |--------|----------|-------|
 | experiment_id | ✓ | |
 | status | ✓ | ONGOING, COMPLETED, CANCELLED, or QUEUED (case-insensitive) |
-| reactor_number | | Optional; only meaningful for HPHT / Core Flood experiments |
+| reactor_number | | Optional; only meaningful for HPHT / Core Flood experiments. A number, or a slot label (`R07`, `P01`–`P06`, `CF02`) |
 | date | | Optional; experiment start date (YYYY-MM-DD or Excel date) |
 
 ---

@@ -7,6 +7,7 @@ import backend.services.calculations  # noqa: F401 — registers @register decor
 from backend.services.calculations.registry import recalculate
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
+from database.reactor_slot import reactor_series_error
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.conditions import ConditionsCreate, ConditionsUpdate, ConditionsResponse
@@ -24,6 +25,16 @@ def _validate_reactor_number(reactor_number: int | None, experiment_type: str | 
             status_code=422,
             detail="reactor_number may only be set for HPHT or Core Flood experiments",
         )
+
+
+def _validate_reactor_series(reactor_series: str | None, experiment_type: str | None) -> None:
+    """Raise 422 if reactor_series is not valid for the experiment type (issue #147).
+
+    Checked before the flush so a bad value is a 422, not a CHECK-violation 500.
+    """
+    error = reactor_series_error(experiment_type, reactor_series)
+    if error is not None:
+        raise HTTPException(status_code=422, detail=error)
 
 
 @router.get("/{conditions_id}", response_model=ConditionsResponse)
@@ -80,6 +91,7 @@ def create_conditions(
 ) -> ConditionsResponse:
     """Create conditions and compute derived fields (water_to_rock_ratio)."""
     _validate_reactor_number(payload.reactor_number, payload.experiment_type)
+    _validate_reactor_series(payload.reactor_series, payload.experiment_type)
     existing = db.execute(
         select(ExperimentalConditions.id)
         .where(ExperimentalConditions.experiment_fk == payload.experiment_fk)
@@ -118,9 +130,14 @@ def update_conditions(
     cond = db.get(ExperimentalConditions, conditions_id)
     if cond is None:
         raise HTTPException(status_code=404, detail="Conditions not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    # Validate the merged values before touching the row, so a 422 leaves the
+    # session clean.
+    merged_type = updates.get("experiment_type", cond.experiment_type)
+    _validate_reactor_number(updates.get("reactor_number", cond.reactor_number), merged_type)
+    _validate_reactor_series(updates.get("reactor_series", cond.reactor_series), merged_type)
+    for field, value in updates.items():
         setattr(cond, field, value)
-    _validate_reactor_number(cond.reactor_number, cond.experiment_type)
     db.flush()
     recalculate(cond, db)
     db.commit()

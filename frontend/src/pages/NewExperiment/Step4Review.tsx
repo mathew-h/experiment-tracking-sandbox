@@ -60,7 +60,12 @@ export function Step4Review({
       <div>
         <h3 className="text-sm font-semibold text-ink-primary mb-2">Conditions</h3>
         <div className="space-y-0">
-          {[...visibleFields].map((f) => kv(f, (step2 as unknown as Record<string, string>)[f]))}
+          {[...visibleFields].map((f) =>
+            // The reactor is picked as a slot label (R03 / P03 / CF01), issue #147.
+            f === 'reactor_number'
+              ? kv('reactor', step2.reactor_slot)
+              : kv(f, (step2 as unknown as Record<string, string>)[f]),
+          )}
         </div>
       </div>
 

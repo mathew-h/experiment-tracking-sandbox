@@ -531,3 +531,56 @@ def test_patch_conditions_rejects_nonpositive_pore_volume(client, db_session, ba
     out = client.patch(f"/api/conditions/{cid}", json={"pore_volume_mL": bad})
     assert out.status_code == 422
     assert client.get(f"/api/conditions/{cid}").json()["pore_volume_mL"] == 50.0
+
+
+# --- Parr series (issue #147) ---
+
+
+def test_conditions_accept_parr_series_and_derive_p_slot(client, db_session):
+    exp = _make_experiment(db_session, "COND_SLOT_147A", 147101)
+    resp = client.post(
+        "/api/conditions",
+        json={
+            "experiment_fk": exp.id,
+            "experiment_id": exp.experiment_id,
+            "experiment_type": "HPHT",
+            "reactor_number": 3,
+            "reactor_series": " p ",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert (body["reactor_series"], body["reactor_slot"]) == ("P", "P03")
+
+    # Clearing the series moves the run back to R03.
+    resp = client.patch(f"/api/conditions/{body['id']}", json={"reactor_series": None})
+    assert resp.status_code == 200
+    assert (resp.json()["reactor_series"], resp.json()["reactor_slot"]) == (None, "R03")
+
+
+def test_conditions_reject_parr_series_on_core_flood(client, db_session):
+    exp = _make_experiment(db_session, "COND_SLOT_147B", 147102)
+    resp = client.post(
+        "/api/conditions",
+        json={
+            "experiment_fk": exp.id,
+            "experiment_id": exp.experiment_id,
+            "experiment_type": "Core Flood",
+            "reactor_number": 1,
+            "reactor_series": "P",
+        },
+    )
+    assert resp.status_code == 422
+    assert "only valid for HPHT" in resp.json()["detail"]
+
+
+def test_conditions_reject_unknown_series_as_422_not_500(client, db_session):
+    exp = _make_experiment(db_session, "COND_SLOT_147C", 147103)
+    created = client.post(
+        "/api/conditions",
+        json={"experiment_fk": exp.id, "experiment_id": exp.experiment_id,
+              "experiment_type": "HPHT", "reactor_number": 2},
+    ).json()
+    resp = client.patch(f"/api/conditions/{created['id']}", json={"reactor_series": "Q"})
+    assert resp.status_code == 422
+    assert "Unknown reactor series" in resp.json()["detail"]

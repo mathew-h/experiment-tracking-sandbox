@@ -373,7 +373,8 @@ export function ExperimentDetailPage() {
                 : ' · Assign sample'}
             </button>
           )}
-          {conditions?.reactor_number != null && ` · Reactor ${conditions.reactor_number}`}
+          {conditions?.reactor_number != null &&
+            ` · Reactor ${conditions.reactor_slot ?? conditions.reactor_number}`}
         </p>
 
         {/* Inline sample ID editor */}

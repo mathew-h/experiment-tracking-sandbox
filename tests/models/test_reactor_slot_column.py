@@ -204,3 +204,78 @@ def test_listener_overwrites_a_hand_assigned_slot(db_session: Session):
     db_session.flush()
     db_session.refresh(cond)
     assert cond.reactor_slot == "R06"
+
+
+# --- Parr series (issue #147) -------------------------------------------------
+# The #147 migration adds reactor_series with no backfill, so the only SQL slot
+# rule is still 1c1ef9b555e0's, and it only ever saw reactor_series = NULL. The
+# parametrized parity test above therefore pins it against
+# derive_reactor_slot(rnum, etype) with the series left at its NULL default;
+# the cases below pin what a non-NULL series does.
+
+
+@pytest.mark.parametrize(
+    "rnum,etype,series,expected",
+    [
+        (3, "HPHT", "P", "P03"),
+        (3, "HPHT", None, "R03"),
+        (3, "HPHT", "", "R03"),
+        (6, "hpht ", "p", "P06"),
+        (1, "Core Flood", "P", None),
+        (1, "Core Flood", None, "CF01"),
+        (2, "Serum", "P", None),
+        (0, "HPHT", "P", None),
+        (None, "HPHT", "P", None),
+        (3, "HPHT", "X", None),
+    ],
+)
+def test_derive_reactor_slot_with_series(rnum, etype, series, expected):
+    assert derive_reactor_slot(rnum, etype, series) == expected
+
+
+def test_reactor_series_error_messages():
+    from database.reactor_slot import reactor_series_error
+
+    assert reactor_series_error("HPHT", None) is None
+    assert reactor_series_error("HPHT", "P") is None
+    assert "only valid for HPHT" in reactor_series_error("Core Flood", "P")
+    assert "Unknown reactor series" in reactor_series_error("HPHT", "Q")
+
+
+def test_is_hpht_series():
+    from database.reactor_slot import is_hpht_series
+
+    assert is_hpht_series("R") and is_hpht_series("P")
+    assert not is_hpht_series("CF") and not is_hpht_series(None)
+
+
+def _hpht_conditions(db_session: Session, exp_id: str, number: int, **kw) -> ExperimentalConditions:
+    exp = Experiment(experiment_id=exp_id, experiment_number=number, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    cond = ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id=exp.experiment_id, experiment_type="HPHT", **kw
+    )
+    db_session.add(cond)
+    db_session.flush()
+    return cond
+
+
+def test_listener_derives_parr_slot_and_back(db_session: Session):
+    cond = _hpht_conditions(db_session, "HPHT_SLOT_147A", 147001, reactor_number=3, reactor_series="P")
+    db_session.refresh(cond)
+    assert cond.reactor_slot == "P03"
+
+    cond.reactor_series = None
+    db_session.flush()
+    db_session.refresh(cond)
+    assert cond.reactor_slot == "R03"
+
+
+def test_check_constraint_rejects_unknown_series(db_session: Session):
+    from sqlalchemy.exc import IntegrityError
+
+    sp = db_session.begin_nested()
+    with pytest.raises(IntegrityError):
+        _hpht_conditions(db_session, "HPHT_SLOT_147B", 147002, reactor_number=3, reactor_series="X")
+    sp.rollback()

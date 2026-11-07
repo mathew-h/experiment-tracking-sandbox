@@ -25,7 +25,7 @@ const step2: Step2Data = {
   serum_vial_size_mL: '',
   particle_size: '',
   feedstock: '',
-  reactor_number: '',
+  reactor_slot: '',
   stir_speed_rpm: '',
   initial_conductivity_mS_cm: '',
   room_temp_pressure_psi: '',

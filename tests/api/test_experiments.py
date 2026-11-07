@@ -1822,3 +1822,34 @@ def test_list_item_without_description_note_has_null_description(client, db_sess
     item = next(i for i in resp.json()["items"] if i["experiment_id"] == "LIST_DESC_001")
     assert "description" in item
     assert item["description"] is None
+
+
+# --- #147: status 409 is per slot, and P03 is not R03 ---
+
+def _seed_hpht(db, experiment_id, number, rn, series, status):
+    from database.models.conditions import ExperimentalConditions
+
+    exp = Experiment(experiment_id=experiment_id, experiment_number=number, status=status)
+    db.add(exp)
+    db.flush()
+    db.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id=experiment_id, experiment_type="HPHT",
+        reactor_number=rn, reactor_series=series,
+    ))
+    db.commit()
+    return exp
+
+
+def test_status_ongoing_in_p03_ignores_r03_but_409s_on_p03(client, db_session):
+    _seed_hpht(db_session, "HPHT_ST147_R03", 147201, 3, None, ExperimentStatus.ONGOING)
+    _seed_hpht(db_session, "HPHT_ST147_P03A", 147202, 3, "P", ExperimentStatus.QUEUED)
+    _seed_hpht(db_session, "HPHT_ST147_P03B", 147203, 3, "P", ExperimentStatus.QUEUED)
+
+    resp = client.patch("/api/experiments/HPHT_ST147_P03A/status", json={"status": "ONGOING"})
+    assert resp.status_code == 200, resp.json()
+
+    resp = client.patch("/api/experiments/HPHT_ST147_P03B/status", json={"status": "ONGOING"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "Reactor P03" in detail and "HPHT_ST147_P03A" in detail
+    assert "HPHT_ST147_R03" not in detail

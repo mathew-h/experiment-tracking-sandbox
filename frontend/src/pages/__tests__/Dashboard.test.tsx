@@ -27,6 +27,7 @@ import { DashboardPage } from '../Dashboard'
 function makeSummary(overrides: Partial<DashboardData['summary']> = {}): DashboardData['summary'] {
   return {
     reactors: { total: 16, ongoing: 8, queued: 4, empty: 4 },
+    parr: { total: 6, ongoing: 2, queued: 1, empty: 3 },
     core_floods: { total: 3, ongoing: 1, queued: 0, empty: 2 },
     gc_measurements_7wd: 5,
     gc_experiments_7wd: 3,
@@ -58,6 +59,7 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     vi.mocked(dashboardApi.full).mockResolvedValue({
       summary: makeSummary(),
       reactors: [],
+      reactor_specs: {},
       timeline: [],
       recent_activity: [],
     })
@@ -75,6 +77,8 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     expect(screen.getByText('GC Measurements')).toBeInTheDocument()
     expect(screen.getByText('Serum Vials Started')).toBeInTheDocument()
     expect(screen.getByText('Core Floods Ongoing')).toBeInTheDocument()
+    expect(screen.getByText('Parr Reactors')).toBeInTheDocument()
+    expect(screen.getByText('1 queued · 3 empty')).toBeInTheDocument()
   })
 
   it('shows em-dash placeholders and no crash while summary is undefined (loading state)', () => {
@@ -88,6 +92,7 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     vi.mocked(dashboardApi.full).mockResolvedValue({
       summary: makeSummary(),
       reactors: [],
+      reactor_specs: {},
       timeline: [],
       recent_activity: [],
     })
@@ -95,17 +100,19 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     // Bars only render once `data` is defined (`{data && <SlotBar .../>}`), so
     // waiting for exactly 2 `[role="img"]` elements to appear is itself the
     // data-loaded signal — unlike a static label, this cannot resolve early.
-    await waitFor(() => expect(container.querySelectorAll('[role="img"]').length).toBe(2))
+    await waitFor(() => expect(container.querySelectorAll('[role="img"]').length).toBe(3))
     const bars = container.querySelectorAll('[role="img"]')
-    // First bar = reactors (16 total), second = core floods (3 total)
+    // Reactors (16), Parr (6, issue #147), core floods (3)
     expect(bars[0].querySelectorAll(':scope > div').length).toBe(16)
-    expect(bars[1].querySelectorAll(':scope > div').length).toBe(3)
+    expect(bars[1].querySelectorAll(':scope > div').length).toBe(6)
+    expect(bars[2].querySelectorAll(':scope > div').length).toBe(3)
   })
 
   it('explains a zero GC count instead of implying an idle lab (issue #115)', async () => {
     vi.mocked(dashboardApi.full).mockResolvedValue({
       summary: makeSummary({ gc_measurements_7wd: 0, gc_experiments_7wd: 0 }),
       reactors: [],
+      reactor_specs: {},
       timeline: [],
       recent_activity: [],
     })
@@ -120,6 +127,7 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     vi.mocked(dashboardApi.full).mockResolvedValue({
       summary: makeSummary({ gc_measurements_7wd: 5, gc_experiments_7wd: 3 }),
       reactors: [],
+      reactor_specs: {},
       timeline: [],
       recent_activity: [],
     })

@@ -12,6 +12,8 @@ export interface ConditionsPayload {
   particle_size?: string
   feedstock?: string
   reactor_number?: number
+  /** 'P' = Parr vessel (HPHT only); null = the type's default series (issue #147). */
+  reactor_series?: 'P' | null
   stir_speed_rpm?: number
   initial_conductivity_mS_cm?: number
   room_temp_pressure_psi?: number
@@ -27,6 +29,8 @@ export interface ConditionsPayload {
 export interface ConditionsResponse extends ConditionsPayload {
   id: number
   water_to_rock_ratio?: number | null
+  /** Derived slot label, e.g. 'R03', 'P03', 'CF01'; null when it holds no slot. */
+  reactor_slot?: string | null
   created_at: string
 }
 

@@ -47,6 +47,7 @@ def test_dashboard_summary_schema():
     from backend.api.schemas.dashboard import DashboardSummary, SlotOccupancy
     s = DashboardSummary(
         reactors=SlotOccupancy(total=16, ongoing=3, queued=1, empty=12),
+        parr=SlotOccupancy(total=6, ongoing=1, queued=0, empty=5),
         core_floods=SlotOccupancy(total=3, ongoing=1, queued=0, empty=2),
         gc_measurements_7wd=5,
         gc_experiments_7wd=3,
@@ -138,6 +139,7 @@ def test_dashboard_response_schema():
     resp = DashboardResponse(
         summary=DashboardSummary(
             reactors=SlotOccupancy(total=16, ongoing=0, queued=0, empty=16),
+            parr=SlotOccupancy(total=6, ongoing=0, queued=0, empty=6),
             core_floods=SlotOccupancy(total=3, ongoing=0, queued=0, empty=3),
             gc_measurements_7wd=0,
             gc_experiments_7wd=0,
@@ -147,6 +149,7 @@ def test_dashboard_response_schema():
             workday_window_end="2026-07-29",
         ),
         reactors=[],
+        reactor_specs={},
         timeline=[],
         recent_activity=[],
     )
@@ -177,15 +180,16 @@ def test_get_dashboard_shape(client):
     assert "recent_activity" in data
     s = data["summary"]
     for key in (
-        "reactors", "core_floods", "gc_measurements_7wd", "gc_experiments_7wd",
+        "reactors", "parr", "core_floods", "gc_measurements_7wd", "gc_experiments_7wd",
         "serum_vials_started_7wd", "serum_experiments_7wd",
         "workday_window_start", "workday_window_end",
     ):
         assert key in s, f"Missing summary key: {key}"
-    for occ_key in ("reactors", "core_floods"):
+    for occ_key in ("reactors", "parr", "core_floods"):
         occ = s[occ_key]
         assert occ["ongoing"] + occ["queued"] + occ["empty"] == occ["total"]
     assert s["reactors"]["total"] == 16
+    assert s["parr"]["total"] == 6
     assert s["core_floods"]["total"] == 3
 
 
@@ -314,11 +318,14 @@ def test_get_dashboard_activity_capped_at_20(client):
 # ---------------------------------------------------------------------------
 
 def test_reactor_specs_constant_coverage():
-    """REACTOR_SPECS covers all R_SLOT_COUNT standard reactors with required keys."""
-    from backend.api.routers.dashboard import REACTOR_SPECS, R_SLOT_COUNT
-    assert len(REACTOR_SPECS) == R_SLOT_COUNT
-    for rn in range(1, R_SLOT_COUNT + 1):
-        spec = REACTOR_SPECS[rn]
+    """REACTOR_SPECS covers every R and P slot label (and no CF label) with required keys."""
+    from backend.api.routers.dashboard import REACTOR_SPECS, R_SLOT_COUNT, P_SLOT_COUNT
+    labels = [f"R{i:02d}" for i in range(1, R_SLOT_COUNT + 1)] + [
+        f"P{i:02d}" for i in range(1, P_SLOT_COUNT + 1)
+    ]
+    assert sorted(REACTOR_SPECS) == sorted(labels)
+    for label in labels:
+        spec = REACTOR_SPECS[label]
         assert "volume_mL" in spec
         assert "material" in spec
         assert "vendor" in spec
@@ -329,25 +336,28 @@ def test_reactor_specs_values():
     from backend.api.routers.dashboard import REACTOR_SPECS
     # R01–R03: Hastelloy, 100 mL, Yushen
     for rn in (1, 2, 3):
-        assert REACTOR_SPECS[rn]["material"] == "Hastelloy"
-        assert REACTOR_SPECS[rn]["volume_mL"] == 100
-        assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+        assert REACTOR_SPECS[f"R{rn:02d}"]["material"] == "Hastelloy"
+        assert REACTOR_SPECS[f"R{rn:02d}"]["volume_mL"] == 100
+        assert REACTOR_SPECS[f"R{rn:02d}"]["vendor"] == "Yushen"
     # R04–R06: 500 mL Titanium, Yushen
     for rn in (4, 5, 6):
-        assert REACTOR_SPECS[rn]["volume_mL"] == 500
-        assert REACTOR_SPECS[rn]["material"] == "Titanium"
-        assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+        assert REACTOR_SPECS[f"R{rn:02d}"]["volume_mL"] == 500
+        assert REACTOR_SPECS[f"R{rn:02d}"]["material"] == "Titanium"
+        assert REACTOR_SPECS[f"R{rn:02d}"]["vendor"] == "Yushen"
     # R07: 300 mL Titanium, Tan
-    assert REACTOR_SPECS[7]["volume_mL"] == 300
-    assert REACTOR_SPECS[7]["material"] == "Titanium"
-    assert REACTOR_SPECS[7]["vendor"] == "Tan"
+    assert REACTOR_SPECS["R07"]["volume_mL"] == 300
+    assert REACTOR_SPECS["R07"]["material"] == "Titanium"
+    assert REACTOR_SPECS["R07"]["vendor"] == "Tan"
     # R08–R09: 100 mL Titanium, Tan
     for rn in (8, 9):
-        assert REACTOR_SPECS[rn]["vendor"] == "Tan"
+        assert REACTOR_SPECS[f"R{rn:02d}"]["vendor"] == "Tan"
     # R10–R16: 100 mL Titanium, Yushen
     for rn in range(10, 17):
-        assert REACTOR_SPECS[rn]["volume_mL"] == 100
-        assert REACTOR_SPECS[rn]["vendor"] == "Yushen"
+        assert REACTOR_SPECS[f"R{rn:02d}"]["volume_mL"] == 100
+        assert REACTOR_SPECS[f"R{rn:02d}"]["vendor"] == "Yushen"
+    # P01-P06: Parr, 75 mL Hastelloy (issue #147)
+    for rn in range(1, 7):
+        assert REACTOR_SPECS[f"P{rn:02d}"] == {"volume_mL": 75, "material": "Hastelloy", "vendor": "Parr"}
 
 
 def test_reactor_card_includes_specs(client, db_session):
@@ -1001,6 +1011,7 @@ def test_dashboard_summary_empty_db(client):
     assert resp.status_code == 200
     s = resp.json()["summary"]
     assert s["reactors"] == {"total": 16, "ongoing": 0, "queued": 0, "empty": 16}
+    assert s["parr"] == {"total": 6, "ongoing": 0, "queued": 0, "empty": 6}
     assert s["core_floods"] == {"total": 3, "ongoing": 0, "queued": 0, "empty": 3}
 
 
@@ -1468,3 +1479,54 @@ def test_reactor_status_endpoint_also_excludes_slotless_rows(client, db_session)
     assert resp.status_code == 200
     ids = {r["experiment_id"] for r in resp.json()}
     assert "SLOT97_SERUM_002" not in ids
+
+
+# ---------------------------------------------------------------------------
+# Parr HPHT vessels P01-P06 (issue #147)
+# ---------------------------------------------------------------------------
+
+def _seed_slot(db_session, exp_id, num, rn, series=None, status=None, etype="HPHT"):
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(experiment_id=exp_id, experiment_number=num,
+                     status=status or ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id, experiment_id=exp_id, reactor_number=rn,
+        reactor_series=series, experiment_type=etype,
+    ))
+    return exp
+
+
+def test_parr_p03_counts_in_parr_not_reactors_and_shows_parr_spec(client, db_session):
+    _seed_slot(db_session, "HPHT_PARR_P03", 14701, 3, "P")
+    _seed_slot(db_session, "HPHT_PARR_R03", 14702, 3, None)
+    db_session.commit()
+
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200
+    data = resp.json()
+    s = data["summary"]
+    assert s["parr"] == {"total": 6, "ongoing": 1, "queued": 0, "empty": 5}
+    assert s["reactors"]["ongoing"] == 1  # only R03
+
+    cards = {c["reactor_label"]: c for c in data["reactors"]}
+    assert cards["P03"]["experiment_id"] == "HPHT_PARR_P03"
+    assert (cards["P03"]["volume_mL"], cards["P03"]["material"], cards["P03"]["vendor"]) == (
+        75, "Hastelloy", "Parr"
+    )
+    assert cards["R03"]["experiment_id"] == "HPHT_PARR_R03"
+    assert (cards["R03"]["volume_mL"], cards["R03"]["material"], cards["R03"]["vendor"]) == (
+        100, "Hastelloy", "Yushen"
+    )
+
+
+def test_dashboard_payload_carries_reactor_specs(client):
+    """The frontend reads empty-slot specs from here instead of its own copy."""
+    specs = client.get("/api/dashboard/").json()["reactor_specs"]
+    assert specs["R07"] == {"volume_mL": 300, "material": "Titanium", "vendor": "Tan"}
+    assert specs["P06"] == {"volume_mL": 75, "material": "Hastelloy", "vendor": "Parr"}
+    assert "CF01" not in specs

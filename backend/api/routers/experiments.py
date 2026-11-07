@@ -1085,6 +1085,7 @@ def update_experiment_status(
         slot = derive_reactor_slot(
             conditions.reactor_number if conditions else None,
             conditions.experiment_type if conditions else None,
+            conditions.reactor_series if conditions else None,
         )
         if slot is not None:
             occupant = db.execute(

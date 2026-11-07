@@ -552,3 +552,66 @@ def test_sequential_child_inherits_parent_serum_vial_size(db_session: Session):
     assert errors == [], f"Unexpected errors: {errors}"
     assert created == 1
     assert _vial_of(db_session, "SERUM_9765-2") == 160
+
+
+# ---------------------------------------------------------------------------
+# Parr reactor labels in the conditions sheet (issue #147)
+# ---------------------------------------------------------------------------
+
+def _conditions_upload(db_session: Session, exp_id: str, num: int, headers, row):
+    _seed_experiment(db_session, exp_id, num, status=ExperimentStatus.QUEUED)
+    xlsx = make_excel_multisheet({
+        "experiments": (_EXP_HEADERS, [[exp_id, None, None, None, None, "QUEUED", None, True]]),
+        "conditions": (["experiment_id", *headers], [[exp_id, *row]]),
+    })
+    return NewExperimentsUploadService.bulk_upsert_from_excel(db_session, xlsx)
+
+
+def _conditions_of(db_session: Session, exp_id: str):
+    db_session.expire_all()
+    exp = db_session.query(Experiment).filter_by(experiment_id=exp_id).first()
+    return exp.conditions
+
+
+def test_p01_label_sets_number_series_and_slot(db_session: Session):
+    *_, errors, _warnings, _info = _conditions_upload(
+        db_session, "HPHT_NE147_001", 147401, ["experiment_type", "reactor_number"], ["HPHT", "P01"]
+    )
+    assert errors == []
+    c = _conditions_of(db_session, "HPHT_NE147_001")
+    assert (c.reactor_number, c.reactor_series, c.reactor_slot) == (1, "P", "P01")
+
+
+def test_p01_label_on_serum_row_is_a_row_error(db_session: Session):
+    *_, errors, _warnings, _info = _conditions_upload(
+        db_session, "SERUM_NE147_002", 147402, ["experiment_type", "reactor_number"], ["Serum", "P01"]
+    )
+    assert any("Row 2" in e and "only valid for HPHT" in e for e in errors), errors
+    assert _conditions_of(db_session, "SERUM_NE147_002") is None
+
+
+def test_plain_reactor_number_is_unchanged(db_session: Session):
+    *_, errors, _warnings, _info = _conditions_upload(
+        db_session, "HPHT_NE147_003", 147403, ["experiment_type", "reactor_number"], ["HPHT", 7]
+    )
+    assert errors == []
+    c = _conditions_of(db_session, "HPHT_NE147_003")
+    assert (c.reactor_number, c.reactor_series, c.reactor_slot) == (7, None, "R07")
+
+
+def test_reactor_series_column_and_type_from_id(db_session: Session):
+    """No experiment_type cell: the type comes from the ID (HPHT_...)."""
+    *_, errors, _warnings, _info = _conditions_upload(
+        db_session, "HPHT_NE147_004", 147404, ["reactor_number", "reactor_series"], [5, "p"]
+    )
+    assert errors == []
+    c = _conditions_of(db_session, "HPHT_NE147_004")
+    assert (c.reactor_number, c.reactor_series, c.reactor_slot) == (5, "P", "P05")
+
+
+def test_conflicting_label_and_series_cells_are_a_row_error(db_session: Session):
+    *_, errors, _warnings, _info = _conditions_upload(
+        db_session, "HPHT_NE147_005", 147405,
+        ["experiment_type", "reactor_number", "reactor_series"], ["HPHT", "R03", "P"],
+    )
+    assert any("name different series" in e for e in errors), errors
