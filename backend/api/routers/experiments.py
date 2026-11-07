@@ -1,6 +1,6 @@
 from __future__ import annotations
 import io
-from typing import Literal
+from typing import Callable, Literal, TypeVar
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
@@ -30,9 +30,11 @@ from backend.services.replicate_groups import (
 )
 from backend.api.schemas.results import (
     ResultWithFlagsResponse, BackgroundAmmoniumUpdate, BackgroundAmmoniumUpdated,
-    RollupTimepointResponse, ExperimentIcpResponse,
+    RollupTimepointResponse, ExperimentIcpResponse, ResultEntryCreate, ResultEntryUpdate,
 )
 from backend.services import icp_series
+from backend.services import result_entry_service as result_entry
+from backend.services.core_flood_service import is_core_flood
 from backend.services import h2_background as h2_bkg
 from database.models.results import ExperimentalResults, ScalarResults
 from database.models.chemicals import Compound, ChemicalAdditive
@@ -49,6 +51,8 @@ from backend.services.denormalized_ids import sync_denormalized_experiment_id
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
+
+T = TypeVar("T")
 
 # Prefix mapping for next-id endpoint
 _TYPE_PREFIX: dict[str, str] = {
@@ -803,7 +807,6 @@ def get_experiment_results(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ResultWithFlagsResponse]:
     """Return all result timepoints for an experiment, with scalar and ICP existence flags."""
-    from database.models.results import ExperimentalResults, ScalarResults, ICPResults
 
     exp = db.execute(
         select(Experiment).where(Experiment.experiment_id == experiment_id)
@@ -828,44 +831,129 @@ def get_experiment_results(
     ).scalars():
         notes_by_result.setdefault(n.result_id, []).append(n)
 
-    out = []
-    for r in results:
-        r_notes = notes_by_result.get(r.id, [])
-        scalar = db.execute(
-            select(ScalarResults).where(ScalarResults.result_id == r.id)
-        ).scalar_one_or_none()
-        icp = db.execute(
-            select(ICPResults).where(ICPResults.result_id == r.id)
-        ).scalar_one_or_none()
-        out.append(ResultWithFlagsResponse(
-            id=r.id,
-            experiment_fk=r.experiment_fk,
-            time_post_reaction_days=r.time_post_reaction_days,
-            time_post_reaction_bucket_days=r.time_post_reaction_bucket_days,
-            cumulative_time_post_reaction_days=r.cumulative_time_post_reaction_days,
-            is_primary_timepoint_result=r.is_primary_timepoint_result,
-            created_at=r.created_at,
-            has_scalar=scalar is not None,
-            has_icp=icp is not None,
-            has_modification_note=any(n.note_type is NoteType.modification for n in r_notes),
-            notes=[NoteResponse.model_validate(n) for n in r_notes],
-            grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
-            h2_concentration=scalar.h2_concentration if scalar else None,
-            h2_grams_per_ton_yield=scalar.h2_grams_per_ton_yield if scalar else None,
-            h2_micromoles=scalar.h2_micromoles if scalar else None,
-            gross_ammonium_concentration_mM=scalar.gross_ammonium_concentration_mM if scalar else None,
-            background_ammonium_concentration_mM=scalar.background_ammonium_concentration_mM if scalar else None,
-            final_conductivity_mS_cm=scalar.final_conductivity_mS_cm if scalar else None,
-            final_ph=scalar.final_ph if scalar else None,
-            scalar_measurement_date=scalar.measurement_date if scalar else None,
-            ferrous_iron_yield_h2_pct=scalar.ferrous_iron_yield_h2_pct if scalar else None,
-            ferrous_iron_yield_nh3_pct=scalar.ferrous_iron_yield_nh3_pct if scalar else None,
-            nmr_run_date=scalar.nmr_run_date if scalar else None,
-            icp_run_date=scalar.icp_run_date if scalar else None,
-            gc_run_date=scalar.gc_run_date if scalar else None,
-            xrd_run_date=scalar.xrd_run_date if scalar else None,
-        ))
-    return out
+    return [_result_with_flags(db, r, notes_by_result.get(r.id, [])) for r in results]
+
+
+def _result_with_flags(
+    db: Session, r: ExperimentalResults, r_notes: list[ExperimentNotes],
+) -> ResultWithFlagsResponse:
+    """One Results-tab row: the result, its scalar values, flags and notes."""
+    from database.models.results import ICPResults
+
+    scalar = db.execute(
+        select(ScalarResults).where(ScalarResults.result_id == r.id)
+    ).scalar_one_or_none()
+    icp = db.execute(
+        select(ICPResults).where(ICPResults.result_id == r.id)
+    ).scalar_one_or_none()
+    return ResultWithFlagsResponse(
+        id=r.id,
+        experiment_fk=r.experiment_fk,
+        time_post_reaction_days=r.time_post_reaction_days,
+        time_post_reaction_bucket_days=r.time_post_reaction_bucket_days,
+        cumulative_time_post_reaction_days=r.cumulative_time_post_reaction_days,
+        is_primary_timepoint_result=r.is_primary_timepoint_result,
+        created_at=r.created_at,
+        sample_tube_number=r.sample_tube_number,
+        has_scalar=scalar is not None,
+        has_icp=icp is not None,
+        has_modification_note=any(n.note_type is NoteType.modification for n in r_notes),
+        notes=[NoteResponse.model_validate(n) for n in r_notes],
+        grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
+        h2_concentration=scalar.h2_concentration if scalar else None,
+        h2_grams_per_ton_yield=scalar.h2_grams_per_ton_yield if scalar else None,
+        h2_micromoles=scalar.h2_micromoles if scalar else None,
+        gross_ammonium_concentration_mM=scalar.gross_ammonium_concentration_mM if scalar else None,
+        background_ammonium_concentration_mM=scalar.background_ammonium_concentration_mM if scalar else None,
+        final_conductivity_mS_cm=scalar.final_conductivity_mS_cm if scalar else None,
+        final_ph=scalar.final_ph if scalar else None,
+        scalar_measurement_date=scalar.measurement_date if scalar else None,
+        ferrous_iron_yield_h2_pct=scalar.ferrous_iron_yield_h2_pct if scalar else None,
+        ferrous_iron_yield_nh3_pct=scalar.ferrous_iron_yield_nh3_pct if scalar else None,
+        nmr_run_date=scalar.nmr_run_date if scalar else None,
+        icp_run_date=scalar.icp_run_date if scalar else None,
+        gc_run_date=scalar.gc_run_date if scalar else None,
+        xrd_run_date=scalar.xrd_run_date if scalar else None,
+    )
+
+
+_CF_USE_SAMPLES = "Use /api/core-floods/{experiment_id}/samples for Core Flood experiments"
+
+
+def _not_core_flood(cond: ExperimentalConditions | None) -> bool:
+    return not is_core_flood(cond)
+
+
+def _result_entry_response(db: Session, result_id: int) -> ResultWithFlagsResponse:
+    """Re-read one result after commit, in the GET /{experiment_id}/results shape."""
+    r = db.get(ExperimentalResults, result_id)
+    db.refresh(r)
+    notes = db.execute(
+        select(ExperimentNotes).where(ExperimentNotes.result_id == r.id)
+        .order_by(ExperimentNotes.id)
+    ).scalars().all()
+    return _result_with_flags(db, r, list(notes))
+
+
+def _run_result_entry(fn: Callable[[], T]) -> T:
+    """Run a result-entry service call, mapping its errors to 404/422."""
+    try:
+        return fn()
+    except result_entry.ResultEntryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except result_entry.ResultEntryInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post(
+    "/{experiment_id}/results", response_model=ResultWithFlagsResponse, status_code=201,
+)
+def create_experiment_result(
+    experiment_id: str,
+    payload: ResultEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ResultWithFlagsResponse:
+    """Add one primary sample (result + scalar rows, notes) to a non-Core-Flood
+    experiment in one transaction (issue #146).
+
+    The day defaults to measurement_date - experiment start (lab-local); the
+    `-t` lock applies. Cumulative time is recomputed for the experiment's chain,
+    derived fields are recalculated, and every write is audited. Core Flood
+    experiments get 422: they use POST /api/core-floods/{experiment_id}/samples.
+    """
+    rid = _run_result_entry(lambda: result_entry.create_result(
+        db, experiment_id, payload, current_user.email,
+        profile=result_entry.STANDARD_PROFILE, allow=_not_core_flood,
+        rejection=_CF_USE_SAMPLES))
+    db.commit()
+    return _result_entry_response(db, rid)
+
+
+@router.patch(
+    "/{experiment_id}/results/{result_id}", response_model=ResultWithFlagsResponse,
+)
+def update_experiment_result(
+    experiment_id: str,
+    result_id: int,
+    payload: ResultEntryUpdate,
+    db: Session = Depends(get_db),
+    current_user: FirebaseUser = Depends(verify_firebase_token),
+) -> ResultWithFlagsResponse:
+    """Edit one primary sample of a non-Core-Flood experiment (issue #146).
+
+    Only the fields present in the body are considered; only changed values are
+    written and audited, and an unchanged body writes nothing. The day is not
+    editable. A blank `result_note` deletes it; `modification_note` appends a new
+    modification note. 404 when the result is not a primary timepoint of
+    `experiment_id`; Core Flood experiments get 422.
+    """
+    _run_result_entry(lambda: result_entry.update_result(
+        db, result_id, payload, current_user.email,
+        profile=result_entry.STANDARD_PROFILE, allow=_not_core_flood,
+        rejection=_CF_USE_SAMPLES, experiment_id=experiment_id))
+    db.commit()
+    return _result_entry_response(db, result_id)
 
 
 @router.get("/{experiment_id}/icp", response_model=ExperimentIcpResponse)

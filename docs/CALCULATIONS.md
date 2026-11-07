@@ -25,6 +25,8 @@ To add a new formula:
 3. Import the module in `backend/services/calculations/__init__.py`
 4. Update this document
 
+**Cumulative time on hand-entered rows (issue #146).** `cumulative_time_post_reaction_days` is not a registry formula; `update_cumulative_times_for_chain` (`backend/services/result_merge_utils.py`) sets it. Since #146, hand-entered samples from the UI (`POST /api/experiments/{experiment_id}/results` and the Core Flood sample routes, both through `backend/services/result_entry_service.py`) always call it, so they get a cumulative time. Rows created with the older `POST /api/results` still get none. No formula changed.
+
 ---
 
 ## Conditions Calculations (`conditions_calcs.py`)

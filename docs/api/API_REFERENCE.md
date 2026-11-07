@@ -13,7 +13,9 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/{experiment_id}/export` | **Export all** (issue #141): one `.xlsx` for the experiment's whole lineage. See below. |
 | POST | `/api/experiments/export` | **Data Export** (issue #142): one `.xlsx` for a picked list of experiments. See below. |
 | GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
-| GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. |
+| GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. Rows include `sample_tube_number` (read-only, issue #146). |
+| POST | `/api/experiments/{experiment_id}/results` | **Hand entry** (issue #146): add one sample (result + scalar rows, notes) atomically to a non-Core-Flood experiment. 201. See below. |
+| PATCH | `/api/experiments/{experiment_id}/results/{result_id}` | **Hand edit** (issue #146): audited partial edit of one primary sample. See below. |
 | GET | `/api/experiments/notes/review` | Review queue: notes with `needs_review = true` across all experiments, with `experiment_id`, `researcher`, `time_post_reaction_days`. Query: `researcher` (exact), `note_type`, `q` and `experiment_id` (case-insensitive substrings; `%`/`_` literal), `order` = `experiment`\|`created_at`\|`text`, `desc`, `skip`, `limit` (≤1000). Response adds `distinct_texts`: top-50 `{text, count}` histogram over the current filter (issue #122 PR-A). |
 | GET | `/api/experiments/{experiment_id}/icp` | **ICP over time** (issue #143): ICP-OES readings for the experiment's whole series plus chained-segment start days. See below. |
 | GET | `/api/experiments/{experiment_id}/rollup` | Cross-replicate mean/median/std per timepoint bucket from `v_results_scalar_rollup` |
@@ -104,6 +106,35 @@ Example grouped item (`group_replicates=true`) — letter `a` was sacrificed acr
 }
 ```
 `SERUM_001a-t3`, the sibling timepoint collapsed into the `SERUM_001a` child above, is not itself listed — it is folded into `vial_count: 2` on that child. `experiment_id` on the top-level item still names the group's representative row, not a rendering label; the UI renders `group_display_id`.
+
+### POST /api/experiments/{experiment_id}/results (issue #146)
+
+The UI's write path for one hand-entered sample on an HPHT, Serum, Autoclave or Other experiment. It shares `backend/services/result_entry_service.py` with `POST /api/core-floods/{experiment_id}/samples`; the two differ only in their field profile and type guard. Core Flood experiments get **422** with detail `"Use /api/core-floods/{experiment_id}/samples for Core Flood experiments"`, so each type keeps one entry path. An experiment with no conditions row is accepted.
+
+Body (`ResultEntryCreate`; `extra="forbid"`, so an unknown key, a Core Flood flow or pressure field, or `background_ammonium_concentration_mM` is 422):
+
+| Field | Rule |
+|-------|------|
+| `measurement_date` | required (sample collection date) |
+| `time_post_reaction_days` | optional, `ge=0`; omitted → derived from `measurement_date`, exactly as the Core Flood day default below |
+| `gc_run_date` | optional; defaults to `measurement_date` |
+| `sample_tube_number` | optional, `gt=0` |
+| `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `gross_ammonium_concentration_mM` | optional, `ge=0` |
+| `final_ph`, `final_conductivity_mS_cm` | optional |
+| `result_note` | optional, max 2000. The sample's first `result_note`; same semantics as the Core Flood form |
+| `modification_note` | optional, max 2000. Non-blank creates a new `modification` note on the result, signed with the caller's email, plus one `ModificationsLog` row (`experiment_notes`, `create`, `{"note_type": "modification", "note_text": ...}`) |
+
+`background_ammonium_concentration_mM` is not writable here; it keeps its model default (0.2 mM) and its dedicated endpoint (`PATCH /api/experiments/{experiment_id}/background-ammonium`).
+
+Time zone, the day default, the `-t<days>` lock, newest-wins demotion and the write sequence (result row, scalar row, `recalculate`, `update_cumulative_times_for_chain`, one audit row per table) are identical to `POST /api/core-floods/{experiment_id}/samples`. Validation runs before any write; the service only flushes and the router commits once, so a failure leaves no partial timepoint. 404 for an unknown experiment.
+
+The response is the new row in the `GET /api/experiments/{experiment_id}/results` shape (`ResultWithFlagsResponse`).
+
+### PATCH /api/experiments/{experiment_id}/results/{result_id} (issue #146)
+
+Body (`ResultEntryUpdate`): any create field except `time_post_reaction_days`, all optional; `extra="forbid"`. The day is not editable. Semantics match `PATCH /api/core-floods/samples/{result_id}`: only changed values are written and audited (a no-op writes nothing), `measurement_date` may be omitted but not `null`, a missing scalar row is created when a non-null scalar value arrives, `recalculate` runs on any scalar change, and `result_note` edits / blank-deletes the first `result_note`. `modification_note` always appends a new note and never edits or deletes an existing one; blank writes nothing.
+
+404 when the result does not exist, is not a primary timepoint, or belongs to another experiment than `experiment_id` (nothing is written). 422 for a Core Flood experiment or an unknown key. The response is the updated row in the `ResultWithFlagsResponse` shape.
 
 ### GET /api/experiments/{experiment_id}/icp
 
@@ -593,9 +624,9 @@ Inline status update (issue #97). Body: `{"status": "ONGOING"}`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/results/{experiment_id}` | List all result timepoints for an experiment |
-| POST | `/api/results` | Create result entry (time, bucket, primary flag). Carries no free text since #122 PR-D: observations and modifications are notes via `POST /api/experiments/{id}/notes` with `result_id`. |
+| POST | `/api/results` | **Not for UI use** (issue #146; kept for Master Results tooling and tests). Create result entry (time, bucket, primary flag). Commits on its own, does not set cumulative time and writes no audit row. Carries no free text since #122 PR-D: observations and modifications are notes via `POST /api/experiments/{id}/notes` with `result_id`. UI callers use `POST /api/experiments/{experiment_id}/results`. |
 | GET | `/api/results/scalar/{result_id}` | Get scalar result |
-| POST | `/api/results/scalar` | Create scalar (triggers H2 + ammonium yield calc) |
+| POST | `/api/results/scalar` | **Not for UI use** (issue #146). Create scalar (triggers H2 + ammonium yield calc). UI callers use `POST /api/experiments/{experiment_id}/results`. |
 | PATCH | `/api/results/scalar/{scalar_id}` | Update scalar (recalculates) |
 | GET | `/api/results/icp/{result_id}` | Get ICP result |
 | POST | `/api/results/icp` | Create ICP result |
@@ -984,6 +1015,8 @@ Body (model field names; `extra="forbid"`, so an unknown key is 422):
 5. One `ModificationsLog` `create` row per table written, with `modified_by` = the caller's email.
 
 The response is the new sample as a `v_core_flood_samples` row plus `notes`.
+
+Since issue #146 this route and the PATCH below are thin wrappers over `backend/services/result_entry_service.py` (`CF_PROFILE`, guard `is_core_flood`); behavior is unchanged. The Core Flood body has no `modification_note` field.
 
 ### PATCH /api/core-floods/samples/{result_id}
 
