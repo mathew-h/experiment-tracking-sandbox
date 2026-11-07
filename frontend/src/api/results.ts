@@ -51,6 +51,10 @@ export interface ScalarResult {
   h2_micromoles: number | null
   h2_grams_per_ton_yield: number | null
   measurement_date: string | null
+  sampling_volume_mL?: number | null
+  gc_run_date?: string | null
+  gas_sampling_volume_ml?: number | null
+  gas_sampling_pressure_MPa?: number | null
 }
 
 export interface ICPResult {

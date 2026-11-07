@@ -1,6 +1,8 @@
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
+import { ToastProvider } from '@/components/ui'
 import { ResultsTab } from '../ResultsTab'
 import type { ResultWithFlags } from '@/api/experiments'
 import * as experimentsApiModule from '@/api/experiments'
@@ -221,5 +223,70 @@ describe('ResultsTab — ICP over time (issue #143)', () => {
     // DOCUMENT_POSITION_FOLLOWING: the chart comes after the table header.
     expect(header.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(experimentsApiModule.experimentsApi.getIcp).toHaveBeenCalledWith('HPHT_001')
+  })
+})
+
+describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
+  function wrapFull(ui: React.ReactElement) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <MemoryRouter>{ui}</MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('renders a Tube column after Sample Date with the tube number', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, sample_tube_number: 14 },
+    ])
+    wrapFull(<ResultsTab experimentId="HPHT_001" experimentFk={10} experimentType="HPHT" />)
+    const tube = await screen.findByText('Tube')
+    const headers = Array.from(tube.parentElement!.children).map((c) => c.textContent)
+    expect(headers.indexOf('Tube')).toBe(headers.indexOf('Sample Date') + 1)
+    expect(screen.getByText('14')).toBeInTheDocument()
+  })
+
+  it('offers Edit on an expanded primary row and opens the edit form', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
+    wrapFull(<ResultsTab experimentId="HPHT_001" experimentFk={10} experimentType="HPHT" />)
+    fireEvent.click(await screen.findByText('T+7'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(await screen.findByText('Edit result — T+7')).toBeInTheDocument()
+  })
+
+  it('offers no Edit on a non-primary row', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
+      { ...baseResult, is_primary_timepoint_result: false },
+    ])
+    wrapFull(<ResultsTab experimentId="HPHT_001" experimentFk={10} experimentType="HPHT" />)
+    fireEvent.click(await screen.findByText('T+7'))
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+  })
+
+  it('links a Core Flood experiment to its run page instead of + Add Results, with no Edit', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
+    wrapFull(
+      <ResultsTab
+        experimentId="CF_007-2"
+        experimentFk={10}
+        experimentType="Core Flood"
+        baseExperimentId="CF_007"
+      />,
+    )
+    const link = await screen.findByRole('link', { name: 'Open run page' })
+    expect(link).toHaveAttribute('href', '/core-floods/CF_007')
+    expect(screen.queryByRole('button', { name: '+ Add Results' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByText('T+7'))
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+  })
+
+  it('keeps + Add Results for a non-core-flood experiment', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([])
+    wrapFull(<ResultsTab experimentId="SERUM_001" experimentFk={10} experimentType="Serum" />)
+    expect(await screen.findByRole('button', { name: '+ Add Results' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open run page' })).not.toBeInTheDocument()
   })
 })

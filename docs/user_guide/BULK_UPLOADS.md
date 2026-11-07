@@ -51,7 +51,7 @@ days of record. If the `Duration (Days)` column disagrees with it, the ID wins
 and the reading is still uploaded — the disagreement appears under **Warnings**
 so you can reconcile the sheet at your leisure. This means you can keep real
 sampling dates in the Sampling sheet without a derived duration blocking the
-upload. (Hand-entered results via the Add Results modal are stricter: there a
+upload. (Hand-entered results via the Add Results form are stricter: there a
 conflicting time is rejected outright, because a single entry has one author who
 can correct it.)
 

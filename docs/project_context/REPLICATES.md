@@ -192,13 +192,14 @@ trailing `-t<days>` token.
 The day encoded in the ID is canonical for that vial — every result row on that
 experiment must be at that day. This is enforced everywhere a result's time is set:
 
-- **Add Results modal:** the Time (days) field auto-fills from the ID and locks —
+- **Add Results form:** the Day field auto-fills from the ID and locks —
   you can't type a conflicting value.
 - **Solution Chemistry upload:** a blank Time (days) cell is filled from the ID; a
   different value in that cell errors the row.
 - **Master Results Sync:** a blank Duration (Days) cell is filled from the ID; a
   different value errors the row.
-- **Direct API calls** (`POST /api/results`, and the scalar-result creation path used by
+- **Direct API calls** (`POST /api/experiments/{id}/results`, `POST /api/results`, and
+  the scalar-result creation path used by
   all three upload routes above) apply the same fill/reject rule, so there's no way to
   get a `-t` vial's results out of sync with its ID.
 
@@ -212,12 +213,15 @@ samples taken at day 0 would. Use `-t<days>` when each timepoint is destructivel
 from its own vial; use a repeated Add Results entry on one experiment when the same vial
 is sampled non-destructively over time.
 
-Results entered via the Add Results modal (`POST /api/results`) set
-`time_post_reaction_bucket_days` automatically from the entered (or ID-encoded) time,
-so they land in that day's rollup bucket just like bulk-uploaded rows (fixed in issue
-#83; rows entered before the fix were backfilled). If you enter the same day twice for
-the same experiment, the newest entry becomes that day's primary row and the older one
-is kept but excluded from the rollup.
+Results entered via the Add Results form (`POST /api/experiments/{id}/results` since
+issue #148) set `time_post_reaction_bucket_days` automatically from the entered (or
+ID-encoded) day, so they land in that day's rollup bucket just like bulk-uploaded rows
+(fixed in issue #83; rows entered before the fix were backfilled). If you enter the same
+day twice for the same experiment, the newest entry becomes that day's primary row and
+the older one is kept but excluded from the rollup. The form warns first: the first Save
+on a day that already has a result shows the warning, and the button changes to "Replace
+existing result". To correct a sample instead, expand its row on the Results tab and use
+**Edit**, which changes only the fields you touch.
 
 ### The group parent counts toward the stats
 

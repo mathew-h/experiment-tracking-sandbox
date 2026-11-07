@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi, type ExperimentNote, type ResultWithFlags } from '@/api/experiments'
 import { NoteBadge } from '@/components/experiments/NoteBadge'
 import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
-import { AddResultsModal } from './AddResultsModal'
+import { ResultEntryModal } from './ResultEntryModal'
+import { isCoreFloodType } from '@/utils/experimentId'
 import { GroupedResultsView } from './GroupedResultsView'
 import { IcpSection } from './IcpSection'
 
@@ -21,7 +23,7 @@ function fmtPct(n: number | null | undefined, decimals = 1) {
   return n != null ? `${n.toFixed(decimals)}%` : '—'
 }
 
-const GRID = 'grid-cols-[1.5rem_5rem_6rem_5rem_5rem_5rem_4.5rem_4rem_6rem_9rem_1.5rem]'
+const GRID = 'grid-cols-[1.5rem_5rem_6rem_3.5rem_5rem_5rem_5rem_4.5rem_4rem_6rem_9rem_1.5rem]'
 
 /** Instrument run dates carried on ResultWithFlags — provenance, not measurements. */
 const RUN_DATE_FIELDS = [
@@ -50,7 +52,13 @@ function hasNonModificationNote(r: ResultWithFlags): boolean {
   return r.notes.some((n) => n.note_type !== 'modification')
 }
 
-function ExpandedRow({ result }: { result: ResultWithFlags }) {
+interface ExpandedRowProps {
+  result: ResultWithFlags
+  /** Opens the edit form; absent when this row can't be edited here. */
+  onEdit?: () => void
+}
+
+function ExpandedRow({ result, onEdit }: ExpandedRowProps) {
   const { data: scalar, isLoading: loadingScalar } = useQuery({
     queryKey: ['scalar', result.id],
     queryFn: () => resultsApi.getScalar(result.id),
@@ -71,6 +79,13 @@ function ExpandedRow({ result }: { result: ResultWithFlags }) {
 
   return (
     <div className="bg-surface-raised border-t border-surface-border px-6 py-3 space-y-3">
+      {onEdit && (
+        <div className="flex justify-end">
+          <Button variant="secondary" size="xs" onClick={onEdit}>
+            Edit
+          </Button>
+        </div>
+      )}
       {loadingScalar ? (
         <PageSpinner />
       ) : scalar && (
@@ -155,12 +170,26 @@ interface Props {
   experimentFk: number
   /** Day parsed from a -t<days> token on the experiment ID (issue #81). */
   idTimepointDays?: number | null
+  /** `conditions.experiment_type`. Core Flood results are entered on the run page. */
+  experimentType?: string | null
+  /** The experiment's start date; a new result's Day counts from it. */
+  experimentStart?: string | null
+  /** The experiment's base ID, for the run page link and run-level queries. */
+  baseExperimentId?: string | null
 }
 
 /** Results tab: timepoint result cards with scalar chemistry and ICP data. */
-export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Props) {
+export function ResultsTab({
+  experimentId,
+  idTimepointDays,
+  experimentType,
+  experimentStart,
+  baseExperimentId,
+}: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
-  const [showAddModal, setShowAddModal] = useState(false)
+  /** 'new' to add a result, a result to edit it, null when the form is closed. */
+  const [entry, setEntry] = useState<ResultWithFlags | 'new' | null>(null)
+  const coreFlood = isCoreFloodType(experimentType)
   const [mode, setMode] = useState<'individual' | 'grouped'>('individual')
 
   const { data: replicateGroup } = useQuery({
@@ -221,9 +250,19 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
               </button>
             </div>
           )}
-          <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
-            + Add Results
-          </Button>
+          {coreFlood ? (
+            // Core flood samples need flow and permeability, which only the run page records.
+            <Link
+              to={`/core-floods/${encodeURIComponent(baseExperimentId ?? experimentId)}`}
+              className="inline-flex items-center h-7 px-3 rounded text-xs font-medium border border-surface-border text-ink-primary hover:bg-surface-raised"
+            >
+              Open run page
+            </Link>
+          ) : (
+            <Button variant="primary" size="sm" onClick={() => setEntry('new')}>
+              + Add Results
+            </Button>
+          )}
         </div>
       </div>
 
@@ -245,6 +284,7 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
                 <span></span>
                 <span>Time (d)</span>
                 <span>Sample Date</span>
+                <span>Tube</span>
                 <span>H₂ (ppm)</span>
                 <span>H₂ (µmol)</span>
                 <span>H₂ (g/t)</span>
@@ -263,6 +303,7 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
                     <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
                     <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
                     <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
+                    <span className="font-mono-data text-xs text-ink-secondary">{r.sample_tube_number ?? '—'}</span>
                     <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_concentration, 1)}</span>
                     <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
                     <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
@@ -277,7 +318,13 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
                     </span>
                     <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
                   </div>
-                  {expanded.has(r.id) && <ExpandedRow result={r} />}
+                  {expanded.has(r.id) && (
+                    <ExpandedRow
+                      result={r}
+                      // Only primary rows are editable, matching the PATCH guard.
+                      onEdit={!coreFlood && r.is_primary_timepoint_result ? () => setEntry(r) : undefined}
+                    />
+                  )}
                 </div>
               ))}
             </>
@@ -288,12 +335,16 @@ export function ResultsTab({ experimentId, experimentFk, idTimepointDays }: Prop
       {/* Issue #143: whole-series ICP chart, below the table in both modes. */}
       <IcpSection experimentId={experimentId} />
 
-      <AddResultsModal
-        open={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        experimentFk={experimentFk}
+      <ResultEntryModal
+        open={entry !== null}
+        onClose={() => setEntry(null)}
         experimentId={experimentId}
+        experimentType={experimentType}
+        experimentStart={experimentStart}
         idTimepointDays={idTimepointDays}
+        baseId={baseExperimentId}
+        results={results}
+        editing={entry !== null && entry !== 'new' ? entry : undefined}
       />
     </div>
   )

@@ -23,3 +23,18 @@ export function isSerumType(t: unknown): boolean {
   const norm = t.trim().replace(/\s+/g, ' ').toLowerCase()
   return norm === 'serum' || norm === 'serum vial'
 }
+
+function normalizeType(t: unknown): string {
+  return typeof t === 'string' ? t.trim().replace(/\s+/g, ' ').toLowerCase() : ''
+}
+
+/** True for HPHT in any casing; mirrors database/reactor_slot.py. */
+export function isHphtType(t: unknown): boolean {
+  return normalizeType(t) === 'hpht'
+}
+
+/** True for the core flood spellings the backend's series_prefix maps to 'CF'. */
+export function isCoreFloodType(t: unknown): boolean {
+  const n = normalizeType(t)
+  return n === 'core flood' || n === 'coreflood' || n === 'cf'
+}

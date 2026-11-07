@@ -7,10 +7,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
 import type { ExperimentNote, ResultWithFlags } from '@/api/experiments'
 import * as experimentsApiModule from '@/api/experiments'
-import * as resultsApiModule from '@/api/results'
 import { ResultsTab } from '../ResultsTab'
 import { NotesTab } from '../NotesTab'
-import { AddResultsModal } from '../AddResultsModal'
 
 vi.mock('@/api/experiments', async () => {
   const actual = await vi.importActual<typeof import('@/api/experiments')>('@/api/experiments')
@@ -285,38 +283,8 @@ describe('NotesTab — typed notes', () => {
   })
 })
 
-describe('AddResultsModal — typed note composer', () => {
-  it('has no required Description field and posts each non-blank note scoped to the new result', async () => {
-    const user = userEvent.setup()
-    wrap(<AddResultsModal open onClose={() => {}} experimentFk={10} experimentId="HPHT_001" idTimepointDays={7} />)
-    expect(screen.queryByText(/^Description/)).not.toBeInTheDocument()
-
-    await user.selectOptions(screen.getByLabelText('Note 1 type'), 'modification')
-    await user.type(screen.getByLabelText('Note 1 text'), 'brine replaced with DI')
-    await user.click(screen.getByRole('button', { name: /add another note/i }))
-    await user.type(screen.getByLabelText('Note 2 text'), 'liquid clear')
-    await user.click(screen.getByRole('button', { name: /save results/i }))
-
-    await vi.waitFor(() => expect(resultsApiModule.resultsApi.createResult).toHaveBeenCalled())
-    const payload = vi.mocked(resultsApiModule.resultsApi.createResult).mock.calls[0][0]
-    expect(Object.keys(payload).filter((k) => /description/.test(k))).toEqual([])
-    await vi.waitFor(() => expect(experimentsApiModule.experimentsApi.addNote).toHaveBeenCalledTimes(2))
-    expect(experimentsApiModule.experimentsApi.addNote).toHaveBeenCalledWith(
-      'HPHT_001', 'brine replaced with DI', { note_type: 'modification', result_id: 77 },
-    )
-    expect(experimentsApiModule.experimentsApi.addNote).toHaveBeenCalledWith(
-      'HPHT_001', 'liquid clear', { note_type: 'observation', result_id: 77 },
-    )
-  })
-
-  it('a blank note row posts nothing', async () => {
-    const user = userEvent.setup()
-    wrap(<AddResultsModal open onClose={() => {}} experimentFk={10} experimentId="HPHT_001" idTimepointDays={7} />)
-    await user.click(screen.getByRole('button', { name: /save results/i }))
-    await vi.waitFor(() => expect(resultsApiModule.resultsApi.createScalar).toHaveBeenCalled())
-    expect(experimentsApiModule.experimentsApi.addNote).not.toHaveBeenCalled()
-  })
-})
+// The result form's notes (Description, Modification) are covered in
+// ResultEntryModal.test.tsx since issue #148 replaced the typed note list.
 
 describe('NotesTab — timeline (issue #122 PR-C)', () => {
   const rowIds = () => screen.getAllByTestId(/^note-row-/).map((el) => Number(el.dataset.noteId))
