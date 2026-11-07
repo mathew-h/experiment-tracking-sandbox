@@ -505,6 +505,9 @@ export function ExperimentDetailPage() {
             experimentId={id!}
             experimentFk={experiment.id}
             idTimepointDays={experiment.id_timepoint_days}
+            experimentType={conditions?.experiment_type ?? null}
+            experimentStart={experiment.date}
+            baseExperimentId={experiment.base_experiment_id}
           />
         )}
         {activeTab === 'Notes' && (

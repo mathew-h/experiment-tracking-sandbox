@@ -211,6 +211,36 @@ export interface ResultWithFlags {
   icp_run_date: string | null
   gc_run_date: string | null
   xrd_run_date: string | null
+  /** Issue #146: the sample's tube number, when one was recorded. */
+  sample_tube_number?: number | null
+}
+
+/** Fields a researcher can hand-enter on a non-core-flood result (issue #146).
+ *  Gas pressure is in MPa on the wire; the form converts from psi. */
+export interface ResultEntryFields {
+  gc_run_date?: string | null
+  sample_tube_number?: number | null
+  sampling_volume_mL?: number | null
+  h2_concentration?: number | null
+  gas_sampling_volume_ml?: number | null
+  gas_sampling_pressure_MPa?: number | null
+  final_ph?: number | null
+  final_conductivity_mS_cm?: number | null
+  gross_ammonium_concentration_mM?: number | null
+  /** Sets the sample's first result note; blank deletes it. */
+  result_note?: string | null
+  /** Adds a new modification note; never edits an existing one. */
+  modification_note?: string | null
+}
+
+export interface ResultEntryCreate extends ResultEntryFields {
+  measurement_date: string
+  time_post_reaction_days?: number
+}
+
+export interface ResultEntryUpdate extends ResultEntryFields {
+  /** May be omitted but never null. */
+  measurement_date?: string
 }
 
 export interface ExperimentListParams {
@@ -400,6 +430,21 @@ export const experimentsApi = {
 
   getResults: (experimentId: string) =>
     apiClient.get<ResultWithFlags[]>(`/experiments/${experimentId}/results`).then((r) => r.data),
+
+  /** Issue #146: one atomic create of a result, its scalar row and its notes. */
+  createResult: (experimentId: string, body: ResultEntryCreate) =>
+    apiClient
+      .post<ResultWithFlags>(`/experiments/${encodeURIComponent(experimentId)}/results`, body)
+      .then((r) => r.data),
+
+  /** Issue #146: changed fields only; a primary result of a non-core-flood experiment. */
+  updateResult: (experimentId: string, resultId: number, body: ResultEntryUpdate) =>
+    apiClient
+      .patch<ResultWithFlags>(
+        `/experiments/${encodeURIComponent(experimentId)}/results/${resultId}`,
+        body,
+      )
+      .then((r) => r.data),
 
   setBackgroundAmmonium: (experimentId: string, value: number) =>
     apiClient.patch<{ updated: number }>(`/experiments/${experimentId}/background-ammonium`, { value }).then((r) => r.data),

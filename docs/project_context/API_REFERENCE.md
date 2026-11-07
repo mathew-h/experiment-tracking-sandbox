@@ -644,7 +644,8 @@ the day encoded in the ID is canonical for that vial's timepoint:
 
 - An omitted/blank `time_post_reaction_days` (`POST /api/results`) or `time_post_reaction`
   (`create_scalar_result_ex`, the scalar-result creation path shared by all bulk-upload
-  routes — the UI's Add Results modal is guarded separately via `POST /api/results`) is
+  routes — the UI's Add Results form applies the same rule via
+  `POST /api/experiments/{experiment_id}/results` since issue #148) is
   filled from `id_timepoint_days`.
 - A supplied value that differs from `id_timepoint_days` by more than
   `TIMEPOINT_TOLERANCE_DAYS` (0.0001 days) is rejected with `422 Unprocessable Entity`; the
