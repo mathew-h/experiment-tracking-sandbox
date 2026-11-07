@@ -85,6 +85,8 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     enabled: hasBackground,
   })
   // The background rollup excludes NULL buckets, so a NULL-bucket row never matches.
+  const bkgNoData =
+    hasBackground && bkgRollup !== undefined && !bkgRollup.some((b) => b.bkg_n_values != null)
   const bkgByBucket = useMemo(() => {
     const map = new Map<number, H2BackgroundRollup>()
     if (hasBackground) {
@@ -164,7 +166,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     queries: allVials.map(({ vial }) => ({
       queryKey: ['experiment-results', vial.experiment_id],
       queryFn: () => experimentsApi.getResults(vial.experiment_id),
-      enabled: showIndividual,
+      enabled: showIndividual && metric.source !== 'bkg',
     })),
   })
 
@@ -270,7 +272,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
               labelFormatter={(v) => `Day ${v}`}
             />
             <Legend wrapperStyle={{ fontSize: 11, color: chartColors.label }} />
-            {showIndividual &&
+            {showIndividual && metric.source !== 'bkg' &&
               seriesLetters.map((letter, i) => (
                 <Line
                   key={letter.key} dataKey={letter.key} name={letter.label}
@@ -291,6 +293,10 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+
+      {bkgNoData && (
+        <p className="text-xs text-status-warning">background has no H₂ data</p>
+      )}
 
       {/* Accessible table view of the rollup */}
       <Table>
@@ -354,12 +360,15 @@ function NetCells({ bkg }: { bkg: H2BackgroundRollup | undefined }) {
         {fmtMeanSd(bkg?.mean_net_fe_yield_h2_pct, bkg?.sd_net_fe_yield_h2_pct)}
       </Td>
       <Td className="text-xs space-x-1.5">
-        {bkg && bkg.bkg_time_gap_days !== 0 && (
+        {bkg && bkg.bkg_time_gap_days != null && bkg.bkg_time_gap_days !== 0 && (
           <span className="text-status-warning">bkg day {bkg.bkg_time_bucket_days ?? '—'}</span>
         )}
         {bkg?.below_background && <span className="text-ink-secondary">≤ bkg</span>}
         {bkg?.bkg_n_values === 1 && (
           <span className="text-ink-muted">background SD unavailable (n=1)</span>
+        )}
+        {bkg && bkg.bkg_n_values == null && (
+          <span className="text-status-warning">no bkg match</span>
         )}
         {!bkg && '—'}
       </Td>
