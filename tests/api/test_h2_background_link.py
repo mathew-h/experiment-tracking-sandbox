@@ -164,7 +164,7 @@ def test_rollup_endpoint_ordered(client, seeded, reporting_views):
 
 
 def test_put_does_not_recalculate(client, seeded):
-    with patch("backend.services.calculations.registry.recalculate") as rc:
+    with patch("backend.api.routers.experiments.recalculate") as rc:
         resp = client.put(URL, json={"experiment_id": "H2L_002a-t7", "mode": "group"})
     assert resp.status_code == 200
     rc.assert_not_called()
