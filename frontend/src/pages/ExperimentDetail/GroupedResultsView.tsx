@@ -6,15 +6,17 @@ import {
   ErrorBar, ResponsiveContainer,
 } from 'recharts'
 import { experimentsApi } from '@/api/experiments'
-import type { ResultWithFlags, RollupTimepoint } from '@/api/experiments'
+import type { H2BackgroundRollup, ResultWithFlags, RollupTimepoint } from '@/api/experiments'
 import { chartColors } from '@/assets/brand'
 import { Table, TableHead, TableBody, TableRow, Th, Td, Select, Spinner } from '@/components/ui'
 
 interface MetricDef {
   key: string
   label: string
-  mean: keyof RollupTimepoint
-  sd: keyof RollupTimepoint | null
+  /** 'rollup' reads RollupTimepoint; 'bkg' reads the H2 background rollup (net values). */
+  source?: 'rollup' | 'bkg'
+  mean: keyof RollupTimepoint | keyof H2BackgroundRollup
+  sd: keyof RollupTimepoint | keyof H2BackgroundRollup | null
   individual: (r: ResultWithFlags) => number | null
 }
 
@@ -28,6 +30,17 @@ const METRICS: MetricDef[] = [
   { key: 'fe_h2', label: 'Fe²⁺ → H₂ (%)', mean: 'mean_fe_yield_h2_pct', sd: 'sd_fe_yield_h2_pct',
     individual: (r) => r.ferrous_iron_yield_h2_pct },
   { key: 'ph', label: 'pH', mean: 'mean_final_ph', sd: null, individual: (r) => r.final_ph },
+]
+
+/** Net H2 metrics (issue #144): only offered when the group has a background link.
+ *  No per-letter series: net values are defined per bucket, not per vial. */
+const NET_METRICS: MetricDef[] = [
+  { key: 'net_h2_umol', label: 'Net H₂ (µmol)', source: 'bkg',
+    mean: 'mean_net_h2_micromoles', sd: 'sd_net_h2_micromoles', individual: () => null },
+  { key: 'net_h2_gpt', label: 'Net H₂ (g/t)', source: 'bkg',
+    mean: 'mean_net_h2_grams_per_ton', sd: 'sd_net_h2_grams_per_ton', individual: () => null },
+  { key: 'net_fe_h2', label: 'Net Fe²⁺ → H₂ (%)', source: 'bkg',
+    mean: 'mean_net_fe_yield_h2_pct', sd: 'sd_net_fe_yield_h2_pct', individual: () => null },
 ]
 
 const fmt = (v: number | null | undefined, digits = 2) =>
@@ -49,7 +62,6 @@ interface GroupedResultsViewProps {
 export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps) {
   const [metricKey, setMetricKey] = useState('h2_ppm')
   const [showIndividual, setShowIndividual] = useState(true)
-  const metric = METRICS.find((m) => m.key === metricKey)!
 
   // NEW query keys — these hit the /experiments/groups/{base_id}[/rollup] endpoints,
   // which return a differently-shaped response than the existing
@@ -59,6 +71,30 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     queryKey: ['replicate-group-detail', baseExperimentId],
     queryFn: () => experimentsApi.getGroup(baseExperimentId),
   })
+  const hasBackground = !!group?.h2_background
+  const metrics = useMemo(
+    () => (hasBackground ? [...METRICS, ...NET_METRICS] : METRICS),
+    [hasBackground],
+  )
+  // If the link is cleared while a net metric is selected, fall back to H2 (ppm).
+  const metric = metrics.find((m) => m.key === metricKey) ?? METRICS[0]
+
+  const { data: bkgRollup } = useQuery({
+    queryKey: ['group-h2-bkg-rollup', baseExperimentId],
+    queryFn: () => experimentsApi.getGroupH2BackgroundRollup(baseExperimentId),
+    enabled: hasBackground,
+  })
+  // The background rollup excludes NULL buckets, so a NULL-bucket row never matches.
+  const bkgByBucket = useMemo(() => {
+    const map = new Map<number, H2BackgroundRollup>()
+    if (hasBackground) {
+      (bkgRollup ?? []).forEach((b) => {
+        if (b.time_post_reaction_bucket_days != null) map.set(b.time_post_reaction_bucket_days, b)
+      })
+    }
+    return map
+  }, [bkgRollup, hasBackground])
+
   const { data: rollup, isLoading, isError: rollupFailed } = useQuery({
     queryKey: ['group-rollup', baseExperimentId],
     queryFn: () => experimentsApi.getGroupRollup(baseExperimentId),
@@ -112,8 +148,16 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
   // holding one vial has a NULL sd, and `fmt(sd ?? 0)` used to render that as
   // "10.0 ± 0.0" -- a fabricated zero standard deviation on a single reading.
   const metricHasSpread = useMemo(
-    () => metric.sd != null && (rollup ?? []).some((r) => r[metric.sd!] != null),
-    [rollup, metric],
+    () => {
+      if (metric.sd == null) return false
+      if (metric.source === 'bkg') {
+        return [...bkgByBucket.values()].some(
+          (b) => b[metric.sd as keyof H2BackgroundRollup] != null,
+        )
+      }
+      return (rollup ?? []).some((r) => r[metric.sd as keyof RollupTimepoint] != null)
+    },
+    [rollup, bkgByBucket, metric],
   )
 
   const vialResults = useQueries({
@@ -129,10 +173,13 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     return rollup
       .filter((r) => r.time_post_reaction_bucket_days != null)
       .map((r) => {
+        const src: Record<string, unknown> | undefined = metric.source === 'bkg'
+          ? (bkgByBucket.get(r.time_post_reaction_bucket_days!) as Record<string, unknown> | undefined)
+          : (r as unknown as Record<string, unknown>)
         const row: Record<string, number | null> = {
           bucket: r.time_post_reaction_bucket_days,
-          mean: r[metric.mean] as number | null,
-          sd: metric.sd ? ((r[metric.sd] as number | null) ?? 0) : 0,
+          mean: (src?.[metric.mean] as number | null | undefined) ?? null,
+          sd: metric.sd ? ((src?.[metric.sd] as number | null | undefined) ?? 0) : 0,
         }
         seriesLetters.forEach((letter) => {
           let value: number | null = null
@@ -150,7 +197,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
         })
         return row
       })
-  }, [rollup, metric, seriesLetters, allVials, vialResults])
+  }, [rollup, metric, bkgByBucket, seriesLetters, allVials, vialResults])
 
   if (isLoading) return <Spinner />
   // A failed fetch is not an empty result. Both queries used to fall through to
@@ -176,9 +223,9 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           <Select
             label="Metric"
             aria-label="Metric"
-            value={metricKey}
+            value={metric.key}
             onChange={(e) => setMetricKey(e.target.value)}
-            options={METRICS.map((m) => ({ value: m.key, label: m.label }))}
+            options={metrics.map((m) => ({ value: m.key, label: m.label }))}
           />
         </div>
         <label className="flex items-center gap-1.5 text-xs text-ink-secondary pb-2 cursor-pointer select-none">
@@ -256,6 +303,14 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
             <Th>H₂ (g/t)</Th>
             <Th>Fe²⁺ → H₂ (%)</Th>
             <Th>pH</Th>
+            {hasBackground && (
+              <>
+                <Th>Net H₂ (µmol)</Th>
+                <Th>Net H₂ (g/t)</Th>
+                <Th>Net Fe²⁺ → H₂ (%)</Th>
+                <Th>Background</Th>
+              </>
+            )}
           </tr>
         </TableHead>
         <TableBody>
@@ -276,10 +331,38 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
                 {fmtMeanSd(r.mean_fe_yield_h2_pct, r.sd_fe_yield_h2_pct)}
               </Td>
               <Td className="font-mono-data">{fmt(r.mean_final_ph)}</Td>
+              {hasBackground && <NetCells bkg={bkgByBucket.get(r.time_post_reaction_bucket_days!)} />}
             </TableRow>
           ))}
         </TableBody>
       </Table>
     </div>
+  )
+}
+
+/** Net H2 + Background cells for one bucket; "—" when no background row matches. */
+function NetCells({ bkg }: { bkg: H2BackgroundRollup | undefined }) {
+  return (
+    <>
+      <Td className="font-mono-data">
+        {fmtMeanSd(bkg?.mean_net_h2_micromoles, bkg?.sd_net_h2_micromoles, 1)}
+      </Td>
+      <Td className="font-mono-data">
+        {fmtMeanSd(bkg?.mean_net_h2_grams_per_ton, bkg?.sd_net_h2_grams_per_ton, 1)}
+      </Td>
+      <Td className="font-mono-data">
+        {fmtMeanSd(bkg?.mean_net_fe_yield_h2_pct, bkg?.sd_net_fe_yield_h2_pct)}
+      </Td>
+      <Td className="text-xs space-x-1.5">
+        {bkg && bkg.bkg_time_gap_days !== 0 && (
+          <span className="text-status-warning">bkg day {bkg.bkg_time_bucket_days ?? '—'}</span>
+        )}
+        {bkg?.below_background && <span className="text-ink-secondary">≤ bkg</span>}
+        {bkg?.bkg_n_values === 1 && (
+          <span className="text-ink-muted">background SD unavailable (n=1)</span>
+        )}
+        {!bkg && '—'}
+      </Td>
+    </>
   )
 }
