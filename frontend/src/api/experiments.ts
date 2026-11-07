@@ -170,6 +170,8 @@ export interface DeleteImpact {
   total: number
   /** Other experiments that named this one as their ammonium background. */
   background_for: string[]
+  /** Sample groups whose H2 background link points at this experiment; links are kept. */
+  h2_background_for: string[]
   /** Replicates whose parent pointer is dropped; their group ID is unaffected. */
   replicate_children: string[]
 }
@@ -307,6 +309,34 @@ export interface ReplicateGroupDetail {
   /** Issue #98: `members` grouped by letter. `member_count` stays per-vial. */
   replicates: ReplicateLetterGroup[]
   replicate_count: number
+  /** Issue #144: the serum-vial H2 background linked to this group, if any. */
+  h2_background: H2BackgroundLink | null
+}
+
+export interface H2BackgroundLink {
+  mode: 'group' | 'vial'
+  background_ref: string
+  created_by: string | null
+  updated_at: string | null
+}
+
+/** One row of GET /experiments/groups/{base_id}/h2-background/rollup. */
+export interface H2BackgroundRollup {
+  base_experiment_id: string
+  time_post_reaction_bucket_days: number | null
+  n_values: number
+  bkg_time_bucket_days: number | null
+  bkg_time_gap_days: number | null
+  bkg_n_values: number | null
+  bkg_mean_h2_micromoles: number | null
+  bkg_sd_h2_micromoles: number | null
+  mean_net_h2_micromoles: number | null
+  sd_net_h2_micromoles: number | null
+  mean_net_h2_grams_per_ton: number | null
+  sd_net_h2_grams_per_ton: number | null
+  mean_net_fe_yield_h2_pct: number | null
+  sd_net_fe_yield_h2_pct: number | null
+  below_background: boolean | null
 }
 
 /** Mirrors backend ReplicateCreateResponse: created items are ExperimentResponse-shaped
@@ -434,6 +464,30 @@ export const experimentsApi = {
   getGroupRollup: (baseId: string) =>
     apiClient
       .get<RollupTimepoint[]>(`/experiments/groups/${encodeURIComponent(baseId)}/rollup`)
+      .then((r) => r.data),
+
+  /** Issue #144: link a background experiment (whole group or one vial) to a group. */
+  setGroupH2Background: (
+    baseId: string,
+    body: { experiment_id: string; mode: 'group' | 'vial' },
+  ) =>
+    apiClient
+      .put<H2BackgroundLink>(
+        `/experiments/groups/${encodeURIComponent(baseId)}/h2-background`,
+        body,
+      )
+      .then((r) => r.data),
+
+  clearGroupH2Background: (baseId: string) =>
+    apiClient
+      .delete(`/experiments/groups/${encodeURIComponent(baseId)}/h2-background`)
+      .then(() => undefined),
+
+  getGroupH2BackgroundRollup: (baseId: string) =>
+    apiClient
+      .get<H2BackgroundRollup[]>(
+        `/experiments/groups/${encodeURIComponent(baseId)}/h2-background/rollup`,
+      )
       .then((r) => r.data),
 
   /**

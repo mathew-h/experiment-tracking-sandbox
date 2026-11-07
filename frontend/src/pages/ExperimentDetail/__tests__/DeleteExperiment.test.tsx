@@ -42,7 +42,7 @@ const EMPTY_IMPACT: DeleteImpact = {
   conditions: 0,
   results: 0, scalar_results: 0, icp_results: 0, result_files: 0, notes: 0,
   additives: 0, external_analyses: 0, xrd_phases: 0,
-  total: 0, background_for: [], replicate_children: [],
+  total: 0, background_for: [], h2_background_for: [], replicate_children: [],
 }
 
 function renderPage() {

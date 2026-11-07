@@ -9,12 +9,13 @@ vi.mock('@/api/experiments', () => ({
     getGroupRollup: vi.fn(),
     getGroup: vi.fn(),
     getResults: vi.fn(),
+    getGroupH2BackgroundRollup: vi.fn(),
   },
 }))
 
 import { GroupedResultsView } from '../GroupedResultsView'
 import { experimentsApi } from '@/api/experiments'
-import type { ReplicateGroupDetail, ReplicateGroupMemberDetail, ReplicateLetterGroup, RollupTimepoint } from '@/api/experiments'
+import type { H2BackgroundRollup, ReplicateGroupDetail, ReplicateGroupMemberDetail, ReplicateLetterGroup, RollupTimepoint } from '@/api/experiments'
 
 // Recharts' ResponsiveContainer reads the container's real layout box before
 // it will render any children (Legend included) — jsdom never lays anything
@@ -76,7 +77,7 @@ function groupOf(
     base_experiment_id: baseId, parent, members, member_count: members.length,
     replicates, replicate_count: replicates.length,
     shared_conditions: {}, divergent_fields: [],
-    additives_summary: null, additive_names: null, additives_diverge: false,
+    additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
   }
 }
 
@@ -261,7 +262,7 @@ describe('GroupedResultsView — issue #101: letterless timepoint vial set', () 
     members: VIALS, member_count: 3,
     replicates: [], replicate_count: 0,
     shared_conditions: {}, divergent_fields: [],
-    additives_summary: null, additive_names: null, additives_diverge: false,
+    additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
   }
 
   const LETTERLESS_ROLLUP: RollupTimepoint[] = [1, 3, 7].map((day, i) => ({
@@ -333,5 +334,160 @@ describe('GroupedResultsView — a failed fetch is not an empty result', () => {
     await waitFor(() =>
       expect(screen.getByText(/no primary results to aggregate yet/i)).toBeInTheDocument(),
     )
+  })
+})
+
+describe('GroupedResultsView — issue #144 net H₂ metrics', () => {
+  const LINK = {
+    mode: 'group' as const, background_ref: 'BKG_001', created_by: null, updated_at: null,
+  }
+  const BKG_ROW: H2BackgroundRollup = {
+    base_experiment_id: 'SERUM_001', time_post_reaction_bucket_days: 7, n_values: 3,
+    bkg_time_bucket_days: 0, bkg_time_gap_days: -3, bkg_n_values: 3,
+    bkg_mean_h2_micromoles: 1.0, bkg_sd_h2_micromoles: 0.1,
+    mean_net_h2_micromoles: 4.5, sd_net_h2_micromoles: 0.5,
+    mean_net_h2_grams_per_ton: 7.7, sd_net_h2_grams_per_ton: 0.9,
+    mean_net_fe_yield_h2_pct: 0.88, sd_net_fe_yield_h2_pct: 0.12,
+    below_background: false,
+  }
+
+  function linkGroup() {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...groupOf('SERUM_001', [
+        { replicate_label: 'a', vials: [detailVial(2, 'SERUM_001a', null, false)] },
+      ]),
+      h2_background: LINK,
+    })
+  }
+
+  beforeEach(() => {
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([BKG_ROW])
+  })
+
+  it('shows net metrics when a link exists', async () => {
+    linkGroup()
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
+    const texts = Array.from(select.options).map((o) => o.text)
+    expect(texts).toEqual(expect.arrayContaining(['Net H₂ (µmol)', 'Net H₂ (g/t)', 'Net Fe²⁺ → H₂ (%)']))
+    expect(select.options[select.selectedIndex].text).toBe('H₂ (ppm)')
+    expect(experimentsApi.getGroupH2BackgroundRollup).toHaveBeenCalledWith('SERUM_001')
+  })
+
+  it('shows no net options and makes no bkg request without a link', async () => {
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
+    expect(Array.from(select.options).some((o) => o.text.startsWith('Net'))).toBe(false)
+    expect(screen.queryByRole('columnheader', { name: 'Background' })).not.toBeInTheDocument()
+    expect(experimentsApi.getGroupH2BackgroundRollup).not.toHaveBeenCalled()
+  })
+
+  it('renders net values and the gap chip', async () => {
+    linkGroup()
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    expect(await screen.findByText('4.5 ± 0.5')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Background' })).toBeInTheDocument()
+    const chip = screen.getByText('bkg day 0')
+    expect(chip.className).toContain('text-status-warning')
+  })
+
+  it('shows no gap chip when the background bucket matches', async () => {
+    linkGroup()
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([
+      { ...BKG_ROW, bkg_time_gap_days: 0, bkg_time_bucket_days: 7 },
+    ])
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    expect(await screen.findByText('4.5 ± 0.5')).toBeInTheDocument()
+    expect(screen.queryByText(/^bkg day/)).not.toBeInTheDocument()
+  })
+
+  it('flags a value at or below background', async () => {
+    linkGroup()
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([
+      { ...BKG_ROW, below_background: true },
+    ])
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    expect(await screen.findByText('≤ bkg')).toBeInTheDocument()
+  })
+
+  it('notes when the background SD is unavailable', async () => {
+    linkGroup()
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([
+      { ...BKG_ROW, bkg_n_values: 1, bkg_sd_h2_micromoles: null },
+    ])
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    expect(await screen.findByText('background SD unavailable (n=1)')).toBeInTheDocument()
+  })
+
+  it('falls back to H₂ (ppm) when the link is cleared under a net metric', async () => {
+    const user = userEvent.setup()
+    linkGroup()
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await screen.findByText('4.5 ± 0.5')
+    await user.selectOptions(screen.getByLabelText(/metric/i), 'net_h2_umol')
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_001', [
+        { replicate_label: 'a', vials: [detailVial(2, 'SERUM_001a', null, false)] },
+      ]),
+    )
+    await queryClient.invalidateQueries({ queryKey: ['replicate-group-detail', 'SERUM_001'] })
+    await waitFor(() => {
+      const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
+      expect(select.options[select.selectedIndex].text).toBe('H₂ (ppm)')
+    })
+  })
+
+  const NO_MATCH_ROW: H2BackgroundRollup = {
+    ...BKG_ROW,
+    bkg_time_bucket_days: null, bkg_time_gap_days: null, bkg_n_values: null,
+    bkg_mean_h2_micromoles: null, bkg_sd_h2_micromoles: null,
+    mean_net_h2_micromoles: null, sd_net_h2_micromoles: null,
+    mean_net_h2_grams_per_ton: null, sd_net_h2_grams_per_ton: null,
+    mean_net_fe_yield_h2_pct: null, sd_net_fe_yield_h2_pct: null,
+    below_background: null,
+  }
+
+  it('shows "no bkg match" and no gap chip for a row with a null gap', async () => {
+    linkGroup()
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([NO_MATCH_ROW])
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    const note = await screen.findByText('no bkg match')
+    expect(note.className).toContain('text-status-warning')
+    expect(screen.queryByText(/^bkg day/)).not.toBeInTheDocument()
+    expect(screen.queryByText('≤ bkg')).not.toBeInTheDocument()
+  })
+
+  it('does not call getResults when a net metric is selected', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...groupOf('SERUM_001', [
+        { replicate_label: 'a', vials: [detailVial(2, 'SERUM_001a', null, false)] },
+      ]),
+      h2_background: LINK,
+    })
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await screen.findByText('4.5 ± 0.5')
+    await waitFor(() => expect(experimentsApi.getResults).toHaveBeenCalled())
+    vi.mocked(experimentsApi.getResults).mockClear()
+    queryClient.removeQueries({ queryKey: ['experiment-results'] })
+    await user.selectOptions(screen.getByLabelText(/metric/i), 'net_h2_umol')
+    await waitFor(() => expect(screen.queryByText(/^replicate a$/)).not.toBeInTheDocument())
+    expect(experimentsApi.getResults).not.toHaveBeenCalled()
+  })
+
+  it('warns when the background has no H₂ data, and only then', async () => {
+    linkGroup()
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([NO_MATCH_ROW])
+    const { unmount } = render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    const warning = await screen.findByText('background has no H₂ data')
+    expect(warning.className).toContain('text-status-warning')
+    unmount()
+    queryClient.clear()
+    vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([BKG_ROW])
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await screen.findByText('4.5 ± 0.5')
+    expect(screen.queryByText('background has no H₂ data')).not.toBeInTheDocument()
   })
 })

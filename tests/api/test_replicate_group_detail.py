@@ -200,3 +200,28 @@ class TestGroupRollupEndpoint:
     def test_group_rollup_unknown_base_id_404(self, client, db_session, reporting_views):
         resp = client.get("/api/experiments/groups/NOPE_DOES_NOT_EXIST/rollup")
         assert resp.status_code == 404
+
+
+def test_group_detail_includes_h2_background(client, db_session, reporting_views):
+    from database.models import ExperimentalResults, H2BackgroundLink, ScalarResults
+    _make_experiment(db_session, "RGD_502a", 9950)
+    bg = _make_experiment(db_session, "RGD_503a", 9951)
+    r = ExperimentalResults(experiment_fk=bg.id, time_post_reaction_days=7,
+                            time_post_reaction_bucket_days=7,
+                            is_primary_timepoint_result=True)
+    db_session.add(r)
+    db_session.flush()
+    db_session.add(ScalarResults(result_id=r.id, h2_micromoles=3.0))
+    db_session.commit()
+
+    r0 = client.get("/api/experiments/groups/RGD_502")
+    assert r0.status_code == 200, r0.text
+    assert r0.json()["h2_background"] is None
+
+    put = client.put("/api/experiments/groups/RGD_502/h2-background",
+                     json={"experiment_id": "RGD_503a", "mode": "vial"})
+    assert put.status_code == 200
+    assert db_session.query(H2BackgroundLink).count() == 1
+    data = client.get("/api/experiments/groups/RGD_502").json()
+    assert data["h2_background"]["mode"] == "vial"
+    assert data["h2_background"]["background_ref"] == "RGD_503a"

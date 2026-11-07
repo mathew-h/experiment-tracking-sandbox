@@ -44,7 +44,7 @@ function groupWith(members: ReplicateGroupMemberDetail[]): ReplicateGroupDetail 
     members, member_count: members.length,
     replicates: [], replicate_count: 0,
     shared_conditions: {}, divergent_fields: [],
-    additives_summary: null, additive_names: null, additives_diverge: false,
+    additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
   }
 }
 

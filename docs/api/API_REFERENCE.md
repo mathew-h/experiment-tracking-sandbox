@@ -20,6 +20,9 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/{experiment_id}/replicate-group` | The lettered replicate set (parent + members) this experiment belongs to |
 | GET | `/api/experiments/groups/{base_id}` | Replicate group detail addressed by base-ID string (not an experiment row) — members, shared/divergent conditions, additives summary |
 | GET | `/api/experiments/groups/{base_id}/rollup` | Cross-replicate rollup for the group, addressed by base-ID string; same shape as `/rollup` above |
+| PUT | `/api/experiments/groups/{base_id}/h2-background` | Link the group to a serum H₂ background (issue #144). See below. |
+| DELETE | `/api/experiments/groups/{base_id}/h2-background` | Clear the group's H₂ background link (204). See below. |
+| GET | `/api/experiments/groups/{base_id}/h2-background/rollup` | Background-adjusted H₂ rollup per bucket from `v_results_h2_bkg_adjusted_rollup`. See below. |
 | POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
 | POST | `/api/experiments/replicates` | Batch-create lettered replicates copying a base experiment's setup |
 | PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), and is_outlier |
@@ -254,8 +257,60 @@ of that re-run, whose ID reduces to `SERUM_001-2`), and
 `SERUM_001_Desorption-t5` (treatment variant). A bare-stem row carries no
 token, so it remains the `parent` and is never also a member.
 
+**H₂ background (issue #144):** the response adds `h2_background`, `null` when the group has no link, otherwise `{ "mode": "group" | "vial", "background_ref": "SERUM_009", "created_by": "mh@example.com", "updated_at": "2026-11-06T15:04:05Z" }`. `background_ref` is the background group key (`group` mode) or stem (`vial` mode). Additive; every other field is unchanged.
+
 **Errors:**
 - `404 Not Found` — `base_id` matches neither an experiment row nor any `base_experiment_id` value.
+
+### PUT /api/experiments/groups/{base_id}/h2-background
+
+Link the group to the serum H₂ background to subtract (issue #144). One link per group; a second PUT replaces it.
+
+**Auth:** Required (Firebase token)
+
+**Request body:** `{ "experiment_id": "SERUM_009a", "mode": "group" | "vial" }`. The server resolves the reference from `experiment_id`: `group` uses that experiment's `COALESCE(base_experiment_id, experiment_id)`, `vial` uses its timepoint-stripped stem (`SERUM_009a-t7` gives `SERUM_009a`).
+
+**Response `200`:** `H2BackgroundLinkResponse` (`mode`, `background_ref`, `created_by`, `updated_at`). Writes one `ModificationsLog` row (`modified_table='h2_background_links'`, `modification_type` `create` or `update`, `old_values`/`new_values` `{mode, background_ref}`) with `experiment_id=<base_id>` and `experiment_fk=NULL`. Calls no `recalculate()`: nothing derived is stored.
+
+**Errors:**
+- `404 Not Found` — the group (`base_id`) does not exist, or `experiment_id` names no experiment.
+- `422 Unprocessable Entity` — the resolved background is the sample group itself (or a stem inside it), or the background has no primary result with `h2_micromoles` and a non-null time bucket on a non-outlier experiment.
+
+### DELETE /api/experiments/groups/{base_id}/h2-background
+
+Clear the group's H₂ background link.
+
+**Auth:** Required (Firebase token)
+
+**Response `204`** (no body), including when the group had no link; in that case no `ModificationsLog` row is written. Clearing a real link writes one (`modification_type='delete'`, `old_values={mode, background_ref}`, `experiment_fk=NULL`).
+
+**Errors:**
+- `404 Not Found` — the group does not exist.
+
+### GET /api/experiments/groups/{base_id}/h2-background/rollup
+
+Background-adjusted H₂ per time bucket for a linked group, from `v_results_h2_bkg_adjusted_rollup`, ordered by `time_post_reaction_bucket_days`. Math is in `docs/CALCULATIONS.md` ("Background-adjusted H₂ (view columns)").
+
+**Auth:** Required (Firebase token)
+
+**Response `200`:** `list[H2BackgroundRollupResponse]`; `[]` when the group has no link.
+```json
+[
+  {
+    "base_experiment_id": "SERUM_001", "time_post_reaction_bucket_days": 7.0, "n_values": 3,
+    "bkg_time_bucket_days": 7.0, "bkg_time_gap_days": 0.0, "bkg_n_values": 3,
+    "bkg_mean_h2_micromoles": 3.0, "bkg_sd_h2_micromoles": 1.0,
+    "mean_net_h2_micromoles": 9.0, "sd_net_h2_micromoles": 2.236,
+    "mean_net_h2_grams_per_ton": 18.143, "sd_net_h2_grams_per_ton": 4.508,
+    "mean_net_fe_yield_h2_pct": null, "sd_net_fe_yield_h2_pct": null,
+    "below_background": false
+  }
+]
+```
+Every `bkg_*` and net field is `null` when no background bucket matches the sample bucket. `bkg_time_gap_days` is background bucket minus sample bucket (non-zero: the nearest bucket was used). `bkg_sd_h2_micromoles` is `null` when the background has one value. Sample buckets that are `null` and outlier sample vials do not appear.
+
+**Errors:**
+- `404 Not Found` — same rule as the group detail endpoint.
 
 ### GET /api/experiments/groups/{base_id}/rollup
 
@@ -395,6 +450,7 @@ powers the delete confirmation dialog. `404` if the experiment does not exist.
   "xrd_phases": 4,
   "total": 16,
   "background_for": ["SERUM_002a"],
+  "h2_background_for": ["SERUM_003"],
   "replicate_children": []
 }
 ```
@@ -408,9 +464,14 @@ reports `total: 1`, not `0`.
 their ammonium background) and `replicate_children` (experiments whose
 `parent_experiment_fk` points here) are **decoupled, not deleted** — those
 experiments survive, and `background_ammonium_concentration_mM` on the citing
-rows is left intact — so they are excluded from `total`. The UI requires the user
+rows is left intact — so they are excluded from `total`. `h2_background_for`
+(issue #144) lists the sample group keys whose H₂ background link resolves to
+this experiment's group key or `-t`-stripped stem. Those `h2_background_links`
+rows are **not** deleted (they are string-addressed and other vials may remain);
+if no background data is left the group's net H₂ values go NULL and its page says
+"background has no H₂ data". It is excluded from `total`. The UI requires the user
 to type the experiment ID whenever anything is destroyed **or** decoupled, i.e.
-`total > 0` or either list is non-empty.
+`total > 0` or any of the three lists is non-empty.
 
 ### DELETE /api/experiments/{experiment_id}
 

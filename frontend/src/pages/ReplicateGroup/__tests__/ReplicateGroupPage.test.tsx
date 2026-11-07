@@ -9,6 +9,7 @@ vi.mock('@/api/experiments', () => ({
     getGroup: vi.fn(),
     getGroupRollup: vi.fn(),
     getResults: vi.fn(),
+    getGroupH2BackgroundRollup: vi.fn(),
   },
 }))
 
@@ -67,12 +68,14 @@ const ORPHAN_GROUP: ReplicateGroupDetail = {
   additives_summary: 'Magnetite 1 g',
   additive_names: 'Magnetite',
   additives_diverge: false,
+  h2_background: null,
 }
 
 beforeEach(() => {
   queryClient.clear()
   vi.clearAllMocks()
   vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue([])
+  vi.mocked(experimentsApi.getGroupH2BackgroundRollup).mockResolvedValue([])
   vi.mocked(experimentsApi.getResults).mockResolvedValue([])
 })
 
@@ -82,7 +85,7 @@ describe('ReplicateGroupPage', () => {
     renderAtBase('SERUM_001')
 
     await waitFor(() =>
-      expect(screen.getByText('This is a grouped experiment view — you may only edit individual replicates.'))
+      expect(screen.getByText('Replicates are edited individually; only the H₂ background is set here.'))
         .toBeInTheDocument()
     )
 
@@ -250,6 +253,7 @@ describe('ReplicateGroupPage — issue #98 letter nesting', () => {
       replicate_count: replicates.length,
       shared_conditions: {}, divergent_fields: [],
       additives_summary: null, additive_names: null, additives_diverge: false,
+    h2_background: null,
     }
   }
 
@@ -327,6 +331,7 @@ describe('ReplicateGroupPage — issue #101: a group with no replicate letters',
     replicates: [], replicate_count: 0,
     shared_conditions: { experiment_type: 'Serum' }, divergent_fields: [],
     additives_summary: null, additive_names: null, additives_diverge: false,
+    h2_background: null,
   }
 
   it('counts vials in the header rather than claiming 0 replicates', async () => {
@@ -358,5 +363,52 @@ describe('ReplicateGroupPage — issue #101: a group with no replicate letters',
     renderAtBase('SERUM_001')
     await waitFor(() => expect(screen.getByText('3 replicates')).toBeInTheDocument())
     expect(screen.queryByText(/vials/)).not.toBeInTheDocument()
+  })
+
+  it('renders no H2 background control for a non-Serum group', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      shared_conditions: { experiment_type: 'HPHT' },
+    })
+    renderAtBase('SERUM_001')
+    await waitFor(() => expect(screen.getByText('3 replicates')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Set' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/H₂ background:/)).not.toBeInTheDocument()
+  })
+
+  it('renders the H2 background control for a Serum group', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(ORPHAN_GROUP)
+    renderAtBase('SERUM_001')
+    expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
+  })
+
+  it.each(['SERUM', 'Serum Vial'])('renders the H2 background control for experiment_type %s', async (type) => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      shared_conditions: { experiment_type: type },
+    })
+    renderAtBase('SERUM_001')
+    expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
+  })
+
+  it('renders the H2 background control when member experiment_type spellings diverge', async () => {
+    const members = [
+      { ...ORPHAN_MEMBERS[0], conditions: { experiment_type: 'SERUM' } },
+      { ...ORPHAN_MEMBERS[1], conditions: { experiment_type: 'Serum' } },
+    ]
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      members,
+      member_count: 2,
+      replicate_count: 2,
+      replicates: [
+        { replicate_label: 'a', vials: [members[0]] },
+        { replicate_label: 'b', vials: [members[1]] },
+      ],
+      shared_conditions: {},
+      divergent_fields: ['experiment_type'],
+    })
+    renderAtBase('SERUM_001')
+    expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
   })
 })

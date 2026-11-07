@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitTimepointToken } from '../experimentId'
+import { isSerumType, splitTimepointToken } from '../experimentId'
 
 describe('splitTimepointToken', () => {
   it('peels integer and decimal day tokens', () => {
@@ -18,5 +18,21 @@ describe('splitTimepointToken', () => {
     expect(splitTimepointToken('SERUM_001a-T7').timepointDays).toBeNull()
     expect(splitTimepointToken('SERUM_001a-t7_Desorption').timepointDays).toBeNull()
     expect(splitTimepointToken('SERUM_001a-t').timepointDays).toBeNull()
+  })
+})
+
+describe('isSerumType', () => {
+  it('accepts every serum spelling in real data', () => {
+    expect(isSerumType('SERUM')).toBe(true)
+    expect(isSerumType('Serum')).toBe(true)
+    expect(isSerumType(' Serum  Vial ')).toBe(true)
+    expect(isSerumType('Serum Vial')).toBe(true)
+  })
+
+  it('rejects other types and non-strings', () => {
+    expect(isSerumType('HPHT')).toBe(false)
+    expect(isSerumType('Serumx')).toBe(false)
+    expect(isSerumType(null)).toBe(false)
+    expect(isSerumType(undefined)).toBe(false)
   })
 })

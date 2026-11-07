@@ -423,3 +423,56 @@ def test_delete_succeeds_with_two_conditions_rows(db):
             select(func.count()).select_from(ExperimentalConditions)
             .where(ExperimentalConditions.experiment_fk == exp.id)
         ).scalar_one() == 0
+
+
+def _h2_vial(db, experiment_id, number):
+    exp = Experiment(experiment_id=experiment_id, experiment_number=number,
+                     status=ExperimentStatus.ONGOING)
+    db.add(exp)
+    db.flush()
+    return exp
+
+
+def test_collect_impact_reports_h2_background_for_vial_link(db):
+    from backend.services.experiment_deletion import collect_delete_impact
+    from database.models import H2BackgroundLink
+
+    vial = _h2_vial(db, "SERUM_009a-t3", 7110)
+    db.add(H2BackgroundLink(base_experiment_id="SERUM_010",
+                            background_stem_id="SERUM_009a"))
+    db.commit()
+    db.refresh(vial)
+
+    impact = collect_delete_impact(db, vial)
+    assert impact.h2_background_for == ["SERUM_010"]
+    assert impact.total == 0  # a link is not destroyed, so it is not counted
+
+
+def test_collect_impact_reports_h2_background_for_group_link(db):
+    from backend.services.experiment_deletion import collect_delete_impact
+    from database.models import H2BackgroundLink
+
+    member = _h2_vial(db, "SERUM_009b-t3", 7111)
+    db.add(H2BackgroundLink(base_experiment_id="SERUM_011",
+                            background_base_id="SERUM_009"))
+    db.commit()
+    db.refresh(member)
+
+    assert collect_delete_impact(db, member).h2_background_for == ["SERUM_011"]
+
+
+def test_delete_keeps_the_h2_background_link_row(db):
+    from backend.services.experiment_deletion import delete_experiment_cascade
+    from database.models import H2BackgroundLink
+
+    vial = _h2_vial(db, "SERUM_009c-t3", 7112)
+    db.add(H2BackgroundLink(base_experiment_id="SERUM_012",
+                            background_stem_id="SERUM_009c"))
+    db.commit()
+    db.refresh(vial)
+
+    delete_experiment_cascade(db, vial, modified_by="tester")
+
+    assert db.execute(select(func.count()).select_from(H2BackgroundLink)
+                      .where(H2BackgroundLink.base_experiment_id == "SERUM_012")
+                      ).scalar_one() == 1

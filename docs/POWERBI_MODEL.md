@@ -32,6 +32,8 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
 | `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `ti_ppm` (37 element columns; `s_ppm` is a known gap) |
 | `public.v_core_flood_samples` | `result_id`, `experiment_id`, `experiment_fk`, `run_base_id`, `is_variant`, `time_post_reaction_days`, `cumulative_time_post_reaction_days`, `sample_date`, `gc_run_date`, `sample_tube_number`, `flow_rate_mL_min`, `nitrogen_flow_rate_mL_min`, `inlet_pressure_psi`, `outlet_pressure_psi`, `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `final_ph`, `final_conductivity_mS_cm`, `pore_volume_mL`, `interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval` |
+| `public.v_results_h2_bkg_adjusted` | `result_id`, `experiment_id`, `experiment_fk`, `base_experiment_id`, `time_post_reaction_bucket_days`, `background_mode`, `background_ref`, `bkg_time_bucket_days`, `bkg_time_gap_days`, `bkg_n_values`, `bkg_mean_h2_ppm`, `bkg_mean_h2_micromoles`, `bkg_sd_h2_micromoles`, `h2_micromoles`, `net_h2_micromoles_unclamped`, `net_h2_micromoles`, `u_bkg_h2_micromoles`, `net_h2_mass_ug`, `net_h2_grams_per_ton_unclamped`, `net_h2_grams_per_ton`, `u_bkg_h2_grams_per_ton`, `net_fe_yield_h2_pct_unclamped`, `net_fe_yield_h2_pct`, `u_bkg_fe_yield_h2_pct`, `below_background` |
+| `public.v_results_h2_bkg_adjusted_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_values`, `bkg_time_bucket_days`, `bkg_time_gap_days`, `bkg_n_values`, `bkg_mean_h2_micromoles`, `bkg_sd_h2_micromoles`, `mean_net_h2_micromoles`, `sd_net_h2_micromoles`, `mean_net_h2_grams_per_ton`, `sd_net_h2_grams_per_ton`, `mean_net_fe_yield_h2_pct`, `sd_net_fe_yield_h2_pct`, `below_background` |
 | `public.v_results_scalar_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_vials`, `n_replicate_letters`, `n_values`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph` |
 
 ---
@@ -84,6 +86,19 @@ One row per **primary timepoint of a Core Flood experiment**, with cross-sample 
 
 ---
 
+## Background-Adjusted H₂ Views (`v_results_h2_bkg_adjusted`, `v_results_h2_bkg_adjusted_rollup`, issue #144)
+
+Serum vial H₂ with a researcher-chosen blank subtracted. Rows exist **only for sample groups that have a background link** (table `h2_background_links`, set on the replicate group page), so both views are empty for unlinked groups. Raw `v_results_h2` and `v_results_scalar_rollup` are unchanged and stay gross. Formulas, the clamp rule and the nearest-bucket rule are in `docs/CALCULATIONS.md` ("Background-adjusted H₂ (view columns)").
+
+- **`v_results_h2_bkg_adjusted`** — one row per primary H₂ result of a linked group (same population as `v_results_h2`; outlier vials stay in). Joins 1–0..1 to `v_dim_timepoints` on `result_id`. Net columns (`net_h2_micromoles`, `net_h2_grams_per_ton`, `net_fe_yield_h2_pct`) are clamped at 0; the `_unclamped` twins keep the signed difference; `u_bkg_*` is the background SD contribution (NULL when the background has one value). `bkg_time_gap_days` is background bucket minus sample bucket (signed; non-zero means the nearest background day was used).
+- **`v_results_h2_bkg_adjusted_rollup`** — one row per `(base_experiment_id, time_post_reaction_bucket_days)`, joined exactly like `v_results_scalar_rollup`. Use this for "mean ± SD" visuals. Sample outlier vials are excluded. Do **not** average the per-row `net_*` columns instead: they are clamped per row, so the average can differ from `mean_net_*` (clamped once, on the mean).
+- **Filter `time_post_reaction_bucket_days IS NOT NULL`** on any visual built from either view. A sample row with a NULL bucket has no background match and NULL net values (41% of legacy primary rows have NULL buckets). The rollup already drops NULL-bucket rows; the per-row view keeps them.
+- **NULL means no value, not zero.** Net columns are NULL when the sample has no `h2_micromoles` (missing gas volume or pressure), no usable background bucket matches, or rock mass / Fe(II) is missing for the g/t and Fe % columns.
+- **Hide** `experiment_fk` (join key only). The per-row view carries `experiment_id`, `base_experiment_id` and the bucket for convenience; prefer the dimension tables for slicers.
+- **Deploy note.** The views are created on API start by `database/event_listeners.py`, but the table needs `alembic upgrade head` (revision `b7e2d9c4a1f6`) on the lab PC first. Power BI picks the views up on its next schema refresh.
+
+---
+
 ## Sample Views
 
 | View | Key columns |
@@ -112,6 +127,9 @@ v_dim_timepoints (result_id)    1 ──── 1 v_results_icp (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_core_flood_samples (result_id)   -- Core Flood timepoints only
 
 v_experiments (base_experiment_id or experiment_id)  * ──── 1 v_results_scalar_rollup (base_experiment_id, time_post_reaction_bucket_days)
+
+v_dim_timepoints (result_id)    1 ──── 0..1 v_results_h2_bkg_adjusted (result_id)   -- primary H2 rows of linked groups only
+v_experiments (base_experiment_id or experiment_id)  * ──── 1 v_results_h2_bkg_adjusted_rollup (base_experiment_id, time_post_reaction_bucket_days)   -- same join as v_results_scalar_rollup
 
 v_sample_info (sample_id)       1 ──── * v_experiments (sample_id)
 v_experiments (experiment_id)   1 ──── * v_notes (experiment_id)
@@ -160,6 +178,15 @@ cross-filtering trap described in [issue #17](https://github.com/mathew-h/experi
 | `experiment_fk` | **Hide** |
 | `time_post_reaction_days` | **Hide** — use `v_dim_timepoints` |
 | `time_post_reaction_bucket_days` | **Hide** — use `v_dim_timepoints` |
+
+### `v_results_h2_bkg_adjusted`
+
+| Field | Action |
+|-------|--------|
+| `experiment_id` | **Hide** |
+| `experiment_fk` | **Hide** |
+| `base_experiment_id` | **Hide** — use the `v_experiments` group key |
+| `time_post_reaction_bucket_days` | **Hide** — use `v_dim_timepoints`, and filter it `IS NOT NULL` |
 
 ### `v_results_icp`
 

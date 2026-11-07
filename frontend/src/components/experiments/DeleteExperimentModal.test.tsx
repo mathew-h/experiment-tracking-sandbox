@@ -16,13 +16,13 @@ const EMPTY_IMPACT: DeleteImpact = {
   experiment_id: 'SERUM_001a',
   conditions: 0, results: 0, scalar_results: 0, icp_results: 0, result_files: 0,
   notes: 0, additives: 0, external_analyses: 0, xrd_phases: 0,
-  total: 0, background_for: [], replicate_children: [],
+  total: 0, background_for: [], h2_background_for: [], replicate_children: [],
 }
 
 const HEAVY_IMPACT: DeleteImpact = {
   ...EMPTY_IMPACT,
   results: 3, scalar_results: 3, icp_results: 2, notes: 1, xrd_phases: 4,
-  total: 13, background_for: ['SERUM_002a'], replicate_children: ['SERUM_001a-2'],
+  total: 13, background_for: ['SERUM_002a'], h2_background_for: [], replicate_children: ['SERUM_001a-2'],
 }
 
 const queryClient = new QueryClient({
@@ -132,6 +132,18 @@ describe('DeleteExperimentModal', () => {
     renderModal()
 
     expect(await screen.findByLabelText(/type the experiment id/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeDisabled()
+  })
+
+  it('lists the groups that use this experiment as their H2 background', async () => {
+    vi.mocked(experimentsApi.getDeleteImpact).mockResolvedValue({
+      ...EMPTY_IMPACT, total: 0, h2_background_for: ['SERUM_010', 'SERUM_011'],
+    })
+    renderModal()
+
+    expect(await screen.findByText(/H₂ background for groups/)).toBeInTheDocument()
+    expect(screen.getByText('SERUM_010, SERUM_011')).toBeInTheDocument()
+    expect(screen.getByLabelText(/type the experiment id/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^delete$/i })).toBeDisabled()
   })
 
