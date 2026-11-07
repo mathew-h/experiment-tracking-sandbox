@@ -185,7 +185,7 @@ describe('detail header group strip — issue #101: letterless timepoint vials',
       })),
       member_count: 3, replicates: [], replicate_count: 0,
       shared_conditions: {}, divergent_fields: [],
-      additives_summary: null, additive_names: null, additives_diverge: false,
+      additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
     })
 
     renderPage('SERUM_pH_002-t1')
@@ -222,7 +222,7 @@ describe('detail header group strip — issue #101: letterless timepoint vials',
       }],
       member_count: 1, replicates: [], replicate_count: 0,
       shared_conditions: {}, divergent_fields: [],
-      additives_summary: null, additive_names: null, additives_diverge: false,
+      additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
     })
 
     renderPage('SERUM_pH_050-t5')

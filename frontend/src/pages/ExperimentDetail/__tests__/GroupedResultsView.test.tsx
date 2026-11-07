@@ -76,7 +76,7 @@ function groupOf(
     base_experiment_id: baseId, parent, members, member_count: members.length,
     replicates, replicate_count: replicates.length,
     shared_conditions: {}, divergent_fields: [],
-    additives_summary: null, additive_names: null, additives_diverge: false,
+    additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
   }
 }
 
@@ -261,7 +261,7 @@ describe('GroupedResultsView — issue #101: letterless timepoint vial set', () 
     members: VIALS, member_count: 3,
     replicates: [], replicate_count: 0,
     shared_conditions: {}, divergent_fields: [],
-    additives_summary: null, additive_names: null, additives_diverge: false,
+    additives_summary: null, additive_names: null, additives_diverge: false, h2_background: null,
   }
 
   const LETTERLESS_ROLLUP: RollupTimepoint[] = [1, 3, 7].map((day, i) => ({

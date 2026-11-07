@@ -22,9 +22,10 @@ import {
   PageSpinner,
 } from '@/components/ui'
 import { GroupedResultsView } from '@/pages/ExperimentDetail/GroupedResultsView'
+import { H2BackgroundRow } from './H2BackgroundRow'
 
 const READ_ONLY_NOTICE =
-  'This is a grouped experiment view — you may only edit individual replicates.'
+  'Replicates are edited individually; only the H₂ background is set here.'
 
 /** snake_case condition field name -> Title Case label. */
 function formatFieldName(field: string): string {
@@ -178,6 +179,7 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
           )}
         </div>
         <p className="text-xs text-ink-muted mt-1">{READ_ONLY_NOTICE}</p>
+        {experimentType === 'Serum' && <H2BackgroundRow baseId={baseId} link={group.h2_background} />}
       </div>
 
       {/* Members table */}
