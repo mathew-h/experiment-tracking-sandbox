@@ -390,4 +390,25 @@ describe('ReplicateGroupPage — issue #101: a group with no replicate letters',
     renderAtBase('SERUM_001')
     expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
   })
+
+  it('renders the H2 background control when member experiment_type spellings diverge', async () => {
+    const members = [
+      { ...ORPHAN_MEMBERS[0], conditions: { experiment_type: 'SERUM' } },
+      { ...ORPHAN_MEMBERS[1], conditions: { experiment_type: 'Serum' } },
+    ]
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      members,
+      member_count: 2,
+      replicate_count: 2,
+      replicates: [
+        { replicate_label: 'a', vials: [members[0]] },
+        { replicate_label: 'b', vials: [members[1]] },
+      ],
+      shared_conditions: {},
+      divergent_fields: ['experiment_type'],
+    })
+    renderAtBase('SERUM_001')
+    expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
+  })
 })

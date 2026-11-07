@@ -67,6 +67,11 @@ class ParsedExperimentID:
 _REPLICATE_LETTER_RE = re.compile(r'^(\d+)([a-z])$')
 _REPLICATE_GUARD_RE = re.compile(r'^\d+[a-z]$')
 _TIMEPOINT_TOKEN_RE = re.compile(r'-t(\d+(?:\.\d+)?)$', re.ASCII)
+# POSIX-ERE equivalent of _TIMEPOINT_TOKEN_RE above, used by Postgres:
+# '-t' + digits + an optional decimal part, anchored to end-of-string. Lowercase
+# 't' only. Anchoring means regexp_replace can match at most once, so its
+# replace-first-only default is what we want.
+TIMEPOINT_TOKEN_SQL_PATTERN = r"-t[0-9]+(\.[0-9]+)?$"
 
 
 def split_timepoint_token(experiment_id: str) -> Tuple[str, Optional[float]]:

@@ -152,6 +152,12 @@ interface ReplicateGroupContentProps {
 
 function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
   const experimentType = group.shared_conditions['experiment_type']
+  // Members that spell the type differently (SERUM vs Serum) push experiment_type
+  // into divergent_fields and out of shared_conditions; show the control if any
+  // member is Serum.
+  const showH2Background = group.divergent_fields.includes('experiment_type')
+    ? [group.parent, ...group.members].some((m) => isSerumType(m?.conditions?.['experiment_type']))
+    : isSerumType(experimentType)
   const [expandedLetters, setExpandedLetters] = useState<Set<string>>(new Set())
   // Issue #101: a group can have members but no letters -- SERUM_pH_002-t1/-t3/-t7
   // is one experiment sampled three times, not three replicates of each other.
@@ -180,7 +186,7 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
           )}
         </div>
         <p className="text-xs text-ink-muted mt-1">{READ_ONLY_NOTICE}</p>
-        {isSerumType(experimentType) && <H2BackgroundRow baseId={baseId} link={group.h2_background} />}
+        {showH2Background && <H2BackgroundRow baseId={baseId} link={group.h2_background} />}
       </div>
 
       {/* Members table */}

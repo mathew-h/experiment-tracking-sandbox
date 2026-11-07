@@ -12,6 +12,7 @@ mirroring tests/api/test_core_flood_view.py's reporting_views fixture.
 """
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -379,11 +380,17 @@ def _norm(sql: str) -> str:
 
 @pytest.mark.parametrize("name", ["v_results_scalar", "v_results_h2", "v_results_scalar_rollup"])
 def test_existing_views_untouched(name):
+    """One-time #144 guard: this branch left v_results_scalar, v_results_h2 and
+    v_results_scalar_rollup unchanged versus 1817bed, the develop head it
+    started from. Delete this test when any of those views is changed on
+    purpose.
+    """
     from database.event_listeners import _VIEWS
 
+    repo_root = Path(__file__).resolve().parents[2]
     proc = subprocess.run(
-        ["git", "show", "develop:database/event_listeners.py"],
-        capture_output=True, text=True,
+        ["git", "show", "1817bed:database/event_listeners.py"],
+        capture_output=True, text=True, cwd=repo_root,
     )
     assert proc.returncode == 0, proc.stderr
     start_marker = f'("{name}", """'

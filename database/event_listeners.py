@@ -7,7 +7,7 @@ from .models import (
 )
 from .database import engine
 from .lineage_utils import update_experiment_lineage, update_orphaned_derivations
-from backend.services.replicate_collapse import TIMEPOINT_TOKEN_SQL_PATTERN
+from database.experiment_id_parser import TIMEPOINT_TOKEN_SQL_PATTERN
 
 logger = logging.getLogger(__name__)
 
