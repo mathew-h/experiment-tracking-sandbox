@@ -110,8 +110,8 @@ class DeleteImpact:
     # Other experiments that name this one as their ammonium background.
     background_for: list[str] = field(default_factory=list)
     # Sample groups whose H2 background link (issue #144) resolves to this
-    # experiment. The link row has no FK and survives the delete; it then
-    # points at nothing (its adjusted values go NULL).
+    # experiment. The link row has no FK and survives the delete; it
+    # may point at nothing (its adjusted values then go NULL).
     h2_background_for: list[str] = field(default_factory=list)
     # Experiments whose parent_experiment_fk points at this one. Their
     # base_experiment_id STRING is untouched, so replicate groups -- addressed

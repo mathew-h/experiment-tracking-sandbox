@@ -152,7 +152,8 @@ export function DeleteExperimentModal({
             <p className="text-ink-muted">
               Used as the H₂ background for groups:{' '}
               <span className="font-mono-data">{impact.h2_background_for.join(', ')}</span>.
-              The links are kept, but those groups lose their background-adjusted H₂ values.
+              The links are kept; if no H₂ data remains for the background, those groups'
+              background-adjusted H₂ values become empty.
             </p>
           )}
 
