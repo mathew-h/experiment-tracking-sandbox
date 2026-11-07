@@ -25,7 +25,7 @@ This file is the index. The detailed notes are split into rule files that load o
 | `ExperimentNotes` — typed notes, scope rules, write paths (issues #118, #122) | `.claude/rules/MODELS-notes.md` |
 | `ExperimentalConditions` — vial size, pore volume, `reactor_slot`, `total_ferrous_iron_g`, 1:1 identity | `.claude/rules/MODELS-conditions.md` |
 | `ExperimentalResults`, `ScalarResults` (H2, merge, dates, overwrite), `ICPResults` | `.claude/rules/MODELS-results.md` |
-| Power BI views, rollup statistics, `v_core_flood_samples` | `.claude/rules/MODELS-views.md` |
+| Power BI views, rollup statistics, `v_core_flood_samples`, `v_results_h2_bkg_adjusted*` | `.claude/rules/MODELS-views.md` |
 
 Field names, types and relationships: read the model file named in each section (`database/models/*.py`) — they are the authoritative definition and are not repeated here.
 
@@ -40,6 +40,15 @@ The central hub for all experimental data.
 ### `ModificationsLog`
 Audit trail for tracking changes to records.
 - **Fields**: `experiment_id`, `experiment_fk`, `sample_id` (String, nullable — bare String ID, no FK, matching `experiment_id` pattern), `modified_by`, `modification_type` (create/update/delete), `modified_table`, `old_values` (JSON), `new_values` (JSON), `created_at`.
+
+### `H2BackgroundLink` (issue #144)
+Defined in `database/models/backgrounds.py`, table `h2_background_links`. Which serum background to subtract from a sample group's H₂. **One row per sample group**, keyed by the base-ID *string* (`base_experiment_id`, UNIQUE, the `COALESCE(base_experiment_id, experiment_id)` group key), so it works for groups with no parent row.
+- Exactly one of `background_base_id` (group mode: a whole background replicate set) or `background_stem_id` (vial mode: one stem such as `SERUM_009a`, covering its `-t` vials) is set. The mode is implied by which column is set; there is no enum. `CHECK num_nonnulls(background_base_id, background_stem_id) = 1` and `CHECK background_base_id IS DISTINCT FROM base_experiment_id`.
+- Bare String IDs, **no FKs** (like `ModificationsLog.sample_id`). Renaming a group or a background stem therefore disconnects the link, by decision (not in the `denormalized_ids.py` rename fan-out). Deleting a background experiment leaves the link; see `h2_background_for` in `.claude/rules/MODELS-deletion.md`.
+- `created_by` (Firebase email), `created_at`, `updated_at`.
+- Distinct from `scalar_results.background_experiment_id` / `background_experiment_fk`, which are per-row ammonium provenance and are untouched.
+- Writes (`PUT`/`DELETE /api/experiments/groups/{base_id}/h2-background`) log to `ModificationsLog` (`modified_table='h2_background_links'`, `experiment_id=<base_id>`, `experiment_fk=NULL`) and call no `recalculate()`: nothing derived is stored. Adjusted values are view columns (`.claude/rules/MODELS-views.md`).
+- Alembic `b7e2d9c4a1f6` creates the table. Its `downgrade` drops both dependent views before the table, because `event_listeners.py` recreates every view on API import.
 
 ---
 

@@ -231,6 +231,54 @@ A core flood run is one `base_experiment_id` split across sequential segment exp
 
 ---
 
+## Background-adjusted H₂ (view columns)
+
+Serum vial H₂ is stored gross. A researcher can link a sample replicate group to a background (blank) serum set (issue #144, table `h2_background_links`), and two SQL views then compute background-adjusted H₂ (`v_results_h2_bkg_adjusted` per row, `v_results_h2_bkg_adjusted_rollup` per group and bucket). Same precedent as the core flood views above: **view columns, not calculation-engine fields.** Nothing is stored, nothing is registered in the calculation registry, and the link endpoints call no `recalculate()`. `_calculate_hydrogen` and its stored `h2_micromoles`, `h2_grams_per_ton_yield` and `ferrous_iron_yield_h2_pct` stay gross. Raw ppm is never adjusted; `bkg_mean_h2_ppm` is exposed for reference only.
+
+**Background statistics** per link and per background time bucket: primary results with `h2_micromoles IS NOT NULL` and a non-null bucket, on non-outlier experiments. Group mode selects experiments whose `COALESCE(base_experiment_id, experiment_id)` equals `background_base_id`. Vial mode selects experiments whose timepoint-stripped `experiment_id` equals `background_stem_id` (`SERUM_009a` covers `SERUM_009a-t3` and `-t7`, not `SERUM_009b`). Outputs `bkg_n_values = COUNT(*)`, `bkg_mean_h2_micromoles = AVG`, `bkg_sd_h2_micromoles = stddev_samp` (NULL when n = 1).
+
+**Nearest-bucket rule.** Each sample row uses the background bucket nearest to its own bucket (`ORDER BY abs(b.bucket - s.bucket), b.bucket LIMIT 1`). Ties go to the earlier bucket. There is no maximum gap. `bkg_time_gap_days = bkg_bucket - sample_bucket` (signed). A sample row with a NULL bucket gets no match, so its net values are NULL. Example: sample buckets 1, 3, 7 against background buckets 0, 7 match 0, 0, 7 (gaps -1, -3, 0); sample 3 against 2 and 4 matches 2.
+
+**Per row** (µmol-level subtraction, because vial sizes may differ). `rock_mass_g` and `total_ferrous_iron_g` come from the **sample's** `experimental_conditions`:
+
+```
+d_umol    = h2_micromoles - bkg_mean_h2_micromoles          (unclamped)
+net_umol  = GREATEST(0, d_umol)
+u_umol    = bkg_sd_h2_micromoles                            (NULL if bkg n = 1)
+
+k_gpt     = 2.01588 / rock_mass_g                           (umol x g/mol = ug; ug/g = g/t)
+k_fe      = 3 x 55.845 / 1e6 / total_ferrous_iron_g x 100
+
+net_h2_mass_ug  = net_umol x 2.01588
+d_gpt = d_umol x k_gpt;   net_gpt = GREATEST(0, d_gpt);   u_gpt = u_umol x k_gpt
+d_fe  = d_umol x k_fe;    net_fe  = GREATEST(0, d_fe);    u_fe  = u_umol x k_fe
+below_background = d_umol < 0
+```
+
+The view exposes `net_*_unclamped` (= d), `net_*` (clamped) and `u_bkg_*` for each of µmol, g/t and Fe %. The constants duplicate `scalar_calcs.py`; a test checks `net_fe_yield_h2_pct` against `calculate_ferrous_iron_yield_h2(net_umol, total_ferrous_iron_g)` and `net_h2_grams_per_ton` against the g/t formula applied to net µg.
+
+**NULL-safe clamps.** Every clamp is `CASE WHEN x IS NOT NULL THEN GREATEST(0, x) END`. Postgres `GREATEST` ignores NULLs, so a bare `GREATEST(0, NULL)` would return 0. With the guard, a missing input (no background match, NULL `h2_micromoles`, NULL or 0 rock mass or Fe(II)) gives a NULL net value, never 0.
+
+**Group level** (`v_results_h2_bkg_adjusted_rollup`, one row per sample `base_experiment_id` and bucket): the mean is clamped, the SD is propagated from the **unclamped** values, using replicate SD only (GC instrument RSD is out of scope):
+
+```
+mean_net_X = GREATEST(0, AVG(d_X))
+sd_net_X   = NULL                                   if stddev_samp(d_X) and AVG(u_X) are both NULL
+           = sqrt(COALESCE(stddev_samp(d_X),0)^2 + COALESCE(AVG(u_X),0)^2)   otherwise
+```
+
+for X in {µmol, g/t, Fe %}. Within one sample bucket every row matches the same background bucket, so `stddev_samp(d_umol)` equals the sample's own replicate SD. `AVG(u_X)` is exact when replicates share rock mass and Fe(II), and a close approximation otherwise (check the group's mixed-condition count in the issue log). Worked example: samples 10, 12, 14 against background 2, 3, 4 (mean 3, sd 1) at one bucket, rock mass 1.0 g: per-row net 7, 9, 11; `mean_net_h2_micromoles = 9.0`, `sd_net_h2_micromoles = sqrt(2^2 + 1^2) = 2.236`, `sd_net_h2_grams_per_ton = 2.01588 x sqrt(5) = 4.508`.
+
+**Rollup scope.** The rollup is built from the per-row view joined to `experiments` with `NOT COALESCE(is_outlier, false)`, so sample outliers are excluded from it (they remain in the per-row view, like every other per-row view). Rows whose sample bucket is NULL are excluded. `n_values` counts rows with a net value, and rollup `below_background` is `AVG(d_umol) < 0` (the group mean before the clamp). When no background bucket matches, the rollup row's `bkg_*` and net columns are NULL. A rock mass or Fe(II) of 0 gives NULL g/t or Fe % (`NULLIF`), matching the Python `> 0` guard; the µmol columns are unaffected.
+
+**Per-row average vs rollup mean.** Because the per-row `net_*` values are clamped and the rollup clamps only the *mean* of unclamped values, the average of the per-row clamped values can differ from `mean_net_*`. Example: samples 1, 2, 5 against a background mean of 3: per-row net 0, 0, 2 (average 0.667), but `mean_net_h2_micromoles = GREATEST(0, AVG(-2, -1, 2)) = GREATEST(0, -0.333) = 0`. Use the rollup for group statistics. Do not average the per-row `net_*` column in a Power BI measure.
+
+**Edge rules.** Mutual links (A uses B, B uses A) are allowed. Chained links are ignored: a background always contributes its raw H₂, never its own adjusted value. Renaming a sample group or a background stem disconnects the link (the key is a string; renames do not fan out to `h2_background_links`, by decision) and net values go NULL. Deleting a background experiment leaves the link in place; the delete confirmation lists the groups affected (`h2_background_for`).
+
+**Python duplicate of the stem pattern.** The vial-mode stem uses `TIMEPOINT_TOKEN_SQL_PATTERN` from `backend/services/replicate_collapse.py` (not a new copy of the regex). That constant is defined above the module's `database` imports to break an import cycle with `database/event_listeners.py`, which imports it at module level.
+
+---
+
 ## Utility Functions
 
 ### `format_additives(conditions)` — `additive_calcs.py`

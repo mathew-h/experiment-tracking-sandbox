@@ -79,12 +79,17 @@ It shows:
 - The cross-replicate **rollup chart** (mean ± std per timepoint) — the same data as the
   Grouped (n=N) mode on an individual member's Results tab.
 
-The page is **read-only**: "This is a grouped experiment view — you may only edit
-individual replicates." Edit a replicate's conditions, additives, or results from its
-own experiment page.
+The page does not edit replicates: "Replicates are edited individually; only the H₂
+background is set here." Edit a replicate's conditions, additives, or results from its
+own experiment page. The one thing set on this page is the Serum **H₂ background**
+(below).
 
 This replaces the old header link to `/experiments/{base}`, which 404'd whenever the
 base ID had no parent row — the common case for lettered-only replicate sets.
+
+### H₂ background (Serum groups)
+
+Serum group pages have an **H₂ background** row in the header. **Set** (or **Change**) picks a blank serum experiment to subtract from this group's H₂, either the **whole group** (all its vials averaged) or **this vial only** (that vial and its `-t` vials). **Clear** removes the link after a confirmation. Once linked, the grouped results view adds **Net H₂ (µmol)**, **Net H₂ (g/t)** and **Net Fe²⁺ → H₂ (%)** with mean ± SD. Each timepoint uses the nearest background day: a warning chip shows the matched day when it differs, "≤ bkg" marks a mean at or below the background, and "no bkg match" means that bucket has no usable background. The default metric stays raw H₂ ppm, and stored H₂ values are never changed. Renaming the group or the background disconnects the link; set it again.
 
 ### Timepoint vials with no letters
 

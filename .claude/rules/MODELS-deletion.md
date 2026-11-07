@@ -92,6 +92,20 @@ Defined across `backend/services/experiment_deletion.py` (single) and `backend/s
     `_impact_to_response`, the TS `DeleteImpact` interface, and the modal's
     `IMPACT_ROWS` — or the dialog silently under-reports.
 
+    **List fields (`background_for`, `h2_background_for`, `replicate_children`)** are
+    decoupled references, not destroyed rows, so they stay out of `total`; the same
+    five layers apply to them (dataclass field, `collect_delete_impact`,
+    `DeleteImpactResponse`, `_impact_to_response`, TS `DeleteImpact`), plus the
+    modal's typed-ID gate and notice instead of `IMPACT_ROWS`.
+    `h2_background_for` (issue #144) is the list of sample group keys whose
+    `h2_background_links` row resolves to the deleted experiment's group key
+    (`background_base_id`) or `-t`-stripped stem (`background_stem_id`); it is
+    filled by `h2_background.groups_using_background`. Link rows are **not**
+    deleted (string-addressed, other vials may remain, no FK): if the background
+    ends up with no H₂ data the group's net values go NULL and its page shows
+    "background has no H₂ data". Deleting a *sample* group's experiments likewise
+    leaves its own link row in place.
+
     **Audit row.** Every delete writes one `ModificationsLog` row with
     `modification_type='delete'`, `modified_table='experiments'`, `old_values`
     holding the deletion snapshot and `new_values` holding the impact counts.
