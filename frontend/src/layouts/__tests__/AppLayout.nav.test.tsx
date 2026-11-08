@@ -26,9 +26,23 @@ describe('AppLayout navigation', () => {
     )
     expect(screen.getByRole('link', { name: /core floods/i })).toHaveAttribute('href', '/core-floods')
     expect(screen.getByRole('link', { name: /^experiments$/i })).not.toHaveClass('border-red-500')
-    // Second to last, just above Notes review.
+    // Just above Notes review, below HPHT (#150).
     const navHrefs = within(screen.getByRole('navigation')).getAllByRole('link').map((a) => a.getAttribute('href'))
     expect(navHrefs[navHrefs.indexOf('/chemicals') + 1]).toBe('/data-export')
-    expect(navHrefs.slice(-2)).toEqual(['/core-floods', '/notes/review'])
+    expect(navHrefs.slice(-3)).toEqual(['/hpht', '/core-floods', '/notes/review'])
+  })
+
+  it('sidebar shows HPHT directly above Core Floods (issue #150)', () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter initialEntries={['/hpht']}>
+        <QueryClientProvider client={qc}>
+          <AppLayout />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: /^hpht$/i })).toHaveAttribute('href', '/hpht')
+    const navHrefs = within(screen.getByRole('navigation')).getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(navHrefs.indexOf('/core-floods') - navHrefs.indexOf('/hpht')).toBe(1)
   })
 })

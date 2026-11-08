@@ -156,7 +156,9 @@ export function resultNoteOf(s: CoreFloodSample): CoreFloodSampleNote | undefine
 }
 
 /** Result and observation texts in order, joined for a table cell. */
-export function noteSummary(s: CoreFloodSample): { text: string; hasModification: boolean } {
+/** Result notes and observations joined, and whether a modification note exists
+ *  (any run sample: Core Flood or HPHT). */
+export function noteSummary(s: { notes: CoreFloodSampleNote[] }): { text: string; hasModification: boolean } {
   return {
     text: s.notes
       .filter((n) => n.note_type === 'result_note' || n.note_type === 'observation')

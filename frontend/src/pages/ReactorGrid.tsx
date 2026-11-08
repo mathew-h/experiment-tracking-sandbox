@@ -28,6 +28,12 @@ function isCoreFlood(label: string): boolean {
   return label.startsWith('CF')
 }
 
+/** HPHT run page of an R or P card's ONGOING experiment (issue #150); null otherwise. */
+export function runPagePath(card: ReactorCardData): string | null {
+  if (isCoreFlood(card.reactor_label) || card.status !== 'ONGOING' || !card.base_experiment_id) return null
+  return `/hpht/${encodeURIComponent(card.base_experiment_id)}`
+}
+
 function StatusBadge({
   card,
 }: {
@@ -524,6 +530,14 @@ function ReactorDetailModal({
           >
             Close
           </button>
+          {runPagePath(card) && (
+            <button
+              onClick={() => navigate(runPagePath(card)!)}
+              className="px-3 py-1.5 text-sm text-ink-primary border border-surface-border rounded hover:bg-surface-raised transition-colors"
+            >
+              Open run page
+            </button>
+          )}
           <button
             onClick={() => navigate(`/experiments/${card.experiment_id}`)}
             className="px-3 py-1.5 text-sm bg-brand-red text-white rounded hover:opacity-90 transition-opacity"

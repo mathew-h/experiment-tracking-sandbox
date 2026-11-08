@@ -14,7 +14,7 @@ vi.mock('@/api/experiments', () => ({
   },
 }))
 
-import { ReactorGrid } from '../ReactorGrid'
+import { ReactorGrid, runPagePath } from '../ReactorGrid'
 import { experimentsApi } from '@/api/experiments'
 
 function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
@@ -23,6 +23,7 @@ function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
     reactor_label: 'R05',
     experiment_id: 'HPHT_MH_072',
     experiment_db_id: 142,
+    base_experiment_id: 'HPHT_MH_072',
     status: 'ONGOING',
     experiment_type: 'HPHT',
     sample_id: null,
@@ -284,5 +285,26 @@ describe('ReactorGrid — Parr group (issue #147)', () => {
     // Only P02 has a spec in this payload; Hastelloy can only come from it.
     expect(parr.textContent).toContain('Hastelloy')
     expect(parr.textContent).toContain('75')
+  })
+})
+
+describe('runPagePath — HPHT run page link (issue #150)', () => {
+  it('links an ONGOING R or P card to its base ID, not its own segment ID', () => {
+    expect(runPagePath(makeCard({ experiment_id: 'HPHT_297-2', base_experiment_id: 'HPHT_297' })))
+      .toBe('/hpht/HPHT_297')
+    expect(runPagePath(makeCard({ reactor_label: 'P03', base_experiment_id: 'HPHT_310' })))
+      .toBe('/hpht/HPHT_310')
+  })
+
+  it('gives no link for Core Flood rigs, QUEUED cards or a missing base ID', () => {
+    expect(runPagePath(makeCard({ reactor_label: 'CF01', experiment_type: 'Core Flood' }))).toBeNull()
+    expect(runPagePath(makeCard({ status: 'QUEUED' }))).toBeNull()
+    expect(runPagePath(makeCard({ base_experiment_id: null }))).toBeNull()
+  })
+
+  it('shows Open run page in the card detail modal', async () => {
+    renderGrid([makeCard({ base_experiment_id: 'HPHT_MH_072' })])
+    fireEvent.click(screen.getByText('HPHT_MH_072'))
+    expect(await screen.findByRole('button', { name: 'Open run page' })).toBeInTheDocument()
   })
 })

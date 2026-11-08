@@ -283,6 +283,21 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
   })
 
+  it('links an HPHT experiment to its run page and keeps + Add Results (issue #150)', async () => {
+    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([])
+    wrapFull(
+      <ResultsTab
+        experimentId="HPHT_297-2"
+        experimentFk={11}
+        experimentType="HPHT"
+        baseExperimentId="HPHT_297"
+      />,
+    )
+    const link = await screen.findByRole('link', { name: 'Open run page' })
+    expect(link).toHaveAttribute('href', '/hpht/HPHT_297')
+    expect(screen.getByRole('button', { name: '+ Add Results' })).toBeInTheDocument()
+  })
+
   it('keeps + Add Results for a non-core-flood experiment', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([])
     wrapFull(<ResultsTab experimentId="SERUM_001" experimentFk={10} experimentType="Serum" />)

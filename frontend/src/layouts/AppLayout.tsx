@@ -86,6 +86,16 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    path: '/hpht',
+    label: 'HPHT',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="4" y="2" width="8" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M6 2V1M10 2V1M6.5 9.5h3M8 8v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
     path: '/core-floods',
     label: 'Core Floods',
     icon: (

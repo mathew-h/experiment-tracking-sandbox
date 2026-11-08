@@ -37,6 +37,8 @@ export interface ReactorCardData {
   reactor_label: string
   experiment_id: string | null
   experiment_db_id: number | null
+  /** The run the card's experiment belongs to; links the HPHT run page (issue #150). */
+  base_experiment_id: string | null
   status: string | null
   experiment_type: string | null
   sample_id: string | null

@@ -3,7 +3,7 @@ import type { CoreFloodSample } from '@/api/coreFloods'
 import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
 import { labDateOf } from '@/utils/labDate'
 import { fmt, noteSummary } from './fields'
-import { ICP_ELEMENTS } from '@/components/icp/icpElements'
+import { IcpList } from '@/components/icp/IcpList'
 
 interface Props {
   samples: CoreFloodSample[]
@@ -22,18 +22,6 @@ const STICKY_EXPANDER = 'sticky left-0 z-10 w-10 min-w-[2.5rem] max-w-[2.5rem]'
 const STICKY_DATE = 'sticky left-10 z-10'
 const STICKY_HEAD_BG = 'bg-surface-overlay'
 const STICKY_ROW_BG = 'bg-surface-raised group-hover:bg-surface-overlay'
-
-function IcpList({ elements }: { elements: Record<string, number> }) {
-  const items = ICP_ELEMENTS.filter((k) => elements[k] != null)
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono-data text-xs">
-      {items.map((k) => (
-        <span key={k}>{k.charAt(0).toUpperCase() + k.slice(1)} {fmt(elements[k])}</span>
-      ))}
-      <span className="text-ink-muted">ppm</span>
-    </div>
-  )
-}
 
 /** Core flood samples, newest first (the server sends oldest first); values go through `fmt`. */
 export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {

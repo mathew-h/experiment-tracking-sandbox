@@ -56,6 +56,31 @@ A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`,
 
 ---
 
+## HPHT runs
+
+An HPHT run is every experiment sharing a base ID: the first segment (`HPHT_297`), later segments (`HPHT_297-2`) and side samples such as `HPHT_068_Acidified`. The **HPHT** page (in the sidebar above Core Floods) treats the whole run as one record. It covers both the R vessels and the Parr vessels (P01–P06).
+
+**List.** One row per run: description, reactor slot (`R07`, `P03`), sample count, last sample date, cumulative H₂ (g/t) and status. It opens on **Active** (runs with an ONGOING segment); **All** shows every run. Type in the search box to filter by run ID or description. A run with no reactor (for example HPHT_Synth_001) shows an empty Reactor cell.
+
+**Run page.** Click a run to open it. From top to bottom:
+
+- **Header:** base ID, description, reactor slot and the ONGOING segment, with **Export all** and **+ Add sample**.
+- **Conditions:** temperature, reaction pressure, rock mass, water volume, W:R, catalyst, feedstock, sample ID, start date and additives of the latest segment. This card is read-only; **Edit on Conditions tab** opens that segment's experiment page.
+- **Samples:** every sample across all segments, newest first. **Day** is the cumulative day since the run started, and **Segment** shows which experiment the sample belongs to. Under **GC**: H₂ ppm, µmol, g/t, cumulative g/t, g/t per day and Fe²⁺ → H₂ %. Under **Solution**: pH and conductivity. A **MOD** badge marks a sample with a modification note. Rows with ICP data have an arrow that shows the element readings. Click a row to edit the sample.
+- **Run to date:** three charts against cumulative day: cumulative H₂ (g/t), H₂ per day for each interval, and cumulative Fe²⁺ → H₂ yield (%). A dashed line marks where each later segment starts. Side samples are left out. A gap means that interval has no value (for example two samples on the same day); it is not a zero.
+- **Side samples** (collapsed): the run's `_Text` variants with their raw values only, no running totals.
+- **ICP over time** (collapsed): the same ICP chart as on the Results tab.
+- **Segments** (collapsed): each segment's status, description and **Rename**, as on the Core Flood page.
+- **Data checks** (only when there is a problem): several roots, several ONGOING segments, a missing description, or a segment whose ID does not follow the run's base ID.
+
+NH₃ is not shown on this page. It stays on the experiment's Results tab and in Power BI.
+
+**Add a sample.** Click **+ Add sample**. It opens the same form as **+ Add Results** on the experiment page. With one ONGOING segment the sample goes there, and the form names it. Otherwise a **Segment** select appears at the top. **Day** counts from the chosen segment's start date, not from the start of the run. Edits work the same way; Day cannot be changed.
+
+**Other ways in.** On an HPHT experiment's Results tab, **Open run page** sits next to **+ Add Results**. On the Dashboard, clicking an occupied R or P reactor with an ONGOING experiment shows an **Open run page** button.
+
+---
+
 ## Experiment Lifecycle
 
 Experiments move through a defined lifecycle from creation to completion:

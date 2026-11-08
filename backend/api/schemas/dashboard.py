@@ -73,6 +73,8 @@ class ReactorCardData(BaseModel):
     reactor_label: str              # "R05", "P03" or "CF01"
     experiment_id: Optional[str] = None
     experiment_db_id: Optional[int] = None
+    # The run the card's experiment belongs to; the HPHT run page link (#150).
+    base_experiment_id: Optional[str] = None
     status: Optional[ExperimentStatus] = None
     experiment_type: Optional[str] = None
     sample_id: Optional[str] = None
