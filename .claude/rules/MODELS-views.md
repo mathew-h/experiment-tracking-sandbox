@@ -42,6 +42,17 @@ One row per **primary timepoint of a Core Flood experiment** (`er.is_primary_tim
 - **View columns, not calculation-engine fields.** Nothing is registered in the calculation registry or stored; per-sample H2 is still computed by `recalculate_scalar`.
 - **Assumes one `experimental_conditions` row per experiment** (`uq_conditions_experiment_fk`); a duplicate would duplicate rows here.
 
+### `v_hpht_samples` (issue #149)
+
+The HPHT counterpart of `v_core_flood_samples`, with the same `s` → `w` → final SELECT structure, `is_variant` rule and window (`PARTITION BY run_base_id, is_variant ORDER BY cumulative_time_post_reaction_days, result_id`). One row per **primary timepoint of an HPHT experiment** (type predicate `= 'hpht'` after the same lowercase and whitespace collapse; keep it in sync with `_SERIES_BY_TYPE`). Key: `result_id`. Created by `database/event_listeners.py` and Alembic `d8a3f5c1e7b2` (view only, no columns; `upgrade` drops the view if it exists before creating it, because API startup may already have created it; `downgrade` drops the view only).
+
+- **Columns:** the raw sample columns of the CF view minus flow, pressure and pore volume, plus `ferrous_iron_yield_h2_pct` and `ec.reactor_slot` (each segment's own slot, R or P).
+- **Derived** (formulas in `docs/CALCULATIONS.md`, "HPHT run values"): `interval_days`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `cumulative_h2_micromoles`, `cumulative_ferrous_iron_yield_h2_pct`. All NULL on variant rows.
+- **H₂ basis: incremental per sample (Mat, 2026-11-06)**, which is what makes the running sums mean "H₂ to date". **No NH₃ columns.**
+- **Why not `v_results_scalar`:** its `cumulative_ferrous_iron_yield_h2_pct` partitions per `experiment_id`, so a `-2` segment restarts at zero. This view sums per run.
+- **Read by** `backend/services/hpht_service.py` (`/api/hpht`), through `run_service.fetch_samples`, whose `SAMPLE_VIEWS` allowlist names the views a run can be read from.
+- **Migration parity:** `tests/models/test_hpht_samples_view.py` compares the migration's `_V_HPHT_SAMPLES` to `_VIEWS`. A later migration that changes this view takes over that check and keeps a `_V_HPHT_SAMPLES_OLD` (see the CF chain above).
+
 ### `v_results_h2_bkg_adjusted` and `v_results_h2_bkg_adjusted_rollup` (issue #144)
 
 Background-adjusted serum H₂, driven by `h2_background_links` (`.claude/rules/MODELS.md`). Defined in `database/event_listeners.py` right after `v_results_h2`; both depend on the table, so a migration that drops it must drop both views first (Alembic `b7e2d9c4a1f6` does). Formulas, clamp rule and nearest-bucket rule: `docs/CALCULATIONS.md` ("Background-adjusted H₂ (view columns)"). **View columns, not calculation-engine fields:** nothing stored, nothing registered, link writes call no `recalculate()`. Existing views (`v_results_h2`, `v_results_scalar`, `v_results_scalar_rollup`) are unchanged.

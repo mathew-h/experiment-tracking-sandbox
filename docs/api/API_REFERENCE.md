@@ -1052,6 +1052,46 @@ The response is the updated sample as a `v_core_flood_samples` row plus `notes`,
 | Edit the description | the experiment notes endpoints (`/api/experiments/{id}/notes`) |
 | Edit pore volume | `PATCH /api/conditions/{id}` (use the segment's `conditions_id`) |
 
+Since issue #149 the run loading behind these routes (`load_segments`, `run_description`, `attach_notes`, the list sort and the ICP query) lives in `backend/services/run_service.py`, shared with the HPHT routes below. Responses are byte-identical to before (checked against every Core Flood run in the dev DB). `CoreFloodSegment` is now an alias of the shared `RunSegment` schema.
+
+## HPHT runs
+
+Issue #149. A **run** is every HPHT experiment sharing a `base_experiment_id` (`HPHT_068`, `HPHT_068-2`, `HPHT_068_Acidified`), in an R or Parr (P) vessel. HPHT is detected the way `database/reactor_slot.py::series_prefix` reads `experiment_type`. Read-only: samples are added and edited through `POST` / `PATCH /api/experiments/{experiment_id}/results[/{result_id}]` (issue #146), additives through `GET /api/experiments/{experiment_id}/additives`, and run cleanup (rename, status, description) through the same endpoints as the Core Flood run page above. All routes need a Firebase bearer token.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/hpht` | List runs, active first. Query: `scope` (`active` default, or `all`), `q` |
+| GET | `/api/hpht/{base_id}/icp` | ICP-OES readings (ppm) for the run's samples, in view order |
+| GET | `/api/hpht/{base_id}` | One run: segments, setup summary, view-derived samples with notes, warnings |
+
+A base ID with no HPHT experiment is **404** (including a Core Flood or Serum base ID).
+
+### GET /api/hpht
+
+One item per HPHT `base_experiment_id`. `scope`, `q` and the sort follow `GET /api/core-floods` exactly: `scope=active` keeps runs with an ONGOING segment; `q` is a case-insensitive substring of the base ID, any segment ID or the description; sorted active first, then newest `last_sample_date`, then `base_id`.
+
+Item fields (`HphtRunListItem`): `base_id`, `description` (same rule as Core Flood), `segment_count`, `ongoing_experiment_ids`, `reactor_slot` (of the latest segment, so a Parr run shows `P03`), `sample_count`, `last_sample_date`, `latest_cumulative_h2_grams_per_ton`, `warning_count`. Variant samples are excluded from the count, the date and the latest cumulative H₂.
+
+### GET /api/hpht/{base_id}
+
+- `segments`: the shared `RunSegment` shape, identical to Core Flood segments (`pore_volume_mL` is always null here), ordered by start date (undated last), then `experiment_id`.
+- `conditions` (`HphtConditionsSummary`): the setup of the **latest non-variant segment**: `experiment_id`, `conditions_id`, experiment `date`, `sample_id`, `temperature_c`, `rxn_temp_pressure_psi`, `rock_mass_g`, `water_volume_mL`, `water_to_rock_ratio`, `catalyst`, `catalyst_ppm`, `feedstock`. `null` when every segment is a variant. **`catalyst` and `catalyst_ppm` are the legacy conditions columns**: in the 2026-10-23 dev data only 71 of 432 HPHT conditions rows have `catalyst_ppm` and none since 2025-10-16, so they are usually empty. Read catalysts from the additives endpoint.
+- `samples`: rows of `v_hpht_samples` for this run, read as-is, plus `notes` (the sample's `result_note`, `observation` and `modification` notes by id, as on Core Flood). Derived columns: `interval_days`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `cumulative_h2_micromoles`, `cumulative_ferrous_iron_yield_h2_pct` (NULL on variant rows). See `docs/CALCULATIONS.md` ("HPHT run values").
+- `warnings`: zero or one entry per code, `{code, experiment_ids}` with sorted IDs:
+
+| Code | Raised when | Experiment IDs |
+|------|-------------|----------------|
+| `multiple_roots` | more than one non-variant segment has no parent | the roots |
+| `multiple_ongoing` | more than one segment is ONGOING | the ONGOING segments |
+| `missing_description` | a segment has no description note | those segments |
+| `base_mismatch` | a segment's `experiment_id` is not the base ID, `<base>-…` or `<base>_…` | those segments |
+
+`base_mismatch` needs the separator, so `HPHT_1960` filed under base `HPHT_196` is flagged. On the 2026-10-23 dev data it flags exactly HPHT_197 (under HPHT_196), HPHT_196 (under HPHT_197) and HPHT_144 (under HPHT_143). There are no pore-volume or flow warnings.
+
+### GET /api/hpht/{base_id}/icp
+
+Same as `GET /api/core-floods/{base_id}/icp`, joined on `v_hpht_samples`: `IcpRow`s in view order, samples without an `icp_results` row omitted, variants included and flagged.
+
 ## Interactive Docs
 
 - Swagger UI: `http://localhost:8000/docs`

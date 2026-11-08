@@ -233,6 +233,28 @@ A core flood run is one `base_experiment_id` split across sequential segment exp
 
 ---
 
+## HPHT run values (`v_hpht_samples`)
+
+An HPHT run is one `base_experiment_id` split across sequential segment experiments (`HPHT_068`, `HPHT_068-2`, `HPHT_068-3`), in an R or Parr (P) vessel. Values that depend on more than one sample are computed in the SQL view `v_hpht_samples` (`database/event_listeners.py`, issue #149), one row per primary timepoint of an HPHT experiment. Like the core flood values above, **these are view columns, not calculation-engine fields**: nothing is registered or stored, and per-sample H₂ (`h2_micromoles`, `h2_grams_per_ton_yield`, `ferrous_iron_yield_h2_pct`) is still computed by `recalculate_scalar`. The HPHT run page and Power BI read the same view.
+
+**Window.** Per `run_base_id` and `is_variant`, ordered by `cumulative_time_post_reaction_days` then `result_id`, from the first sample to the current row. A `-2` segment continues its root's sums. `v_results_scalar.cumulative_ferrous_iron_yield_h2_pct` partitions per `experiment_id` instead and restarts at each segment, so use this view for a run's H₂ to date.
+
+| Column | Definition |
+|---|---|
+| `interval_days` | `cumulative_time − COALESCE(LAG(cumulative_time), 0)` |
+| `cumulative_h2_grams_per_ton` | `SUM(COALESCE(h2_grams_per_ton_yield, 0))` over the window |
+| `h2_grams_per_ton_per_day` | `h2_grams_per_ton_yield / NULLIF(interval_days, 0)` |
+| `cumulative_h2_micromoles` | `SUM(COALESCE(h2_micromoles, 0))` over the window |
+| `cumulative_ferrous_iron_yield_h2_pct` | `SUM(COALESCE(ferrous_iron_yield_h2_pct, 0))` over the window |
+
+**H₂ basis: incremental (decided by Mat, 2026-11-06).** Each sample's H₂ is only what was collected since the previous sample, so per-sample g/t, µmol and Fe(II) yield % sum to the run's H₂ to date, and a sample's g/t divided by its interval days is a rate. If a sample's H₂ were cumulative, every column above except `interval_days` would be wrong.
+
+**No NH₃ columns.** The HPHT run view is H₂-focused (decided 2026-11-06); ammonium stays in `v_results_scalar`.
+
+**Variants and edge cases** follow the core flood rules above: a `_Text` child of a segment (`HPHT_061_Desorption`, `HPHT_068_Acidified`) is a variant with every derived column NULL in its own partition; a zero interval gives a NULL rate; a NULL per-sample value adds 0; NULL cumulative time sorts last. "HPHT" is matched the way `database/reactor_slot.py::_SERIES_BY_TYPE` reads it (case- and whitespace-insensitive).
+
+---
+
 ## Background-adjusted H₂ (view columns)
 
 Serum vial H₂ is stored gross. A researcher can link a sample replicate group to a background (blank) serum set (issue #144, table `h2_background_links`), and two SQL views then compute background-adjusted H₂ (`v_results_h2_bkg_adjusted` per row, `v_results_h2_bkg_adjusted_rollup` per group and bucket). Same precedent as the core flood views above: **view columns, not calculation-engine fields.** Nothing is stored, nothing is registered in the calculation registry, and the link endpoints call no `recalculate()`. `_calculate_hydrogen` and its stored `h2_micromoles`, `h2_grams_per_ton_yield` and `ferrous_iron_yield_h2_pct` stay gross. Raw ppm is never adjusted; `bkg_mean_h2_ppm` is exposed for reference only.

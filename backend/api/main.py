@@ -14,6 +14,7 @@ from backend.config.settings import get_settings
 from backend.api.routers import (
     experiments, conditions, results, samples,
     chemicals, analysis, dashboard, admin, bulk_uploads, auth, additives, core_floods,
+    hpht,
 )
 
 settings = get_settings()
@@ -66,6 +67,7 @@ app.include_router(bulk_uploads.router)
 app.include_router(auth.router)
 app.include_router(additives.router)
 app.include_router(core_floods.router)
+app.include_router(hpht.router)
 
 
 @app.get("/health")
