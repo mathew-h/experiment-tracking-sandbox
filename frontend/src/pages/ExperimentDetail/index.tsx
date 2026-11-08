@@ -159,6 +159,22 @@ export function ExperimentDetailPage() {
     },
   })
 
+  // Issue #152: a background / blank is left out of a group's averages when the
+  // group also has sample vials, and is offered first as an H₂ background.
+  const backgroundMutation = useMutation({
+    mutationFn: (isBackground: boolean) => experimentsApi.patch(id!, { is_background: isBackground }),
+    onSuccess: (_updated, isBackground) => {
+      queryClient.invalidateQueries({ queryKey: ['experiment'] })
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      queryClient.invalidateQueries({ queryKey: ['group-rollup'] })
+      queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
+      success(isBackground ? 'Marked as background' : 'Background flag removed')
+    },
+    onError: (err: unknown) => {
+      toastError('Update failed', String(err))
+    },
+  })
+
   function startDateEdit() {
     setDateDraft(experiment!.date?.slice(0, 10) ?? '')
     setEditingDate(true)
@@ -261,6 +277,7 @@ export function ExperimentDetailPage() {
             {experiment.is_outlier && (
               <Badge variant="warning">Outlier — excluded from group stats</Badge>
             )}
+            {experiment.is_background && <Badge variant="info">Background</Badge>}
             {conditions?.experiment_type && (
               <span className="text-xs text-ink-muted">{conditions.experiment_type}</span>
             )}
@@ -430,6 +447,14 @@ export function ExperimentDetailPage() {
             {experiment.is_outlier ? 'Include in rollup' : 'Mark as outlier'}
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => backgroundMutation.mutate(!experiment.is_background)}
+          disabled={backgroundMutation.isPending}
+        >
+          {experiment.is_background ? 'Unmark background' : 'Mark as background'}
+        </Button>
         <ExportAllButton experimentId={experiment.experiment_id} />
         <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}>
           Delete Experiment

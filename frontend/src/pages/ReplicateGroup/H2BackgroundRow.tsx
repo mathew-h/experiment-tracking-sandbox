@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import type { ExperimentListItem, H2BackgroundLink } from '@/api/experiments'
-import { Button, ConfirmModal, Input, Modal } from '@/components/ui'
+import { Badge, Button, ConfirmModal, Input, Modal } from '@/components/ui'
 import { isSerumType, splitTimepointToken } from '@/utils/experimentId'
 
 type Mode = 'group' | 'vial'
@@ -89,8 +89,12 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
     },
   })
 
+  // Issue #152: flagged backgrounds first; the sort is stable, so the list's
+  // own order (newest first) holds within each half.
   const items = searchEnabled
-    ? (results?.items ?? []).filter((i) => isSerumType(i.experiment_type))
+    ? (results?.items ?? [])
+        .filter((i) => isSerumType(i.experiment_type))
+        .sort((a, b) => Number(!!b.is_background) - Number(!!a.is_background))
     : []
   const groupKey = picked ? groupKeyOf(picked) : ''
   const { data: pickedGroup } = useQuery({
@@ -189,9 +193,10 @@ export function H2BackgroundRow({ baseId, link }: H2BackgroundRowProps) {
                   <button
                     type="button"
                     onClick={() => setPicked(item)}
-                    className="w-full text-left px-3 py-1.5 text-sm font-mono-data text-ink-primary hover:bg-surface-raised"
+                    className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm font-mono-data text-ink-primary hover:bg-surface-raised"
                   >
                     {item.experiment_id}
+                    {item.is_background && <Badge variant="info">Background</Badge>}
                   </button>
                 </li>
               ))}

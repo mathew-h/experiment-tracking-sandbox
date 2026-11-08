@@ -14,6 +14,8 @@ class ExperimentCreate(BaseModel):
     status: ExperimentStatus = ExperimentStatus.ONGOING
     base_experiment_id: Optional[str] = None
     parent_experiment_fk: Optional[int] = None
+    # Issue #152: a background / blank vial (no rock, or a deliberate control).
+    is_background: bool = False
 
 
 class ExperimentUpdate(BaseModel):
@@ -23,12 +25,13 @@ class ExperimentUpdate(BaseModel):
     date: Optional[datetime] = None
     status: Optional[ExperimentStatus] = None
     is_outlier: Optional[bool] = None
+    is_background: Optional[bool] = None
 
-    @field_validator("is_outlier")
+    @field_validator("is_outlier", "is_background")
     @classmethod
-    def _is_outlier_not_null(cls, v: Optional[bool]) -> bool:
+    def _flag_not_null(cls, v: Optional[bool], info) -> bool:
         if v is None:
-            raise ValueError("is_outlier cannot be null; send true or false, or omit the field")
+            raise ValueError(f"{info.field_name} cannot be null; send true or false, or omit the field")
         return v
 
 
@@ -55,6 +58,7 @@ class ExperimentListItem(BaseModel):
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
     is_outlier: bool = False
+    is_background: bool = False
     id_timepoint_days: Optional[float] = None
     # Joined from conditions (may be None if no conditions recorded yet)
     experiment_type: Optional[str] = None
@@ -105,6 +109,7 @@ class ExperimentResponse(BaseModel):
     parent_experiment_fk: Optional[int] = None
     replicate_label: Optional[str] = None
     is_outlier: bool = False
+    is_background: bool = False
     id_timepoint_days: Optional[float] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -238,6 +243,7 @@ class ReplicateGroupMember(BaseModel):
     replicate_label: Optional[str] = None
     status: Optional[ExperimentStatus] = None
     is_outlier: bool = False
+    is_background: bool = False
 
 
 class ReplicateGroupResponse(BaseModel):

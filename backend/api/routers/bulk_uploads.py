@@ -935,12 +935,15 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
                 "status",
                 "researcher",
                 "initial_note",
+                # Issue #152: TRUE marks a background / blank. Blank = inherit
+                # from the -N / _Text parent on create, unchanged on overwrite.
+                "is_background",
                 "overwrite",
             ],
             required={"experiment_id*"},
             example_row=[
                 "HPHT_001", None, "S001", "2026-01-15", "ONGOING", "MH",
-                "Initial setup note", "FALSE",
+                "Initial setup note", "FALSE", "FALSE",
             ],
         )
 
@@ -1010,6 +1013,13 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("status", "ONGOING, COMPLETED, CANCELLED, or QUEUED. Defaults to ONGOING."),
             ("researcher", "Researcher initials. Auto-populated from experiment_id (3-part format) if omitted."),
             ("initial_note", "Free-text note attached to the experiment at creation."),
+            ("is_background", (
+                "TRUE = this experiment is a background / blank (no rock, or a deliberate "
+                "control). Backgrounds are left out of a replicate group's averages when the "
+                "group also has sample vials. Blank = FALSE for a new experiment (a -N or "
+                "_Text derivation inherits its parent's value) and unchanged on overwrite. "
+                "Accepts TRUE/FALSE, YES/NO, 1/0; anything else skips the row."
+            )),
             ("overwrite", "TRUE = update existing experiment (must already exist); FALSE (default) = skip if experiment already exists. Note: overwrite=TRUE on a non-existent experiment skips with a warning — it does NOT create. Also: overwrite=TRUE clears all existing notes before adding the new initial_note."),
             ("--- conditions sheet ---", ""),
             ("experiment_id*", "REQUIRED. Must match an experiment_id in the experiments sheet or already exist in the database."),

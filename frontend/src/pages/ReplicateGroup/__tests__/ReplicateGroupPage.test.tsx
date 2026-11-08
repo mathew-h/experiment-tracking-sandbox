@@ -412,3 +412,18 @@ describe('ReplicateGroupPage — issue #101: a group with no replicate letters',
     expect(await screen.findByRole('button', { name: 'Set' })).toBeInTheDocument()
   })
 })
+
+describe('ReplicateGroupPage — issue #152 background badge', () => {
+  it('badges a background member and no other', async () => {
+    const members = ORPHAN_MEMBERS.map((m) => (m.id === 3 ? { ...m, is_background: true } : m))
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue({
+      ...ORPHAN_GROUP,
+      members,
+      replicates: members.map((m) => ({ replicate_label: m.replicate_label!, vials: [m] })),
+    })
+    renderAtBase('SERUM_001')
+    const link = await screen.findByRole('link', { name: 'SERUM_001b' })
+    expect(link.closest('td')).toHaveTextContent('SERUM_001bBackground')
+    expect(screen.getAllByText('Background')).toHaveLength(1)
+  })
+})

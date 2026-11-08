@@ -235,6 +235,7 @@ so you can fill the template with the correct experiment IDs before uploading.
 | date | | YYYY-MM-DD |
 | sample_id | | Must exist in SampleInfo |
 | initial_note | | Becomes the experiment's **description** note (the Description column on the experiments list). Leave blank to add no note — a blank cell no longer inserts a `nan` placeholder, and with `overwrite=TRUE` a blank cell leaves the existing notes untouched; only a filled cell replaces them |
+| is_background | | `TRUE` marks a background / blank (no rock, or a deliberate control); issue #152. Blank on a new experiment = `FALSE`, except a `-N` or `_Text` derivation, which inherits its parent's value; blank with `overwrite=TRUE` leaves the stored value unchanged. Accepts `TRUE`/`FALSE`, `YES`/`NO`, `Y`/`N`, `1`/`0`; anything else skips that row with a warning. A change is recorded in the experiment's Entry Logs |
 | temperature_c | | |
 | initial_ph | | |
 | rock_mass_g | | |

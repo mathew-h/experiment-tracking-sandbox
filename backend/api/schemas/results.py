@@ -289,6 +289,9 @@ class RollupTimepointResponse(BaseModel):
     mean_grams_per_ton_yield: Optional[float] = None
     sd_grams_per_ton_yield: Optional[float] = None
     mean_final_ph: Optional[float] = None
+    # Issue #152: true when every non-outlier member of the group is a
+    # background, so these statistics are the background's own.
+    is_background_group: bool = False
 
 
 class IcpRow(BaseModel):
