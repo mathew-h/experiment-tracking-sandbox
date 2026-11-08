@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type { IcpRow } from './icp'
+import type { RunSampleNote, RunSegment } from './runs'
 
 export type CoreFloodWarningCode =
   | 'multiple_roots'
@@ -13,26 +14,9 @@ export interface CoreFloodWarning {
   experiment_ids: string[]
 }
 
-export interface CoreFloodSegment {
-  id: number
-  experiment_id: string
-  status: string | null
-  date: string | null
-  parent_experiment_id: string | null
-  is_variant: boolean
-  description: string | null
-  conditions_id: number | null
-  pore_volume_mL: number | null
-  rock_mass_g: number | null
-  reactor_slot: string | null
-}
-
-export interface CoreFloodSampleNote {
-  id: number
-  note_type: 'observation' | 'result_note' | 'modification'
-  note_text: string
-  created_by: string | null
-}
+/** Shared with the HPHT run endpoints (issue #149). */
+export type CoreFloodSegment = RunSegment
+export type CoreFloodSampleNote = RunSampleNote
 
 /** One v_core_flood_samples row; names are the view's column names. */
 export interface CoreFloodSample {

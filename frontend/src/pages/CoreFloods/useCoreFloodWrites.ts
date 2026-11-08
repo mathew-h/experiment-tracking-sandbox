@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
+import type { RunWrites } from '@/components/runs/runWrites'
 
 /** Refreshes everything a core flood sample write can change: the run list and
  *  run page, each touched segment's experiment and results, and the lists that
@@ -19,4 +20,11 @@ export async function invalidateCoreFloodWrites(
     qc.invalidateQueries({ queryKey: ['experiments'] }),
     qc.invalidateQueries({ queryKey: ['dashboard'] }),
   ])
+}
+
+/** The Core Flood run page, for the shared run components. */
+export const CORE_FLOOD_WRITES: RunWrites = {
+  invalidate: invalidateCoreFloodWrites,
+  runPath: (baseId) => `/core-floods/${encodeURIComponent(baseId)}`,
+  runQueryKey: (baseId) => ['core-flood', baseId],
 }

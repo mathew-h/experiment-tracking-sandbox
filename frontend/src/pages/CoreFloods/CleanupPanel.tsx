@@ -4,7 +4,7 @@ import type { CoreFloodRun, CoreFloodSample, CoreFloodWarning } from '@/api/core
 import { conditionsApi } from '@/api/conditions'
 import { Button, Card, CardHeader, Input, useToast } from '@/components/ui'
 import { labDateOf } from '@/utils/labDate'
-import { SegmentStatusSelect } from './SegmentStatusSelect'
+import { SegmentStatusSelect } from '@/components/runs/SegmentStatusSelect'
 import { invalidateCoreFloodWrites } from './useCoreFloodWrites'
 
 interface Props {
@@ -85,6 +85,7 @@ function PoreVolumeAll({ baseId, run, ids }: { baseId: string; run: CoreFloodRun
 
 /** One line per run warning, each with the control that fixes it. */
 export function CleanupPanel({ baseId, run, onEditSample, onRename, onEditDescription }: Props) {
+  const qc = useQueryClient()
   if (run.warnings.length === 0) return null
 
   const segment = (id: string) => run.segments.find((s) => s.experiment_id === id)
@@ -118,7 +119,10 @@ export function CleanupPanel({ baseId, run, onEditSample, onRename, onEditDescri
                 return seg ? (
                   <div key={id} className="flex items-center gap-2">
                     <span className="font-mono-data text-xs text-ink-primary">{id}</span>
-                    <SegmentStatusSelect baseId={baseId} segment={seg} />
+                    <SegmentStatusSelect
+                      segment={seg}
+                      onChanged={() => invalidateCoreFloodWrites(qc, baseId, [id])}
+                    />
                   </div>
                 ) : null
               })}

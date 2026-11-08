@@ -794,6 +794,7 @@ Returns all dashboard data in a single call. Response shape:
       "reactor_label": "R05",
       "experiment_id": "HPHT_MH_072",
       "experiment_db_id": 142,
+      "base_experiment_id": "HPHT_MH_072",
       "status": "ONGOING",
       "experiment_type": "HPHT",
       "sample_id": "SMP-042",
@@ -843,6 +844,7 @@ Returns all dashboard data in a single call. Response shape:
 **Notes:**
 - Only occupied reactor slots are returned; the frontend renders every fixed slot from the summary totals, in three groups: HPHT `R01`–`R16`, Parr `P01`–`P06` and Core Flood `CF01`–`CF03` (issue #147)
 - `summary.reactors` counts only `R01`–`R16` (Yushen/Tan); the Parr vessels are counted separately in `summary.parr`
+- `base_experiment_id` (issue #150) is the run the card's experiment belongs to, so a `-2` segment's card carries its root's base ID. The dashboard's "Open run page" button on an ONGOING R or P card links to `/hpht/{base_experiment_id}`.
 - `reactor_specs` is the hardware spec per slot label (`R01`–`R16`, `P01`–`P06`; Core Flood labels have none). It is the only copy of the table (`REACTOR_SPECS` in `backend/api/routers/dashboard.py`); the frontend reads empty-slot specs from it. Each card's `volume_mL` / `material` / `vendor` is looked up by `reactor_label`, so CF01 and P01 never inherit R01's spec
 - `description` is the text of the oldest note for the experiment
 - Timeline limited to 100 most recent experiments
@@ -1091,6 +1093,10 @@ Item fields (`HphtRunListItem`): `base_id`, `description` (same rule as Core Flo
 ### GET /api/hpht/{base_id}/icp
 
 Same as `GET /api/core-floods/{base_id}/icp`, joined on `v_hpht_samples`: `IcpRow`s in view order, samples without an `icp_results` row omitted, variants included and flagged.
+
+### HPHT run page (issue #150)
+
+`/hpht` and `/hpht/:baseId` in the frontend read these three endpoints (`frontend/src/api/hpht.ts`, query keys `['hpht-runs', scope, q]`, `['hpht-run', baseId]`, `['hpht-icp', baseId]`). The page writes nothing through `/api/hpht`: sample add/edit goes through `POST` / `PATCH /api/experiments/{experiment_id}/results` (the #148 `ResultEntryModal`, pointed at one segment), and segment rename/status/description through the experiment endpoints. After a write it invalidates `['hpht-runs']`, `['hpht-run', baseId]`, `['hpht-icp', baseId]`, `['experiment', segmentId]`, `['experiment-results', segmentId]` and `['dashboard']`. The charts plot `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day` and `cumulative_ferrous_iron_yield_h2_pct` against `cumulative_time_post_reaction_days` for non-variant rows only; a NULL value is drawn as a gap, never as 0.
 
 ## Interactive Docs
 

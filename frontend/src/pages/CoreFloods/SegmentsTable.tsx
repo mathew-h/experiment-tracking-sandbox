@@ -1,28 +1,32 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { CoreFloodSegment } from '@/api/coreFloods'
+import type { RunSegment } from '@/api/runs'
 import { experimentsApi } from '@/api/experiments'
 import { Button, Input, Table, TableBody, TableHead, TableRow, Td, Th, useToast } from '@/components/ui'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { DescriptionEditor } from '@/pages/ExperimentDetail/DescriptionEditor'
-import { SegmentStatusSelect } from './SegmentStatusSelect'
-import { invalidateCoreFloodWrites } from './useCoreFloodWrites'
+import { SegmentStatusSelect } from '@/components/runs/SegmentStatusSelect'
+import type { RunWrites } from '@/components/runs/runWrites'
+import { CORE_FLOOD_WRITES } from './useCoreFloodWrites'
 
 interface Props {
   baseId: string
-  segments: CoreFloodSegment[]
+  segments: RunSegment[]
   /** Experiment ID whose rename input is open, or null. */
   renaming: string | null
   setRenaming: (experimentId: string | null) => void
   /** Experiment ID whose description editor is open, or null. */
   describing: string | null
   setDescribing: (experimentId: string | null) => void
+  /** Refresh and routing for the page the table sits on; Core Flood by default. */
+  writes?: RunWrites
 }
 
 interface SegmentProps {
   baseId: string
-  segment: CoreFloodSegment
+  segment: RunSegment
+  writes: RunWrites
 }
 
 /** Inline rename. Renaming re-derives lineage on the server, so the segment can
@@ -30,6 +34,7 @@ interface SegmentProps {
 function RenameCell({
   baseId,
   segment,
+  writes,
   segmentCount,
   onDone,
 }: SegmentProps & { segmentCount: number; onDone: () => void }) {
@@ -47,15 +52,15 @@ function RenameCell({
       onDone()
       if (newBase !== baseId) {
         if (segmentCount === 1) {
-          navigate(`/core-floods/${encodeURIComponent(newBase)}`, { replace: true })
+          navigate(writes.runPath(newBase), { replace: true })
         } else {
           success('Segment renamed', `${updated.experiment_id} moved to run ${newBase}`)
         }
-        void invalidateCoreFloodWrites(qc, newBase, [])
+        void writes.invalidate(qc, newBase, [])
         // The run's only segment left it, so the old run is gone: refetching 404s.
-        if (segmentCount === 1) qc.removeQueries({ queryKey: ['core-flood', baseId] })
+        if (segmentCount === 1) qc.removeQueries({ queryKey: writes.runQueryKey(baseId) })
       }
-      return invalidateCoreFloodWrites(qc, baseId, [segment.experiment_id, updated.experiment_id])
+      return writes.invalidate(qc, baseId, [segment.experiment_id, updated.experiment_id])
     },
     onError: (err: Error) => toastError('Rename failed', err.message),
   })
@@ -95,7 +100,7 @@ function RenameCell({
 }
 
 /** The description, loaded on demand: the note ID only exists on the experiment detail. */
-function DescribeCell({ baseId, segment, onDone }: SegmentProps & { onDone: () => void }) {
+function DescribeCell({ baseId, segment, writes, onDone }: SegmentProps & { onDone: () => void }) {
   const qc = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: ['experiment', segment.experiment_id],
@@ -118,14 +123,17 @@ function DescribeCell({ baseId, segment, onDone }: SegmentProps & { onDone: () =
       onCancel={onDone}
       onSaved={() => {
         onDone()
-        void invalidateCoreFloodWrites(qc, baseId, [segment.experiment_id])
+        void writes.invalidate(qc, baseId, [segment.experiment_id])
       }}
     />
   )
 }
 
 /** The run's segments, with inline status, description and rename edits. */
-export function SegmentsTable({ baseId, segments, renaming, setRenaming, describing, setDescribing }: Props) {
+export function SegmentsTable({
+  baseId, segments, renaming, setRenaming, describing, setDescribing, writes = CORE_FLOOD_WRITES,
+}: Props) {
+  const qc = useQueryClient()
   return (
     <Table>
       <TableHead>
@@ -143,6 +151,7 @@ export function SegmentsTable({ baseId, segments, renaming, setRenaming, describ
                 <RenameCell
                   baseId={baseId}
                   segment={seg}
+                  writes={writes}
                   segmentCount={segments.length}
                   onDone={() => setRenaming(null)}
                 />
@@ -166,11 +175,14 @@ export function SegmentsTable({ baseId, segments, renaming, setRenaming, describ
               )}
             </Td>
             <Td>
-              <SegmentStatusSelect baseId={baseId} segment={seg} />
+              <SegmentStatusSelect
+                segment={seg}
+                onChanged={() => writes.invalidate(qc, baseId, [seg.experiment_id])}
+              />
             </Td>
             <Td className="text-xs">
               {describing === seg.experiment_id ? (
-                <DescribeCell baseId={baseId} segment={seg} onDone={() => setDescribing(null)} />
+                <DescribeCell baseId={baseId} segment={seg} writes={writes} onDone={() => setDescribing(null)} />
               ) : (
                 <button
                   type="button"

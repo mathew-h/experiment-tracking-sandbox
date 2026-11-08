@@ -16,6 +16,7 @@ import { DataExportPage } from '@/pages/DataExport'
 import { AnalysisPage } from '@/pages/Analysis'
 import { NotesReviewPage } from '@/pages/NotesReview'
 import { CoreFloodListPage, CoreFloodRunPage } from '@/pages/CoreFloods'
+import { HphtListPage, HphtRunPage } from '@/pages/Hpht'
 
 /** Root component: sets up React Query, React Router, and the auth/toast providers. */
 export default function App() {
@@ -40,6 +41,8 @@ export default function App() {
           <Route path="/experiments/new" element={<NewExperimentPage />} />
           <Route path="/experiments/groups/:baseId" element={<ReplicateGroupPage />} />
           <Route path="/experiments/:id" element={<ExperimentDetailPage />} />
+          <Route path="/hpht" element={<HphtListPage />} />
+          <Route path="/hpht/:baseId" element={<HphtRunPage />} />
           <Route path="/core-floods" element={<CoreFloodListPage />} />
           <Route path="/core-floods/:baseId" element={<CoreFloodRunPage />} />
           <Route path="/bulk-uploads" element={<BulkUploadsPage />} />

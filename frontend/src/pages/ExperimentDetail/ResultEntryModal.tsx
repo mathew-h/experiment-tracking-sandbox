@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Modal, PageSpinner, useToast } from '@/components/ui'
 import { NoteBadge } from '@/components/experiments/NoteBadge'
@@ -36,8 +36,10 @@ interface Props {
   /** Day parsed from a -t<days> token on the experiment ID (issue #81). When set,
    *  Day is defaulted and locked to this value. */
   idTimepointDays?: number | null
-  /** Base experiment ID. When given, the HPHT run queries are refreshed too. */
+  /** Base experiment ID. When given, the HPHT run queries and the dashboard are refreshed too. */
   baseId?: string | null
+  /** Shown at the top of the form, e.g. the HPHT run page's segment select (issue #150). */
+  headerSlot?: ReactNode
   /** The experiment's results, used to warn before a same-day add replaces one. */
   results?: ResultWithFlags[]
   /** Set to edit this (primary) result instead of adding one. */
@@ -163,6 +165,7 @@ function ModalBody({
   experimentStart,
   idTimepointDays,
   baseId,
+  headerSlot,
   results = [],
   editing,
   initialEdit,
@@ -260,7 +263,7 @@ function ModalBody({
     onSuccess: async () => {
       const keys: unknown[][] = [['experiment-results', experimentId], ['experiment', experimentId]]
       if (editing) keys.push(['scalar', editing.id])
-      if (baseId) keys.push(['hpht-runs'], ['hpht-run', baseId])
+      if (baseId) keys.push(['hpht-runs'], ['hpht-run', baseId], ['hpht-icp', baseId], ['dashboard'])
       await Promise.all(keys.map((queryKey) => qc.invalidateQueries({ queryKey })))
       success(editing ? 'Result updated' : 'Result added')
       onClose()
@@ -364,6 +367,8 @@ function ModalBody({
             }). Saving replaces it as the primary result for that day.`}
           </div>
         )}
+
+        {headerSlot}
 
         {/* Header */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{HEADER_KEYS.map(renderField)}</div>

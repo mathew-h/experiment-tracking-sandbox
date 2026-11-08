@@ -636,6 +636,33 @@ def test_cf_and_hpht_in_same_reactor_number_each_get_own_slot(client, db_session
     assert cards["R01"]["experiment_id"] == "HPHT_SLOT_TEST_001"
 
 
+def test_reactor_card_carries_base_experiment_id(client, db_session):
+    """Issue #150: the card links to the HPHT run page of its base ID, so a
+    -2 segment's card must carry the root's base, not its own ID."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+
+    exp = Experiment(
+        experiment_id="HPHTBASE_001-2",
+        experiment_number=91050,
+        status=ExperimentStatus.ONGOING,
+    )
+    db_session.add(exp)
+    db_session.flush()
+    db_session.add(ExperimentalConditions(
+        experiment_fk=exp.id,
+        experiment_id="HPHTBASE_001-2",
+        reactor_number=9,
+        experiment_type="HPHT",
+    ))
+    db_session.commit()
+
+    cards = {c["reactor_label"]: c for c in client.get("/api/dashboard/").json()["reactors"]}
+    assert cards["R09"]["experiment_id"] == "HPHTBASE_001-2"
+    assert cards["R09"]["base_experiment_id"] == "HPHTBASE_001"
+
+
 # ---------------------------------------------------------------------------
 # Performance test
 # ---------------------------------------------------------------------------
