@@ -25,7 +25,7 @@ This file is the index. The detailed notes are split into rule files that load o
 | `ExperimentNotes` — typed notes, scope rules, write paths (issues #118, #122) | `.claude/rules/MODELS-notes.md` |
 | `ExperimentalConditions` — vial size, pore volume, `reactor_series` (Parr), `reactor_slot`, `total_ferrous_iron_g`, 1:1 identity | `.claude/rules/MODELS-conditions.md` |
 | `ExperimentalResults`, `ScalarResults` (H2, merge, dates, overwrite), `ICPResults` | `.claude/rules/MODELS-results.md` |
-| Power BI views, rollup statistics, `v_core_flood_samples`, `v_results_h2_bkg_adjusted*` | `.claude/rules/MODELS-views.md` |
+| Power BI views, rollup statistics, `v_core_flood_samples`, `v_hpht_samples`, `v_results_h2_bkg_adjusted*` | `.claude/rules/MODELS-views.md` |
 
 Field names, types and relationships: read the model file named in each section (`database/models/*.py`) — they are the authoritative definition and are not repeated here.
 

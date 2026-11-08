@@ -34,6 +34,7 @@ PostgreSQL database on the lab PC and import these views as tables.
 | `public.v_results_h2` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `h2_concentration`, `h2_concentration_unit`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `gc_run_date` |
 | `public.v_results_icp` | `result_id`, `experiment_id`, `experiment_fk`, `time_post_reaction_days`, `time_post_reaction_bucket_days`, `icp_dilution_factor`, `icp_instrument_used`, `icp_raw_label`, `icp_sample_date`, `icp_run_date`, `fe_ppm` … `ti_ppm` (37 element columns; `s_ppm` is a known gap) |
 | `public.v_core_flood_samples` | `result_id`, `experiment_id`, `experiment_fk`, `run_base_id`, `is_variant`, `time_post_reaction_days`, `cumulative_time_post_reaction_days`, `sample_date`, `gc_run_date`, `sample_tube_number`, `flow_rate_mL_min`, `nitrogen_flow_rate_mL_min`, `inlet_pressure_psi`, `outlet_pressure_psi`, `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `final_ph`, `final_conductivity_mS_cm`, `pore_volume_mL`, `interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval` |
+| `public.v_hpht_samples` | `result_id`, `experiment_id`, `experiment_fk`, `run_base_id`, `is_variant`, `time_post_reaction_days`, `cumulative_time_post_reaction_days`, `sample_date`, `gc_run_date`, `sample_tube_number`, `sampling_volume_mL`, `h2_concentration`, `gas_sampling_volume_ml`, `gas_sampling_pressure_MPa`, `h2_micromoles`, `h2_mass_ug`, `h2_grams_per_ton_yield`, `ferrous_iron_yield_h2_pct`, `final_ph`, `final_conductivity_mS_cm`, `reactor_slot`, `interval_days`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `cumulative_h2_micromoles`, `cumulative_ferrous_iron_yield_h2_pct` |
 | `public.v_results_h2_bkg_adjusted` | `result_id`, `experiment_id`, `experiment_fk`, `base_experiment_id`, `time_post_reaction_bucket_days`, `background_mode`, `background_ref`, `bkg_time_bucket_days`, `bkg_time_gap_days`, `bkg_n_values`, `bkg_mean_h2_ppm`, `bkg_mean_h2_micromoles`, `bkg_sd_h2_micromoles`, `h2_micromoles`, `net_h2_micromoles_unclamped`, `net_h2_micromoles`, `u_bkg_h2_micromoles`, `net_h2_mass_ug`, `net_h2_grams_per_ton_unclamped`, `net_h2_grams_per_ton`, `u_bkg_h2_grams_per_ton`, `net_fe_yield_h2_pct_unclamped`, `net_fe_yield_h2_pct`, `u_bkg_fe_yield_h2_pct`, `below_background` |
 | `public.v_results_h2_bkg_adjusted_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_values`, `bkg_time_bucket_days`, `bkg_time_gap_days`, `bkg_n_values`, `bkg_mean_h2_micromoles`, `bkg_sd_h2_micromoles`, `mean_net_h2_micromoles`, `sd_net_h2_micromoles`, `mean_net_h2_grams_per_ton`, `sd_net_h2_grams_per_ton`, `mean_net_fe_yield_h2_pct`, `sd_net_fe_yield_h2_pct`, `below_background` |
 | `public.v_results_scalar_rollup` | `base_experiment_id`, `time_post_reaction_bucket_days`, `n_vials`, `n_replicate_letters`, `n_values`, `mean_gross_ammonium_mM`, `median_gross_ammonium_mM`, `sd_gross_ammonium_mM`, `mean_net_ammonium_mM`, `sd_net_ammonium_mM`, `mean_h2_ppm`, `sd_h2_ppm`, `mean_h2_micromoles`, `sd_h2_micromoles`, `mean_h2_grams_per_ton`, `sd_h2_grams_per_ton`, `mean_fe_yield_h2_pct`, `sd_fe_yield_h2_pct`, `mean_fe_yield_nh3_pct`, `sd_fe_yield_nh3_pct`, `mean_grams_per_ton_yield`, `sd_grams_per_ton_yield`, `mean_final_ph` |
@@ -88,6 +89,20 @@ One row per **primary timepoint of a Core Flood experiment**, with cross-sample 
 
 ---
 
+## HPHT Run View (`v_hpht_samples`, issue #149)
+
+One row per **primary timepoint of an HPHT experiment** (R01–R16 and Parr P01–P06), with cross-sample run values computed over the whole run. Same shape as `v_core_flood_samples`. Key: `result_id`, joining 1–1 to `v_dim_timepoints` (HPHT timepoints only, so the join is 1–0..1 from that side). **`run_base_id` (= `base_experiment_id`) is the run**: it spans the sequential segments `HPHT_068`, `HPHT_068-2`, `HPHT_068-3`. Use it, not `experiment_id`, for run-level slicers and "H₂ to date" charts.
+
+- **Use this, not `v_results_scalar`, for an HPHT run's H₂ to date.** `v_results_scalar.cumulative_ferrous_iron_yield_h2_pct` partitions per `experiment_id`, so a `-2` segment restarts at zero there. Here the running sums continue across segments.
+- **Order and window.** Per `run_base_id` and `is_variant`, ordered by `cumulative_time_post_reaction_days` then `result_id`. Plot against `cumulative_time_post_reaction_days`.
+- **Derived columns:** `interval_days`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `cumulative_h2_micromoles`, `cumulative_ferrous_iron_yield_h2_pct`. Per-sample H₂ is **incremental** (only what was collected since the previous sample), so the sums are the run's H₂ to date. Formulas in `docs/CALCULATIONS.md` ("HPHT run values"). No NH₃ columns: take ammonium from `v_results_scalar`.
+- **Variants.** `is_variant = true` marks a `_Text` child of a segment (`HPHT_061_Desorption`, `HPHT_068_Acidified`). Its raw columns are present but every derived column is NULL, and it never shifts the run's sums. Filter `is_variant = false` for the run curve.
+- **`reactor_slot`** is the experiment's own slot (`R07`, `P03`), so a run that moved vessels shows each segment's slot.
+- **Data shape (dev DB, 2026-10-23 data):** 1094 rows over 275 runs; 53 variant rows; 602 rows with no H₂ value (they add 0 to the sums); 175 rows with NULL cumulative time (they sort last and have NULL `interval_days` and rate); 135 rows with a zero interval (two samples on one cumulative day), whose rate is NULL.
+- **Hide** `experiment_fk` (join key only).
+
+---
+
 ## Background-Adjusted H₂ Views (`v_results_h2_bkg_adjusted`, `v_results_h2_bkg_adjusted_rollup`, issue #144)
 
 Serum vial H₂ with a researcher-chosen blank subtracted. Rows exist **only for sample groups that have a background link** (table `h2_background_links`, set on the replicate group page), so both views are empty for unlinked groups. Raw `v_results_h2` and `v_results_scalar_rollup` are unchanged and stay gross. Formulas, the clamp rule and the nearest-bucket rule are in `docs/CALCULATIONS.md` ("Background-adjusted H₂ (view columns)").
@@ -127,6 +142,7 @@ v_dim_timepoints (result_id)    1 ──── 1 v_results_scalar (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_results_h2 (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_results_icp (result_id)
 v_dim_timepoints (result_id)    1 ──── 1 v_core_flood_samples (result_id)   -- Core Flood timepoints only
+v_dim_timepoints (result_id)    1 ──── 1 v_hpht_samples (result_id)         -- HPHT timepoints only
 
 v_experiments (base_experiment_id or experiment_id)  * ──── 1 v_results_scalar_rollup (base_experiment_id, time_post_reaction_bucket_days)
 
