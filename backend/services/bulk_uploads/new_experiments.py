@@ -53,6 +53,32 @@ def _is_blank_cell(val: Any) -> bool:
         return False
 
 
+_BACKGROUND_TRUE = {"true", "yes", "y", "1"}
+_BACKGROUND_FALSE = {"false", "no", "n", "0"}
+
+
+def parse_background_cell(val: Any) -> Tuple[Optional[bool], Optional[str]]:
+    """Read the experiments sheet's is_background cell (issue #152).
+
+    Returns (value, error). A blank cell is (None, None): on create the flag is
+    inherited from the derivation parent (or False), on overwrite it is left
+    unchanged. true/false/yes/no/y/n/1/0 (any case, Excel booleans and 1.0/0.0
+    too) set it; anything else is an error and the row is not written.
+    """
+    if _is_blank_cell(val):
+        return None, None
+    if isinstance(val, bool):
+        return val, None
+    if isinstance(val, (int, float)) and val in (0, 1):
+        return bool(val), None
+    text = str(val).strip().lower()
+    if text in _BACKGROUND_TRUE:
+        return True, None
+    if text in _BACKGROUND_FALSE:
+        return False, None
+    return None, f"is_background must be TRUE or FALSE (got '{val}')"
+
+
 def _resolve_reactor_cells(row: Any, experiment_type: Any) -> Dict[str, Any]:
     """Read a conditions row's reactor cells into column values (issue #147).
 
@@ -590,6 +616,17 @@ class NewExperimentsUploadService:
                     
                     current_step = "parsing status field"
                     status_val = parse_status(row.get('status'))
+
+                    current_step = "parsing is_background field"
+                    background_val, background_error = parse_background_cell(row.get('is_background'))
+                    if background_error:
+                        # Checked before any write, so the row is skipped whole (issue #152).
+                        warnings.append(f"[experiments] Row {idx+2} ({exp_id}): {background_error}")
+                        plan.conflicts.append(PlanConflict(
+                            row=idx + 2, kind="invalid_is_background", detail=background_error,
+                        ))
+                        failed_experiment_ids.add(''.join(ch for ch in exp_id.lower() if ch not in ['-', '_', ' ']))
+                        continue
                     
                     current_step = "parsing date field"
                     # date can be Excel serial, ISO, or empty
@@ -665,6 +702,12 @@ class NewExperimentsUploadService:
                         date_field = None if date_val is None else date_val.to_pydatetime()
                         
                         current_step = "creating new experiment object - calling Experiment()"
+                        # Issue #152: blank inherits the derivation parent's flag
+                        # (a -2 or _Text of a background is a background).
+                        background_field = (
+                            background_val if background_val is not None
+                            else bool(parent.is_background) if parent else False
+                        )
                         experiment = Experiment(
                             experiment_number=exp_number,
                             experiment_id=exp_id_field,
@@ -672,6 +715,7 @@ class NewExperimentsUploadService:
                             researcher=researcher_field,
                             status=status_field,
                             date=date_field,
+                            is_background=background_field,
                         )
                         
                         current_step = "creating new experiment object - db.add()"
@@ -792,6 +836,10 @@ class NewExperimentsUploadService:
                                     old=experiment.date.isoformat() if experiment.date else None,
                                     new=_new_date.isoformat() if _new_date else None,
                                 ))
+                            if background_val is not None and background_val != experiment.is_background:
+                                _fields_changed.append(FieldChange(
+                                    field="is_background", old=experiment.is_background, new=background_val,
+                                ))
                             if _fields_changed:
                                 overwrite_plan_by_exp_id.setdefault(
                                     exp_id, PlanOverwrite(row=idx + 2, experiment_id=exp_id)
@@ -833,6 +881,18 @@ class NewExperimentsUploadService:
                             experiment.status = status_val
                         if date_val is not None:
                             experiment.date = date_val.to_pydatetime()
+                        if background_val is not None and background_val != experiment.is_background:
+                            # Audited like PATCH /api/experiments/{id} (issue #152).
+                            db.add(ModificationsLog(
+                                experiment_id=experiment.experiment_id,
+                                experiment_fk=experiment.id,
+                                modified_by="new_experiments_upload",
+                                modification_type="update",
+                                modified_table="experiments",
+                                old_values={"is_background": bool(experiment.is_background)},
+                                new_values={"is_background": background_val},
+                            ))
+                            experiment.is_background = background_val
                         updated_exp += 1
                         processed_experiment_ids.add(exp_id_norm)  # Use normalized ID for tracking (new ID after rename)
 

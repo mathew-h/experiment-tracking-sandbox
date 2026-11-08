@@ -826,3 +826,15 @@ Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
 - The server does not enforce the pairing.
 
 **Related:** Alembic `a1c5e8f2b9d3`; `.claude/rules/MODELS-results.md`; `docs/CALCULATIONS.md` ("Core flood run values").
+
+## 2026-11-08 — Backgrounds are an explicit flag, never inferred (issue #152)
+
+**Decision (Mat):** a background / blank vial is marked by `experiments.is_background`, set by a person (PATCH, wizard, upload) or inherited by replicates. It is never derived from rock mass, sample ID or description text: the #151 report showed those disagree (background series with 1 g of rock; rock-free coupon tests that are samples).
+
+**Consequences:**
+- In a group that also has sample vials, backgrounds are left out of the group's mean, SD and `n`. A group made only of backgrounds keeps its own statistics, so it can still be linked as a #144 H₂ background.
+- A linked background set with any flagged vial uses only its flagged vials.
+- Yields are not blanked, and per-row views keep every row.
+- Existing data is flagged only from a list the experimenters confirm (`set_background_flags_023.py`, after #151).
+
+**Related:** Alembic `e4b9c2d7a6f1`; `.claude/rules/MODELS.md`; `.claude/rules/MODELS-views.md`; `docs/user_guide/REPLICATES.md`.

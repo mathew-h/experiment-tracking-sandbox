@@ -13,6 +13,7 @@ function makeStep1(overrides: Partial<Step1Data> = {}): Step1Data {
     date: '',
     status: '',
     note: '',
+    isBackground: false,
     ...overrides,
   }
 }

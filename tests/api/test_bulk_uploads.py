@@ -1453,3 +1453,20 @@ def test_new_experiments_template_has_pore_volume(client):
     assert "pore_volume_mL" in notes
     assert "Core Flood only" in notes["pore_volume_mL"]
     assert "P01-P06" in notes["reactor_series"]
+
+
+def test_new_experiments_template_has_is_background(client):
+    """is_background sits on the experiments sheet before overwrite, FALSE in the
+    example, and is documented on INSTRUCTIONS (issue #152)."""
+    import io as _io
+    import openpyxl
+    resp = client.get("/api/bulk-uploads/templates/new-experiments")
+    wb = openpyxl.load_workbook(_io.BytesIO(resp.content))
+    ws = next(s for s in wb.worksheets if s.title.lower() == "experiments")
+    headers = [str(c.value).replace("*", "").split("(")[0].strip() for c in ws[1] if c.value]
+    assert headers[-2:] == ["is_background", "overwrite"]
+    assert ws.cell(row=2, column=len(headers) - 1).value == "FALSE"
+    inst = next(s for s in wb.worksheets if s.title.upper() == "INSTRUCTIONS")
+    notes = {r[0].value: r[1].value for r in inst.iter_rows(min_row=1) if r[0].value}
+    assert "background" in notes["is_background"]
+    assert "inherits" in notes["is_background"]

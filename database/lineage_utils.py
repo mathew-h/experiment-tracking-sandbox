@@ -591,6 +591,8 @@ def create_replicate_experiments(
             researcher=parent.researcher,
             status=parent.status,
             date=parent.date,
+            # Issue #152: a replicate of a background is a background.
+            is_background=bool(parent.is_background),
         )
         next_number += 1
         db.add(new_experiment)

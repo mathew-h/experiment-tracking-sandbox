@@ -617,3 +617,37 @@ describe('ExperimentListPage — issue #122 PR-C: the Description column reads `
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })
+
+describe('ExperimentListPage — background filter and badge (issue #152)', () => {
+  beforeEach(() => {
+    vi.mocked(experimentsApi.list).mockImplementation(async () => {
+      const items = makeItems(0, 2)
+      items[0] = { ...items[0], experiment_id: 'SERUM_BG_001', is_background: true }
+      return { items, total: 2, skip: 0, limit: LIMIT }
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('sends is_background and badges background rows', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await waitFor(() => expect(screen.getByText('SERUM_BG_001')).toBeInTheDocument())
+    expect(screen.getAllByText('BG')).toHaveLength(1)
+    expect(vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]?.is_background).toBeUndefined()
+
+    fireEvent.change(screen.getByRole('combobox', { name: /background filter/i }), {
+      target: { value: 'true' },
+    })
+    await waitFor(() =>
+      expect(vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]?.is_background).toBe(true),
+    )
+    fireEvent.change(screen.getByRole('combobox', { name: /background filter/i }), {
+      target: { value: 'false' },
+    })
+    await waitFor(() =>
+      expect(vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]?.is_background).toBe(false),
+    )
+  })
+})

@@ -104,6 +104,9 @@ export interface ExperimentListItem {
   parent_experiment_fk: number | null
   replicate_label: string | null
   is_outlier: boolean
+  /** Issue #152: a background / blank vial; left out of a mixed group's averages.
+   *  Always sent by the API; optional so payloads built before #152 stay valid. */
+  is_background?: boolean
   id_timepoint_days: number | null
   /** Issue #98: what the ID column renders — the group stem in grouped mode,
    *  the timepoint-stripped stem in flat mode. `experiment_id` above still
@@ -136,6 +139,9 @@ export interface ExperimentDetail {
   parent_experiment_fk: number | null
   replicate_label: string | null
   is_outlier: boolean
+  /** Issue #152: a background / blank vial; left out of a mixed group's averages.
+   *  Always sent by the API; optional so payloads built before #152 stay valid. */
+  is_background?: boolean
   id_timepoint_days: number | null
   created_at: string
   updated_at: string | null
@@ -254,6 +260,8 @@ export interface ExperimentListParams {
   date_to?: string
   description?: string
   additive?: string
+  /** Issue #152: true = backgrounds only, false = samples only. */
+  is_background?: boolean
   skip?: number
   limit?: number
   group_replicates?: boolean
@@ -267,6 +275,7 @@ export interface CreateExperimentPayload {
   sample_id?: string
   experiment_type?: string
   note?: string
+  is_background?: boolean
 }
 
 export interface RollupTimepoint {
@@ -296,6 +305,8 @@ export interface RollupTimepoint {
   mean_grams_per_ton_yield: number | null
   sd_grams_per_ton_yield: number | null
   mean_final_ph: number | null
+  /** Issue #152: every non-outlier member is a background, so these are the background's own stats. */
+  is_background_group?: boolean
 }
 
 export interface ReplicateGroupMember {
@@ -304,6 +315,9 @@ export interface ReplicateGroupMember {
   replicate_label: string | null
   status: ExperimentStatus | null
   is_outlier: boolean
+  /** Issue #152: a background / blank vial; left out of a mixed group's averages.
+   *  Always sent by the API; optional so payloads built before #152 stay valid. */
+  is_background?: boolean
 }
 
 export interface ReplicateGroup {
@@ -383,6 +397,9 @@ export interface CreatedReplicate {
   parent_experiment_fk: number | null
   replicate_label: string | null
   is_outlier: boolean
+  /** Issue #152: a background / blank vial; left out of a mixed group's averages.
+   *  Always sent by the API; optional so payloads built before #152 stay valid. */
+  is_background?: boolean
   created_at: string
   updated_at: string | null
 }
@@ -411,6 +428,7 @@ export const experimentsApi = {
       experiment_id?: string
       sample_id?: string
       is_outlier?: boolean
+      is_background?: boolean
     },
   ) =>
     apiClient

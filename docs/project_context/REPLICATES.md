@@ -258,3 +258,16 @@ If one vial in a replicate set goes bad (leak, cracked septum, contamination), y
 5. To undo, click **Include in rollup** on the same page. Every flag change is recorded in the experiment's Entry Logs.
 
 The button appears only on experiments that belong to a replicate set (lettered members and the group parent, which is vial 0).
+
+## Marking a background (blank)
+
+A background is a vial with no rock, or a deliberate control, whose H₂ is the baseline for its samples (issue #152). Mark it so it never mixes with sample statistics:
+
+1. On the experiment page, click **Mark as background**. A **Background** badge appears next to the status. (New experiments: tick **Background / blank** on step 1 of the wizard, or put `TRUE` in the `is_background` column of the New Experiments upload.)
+2. In a group that also has sample vials, backgrounds are left out of the group's mean, SD and `n`, and their letter is labelled "(background)" in the grouped chart.
+3. A group made only of backgrounds (for example `SERUM_BO3_002`) keeps its own statistics. That is the group you link as the H₂ background of its samples; the **H₂ background** search lists flagged backgrounds first.
+4. If a linked background set contains flagged vials, only those are used for the background mean.
+5. Yields (g/t, Fe²⁺ %) are not blanked. A background with a rock mass still shows them; clear the rock mass if no rock went in.
+6. New replicates created from a background are backgrounds too. To undo, click **Unmark background**. Every change is recorded in the Entry Logs.
+
+The experiments list has a **Samples and backgrounds** filter and marks backgrounds with a **BG** badge.

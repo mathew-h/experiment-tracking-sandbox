@@ -129,6 +129,7 @@ function MemberRow({ member, isParent, divergentFields, child }: MemberRowProps)
         >
           {member.experiment_id}
         </Link>
+        {member.is_background && <Badge variant="info" className="ml-2">Background</Badge>}
       </Td>
       <Td className="font-mono-data">
         {member.id_timepoint_days != null ? `T+${member.id_timepoint_days}` : '—'}

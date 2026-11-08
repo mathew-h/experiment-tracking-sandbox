@@ -383,13 +383,15 @@ def _norm(sql: str) -> str:
 
 
 @pytest.mark.parametrize(
-    "name", ["v_results_scalar", "v_results_h2", "v_results_scalar_rollup"]
+    "name", ["v_results_scalar", "v_results_h2"]
 )
 def test_existing_views_untouched(name):
     """One-time #144 guard: this branch left v_results_scalar, v_results_h2 and
     v_results_scalar_rollup unchanged versus 1817bed, the develop head it
     started from. Delete this test when any of those views is changed on
-    purpose.
+    purpose. v_results_scalar_rollup was changed on purpose by issue #152
+    (is_background) and is dropped from the list; its definition is now pinned by
+    tests/models/test_is_background_column.py.
     """
     from database.event_listeners import _VIEWS
 

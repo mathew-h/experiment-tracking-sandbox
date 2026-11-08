@@ -269,3 +269,24 @@ describe('H2BackgroundRow', () => {
     expect(experimentsApi.list).toHaveBeenCalledWith({ search: '009' })
   })
 })
+
+describe('H2BackgroundRow — issue #152 flagged backgrounds first', () => {
+  it('lists flagged backgrounds before other matches, with a badge', async () => {
+    const user = userEvent.setup()
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [
+        item('SERUM_009a', 'SERUM_009'),
+        { ...item('SERUM_008a', 'SERUM_008'), is_background: true },
+        item('SERUM_007a', 'SERUM_007'),
+      ],
+      total: 3, skip: 0, limit: 50,
+    })
+    renderRow(null)
+    await user.click(screen.getByRole('button', { name: 'Set' }))
+    await user.type(screen.getByRole('textbox'), 'SERUM_00')
+    await screen.findByRole('button', { name: /SERUM_008a/ })
+    const names = within(screen.getByRole('list')).getAllByRole('button').map((b) => b.textContent)
+    // Stable sort: the flagged one moves up, the others keep the list's order.
+    expect(names).toEqual(['SERUM_008aBackground', 'SERUM_009a', 'SERUM_007a'])
+  })
+})

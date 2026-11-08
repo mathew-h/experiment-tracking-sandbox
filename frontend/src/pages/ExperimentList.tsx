@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { experimentsApi, type ExperimentListItem, type ExperimentStatus } from '@/api/experiments'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
-  Button, Input, Select, PageSpinner, StatusBadge, useToast,
+  Badge, Button, Input, Select, PageSpinner, StatusBadge, useToast,
 } from '@/components/ui'
 
 const STATUS_OPTIONS = [
@@ -20,6 +20,12 @@ const STATUS_TEXT_CLASS: Record<string, string> = {
   CANCELLED: 'text-status-cancelled',
   QUEUED:    'text-status-queued',
 }
+// Issue #152: background / blank experiments.
+const BACKGROUND_OPTIONS = [
+  { value: 'true', label: 'Backgrounds only' },
+  { value: 'false', label: 'Samples only' },
+]
+
 const TYPE_OPTIONS = [
   { value: 'Serum', label: 'Serum' },
   { value: 'HPHT', label: 'HPHT' },
@@ -40,12 +46,13 @@ export function ExperimentListPage() {
   const [descriptionFilter, setDescriptionFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [backgroundFilter, setBackgroundFilter] = useState('')
   const [skip, setSkip] = useState(0)
   const [limit, setLimit] = useState(25)
   const [groupReplicates, setGroupReplicates] = useState(true)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
 
-  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, skip, limit, groupReplicates]
+  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, backgroundFilter, skip, limit, groupReplicates]
   const { data, isLoading, error } = useQuery({
     queryKey,
     queryFn: () => experimentsApi.list({
@@ -57,6 +64,7 @@ export function ExperimentListPage() {
       description: descriptionFilter || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
+      is_background: backgroundFilter ? backgroundFilter === 'true' : undefined,
       skip,
       limit,
       group_replicates: groupReplicates || undefined,
@@ -66,7 +74,7 @@ export function ExperimentListPage() {
   const resetPage = () => setSkip(0)
   const totalPages = data ? Math.ceil(data.total / limit) : 0
   const currentPage = Math.floor(skip / limit) + 1
-  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || descriptionFilter || dateFrom || dateTo)
+  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || descriptionFilter || dateFrom || dateTo || backgroundFilter)
 
   return (
     <div className="space-y-4">
@@ -102,6 +110,16 @@ export function ExperimentListPage() {
             placeholder="All statuses"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); resetPage() }}
+          />
+        </div>
+        <div className="w-44">
+          <Select
+            label=""
+            aria-label="Background filter"
+            options={BACKGROUND_OPTIONS}
+            placeholder="Samples and backgrounds"
+            value={backgroundFilter}
+            onChange={(e) => { setBackgroundFilter(e.target.value); resetPage() }}
           />
         </div>
         <div className="w-40">
@@ -173,7 +191,7 @@ export function ExperimentListPage() {
             size="sm"
             onClick={() => {
               setStatusFilter(''); setTypeFilter(''); setExperimentIdFilter('')
-              setSampleFilter(''); setReactorFilter(''); setDescriptionFilter('')
+              setSampleFilter(''); setReactorFilter(''); setDescriptionFilter(''); setBackgroundFilter('')
               setDateFrom(''); setDateTo(''); resetPage()
             }}
           >
@@ -361,6 +379,7 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
           {child && <span className="text-ink-muted">↳ {exp.replicate_label}</span>}
           {displayId}
         </span>
+        {exp.is_background && <Badge variant="info" className="ml-2">BG</Badge>}
         {groupBadge}
       </Td>
       <Td className="text-xs text-ink-secondary max-w-48 truncate">

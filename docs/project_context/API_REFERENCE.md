@@ -7,7 +7,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `search` (case-insensitive partial match on `experiment_id`), `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `additive` (case-insensitive partial match on the compound name of any of the experiment's chemical additives), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, `description`, and `additive` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
+| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `search` (case-insensitive partial match on `experiment_id`), `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `additive` (case-insensitive partial match on the compound name of any of the experiment's chemical additives), `is_background` (bool, issue #152: `true` = backgrounds only, `false` = samples only, omitted = both), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, `description`, and `additive` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}/export` | **Export all** (issue #141): one `.xlsx` for the experiment's whole lineage. See below. |
@@ -25,9 +25,9 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | PUT | `/api/experiments/groups/{base_id}/h2-background` | Link the group to a serum H₂ background (issue #144). See below. |
 | DELETE | `/api/experiments/groups/{base_id}/h2-background` | Clear the group's H₂ background link (204). See below. |
 | GET | `/api/experiments/groups/{base_id}/h2-background/rollup` | Background-adjusted H₂ rollup per bucket from `v_results_h2_bkg_adjusted_rollup`. See below. |
-| POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted) |
-| POST | `/api/experiments/replicates` | Batch-create lettered replicates copying a base experiment's setup |
-| PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), and is_outlier |
+| POST | `/api/experiments` | Create experiment (auto-assigns `experiment_number` if omitted). Optional `is_background` (bool, default false; issue #152) |
+| POST | `/api/experiments/replicates` | Batch-create lettered replicates copying a base experiment's setup, including `is_background` |
+| PATCH | `/api/experiments/{experiment_id}` | Update status, researcher, date, sample_id, experiment_id (rename), is_outlier and is_background. `is_outlier` / `is_background` reject an explicit `null` (422); a changed flag writes one `ModificationsLog` row (`old_values`/`new_values` = `{"is_background": …}`), an unchanged one writes none |
 | PATCH | `/api/experiments/{experiment_id}/status` | Inline status update. Body: `{"status": "COMPLETED"}` |
 | DELETE | `/api/experiments/{experiment_id}` | Delete experiment (cascades all related data) |
 | POST | `/api/experiments/{experiment_id}/notes` | Add a typed note. Body: `{"note_text": "...", "note_type": "observation"\|"description"\|"modification"\|"result_note", "result_id": 123, "event_date": "2026-09-24"}` — `note_type` defaults to `observation`, `result_id` and `event_date` optional. `description` must not carry `result_id`; `modification` must carry `result_id` OR `event_date` (or both); `result_note` must carry `result_id`; `observation` may carry either, neither, or both (422 otherwise). `result_id` of another experiment → 422. A second `description` → 409. Response adds `note_type`, `result_id`, `event_date`, `created_by` (caller email), `needs_review`. |
@@ -61,7 +61,7 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
 
 - A row is top-level when `replicate_label IS NULL OR parent_experiment_fk IS NULL`.
 - A lettered replicate that matches the active filters is represented by its parent row instead of itself — i.e. filtering that matches only `SERUM_001b` still pulls `SERUM_001` (the parent) into the page, with `b` attached as a child.
-- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, `is_outlier`, and `id_timepoint_days`.
+- Every list item (flat or grouped mode) now includes `base_experiment_id`, `parent_experiment_fk`, `replicate_label`, `is_outlier`, `is_background` (issue #152) and `id_timepoint_days`. Experiment detail and the group member payloads carry `is_background` too.
 - In grouped mode, the representative row of a real lettered group (parent-led or an orphan stem with no parent row) additionally gets a `replicates` array. Membership is resolved by matching every row's bucket key (base stem), **not** by `parent_experiment_fk`, and the array includes the representative's own letter — see *New fields* below for the exact rules and the letter + sequential-rerun caveat. Rows attach in full regardless of whether they individually matched the filters — that's the point of grouping. Non-group items have `replicates: null`.
 - `total` counts top-level rows, not raw experiment rows.
 - Flat mode (`group_replicates=false`, the default) is **not** a raw pass-through: among the matched rows, any that differ only by a trailing `-t<days>` token are collapsed into one row per stem (issue #98) — e.g. `SERUM_001a-t1` and `SERUM_001a-t3` (one replicate sampled twice) render as a single row. `group_display_id` carries the collapsed label and `vial_count` the number of rows folded into it. Collapsing only ever happens among rows that passed the active filters — see *New fields* below.
@@ -181,6 +181,8 @@ parent opt-out.
 
 **Errors:**
 - `404 Not Found` — no experiment matches `experiment_id`
+
+**Backgrounds (issue #152):** a group with any non-background, non-outlier member averages only its non-background vials; a group whose non-outlier members are all backgrounds keeps its own rollup. Each row carries `is_background_group` (true when the statistics are the backgrounds' own).
 
 **Outlier exclusion (P4):** experiments with `is_outlier = true` are excluded from every statistic in this response, including `n_vials` — a flagged replicate never contributes to the mean/median/std or the count, though its own data remains queryable via the per-row endpoints/views.
 

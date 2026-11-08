@@ -13,6 +13,8 @@ export interface Step1Data {
   date: string
   status: string
   note: string
+  /** Issue #152: a background / blank (no rock, or a deliberate control). */
+  isBackground: boolean
 }
 
 interface Props {
@@ -98,6 +100,20 @@ export function Step1BasicInfo({ data, onChange, onNext }: Props) {
         </p>
       )}
       <SampleSelector value={data.sampleId} onChange={(id) => onChange({ sampleId: id })} />
+      <label className="flex items-start gap-2 text-sm text-ink-secondary cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={data.isBackground}
+          onChange={(e) => onChange({ isBackground: e.target.checked })}
+          className="accent-brand-red mt-1"
+        />
+        <span>
+          Background / blank
+          <span className="block text-xs text-ink-muted">
+            No rock, or a deliberate control. Left out of a group&apos;s averages when the group also has samples.
+          </span>
+        </span>
+      </label>
       <div className="grid grid-cols-2 gap-3">
         <Input
           label="Date"

@@ -23,6 +23,7 @@ const defaultStep1 = (): Step1Data => ({
   date: new Date().toISOString().split('T')[0],
   status: 'ONGOING',
   note: '',
+  isBackground: false,
 })
 
 const defaultStep2 = (): Step2Data => ({
@@ -70,6 +71,7 @@ export function NewExperimentPage() {
         date: new Date().toISOString().split('T')[0],
         note: '',
         sampleId: exp.sample_id ?? '',
+        isBackground: !!exp.is_background,
         experimentType: (conditions?.experiment_type as ExperimentType | undefined) ?? '',
       }))
 
@@ -134,6 +136,7 @@ export function NewExperimentPage() {
         status: step1.status,
         sample_id: step1.sampleId || undefined,
         date: step1.date || undefined,
+        is_background: step1.isBackground,
       })
 
       // 2. The Step 1 text is the experiment's description (issue #122, design

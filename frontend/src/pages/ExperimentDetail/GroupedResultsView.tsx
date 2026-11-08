@@ -110,6 +110,14 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
   // at all -- label it '(outlier)' so an empty legend entry reads as a
   // deliberate exclusion rather than missing data. A letter with a mix of
   // flagged and clean vials still has real points and stays unlabeled.
+  // Issue #152: mirror v_results_scalar_rollup -- background vials are left out
+  // of a group that also has non-background, non-outlier members; a group made
+  // only of backgrounds keeps them (it is the background's own time course).
+  const backgroundsExcluded = useMemo(() => {
+    const everyone = [...(group?.parent ? [group.parent] : []), ...(group?.members ?? [])]
+    return everyone.some((m) => !m.is_outlier && !m.is_background)
+  }, [group])
+
   const seriesLetters = useMemo(() => {
     const letters = [
       ...(group?.parent ? [{ key: 'parent', baseLabel: 'replicate 0', vials: [group.parent] }] : []),
@@ -121,9 +129,12 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     ]
     return letters.slice(0, chartColors.series.length).map((letter) => {
       const allOutliers = letter.vials.length > 0 && letter.vials.every((v) => v.is_outlier)
-      return { ...letter, label: `${letter.baseLabel}${allOutliers ? ' (outlier)' : ''}` }
+      const allBackground = !allOutliers && backgroundsExcluded && letter.vials.length > 0
+        && letter.vials.every((v) => v.is_outlier || v.is_background)
+      const suffix = allOutliers ? ' (outlier)' : allBackground ? ' (background)' : ''
+      return { ...letter, label: `${letter.baseLabel}${suffix}` }
     })
-  }, [group])
+  }, [group, backgroundsExcluded])
 
   // One fetch per vial (results are stored per experiment row), flattened into
   // its letter's series below.
@@ -187,6 +198,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
           let value: number | null = null
           allVials.forEach(({ letterKey, vial }, i) => {
             if (letterKey !== letter.key || vial.is_outlier) return
+            if (backgroundsExcluded && vial.is_background) return
             const match = (vialResults[i]?.data ?? []).find(
               (res) => res.time_post_reaction_bucket_days === r.time_post_reaction_bucket_days
             )
@@ -199,7 +211,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
         })
         return row
       })
-  }, [rollup, metric, bkgByBucket, seriesLetters, allVials, vialResults])
+  }, [rollup, metric, bkgByBucket, seriesLetters, allVials, vialResults, backgroundsExcluded])
 
   if (isLoading) return <Spinner />
   // A failed fetch is not an empty result. Both queries used to fall through to

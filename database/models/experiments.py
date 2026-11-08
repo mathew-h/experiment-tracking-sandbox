@@ -27,6 +27,10 @@ class Experiment(Base):
     parent_experiment_fk = Column(Integer, ForeignKey("experiments.id", ondelete="SET NULL"), nullable=True)  # FK to parent experiment
     replicate_label = Column(String, nullable=True, index=True)  # "a", "b", "c"; NULL = not a replicate. is_replicate == (replicate_label IS NOT NULL)
     is_outlier = Column(Boolean, nullable=False, default=False, server_default=text("false"))  # True = bad vial (leak, cracked septum): excluded from v_results_scalar_rollup aggregates incl. n_replicates; per-row views and own pages unaffected
+    # True = a background / blank (no rock, or a deliberate control), issue #152.
+    # Rollups leave backgrounds out of a group that also has sample vials; a group
+    # made only of backgrounds keeps its own rollup. Yields are not blanked.
+    is_background = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     # Day value parsed from a trailing '-t<days>' ID token (issue #81); NULL =
     # not encoded. Canonical for result times; grouping still uses base + bucket.
     id_timepoint_days = Column(Float, nullable=True, index=True)

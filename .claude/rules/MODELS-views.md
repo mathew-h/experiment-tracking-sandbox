@@ -17,6 +17,10 @@ SQL views are created at application startup so Power BI (and other reporting to
 
 `description` is the note typed `'description'` (`WHERE n.note_type = 'description'`, at most one per experiment by the partial unique index). It replaced `ORDER BY n.created_at ASC LIMIT 1`, which was **wrong, not merely different**: `created_at` is the transaction timestamp, so every note a bulk upload inserted in one transaction shared it and the `LIMIT 1` was arbitrary. Recreated by Alembic `c4d8f1a2b6e7` and on API startup.
 
+### Backgrounds — `is_background` (issue #152, Alembic `e4b9c2d7a6f1`)
+
+`v_experiments` gains `is_background` (last column). `v_results_scalar_rollup` and `v_results_h2_bkg_adjusted_rollup` join a per-group subquery `g` (`bool_and(is_background)` over the group's **non-outlier** experiments, results or not) and filter `NOT is_background OR g.all_background`: a group with any non-background, non-outlier member averages only its non-background vials; a group whose non-outlier members are all backgrounds keeps its own rollup. The scalar rollup exposes it as `is_background_group` (last column); the grain is unchanged. `v_results_h2_bkg_adjusted` splits its background CTE into `bm` (the linked set's non-outlier vials), `bsel` (only the flagged ones when any exist, else all) and `bkg` (the aggregate), so unflagged data behaves exactly as before #152 (verified on dev data: old and new SQL return identical rows with nothing flagged). Per-row views keep background rows. The migration carries `_OLD`/`_NEW` SQL for all four views and restores `_OLD` before dropping the column on downgrade; `tests/models/test_is_background_column.py` holds the startup-parity check now (a later migration changing these views takes it over and keeps `_OLD`).
+
 ### `v_dim_timepoints` — `modification_note` (issue #118 PR3)
 
 `brine_modification_description` was replaced by `modification_note`: the result's `'modification'` notes, `'; '`-joined in id order when more than one exists (an upload's mirror and a hand-written one can coexist under different `created_by`). NULL when none.

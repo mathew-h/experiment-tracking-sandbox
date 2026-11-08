@@ -125,3 +125,20 @@ describe('NewExperimentPage — description note', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['experiments'] })
   })
 })
+
+describe('NewExperimentPage — background flag (issue #152)', () => {
+  it('sends is_background false by default', async () => {
+    const user = userEvent.setup()
+    wrap(<NewExperimentPage />)
+    await createExperiment(user)
+    expect(vi.mocked(experimentsApi.create).mock.calls[0][0]).toMatchObject({ is_background: false })
+  })
+
+  it('sends is_background true when the Step 1 box is ticked', async () => {
+    const user = userEvent.setup()
+    wrap(<NewExperimentPage />)
+    await user.click(screen.getByRole('checkbox', { name: /background \/ blank/i }))
+    await createExperiment(user)
+    expect(vi.mocked(experimentsApi.create).mock.calls[0][0]).toMatchObject({ is_background: true })
+  })
+})

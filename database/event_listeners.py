@@ -138,7 +138,8 @@ _VIEWS = [
             (SELECT n.note_text
              FROM experiment_notes n
              WHERE n.experiment_fk = e.id
-               AND n.note_type = 'description') AS description
+               AND n.note_type = 'description') AS description,
+            e.is_background
         FROM experiments e
         LEFT JOIN experimental_conditions ec ON ec.experiment_fk = e.id
     """),
@@ -554,6 +555,12 @@ _VIEWS = [
     # The JOIN to scalar_results is INNER so a timepoint with no scalar data
     # produces no row here at all. See
     # docs/issues/issue-rollup-replicate-count-and-null-timepoint-buckets.md
+    #
+    # Backgrounds (issue #152): a group with any non-background, non-outlier
+    # member averages only its non-background vials; a group whose non-outlier
+    # members are all is_background keeps its own rollup (it is what #144 links
+    # to as a background). g is computed over every non-outlier experiment of
+    # the group, results or not. is_background_group marks the second case.
     # ------------------------------------------------------------------
     ("v_results_scalar_rollup", """
         CREATE VIEW v_results_scalar_rollup AS
@@ -586,14 +593,24 @@ _VIEWS = [
             stddev_samp(sr.ferrous_iron_yield_nh3_pct)                  AS sd_fe_yield_nh3_pct,
             AVG(sr.grams_per_ton_yield)                                 AS mean_grams_per_ton_yield,
             stddev_samp(sr.grams_per_ton_yield)                         AS sd_grams_per_ton_yield,
-            AVG(sr.final_ph)                                            AS mean_final_ph
+            AVG(sr.final_ph)                                            AS mean_final_ph,
+            g.all_background                                            AS is_background_group
         FROM experimental_results er
         JOIN experiments e     ON e.id  = er.experiment_fk
         JOIN scalar_results sr ON sr.result_id = er.id
+        JOIN (
+            SELECT COALESCE(base_experiment_id, experiment_id) AS group_key,
+                   bool_and(COALESCE(is_background, false))   AS all_background
+            FROM experiments
+            WHERE NOT COALESCE(is_outlier, false)
+            GROUP BY 1
+        ) g ON g.group_key = COALESCE(e.base_experiment_id, e.experiment_id)
         WHERE er.is_primary_timepoint_result = TRUE
           AND NOT COALESCE(e.is_outlier, false)
+          AND (NOT COALESCE(e.is_background, false) OR g.all_background)
         GROUP BY COALESCE(e.base_experiment_id, e.experiment_id),
-                 er.time_post_reaction_bucket_days
+                 er.time_post_reaction_bucket_days,
+                 g.all_background
     """),
 
     # ------------------------------------------------------------------
@@ -637,7 +654,9 @@ _VIEWS = [
     #           token peeled off (TIMEPOINT_TOKEN_SQL_PATTERN) =
     #           background_stem_id
     # Background stats (bkg CTE) are per (sample group, bucket) and EXCLUDE
-    # is_outlier background vials. Each sample row takes the nearest
+    # is_outlier background vials. Issue #152: bm lists the linked set's
+    # non-outlier vials; bsel keeps only its is_background vials when it has
+    # any, else all of them (unflagged data behaves as before #152). Each sample row takes the nearest
     # background bucket (ties go to the earlier bucket, no maximum gap);
     # bkg_time_gap_days = background bucket - sample bucket (signed).
     # A sample row with a NULL bucket, or no background bucket, or NULL
@@ -678,27 +697,41 @@ _VIEWS = [
             WHERE er.is_primary_timepoint_result = TRUE
               AND sr.h2_concentration IS NOT NULL
         ),
-        bkg AS (
+        bm AS (
             SELECT
                 l.base_experiment_id                 AS sample_base,
-                er.time_post_reaction_bucket_days    AS bucket,
-                COUNT(*)                             AS n_values,
-                AVG(sr.h2_concentration)             AS mean_ppm,
-                AVG(sr.h2_micromoles)                AS mean_umol,
-                stddev_samp(sr.h2_micromoles)        AS sd_umol
+                e.id                                 AS experiment_fk,
+                COALESCE(e.is_background, false)     AS is_background
             FROM h2_background_links l
             JOIN experiments e ON
                  (l.background_base_id IS NOT NULL
                   AND COALESCE(e.base_experiment_id, e.experiment_id) = l.background_base_id)
               OR (l.background_stem_id IS NOT NULL
                   AND regexp_replace(e.experiment_id, '{TIMEPOINT_TOKEN_SQL_PATTERN}', '') = l.background_stem_id)
-            JOIN experimental_results er ON er.experiment_fk = e.id
+            WHERE NOT COALESCE(e.is_outlier, false)
+        ),
+        bsel AS (
+            SELECT bm.sample_base, bm.experiment_fk
+            FROM bm
+            WHERE bm.is_background
+               OR NOT EXISTS (SELECT 1 FROM bm b2
+                              WHERE b2.sample_base = bm.sample_base AND b2.is_background)
+        ),
+        bkg AS (
+            SELECT
+                bsel.sample_base,
+                er.time_post_reaction_bucket_days    AS bucket,
+                COUNT(*)                             AS n_values,
+                AVG(sr.h2_concentration)             AS mean_ppm,
+                AVG(sr.h2_micromoles)                AS mean_umol,
+                stddev_samp(sr.h2_micromoles)        AS sd_umol
+            FROM bsel
+            JOIN experimental_results er ON er.experiment_fk = bsel.experiment_fk
             JOIN scalar_results sr       ON sr.result_id = er.id
             WHERE er.is_primary_timepoint_result = TRUE
               AND sr.h2_micromoles IS NOT NULL
               AND er.time_post_reaction_bucket_days IS NOT NULL
-              AND NOT COALESCE(e.is_outlier, false)
-            GROUP BY l.base_experiment_id, er.time_post_reaction_bucket_days
+            GROUP BY bsel.sample_base, er.time_post_reaction_bucket_days
         ),
         d AS (
             SELECT
@@ -758,8 +791,10 @@ _VIEWS = [
     # v_results_h2_bkg_adjusted_rollup (issue #144)
     # One row per (base_experiment_id, timepoint bucket) of a linked sample
     # group, read from v_results_h2_bkg_adjusted. Sample experiments flagged
-    # is_outlier are excluded (as in v_results_scalar_rollup); rows with a
-    # NULL bucket are dropped. n_values counts rows with a net value.
+    # is_outlier are excluded (as in v_results_scalar_rollup), and so are
+    # is_background vials of a group that also has sample vials (issue #152,
+    # same g subquery as v_results_scalar_rollup); rows with a NULL bucket are
+    # dropped. n_values counts rows with a net value.
     # Background columns are constant within a sample bucket, so MIN() just
     # carries them through.
     # Mean: GREATEST(0, AVG(unclamped)), so negative replicates pull the
@@ -803,7 +838,15 @@ _VIEWS = [
             AVG(v.net_h2_micromoles_unclamped) < 0                      AS below_background
         FROM v_results_h2_bkg_adjusted v
         JOIN experiments e ON e.id = v.experiment_fk
+        JOIN (
+            SELECT COALESCE(base_experiment_id, experiment_id) AS group_key,
+                   bool_and(COALESCE(is_background, false))   AS all_background
+            FROM experiments
+            WHERE NOT COALESCE(is_outlier, false)
+            GROUP BY 1
+        ) g ON g.group_key = v.base_experiment_id
         WHERE NOT COALESCE(e.is_outlier, false)
+          AND (NOT COALESCE(e.is_background, false) OR g.all_background)
           AND v.time_post_reaction_bucket_days IS NOT NULL
         GROUP BY v.base_experiment_id, v.time_post_reaction_bucket_days
     """),

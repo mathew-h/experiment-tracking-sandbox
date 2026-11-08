@@ -491,3 +491,34 @@ describe('GroupedResultsView — issue #144 net H₂ metrics', () => {
     expect(screen.queryByText('background has no H₂ data')).not.toBeInTheDocument()
   })
 })
+
+describe('GroupedResultsView — issue #152 background vials', () => {
+  const bg = (v: ReplicateGroupMemberDetail): ReplicateGroupMemberDetail => ({ ...v, is_background: true })
+
+  it('labels a background letter of a mixed group, matching the rollup that leaves it out', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_003', [
+        { replicate_label: 'a', vials: [detailVial(1, 'SERUM_003a', null, false)] },
+        { replicate_label: 'b', vials: [bg(detailVial(2, 'SERUM_003b', null, false))] },
+      ]),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_003" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByText(/^replicate b \(background\)$/)).toBeInTheDocument()
+    expect(screen.getByText(/^replicate a$/)).toBeInTheDocument()
+  })
+
+  it('keeps every letter of an all-background group unlabelled', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(
+      groupOf('SERUM_004', [
+        { replicate_label: 'a', vials: [bg(detailVial(1, 'SERUM_004a', null, false))] },
+        { replicate_label: 'b', vials: [bg(detailVial(2, 'SERUM_004b', null, false))] },
+      ]),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_004" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect(screen.getByText(/^replicate a$/)).toBeInTheDocument()
+    expect(screen.getByText(/^replicate b$/)).toBeInTheDocument()
+    expect(screen.queryByText(/\(background\)/)).not.toBeInTheDocument()
+  })
+})

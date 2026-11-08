@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal, Mapping
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.orm import Session
 
 from database.experiment_id_parser import split_timepoint_token
@@ -43,13 +43,20 @@ def link_ref(link: H2BackgroundLink) -> str:
 
 
 def _has_usable_background(db: Session, mode: LinkMode, ref: str) -> bool:
-    """Mirror the view's bkg CTE filter: primary row, non-null H2 and bucket,
-    non-outlier experiment."""
+    """Mirror the view's bm/bsel/bkg CTEs: primary row, non-null H2 and bucket,
+    non-outlier experiment; and when the set has any non-outlier
+    is_background vial, only those count (issue #152)."""
     if mode == "group":
         key = func.coalesce(Experiment.base_experiment_id, Experiment.experiment_id)
         match = key == ref
     else:
         match = timepoint_stem_expr(Experiment) == ref
+    not_outlier = func.coalesce(Experiment.is_outlier, False).is_(False)
+    has_flagged = db.execute(
+        select(Experiment.id).where(match, not_outlier, Experiment.is_background.is_(True)).limit(1)
+    ).first() is not None
+    if has_flagged:
+        match = and_(match, Experiment.is_background.is_(True))
     q = (
         select(ExperimentalResults.id)
         .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
@@ -59,7 +66,7 @@ def _has_usable_background(db: Session, mode: LinkMode, ref: str) -> bool:
             ExperimentalResults.is_primary_timepoint_result.is_(True),
             ScalarResults.h2_micromoles.is_not(None),
             ExperimentalResults.time_post_reaction_bucket_days.is_not(None),
-            func.coalesce(Experiment.is_outlier, False).is_(False),
+            not_outlier,
         )
         .limit(1)
     )

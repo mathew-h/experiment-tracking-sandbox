@@ -118,6 +118,7 @@ def list_experiments(
     date_to: str | None = None,
     description: str | None = None,
     additive: str | None = None,
+    is_background: bool | None = None,
     group_replicates: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
@@ -156,6 +157,9 @@ def list_experiments(
         stmt = stmt.where(ExperimentalConditions.reactor_number == reactor_number)
     if description:
         stmt = stmt.where(Experiment.description.ilike(f"%{description}%"))
+    if is_background is not None:
+        # Issue #152: backgrounds only (true) or samples only (false).
+        stmt = stmt.where(Experiment.is_background.is_(is_background))
     if additive:
         # ChemicalAdditive.experiment_id is the CONDITIONS row id.
         stmt = stmt.where(
@@ -434,6 +438,7 @@ def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
         replicate_label=exp.replicate_label,
         status=exp.status,
         is_outlier=exp.is_outlier,
+        is_background=exp.is_background,
         id_timepoint_days=exp.id_timepoint_days,
         researcher=exp.researcher,
         date=exp.date,
@@ -1518,6 +1523,7 @@ def update_experiment(
     new_sample_id = data.pop("sample_id", None)
     old_date = exp.date  # capture before mutation
     old_is_outlier = exp.is_outlier  # capture before mutation
+    old_is_background = exp.is_background  # capture before mutation
 
     for field, value in data.items():
         setattr(exp, field, value)
@@ -1546,6 +1552,19 @@ def update_experiment(
         ))
         log.info("experiment_outlier_updated", experiment_id=exp.experiment_id,
                  is_outlier=data["is_outlier"], user=current_user.uid)
+
+    if "is_background" in data and data["is_background"] != old_is_background:
+        db.add(ModificationsLog(
+            experiment_id=exp.experiment_id,
+            experiment_fk=exp.id,
+            modified_by=current_user.uid,
+            modification_type="update",
+            modified_table="experiments",
+            old_values={"is_background": old_is_background},
+            new_values={"is_background": data["is_background"]},
+        ))
+        log.info("experiment_background_updated", experiment_id=exp.experiment_id,
+                 is_background=data["is_background"], user=current_user.uid)
 
     if new_id is not None:
         new_id = new_id.strip()
