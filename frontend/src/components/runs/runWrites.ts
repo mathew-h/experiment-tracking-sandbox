@@ -8,6 +8,8 @@ export interface RunWrites {
   invalidate: (qc: QueryClient, baseId: string, segmentIds: string[]) => Promise<void>
   /** Route of a run page. */
   runPath: (baseId: string) => string
+  /** Route of the run list: where a run page goes when its run is gone (issue #158). */
+  listPath: '/hpht' | '/core-floods'
   /** Query key of a run's detail query (removed when the run disappears). */
   runQueryKey: (baseId: string) => unknown[]
 }

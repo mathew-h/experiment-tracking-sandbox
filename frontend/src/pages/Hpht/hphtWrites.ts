@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { RunWrites } from '@/components/runs/runWrites'
-import { runPathFor } from '@/utils/experimentId'
+import { runListPathFor, runPathFor } from '@/utils/experimentId'
 
 /** Refreshes everything an HPHT run write can change: the run list, the run
  *  and its ICP, each touched segment's experiment and results, and the
@@ -29,5 +29,6 @@ export const hphtRunPath = (baseId: string) => runPathFor('HPHT', baseId)
 export const HPHT_WRITES: RunWrites = {
   invalidate: invalidateHphtWrites,
   runPath: hphtRunPath,
+  listPath: runListPathFor('HPHT'),
   runQueryKey: (baseId) => ['hpht-run', baseId],
 }

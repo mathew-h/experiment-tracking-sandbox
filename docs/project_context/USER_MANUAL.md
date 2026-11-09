@@ -45,14 +45,16 @@ A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`,
 
 **Run page.** Click a run to open it. The header shows the rig, the ONGOING segment, cumulative H₂ and pore volumes to date. Below it:
 
-- **Segments:** one row per segment, with a link to its experiment page, an editable status, an inline description and **Rename**. Pore volume is set from **Data checks** or on each experiment's Conditions tab.
-- **Samples:** every sample across all segments in time order. **Cum. day** is the cumulative day since the run started. A flow rate of 0 shows a **HOLD** badge. Blanks and bypass samples sit in a separate **Side samples** section with no cumulative columns. Click a row to edit it.
+- **Segments:** one row per segment, with a link to its experiment page, an editable status, an inline description, **Rename** and **Delete**. It is open when the run has more than one segment, and its header lists every segment ID as a link. **Delete** asks you to type the segment's ID, like deleting from the experiment page; deleting a run's last segment returns you to the Core Floods list. Pore volume is set from **Data checks** or on each experiment's Conditions tab.
+- **Samples:** every sample across all segments in time order. **Cum. day** is the cumulative day since the run started. A flow rate of 0 shows a **HOLD** badge. Blanks and bypass samples sit in a separate **Side samples** section with no cumulative columns; their IDs link to the experiment page. Click a row to edit it.
 - **Cleanup:** one line per data problem the run has (several roots, several ONGOING segments, missing pore volume or description, samples with no flow rate), each with its fix. The segment's ID sits beside each per-segment control. **Set pore volume for all segments** writes one value to every segment that lacks it.
 - **ICP over time:** ICP ppm against cumulative day for the run's main-line samples, with a dashed marker where each segment starts. It works the same way as on the Results tab (see "Plot ICP concentrations over time" below).
 
 **Export.** **Export all** in the run header downloads one Excel workbook for the whole run: every segment and side sample, with a Core Flood tab of flow, pressures and cumulative values.
 
 **From a segment's experiment page.** The breadcrumb reads **Experiments › Run CF_020 › CF_020-5_Bypass1**, and the strip under the ID lists every segment and side sample of the run (side samples follow their segment). Click **Run CF_020** or any segment in the strip to move around the run.
+
+**Segment IDs in the address.** `/core-floods/CF_020-3` (any segment or side-sample ID) opens run CF_020, and the address changes to `/core-floods/CF_020`. An ID that is not a core flood shows "No core flood run …" with links back to the list and to that experiment's page.
 
 **Add a sample.** Click **+ Add sample**. With one ONGOING segment it is used automatically; otherwise pick a segment. Day here is the number of days since the chosen segment started (not the cumulative day shown in the table); it is filled from the sample date and the segment's start, and you can change it (a segment with no start date needs a Day typed in). If that segment already has a sample on the same day, a warning appears and the button becomes **Replace existing sample**: saving replaces that sample in the run. Enter a fractional day (for example 11.5) to keep both. The GC run date follows the sample date until you edit it, and flow rate, N₂ flow, inlet pressure and outlet pressure are filled from the previous sample. Flow rate is the rate since the previous sample: **enter 0 for a hold**. Enter gas pressure in **psi**; it is stored in MPa. When editing, only the fields you change are saved, and Day cannot be changed.
 
@@ -72,7 +74,9 @@ An HPHT run is every experiment sharing a base ID: the first segment (`HPHT_297`
 - **Run to date:** three charts against cumulative day: cumulative H₂ (g/t), H₂ per day for each interval, and cumulative Fe²⁺ → H₂ yield (%). A dashed line marks where each later segment starts. Side samples are left out. A gap means that interval has no value (for example two samples on the same day); it is not a zero.
 - **Side samples** (collapsed): the run's `_Text` variants with their raw values only, no running totals.
 - **ICP over time** (collapsed): the same ICP chart as on the Results tab.
-- **Segments** (collapsed): each segment's status, description and **Rename**, as on the Core Flood page.
+- **Segments** (open when the run has more than one segment): each segment's status, description, **Rename** and **Delete**, as on the Core Flood page. The header lists every segment ID as a link.
+
+Every segment ID on the page (the **Segment** column, the ONGOING badge, the Segments header) links to that experiment's page; clicking one in the Samples table opens the experiment, not the sample editor. `/hpht/HPHT_297-2` opens run HPHT_297 and the address changes to `/hpht/HPHT_297`.
 - **Data checks** (only when there is a problem): several roots, several ONGOING segments, a missing description, or a segment whose ID does not follow the run's base ID.
 
 NH₃ is not shown on this page. It stays on the experiment's Results tab and in Power BI.

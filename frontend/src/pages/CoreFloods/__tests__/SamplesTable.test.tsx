@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render as rtlRender, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 import type { CoreFloodSample } from '@/api/coreFloods'
 import { SamplesTable } from '../SamplesTable'
+
+// Side-sample IDs are links since issue #158, so every render needs a router.
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: MemoryRouter })
 
 const sample = (over: Partial<CoreFloodSample>): CoreFloodSample => ({
   result_id: 1,
@@ -167,5 +171,17 @@ describe('SamplesTable', () => {
     expect(cells[0].className).toMatch(/sticky left-0/)
     expect(cells[1].className).toMatch(/sticky/)
     expect(screen.getByRole('columnheader', { name: 'Date' }).className).toMatch(/sticky/)
+  })
+})
+
+describe('SamplesTable side-sample IDs (issue #158)', () => {
+  it('links the side-sample ID without firing the row edit', async () => {
+    const onEdit = vi.fn()
+    const s = sample({ result_id: 1, experiment_id: 'CF_020-5_Bypass1', is_variant: true })
+    render(<SamplesTable samples={[s]} variant onEdit={onEdit} icpByResult={new Map()} />)
+    const link = screen.getByRole('link', { name: 'CF_020-5_Bypass1' })
+    expect(link).toHaveAttribute('href', '/experiments/CF_020-5_Bypass1')
+    await userEvent.click(link)
+    expect(onEdit).not.toHaveBeenCalled()
   })
 })

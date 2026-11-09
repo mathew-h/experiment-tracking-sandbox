@@ -10,6 +10,8 @@ interface SegmentLinkProps {
   children?: ReactNode
   /** Muted and struck through, for a vial excluded from the group mean. */
   outlier?: boolean
+  /** Keep the surrounding text colour, underlined (inside a badge, issue #158). */
+  inherit?: boolean
   /** Layout classes; the colour comes from `outlier`. */
   className?: string
   /** Keep the click from reaching a click-to-edit row around the link (default true). */
@@ -18,6 +20,7 @@ interface SegmentLinkProps {
 
 const ID_LINK = 'text-red-400 hover:text-red-300'
 const OUTLIER_LINK = 'text-ink-muted line-through hover:text-ink-secondary'
+const INHERIT_LINK = 'underline decoration-dotted underline-offset-2 hover:opacity-80'
 
 /** An experiment ID that links to its detail page. Every printed experiment ID
  *  with a detail page should be one of these (issue #155). */
@@ -26,6 +29,7 @@ export function SegmentLink({
   tab,
   children,
   outlier = false,
+  inherit = false,
   className,
   stopPropagation = true,
 }: SegmentLinkProps) {
@@ -35,7 +39,7 @@ export function SegmentLink({
     <Link
       to={to}
       onClick={onClick}
-      className={['font-mono-data', outlier ? OUTLIER_LINK : ID_LINK, className].filter(Boolean).join(' ')}
+      className={['font-mono-data', outlier ? OUTLIER_LINK : inherit ? INHERIT_LINK : ID_LINK, className].filter(Boolean).join(' ')}
     >
       {children ?? id}
     </Link>

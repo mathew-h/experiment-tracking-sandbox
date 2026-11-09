@@ -8,6 +8,7 @@ import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { DescriptionEditor } from '@/pages/ExperimentDetail/DescriptionEditor'
 import { SegmentStatusSelect } from '@/components/runs/SegmentStatusSelect'
 import { SegmentLink } from '@/components/runs/SegmentLink'
+import { DeleteExperimentModal } from '@/components/experiments/DeleteExperimentModal'
 import type { RunWrites } from '@/components/runs/runWrites'
 import { CORE_FLOOD_WRITES } from './useCoreFloodWrites'
 
@@ -130,12 +131,35 @@ function DescribeCell({ baseId, segment, writes, onDone }: SegmentProps & { onDo
   )
 }
 
-/** The run's segments, with inline status, description and rename edits. */
+/** The run's segments, with inline status, description, rename and delete. */
 export function SegmentsTable({
   baseId, segments, renaming, setRenaming, describing, setDescribing, writes = CORE_FLOOD_WRITES,
 }: Props) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { success } = useToast()
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  // Issue #158: delete in place, behind the same typed-ID gate as the detail page.
+  const onDeleted = () => {
+    const deletedId = deleting!
+    setDeleting(null)
+    success('Segment deleted', deletedId)
+    if (segments.length > 1) {
+      void writes.invalidate(qc, baseId, [deletedId])
+      return
+    }
+    // The run is gone with its last segment. Leave first, then drop the run's
+    // cache once this page has unmounted, so it is not refetched into a 404.
+    navigate(writes.listPath, { replace: true })
+    setTimeout(() => {
+      qc.removeQueries({ queryKey: writes.runQueryKey(baseId) })
+      void writes.invalidate(qc, baseId, [deletedId])
+    }, 0)
+  }
+
   return (
+    <>
     <Table>
       <TableHead>
         <tr>
@@ -167,6 +191,14 @@ export function SegmentsTable({
                   >
                     Rename
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    aria-label={`Delete ${seg.experiment_id}`}
+                    onClick={() => setDeleting(seg.experiment_id)}
+                  >
+                    Delete
+                  </Button>
                 </div>
               )}
             </Td>
@@ -194,5 +226,12 @@ export function SegmentsTable({
         ))}
       </TableBody>
     </Table>
+    <DeleteExperimentModal
+      open={deleting !== null}
+      experimentId={deleting ?? ''}
+      onClose={() => setDeleting(null)}
+      onDeleted={onDeleted}
+    />
+    </>
   )
 }

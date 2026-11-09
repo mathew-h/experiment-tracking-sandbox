@@ -327,10 +327,11 @@ Renders `text-xs text-ink-muted` with `›` separators inside `<nav aria-label="
 | `tab` | `string` | — | Adds `?tab=` for a detail-page tab |
 | `children` | `ReactNode` | the ID | Text shown in place of the ID |
 | `outlier` | `boolean` | `false` | Muted and struck through instead of red |
-| `className` | `string` | — | Layout classes only; colour comes from `outlier` |
+| `inherit` | `boolean` | `false` | Keeps the surrounding text colour, dotted underline (inside a badge) |
+| `className` | `string` | — | Layout classes only; colour comes from `outlier` / `inherit` |
 | `stopPropagation` | `boolean` | `true` | Keeps the click from opening a click-to-edit row |
 
-Every printed experiment ID that has a detail page should be a `SegmentLink` (`font-mono-data text-red-400`). Run-page routes come from `runPathFor(type, baseId)` and `runListPathFor(type)` in `src/utils/experimentId.ts`; never spell `/hpht/…` or `/core-floods/…` in a component.
+Every printed experiment ID that has a detail page should be a `SegmentLink` (`font-mono-data text-red-400`). For a comma-separated list use `SegmentIdList` (`src/components/runs/runPageNav.tsx`). Never put a link inside a `Collapsible` header's `summary` (it renders in the toggle `<button>`); pass it as `links`, which renders beside the button (issue #158). Run-page routes come from `runPathFor(type, baseId)` and `runListPathFor(type)` in `src/utils/experimentId.ts`; never spell `/hpht/…` or `/core-floods/…` in a component.
 
 ---
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { HphtRun } from '@/api/hpht'
 import type { ResultWithFlags } from '@/api/experiments'
@@ -64,16 +64,26 @@ function result(id: number, day: number): ResultWithFlags {
   }
 }
 
-function renderPage(run: HphtRun = RUN) {
+function Probe() {
+  return (
+    <>
+      <div data-testid="path">{useLocation().pathname}</div>
+      <div data-testid="nav-type">{useNavigationType()}</div>
+    </>
+  )
+}
+
+function renderPage(run: HphtRun = RUN, path = `/hpht/${run.base_id}`) {
   vi.mocked(hphtApi.get).mockResolvedValue(run)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={[`/hpht/${run.base_id}`]}>
+    <MemoryRouter initialEntries={[path]}>
       <QueryClientProvider client={qc}>
         <ToastProvider>
           <Routes>
             <Route path="/hpht/:baseId" element={<HphtRunPage />} />
           </Routes>
+          <Probe />
         </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -98,7 +108,11 @@ describe('HphtRunPage (issue #150)', () => {
     renderPage()
     expect(await screen.findByRole('heading', { name: 'HPHT_297', level: 1 })).toBeInTheDocument()
     expect(screen.getByText('Reactor R07')).toBeInTheDocument()
-    expect(screen.getByText('Ongoing: HPHT_297-2')).toBeInTheDocument()
+    const badge = screen.getByText(/^Ongoing:/)
+    expect(badge).toHaveTextContent('Ongoing: HPHT_297-2')
+    expect(within(badge).getByRole('link', { name: 'HPHT_297-2' })).toHaveAttribute(
+      'href', '/experiments/HPHT_297-2',
+    )
     expect(screen.getByText('1500 psi')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Edit on Conditions tab' })).toHaveAttribute(
       'href', '/experiments/HPHT_297-2',
@@ -187,5 +201,48 @@ describe('HphtRunPage (issue #150)', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByText('No HPHT run NOPE')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to HPHT' })).toHaveAttribute('href', '/hpht')
+    expect(screen.getByRole('link', { name: 'Open experiment NOPE' })).toHaveAttribute('href', '/experiments/NOPE')
+  })
+})
+
+describe('HphtRunPage links (issue #158)', () => {
+  beforeEach(() => {
+    vi.mocked(hphtApi.get).mockReset()
+    vi.mocked(hphtApi.icp).mockReset()
+    vi.mocked(hphtApi.icp).mockResolvedValue([])
+    vi.mocked(experimentsApi.getResults).mockReset()
+    vi.mocked(experimentsApi.getResults).mockResolvedValue([])
+    vi.mocked(chemicalsApi.listExperimentAdditives).mockResolvedValue([])
+  })
+
+  it('opens Segments for a run with several segments and links them in the summary', async () => {
+    renderPage()
+    const seg = await screen.findByRole('button', { name: /^Segments/ })
+    expect(seg).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: 'Segments' })).toBeInTheDocument()
+    const hrefs = within(seg.parentElement!).getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(hrefs).toEqual(RUN.segments.map((s) => `/experiments/${s.experiment_id}`))
+  })
+
+  it('keeps Segments closed for a single-segment run', async () => {
+    renderPage({ ...RUN, segments: [RUN.segments[0]] })
+    expect(await screen.findByRole('button', { name: /^Segments/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('links the Segment column without opening the sample editor', async () => {
+    renderPage()
+    const region = await samplesRegion()
+    const link = within(region).getAllByRole('link', { name: 'HPHT_297-2' })[0]
+    expect(link).toHaveAttribute('href', '/experiments/HPHT_297-2')
+    await userEvent.click(link)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('replaces a segment ID in the URL with the run base ID', async () => {
+    renderPage(RUN, '/hpht/HPHT_297-2')
+    await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent(/^\/hpht\/HPHT_297$/))
+    expect(screen.getByTestId('nav-type')).toHaveTextContent('REPLACE')
+    expect(await screen.findByRole('heading', { name: 'HPHT_297', level: 1 })).toBeInTheDocument()
   })
 })

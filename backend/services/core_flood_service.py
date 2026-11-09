@@ -85,10 +85,21 @@ def compute_warnings(
     return [CoreFloodWarning(code=code, experiment_ids=v) for code, v in found.items() if v]
 
 
-def get_run(db: Session, base_id: str) -> CoreFloodRun:
+def _resolve(
+    db: Session, requested_id: str,
+) -> tuple[str, list[CoreFloodSegment]]:
+    """Base ID and segments of the core flood run `requested_id` names:
+    a base, segment or variant ID (issue #158). Not-found reports the
+    ID the caller sent."""
+    base_id = runs.resolve_base_id(db, requested_id)
     segments = _load_segments(db, base_id).get(base_id)
     if not segments:
-        raise CoreFloodNotFound(base_id)
+        raise CoreFloodNotFound(requested_id)
+    return base_id, segments
+
+
+def get_run(db: Session, base_id: str) -> CoreFloodRun:
+    base_id, segments = _resolve(db, base_id)
     segments = runs.by_date(segments)
     samples = fetch_samples(db, base_ids=[base_id])
     return CoreFloodRun(
@@ -101,8 +112,7 @@ def get_run(db: Session, base_id: str) -> CoreFloodRun:
 
 def get_run_icp(db: Session, base_id: str) -> list[CoreFloodIcpRow]:
     """ICP-OES readings for a run's samples, in view order; samples without ICP are omitted."""
-    if not _load_segments(db, base_id).get(base_id):
-        raise CoreFloodNotFound(base_id)
+    base_id, _ = _resolve(db, base_id)
     return runs.run_icp(db, _VIEW, base_id)
 
 
