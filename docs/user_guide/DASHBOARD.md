@@ -66,13 +66,18 @@ Shows all 19 reactor slots:
 
 ### Reactor Detail Modal
 
-Click any occupied reactor slot to open a detail panel showing all card fields in full, plus the experiment start date. A **View Detail →** button navigates to the experiment's full detail page.
+Click any occupied reactor slot to open a detail panel showing all card fields in full, plus the experiment start date. Directly below the Experiment section (issue #157):
+
+- **Open run page** (the red, primary button) opens the run the card's experiment belongs to: `/hpht/{base}` for an R or P vessel, `/core-floods/{base}` for a CF rig, whatever the card's status (ongoing, queued or completed). It is missing only when the experiment has no base ID.
+- **Open segment {experiment ID}** opens that experiment's own detail page. It becomes the primary button when there is no run page.
+- **Close** closes the panel.
 
 #### Reactor Modification box (issue #122 PR-B, 2026-09-24)
 
-The detail panel's **Reactor Modification** section shows the most recent entry
-(today's included) for this experiment (date + text, read-only) above an editable date field
-(defaults to today) and a text box. "Today" is the lab's calendar day
+The detail panel's **Reactor Modification** section, below the navigation buttons and
+Hardware, shows the most recent entry (today's included) for this experiment (date + text,
+read-only) above **Log a reactor modification note**: an editable date field
+(defaults to today), a text box and a secondary **Save** button. "Today" is the lab's calendar day
 (America/New_York), on both this date field and the server's "Modified today"
 lookup below — not UTC (Mat's ruling, 2026-10-05). Clicking **Save** adds a dated `modification`
 note to the experiment — visible on that experiment's Notes tab — rather than

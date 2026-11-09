@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, useToast } from '@/components/ui'
+import { Button, Card, useToast } from '@/components/ui'
 import type { ReactorCardData, ReactorSpec } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 import { labTodayISO } from '@/utils/labDate'
@@ -29,10 +29,18 @@ function isCoreFlood(label: string): boolean {
   return label.startsWith('CF')
 }
 
-/** HPHT run page of an R or P card's ONGOING experiment (issue #150); null otherwise. */
+/** Run type a slot series holds: CF rigs run core floods, R and P (#147) vessels run HPHT. */
+function runTypeForLabel(label: string): 'HPHT' | 'Core Flood' | null {
+  if (isCoreFlood(label)) return 'Core Flood'
+  if (/^[RP]\d/.test(label)) return 'HPHT'
+  return null
+}
+
+/** Run page of a card's experiment, whatever its status (issues #150, #157);
+ *  null when the card has no base ID or the slot series has no run page. */
 export function runPagePath(card: ReactorCardData): string | null {
-  if (isCoreFlood(card.reactor_label) || card.status !== 'ONGOING' || !card.base_experiment_id) return null
-  return runPathFor('HPHT', card.base_experiment_id)
+  const type = runTypeForLabel(card.reactor_label)
+  return type && card.base_experiment_id ? runPathFor(type, card.base_experiment_id) : null
 }
 
 function StatusBadge({
@@ -267,6 +275,7 @@ function ReactorDetailModal({
   const [crDate, setCrDate] = useState(() => labTodayISO())
   const [crText, setCrText] = useState('')
   const isQueued = card.status === 'QUEUED'
+  const titleId = useId()
 
   const dateMutation = useMutation({
     mutationFn: (newDate: string) =>
@@ -325,22 +334,27 @@ function ReactorDetailModal({
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
+  const runPath = runPagePath(card)
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${titleId}-slot ${titleId}-id`}
         className="bg-surface-overlay border border-surface-border rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
-            <p className="text-2xs text-ink-muted uppercase tracking-wider mb-1">
+            <p id={`${titleId}-slot`} className="text-2xs text-ink-muted uppercase tracking-wider mb-1">
               {card.reactor_label}
             </p>
-            <h2 className="text-lg font-bold text-ink-primary font-mono-data">
+            <h2 id={`${titleId}-id`} className="text-lg font-bold text-ink-primary font-mono-data">
               {card.experiment_id}
             </h2>
           </div>
@@ -451,6 +465,26 @@ function ReactorDetailModal({
           </dl>
         </div>
 
+        {/* Navigation (issue #157): the run is the primary destination, and sits
+            above the modification note so the note reads as a side task. */}
+        <div className="flex justify-end gap-2 pt-3 pb-4 border-t border-surface-border">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+          <Button
+            variant={runPath ? 'secondary' : 'primary'}
+            size="sm"
+            onClick={() => navigate(`/experiments/${encodeURIComponent(card.experiment_id ?? '')}`)}
+          >
+            Open segment {card.experiment_id}
+          </Button>
+          {runPath && (
+            <Button variant="primary" size="sm" onClick={() => navigate(runPath)}>
+              Open run page
+            </Button>
+          )}
+        </div>
+
         {/* HARDWARE section */}
         {(card.volume_mL != null || card.material || card.vendor) && (
           <div className="pt-3 border-t border-surface-border mb-4">
@@ -497,7 +531,7 @@ function ReactorDetailModal({
 
             {/* Editable date + text for the selected entry */}
             <div className="flex items-center justify-between mb-1.5">
-              <p className="text-xs text-ink-muted">Reactor Modification for</p>
+              <h3 className="text-xs font-medium text-ink-secondary">Log a reactor modification note</h3>
               <input
                 type="date"
                 value={crDate}
@@ -513,39 +547,17 @@ function ReactorDetailModal({
               placeholder="Enter a reactor modification…"
               className="w-full text-sm bg-surface-raised border border-surface-border rounded px-2.5 py-2 text-ink-primary placeholder:text-ink-muted resize-none focus:outline-none focus:border-ink-muted transition-colors"
             />
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2"
               onClick={() => crMutation.mutate(crText.trim())}
               disabled={!crText.trim() || crMutation.isPending}
-              className="mt-2 px-3 py-1.5 text-sm bg-brand-red text-white rounded hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {crMutation.isPending ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
         )}
-
-        {/* Footer */}
-        <div className="mt-5 flex justify-end gap-2 pt-3 border-t border-surface-border">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm text-ink-muted hover:text-ink-primary border border-surface-border rounded transition-colors"
-          >
-            Close
-          </button>
-          {runPagePath(card) && (
-            <button
-              onClick={() => navigate(runPagePath(card)!)}
-              className="px-3 py-1.5 text-sm text-ink-primary border border-surface-border rounded hover:bg-surface-raised transition-colors"
-            >
-              Open run page
-            </button>
-          )}
-          <button
-            onClick={() => navigate(`/experiments/${card.experiment_id}`)}
-            className="px-3 py-1.5 text-sm bg-brand-red text-white rounded hover:opacity-90 transition-opacity"
-          >
-            View Detail →
-          </button>
-        </div>
       </div>
     </div>
   )
