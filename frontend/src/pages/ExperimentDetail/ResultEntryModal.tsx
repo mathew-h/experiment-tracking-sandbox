@@ -374,7 +374,7 @@ function ModalBody({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{HEADER_KEYS.map(renderField)}</div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="result-description" className={LABEL_CLASS}>
-            Description
+            Result Note/Sample Description
           </label>
           <textarea
             id="result-description"

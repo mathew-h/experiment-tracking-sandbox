@@ -37,7 +37,7 @@ const SOLUTION_COLUMNS: readonly Column[] = [
   { head: 'pH', value: (s) => s.final_ph },
   { head: 'Cond.', value: (s) => s.final_conductivity_mS_cm },
 ]
-const LEAD_COLUMNS = 6 // expander, Date, Day, Segment, Tube, Description
+const LEAD_COLUMNS = 6 // expander, Date, Day, Segment, Tube, Result Note/Sample Description
 
 /** Headers are upper-cased by CSS, which turns µ into Greek capital Mu ("MMOL" reads
  *  as millimoles), so the µ prefix is kept lower case. */
@@ -74,7 +74,7 @@ export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Prop
           <Th>Day</Th>
           <Th>Segment</Th>
           <Th>Tube</Th>
-          <Th>Description</Th>
+          <Th>Result Note/Sample Description</Th>
           {[...gc, ...SOLUTION_COLUMNS].map((c) => <Th key={c.head}>{headLabel(c.head)}</Th>)}
         </tr>
       </TableHead>
