@@ -115,7 +115,7 @@ export function HphtRunPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <Breadcrumb items={[{ label: 'HPHT', to: '/hpht' }]} />
+          <Breadcrumb items={[{ label: 'HPHT', to: '/hpht' }, { label: run.base_id, mono: true }]} />
           <h1 className="text-lg font-semibold text-ink-primary font-mono-data">{run.base_id}</h1>
           {description && <p className="text-sm text-ink-secondary max-w-prose">{description}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">

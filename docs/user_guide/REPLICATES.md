@@ -62,7 +62,8 @@ sets are a/b/c, well under that cap.
 
 Every replicate group — including an orphan lettered set with no parent row — has its
 own page at `/experiments/groups/{base}` (e.g. `/experiments/groups/SERUM_001`). Reach
-it from the **Group {base}** link in the experiment detail header strip of any member.
+it from the **Group {base}** link in the experiment detail header strip of any member,
+or from the breadcrumb above the ID (**Experiments › Group SERUM_001 › SERUM_001a**).
 
 It shows:
 

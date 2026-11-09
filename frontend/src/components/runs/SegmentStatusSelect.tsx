@@ -11,12 +11,14 @@ const STATUS_OPTIONS: { value: ExperimentStatus; label: string }[] = [
 ]
 
 interface Props {
-  segment: RunSegment
+  /** A run segment, or any experiment with an ID and a status (the detail page). */
+  segment: Pick<RunSegment, 'experiment_id' | 'status'>
   /** Refreshes the page's run queries after a successful change. */
   onChanged: () => Promise<unknown> | void
 }
 
-/** Status control for one run segment (Core Flood and HPHT run pages). It is
+/** Status control for one experiment (Core Flood and HPHT run pages, and the
+ *  detail page since issue #156). It is
  *  controlled by the run query, so a rejected change (for example the 409
  *  occupancy check) shows the old value. */
 export function SegmentStatusSelect({ segment, onChanged }: Props) {

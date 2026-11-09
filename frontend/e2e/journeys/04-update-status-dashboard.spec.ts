@@ -42,6 +42,7 @@ test('status change via reactor grid persists to experiment detail', async ({ pa
   await page.goto(`/experiments/${expId}`)
   await page.waitForLoadState('networkidle')
 
-  // The simple (display-only) StatusBadge in ExperimentDetail shows the status
-  await expect(page.getByText(/COMPLETED/i).first()).toBeVisible({ timeout: 10_000 })
+  // Issue #156: the detail page shows status in a select; read its value, since
+  // the option text "Completed" is present whether or not it is selected.
+  await expect(page.getByRole('combobox', { name: `Status of ${expId}` })).toHaveValue('COMPLETED', { timeout: 10_000 })
 })
