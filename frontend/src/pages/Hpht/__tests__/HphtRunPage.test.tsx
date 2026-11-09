@@ -105,13 +105,13 @@ describe('HphtRunPage (issue #150)', () => {
     )
   })
 
-  it('lists samples newest first with Tube and Description, and a MOD badge', async () => {
+  it('lists samples newest first with Tube and the result note, and a MOD badge', async () => {
     renderPage()
     const region = await samplesRegion()
     const rows = within(region).getAllByTestId(/^sample-/)
     expect(rows.map((r) => r.dataset.testid)).toEqual(['sample-12', 'sample-11', 'sample-10'])
     expect(within(region).getByRole('columnheader', { name: 'Tube' })).toBeInTheDocument()
-    expect(within(region).getByRole('columnheader', { name: 'Description' })).toBeInTheDocument()
+    expect(within(region).getByRole('columnheader', { name: 'Result Note/Sample Description' })).toBeInTheDocument()
     expect(within(rows[2]).getByText('First draw')).toBeInTheDocument()
     expect(within(rows[0]).getByText('MOD')).toBeInTheDocument()
     expect(within(rows[0]).getByText('5')).toBeInTheDocument()

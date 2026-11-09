@@ -8,6 +8,7 @@ endpoints (#146), so there is no write path here.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Literal
 
@@ -26,6 +27,31 @@ from database.models.experiments import Experiment
 from database.reactor_slot import series_prefix
 
 _VIEW = "v_hpht_samples"
+
+# Yushen/Tan R slots, then Parr P slots, then anything else (no reactor last).
+_SLOT_RE = re.compile(r"^(R|P)(\d+)$")
+_SERIES_ORDER = {"R": 0, "P": 1}
+
+
+def _slot_key(slot: str | None) -> tuple[int, int]:
+    """Sort key for a reactor slot label: R01..R16, P01..P06, then the rest.
+
+    Numeric, so R10 sorts after R09 rather than after R01."""
+    match = _SLOT_RE.match(slot or "")
+    if not match:
+        return (len(_SERIES_ORDER), 0)
+    return (_SERIES_ORDER[match.group(1)], int(match.group(2)))
+
+
+def _sort_by_reactor(items: list[HphtRunListItem]) -> list[HphtRunListItem]:
+    """Active first, then reactor slot. In place.
+
+    Applied on top of run_service.sort_runs: the sort is stable, so runs on the
+    same reactor keep its newest-sample-first, then base_id order."""
+    runs.sort_runs(items)
+    items.sort(key=lambda i: (not i.ongoing_experiment_ids,
+                              _slot_key(i.reactor_slot)))
+    return items
 
 
 class HphtRunNotFound(LookupError):
@@ -140,4 +166,4 @@ def list_runs(
                 real[-1]["cumulative_h2_grams_per_ton"] if real else None),
             warning_count=len(compute_warnings(base_id, segments)),
         ))
-    return runs.sort_runs(items)
+    return _sort_by_reactor(items)

@@ -127,7 +127,7 @@ describe('ResultEntryModal — add', () => {
     const user = userEvent.setup()
     wrap(<ResultEntryModal {...addProps} />)
     await user.type(screen.getByLabelText('Tube #'), '12')
-    await user.type(screen.getByLabelText('Description'), 'liquid cloudy')
+    await user.type(screen.getByLabelText('Result Note/Sample Description'), 'liquid cloudy')
     await user.type(screen.getByLabelText('Gas pressure (psi)'), '100')
     await user.type(screen.getByLabelText('H₂ (ppm)'), '450')
     await user.click(screen.getByRole('button', { name: 'Save Results' }))
@@ -260,10 +260,10 @@ describe('ResultEntryModal — edit', () => {
     expect(api.createResult).not.toHaveBeenCalled()
   })
 
-  it('sends result_note "" when Description is cleared', async () => {
+  it('sends result_note "" when the note is cleared', async () => {
     const user = userEvent.setup()
     wrap(<ResultEntryModal {...editProps} />)
-    const desc = (await screen.findByLabelText('Description')) as HTMLTextAreaElement
+    const desc = (await screen.findByLabelText('Result Note/Sample Description')) as HTMLTextAreaElement
     expect(desc.value).toBe('liquid cloudy')
     await user.clear(desc)
     await user.click(screen.getByRole('button', { name: 'Save' }))

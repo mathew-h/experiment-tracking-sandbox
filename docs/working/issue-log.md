@@ -2927,3 +2927,11 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Not done:** wizard checkbox and upload column not browser-checked (covered by tests). Backfill not run (waits on #151).
 - **Deploy:** lab PC `update.ps1` applies `e4b9c2d7a6f1`; refresh Power BI for `v_experiments.is_background` and `v_results_scalar_rollup.is_background_group`.
 - **Tests added:** yes — pytest: column/migration parity, 9 view tests, 9 API tests, 30 parser tests, 4 backfill tests, template header; vitest: toggle, list filter, wizard, grouped chart, picker, group page. **Docs updated:** yes. **Decision logged:** yes (`decisions.md`).
+
+## 2026-11-09 | inline — HPHT list sorted by reactor; clearer result note label (`fix/hpht-sort-reactor-number`)
+- **Files changed:** `backend/services/hpht_service.py` (`_slot_key`, `_sort_by_reactor`; `list_runs` uses it), `tests/api/test_hpht.py`, `frontend/src/pages/Hpht/HphtListPage.tsx` (docstring), `frontend/src/pages/Hpht/HphtSamplesTable.tsx` (column header), `frontend/src/pages/ExperimentDetail/ResultEntryModal.tsx` (field label), `ResultEntryModal.test.tsx`, `HphtRunPage.test.tsx`; docs `docs/api/API_REFERENCE.md` (+ `project_context` copy).
+- **What:** `GET /api/hpht` now sorts active first, then reactor slot (R01–R16 numerically, then Parr P01–P06, then no slot), then the shared `run_service.sort_runs` order (newest sample, base_id) via a stable second sort. Core Flood order unchanged (`sort_runs` untouched). The result entry modal's "Description" field (shared by Results tab, HPHT and Core Flood sample modals) and the HPHT samples table column are now "Result Note/Sample Description".
+- **Verification:** pytest `tests/api/test_hpht.py`, `test_hpht_view.py`, `test_core_floods.py` 92 passed; six-dir scoped run (one process) **1753 passed, 0 failed** (1752 at #152 + 1). Red check: reverting to `sort_runs` fails the new ordering test. vitest 67 files / 612 passed; eslint 5 / tsc 3 = baseline; flake8 counts equal develop on changed Python files. No browser check.
+- **Note:** a test base ID ending `_R01` is parsed as a variant suffix (base `HPHTS_DONE`), so fixture names avoid `_R<n>`.
+- **Deploy:** no migration.
+- **Tests added:** yes — pytest list ordering; vitest label/header assertions updated. **Docs updated:** yes. **Decision logged:** no.

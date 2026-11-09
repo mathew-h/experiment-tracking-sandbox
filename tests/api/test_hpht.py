@@ -86,6 +86,24 @@ def test_scope_active_returns_only_runs_with_an_ongoing_segment(client, db_sessi
     assert everything.index("HPHTA_002") < everything.index("HPHTA_001")
 
 
+def test_list_sorts_active_first_then_by_reactor_slot(
+        client, db_session, reporting_views):
+    ongoing = ExperimentStatus.ONGOING
+    _hpht(db_session, "HPHTS_P02", status=ongoing, reactor_number=2,
+          reactor_series="P")
+    _hpht(db_session, "HPHTS_R10", status=ongoing, reactor_number=10)
+    _hpht(db_session, "HPHTS_NONE", status=ongoing, reactor_number=None)
+    _hpht(db_session, "HPHTS_R02", status=ongoing, reactor_number=2)
+    _hpht(db_session, "HPHTS_R09", status=ongoing, reactor_number=9)
+    _hpht(db_session, "HPHTS_D01", reactor_number=1)
+    params = {"scope": "all", "q": "HPHTS_"}
+    bases = _bases(client.get("/api/hpht", params=params).json())
+    # Numeric (R09 before R10), R before Parr, no reactor last;
+    # completed after all active.
+    assert bases == ["HPHTS_R02", "HPHTS_R09", "HPHTS_R10", "HPHTS_P02",
+                     "HPHTS_NONE", "HPHTS_D01"]
+
+
 def test_q_matches_description_base_and_segment(client, db_session, reporting_views):
     _hpht(db_session, "HPHTQ_001", description="Olivine with nickel catalyst")
     _hpht(db_session, "HPHTQ_002", description="Basalt control")

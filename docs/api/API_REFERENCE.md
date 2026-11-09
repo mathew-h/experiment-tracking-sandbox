@@ -1072,7 +1072,7 @@ A base ID with no HPHT experiment is **404** (including a Core Flood or Serum ba
 
 ### GET /api/hpht
 
-One item per HPHT `base_experiment_id`. `scope`, `q` and the sort follow `GET /api/core-floods` exactly: `scope=active` keeps runs with an ONGOING segment; `q` is a case-insensitive substring of the base ID, any segment ID or the description; sorted active first, then newest `last_sample_date`, then `base_id`.
+One item per HPHT `base_experiment_id`. `scope` and `q` follow `GET /api/core-floods` exactly: `scope=active` keeps runs with an ONGOING segment; `q` is a case-insensitive substring of the base ID, any segment ID or the description. Sorted active first, then by `reactor_slot` (R01–R16 numerically, then Parr P01–P06, then runs with no slot), then newest `last_sample_date`, then `base_id`. (Core Flood has no reactor step.)
 
 Item fields (`HphtRunListItem`): `base_id`, `description` (same rule as Core Flood), `segment_count`, `ongoing_experiment_ids`, `reactor_slot` (of the latest segment, so a Parr run shows `P03`), `sample_count`, `last_sample_date`, `latest_cumulative_h2_grams_per_ton`, `warning_count`. Variant samples are excluded from the count, the date and the latest cumulative H₂.
 

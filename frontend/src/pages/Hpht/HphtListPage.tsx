@@ -20,7 +20,8 @@ const SCOPES = [
 const MUTED_DASH = <span className="text-ink-muted">—</span>
 
 /** HPHT runs, one row per base ID, with an Active/All scope toggle and search.
- *  The server sorts: active first, then most recent sample. */
+ *  The server sorts: active first, then reactor (R01-R16, P01-P06, none last),
+ *  then most recent sample. */
 export function HphtListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const scope = searchParams.get('scope') === 'all' ? 'all' : 'active'
