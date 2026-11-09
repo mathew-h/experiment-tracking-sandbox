@@ -20,6 +20,17 @@ function occupancySegments(o?: SlotOccupancy): SlotSegment[] {
   ]
 }
 
+/** All HPHT vessels as one pool: the R01-R16 Yushen/Tan slots plus the
+ *  P01-P06 Parr slots (22). The API keeps them apart for the reactor grid. */
+function combineOccupancy(a: SlotOccupancy, b: SlotOccupancy): SlotOccupancy {
+  return {
+    total: a.total + b.total,
+    ongoing: a.ongoing + b.ongoing,
+    queued: a.queued + b.queued,
+    empty: a.empty + b.empty,
+  }
+}
+
 function applyFilters(entries: GanttEntry[], f: DashboardFilterState): GanttEntry[] {
   return entries.filter((e) => {
     if (f.statuses.length > 0 && !f.statuses.includes(e.status)) return false
@@ -46,6 +57,7 @@ export function DashboardPage() {
   })
 
   const filteredTimeline = data ? applyFilters(data.timeline, filters) : []
+  const hpht = data ? combineOccupancy(data.summary.reactors, data.summary.parr) : undefined
 
   return (
     <div className="space-y-6">
@@ -60,31 +72,14 @@ export function DashboardPage() {
       </div>
 
       {/* Summary metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricCard
           label="Reactor Occupancy"
-          value={data?.summary.reactors.ongoing ?? '—'}
-          unit={`/ ${data?.summary.reactors.total ?? R_FALLBACK} ongoing`}
-          sub={
-            data
-              ? `${data.summary.reactors.queued} queued · ${data.summary.reactors.empty} empty`
-              : undefined
-          }
+          value={hpht?.ongoing ?? '—'}
+          unit={`/ ${hpht?.total ?? R_FALLBACK + P_FALLBACK} ongoing`}
+          sub={hpht ? `${hpht.queued} queued · ${hpht.empty} empty` : undefined}
         >
-          {data && <SlotBar total={data.summary.reactors.total} segments={occupancySegments(data.summary.reactors)} />}
-        </MetricCard>
-
-        <MetricCard
-          label="Parr Reactors"
-          value={data?.summary.parr.ongoing ?? '—'}
-          unit={`/ ${data?.summary.parr.total ?? P_FALLBACK} ongoing`}
-          sub={
-            data
-              ? `${data.summary.parr.queued} queued · ${data.summary.parr.empty} empty`
-              : undefined
-          }
-        >
-          {data && <SlotBar total={data.summary.parr.total} segments={occupancySegments(data.summary.parr)} />}
+          {hpht && <SlotBar total={hpht.total} segments={occupancySegments(hpht)} />}
         </MetricCard>
 
         <MetricCard

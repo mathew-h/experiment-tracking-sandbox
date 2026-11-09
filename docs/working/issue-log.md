@@ -2935,3 +2935,9 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Note:** a test base ID ending `_R01` is parsed as a variant suffix (base `HPHTS_DONE`), so fixture names avoid `_R<n>`.
 - **Deploy:** no migration.
 - **Tests added:** yes — pytest list ordering; vitest label/header assertions updated. **Docs updated:** yes. **Decision logged:** no.
+
+## 2026-11-09 | inline — one HPHT reactor KPI tile, 22 slots (`fix/dashboard-combined-hpht-kpi`)
+- **Files changed:** `frontend/src/pages/Dashboard.tsx` (`combineOccupancy`; Parr tile removed, KPI row 5 → 4 columns), `frontend/src/pages/__tests__/Dashboard.test.tsx`, `docs/user_guide/DASHBOARD.md` (+ `project_context` copy).
+- **What:** the Reactor Occupancy tile now counts R01–R16 and P01–P06 as one 22-slot pool (ongoing, queued, empty, bar). Frontend only: the API still returns `summary.reactors` and `summary.parr` separately, and the reactor grid still groups R and Parr.
+- **Verification:** vitest 67 files / 612 passed; eslint 5 / tsc 3 = baseline, changed files clean. No browser check. No backend change.
+- **Tests added:** yes — updated Dashboard tests (no Parr tile, combined 10 / 22, 5 queued · 7 empty, 22-tick bar). **Docs updated:** yes. **Decision logged:** no.
