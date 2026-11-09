@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -253,14 +253,10 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
         </label>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-ink-secondary pb-2">
           {drillInVials.map((vial) => (
-            <Link
-              key={vial.id}
-              to={`/experiments/${vial.experiment_id}`}
-              className={`font-mono-data ${vial.is_outlier ? 'text-ink-muted line-through hover:text-ink-secondary' : 'text-red-400 hover:text-red-300'}`}
-            >
+            <SegmentLink key={vial.id} id={vial.experiment_id} outlier={vial.is_outlier}>
               {vial.experiment_id}
               {vial.is_outlier ? ' (outlier)' : ''}
-            </Link>
+            </SegmentLink>
           ))}
         </div>
       </div>

@@ -6,7 +6,7 @@ import { NoteBadge } from '@/components/experiments/NoteBadge'
 import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
 import { ResultEntryModal } from './ResultEntryModal'
-import { isCoreFloodType, isHphtType } from '@/utils/experimentId'
+import { isCoreFloodType, isHphtType, runPathFor } from '@/utils/experimentId'
 import { GroupedResultsView } from './GroupedResultsView'
 import { IcpSection } from './IcpSection'
 
@@ -191,6 +191,7 @@ export function ResultsTab({
   const [entry, setEntry] = useState<ResultWithFlags | 'new' | null>(null)
   const coreFlood = isCoreFloodType(experimentType)
   const hpht = isHphtType(experimentType)
+  const runPath = runPathFor(experimentType, baseExperimentId ?? experimentId)
   const [mode, setMode] = useState<'individual' | 'grouped'>('individual')
 
   const { data: replicateGroup } = useQuery({
@@ -253,18 +254,20 @@ export function ResultsTab({
           )}
           {coreFlood ? (
             // Core flood samples need flow and permeability, which only the run page records.
-            <Link
-              to={`/core-floods/${encodeURIComponent(baseExperimentId ?? experimentId)}`}
-              className="inline-flex items-center h-7 px-3 rounded text-xs font-medium border border-surface-border text-ink-primary hover:bg-surface-raised"
-            >
-              Open run page
-            </Link>
+            runPath && (
+              <Link
+                to={runPath}
+                className="inline-flex items-center h-7 px-3 rounded text-xs font-medium border border-surface-border text-ink-primary hover:bg-surface-raised"
+              >
+                Open run page
+              </Link>
+            )
           ) : (
             <>
-              {hpht && (
+              {hpht && runPath && (
                 // Issue #150: the run page shows this segment's samples alongside the others in its run.
                 <Link
-                  to={`/hpht/${encodeURIComponent(baseExperimentId ?? experimentId)}`}
+                  to={runPath}
                   className="inline-flex items-center h-7 px-3 rounded text-xs font-medium border border-surface-border text-ink-primary hover:bg-surface-raised"
                 >
                   Open run page

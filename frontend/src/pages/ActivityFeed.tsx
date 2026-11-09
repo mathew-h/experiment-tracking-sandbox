@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import type { ActivityEntry } from '@/api/dashboard'
 
 const ACTION_LABEL: Record<string, string> = {
@@ -27,8 +27,6 @@ function timeAgo(iso: string): string {
 
 /** Scrollable feed of recent experiment modifications with timestamp and actor. */
 export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
-  const navigate = useNavigate()
-
   if (entries.length === 0) {
     return (
       <p className="text-sm text-ink-muted text-center py-8">No recent activity</p>
@@ -51,12 +49,7 @@ export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
               {entry.experiment_id && (
                 <>
                   {' — '}
-                  <button
-                    onClick={() => navigate(`/experiments/${entry.experiment_id}`)}
-                    className="text-brand-red hover:underline font-mono-data"
-                  >
-                    {entry.experiment_id}
-                  </button>
+                  <SegmentLink id={entry.experiment_id} className="hover:underline" />
                 </>
               )}
             </p>

@@ -41,6 +41,7 @@ frontend/src/
 │   ├── Select.tsx
 │   ├── Card.tsx
 │   ├── Badge.tsx
+│   ├── Breadcrumb.tsx        # Shared page trail (issue #155)
 │   ├── Table.tsx
 │   ├── Modal.tsx
 │   ├── Toast.tsx

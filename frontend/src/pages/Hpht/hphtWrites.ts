@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { RunWrites } from '@/components/runs/runWrites'
+import { runPathFor } from '@/utils/experimentId'
 
 /** Refreshes everything an HPHT run write can change: the run list, the run
  *  and its ICP, each touched segment's experiment and results, and the
@@ -22,7 +23,7 @@ export async function invalidateHphtWrites(
   ])
 }
 
-export const hphtRunPath = (baseId: string) => `/hpht/${encodeURIComponent(baseId)}`
+export const hphtRunPath = (baseId: string) => runPathFor('HPHT', baseId)
 
 /** The HPHT run page, for the shared run components. */
 export const HPHT_WRITES: RunWrites = {

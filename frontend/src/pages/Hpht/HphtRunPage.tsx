@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { hphtApi, type HphtRun, type HphtSample, type HphtWarning } from '@/api/hpht'
-import { Badge, Button, Card, CardHeader, PageSpinner } from '@/components/ui'
+import { Badge, Breadcrumb, Button, Card, CardHeader, PageSpinner } from '@/components/ui'
 import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { IcpChart } from '@/components/icp/IcpChart'
 import { segmentStarts } from '@/components/icp/icpSeries'
@@ -115,9 +115,7 @@ export function HphtRunPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <p className="text-xs text-ink-muted">
-            <Link to="/hpht" className="hover:text-ink-secondary">HPHT</Link>
-          </p>
+          <Breadcrumb items={[{ label: 'HPHT', to: '/hpht' }]} />
           <h1 className="text-lg font-semibold text-ink-primary font-mono-data">{run.base_id}</h1>
           {description && <p className="text-sm text-ink-secondary max-w-prose">{description}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
