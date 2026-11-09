@@ -77,8 +77,11 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     expect(screen.getByText('GC Measurements')).toBeInTheDocument()
     expect(screen.getByText('Serum Vials Started')).toBeInTheDocument()
     expect(screen.getByText('Core Floods Ongoing')).toBeInTheDocument()
-    expect(screen.getByText('Parr Reactors')).toBeInTheDocument()
-    expect(screen.getByText('1 queued · 3 empty')).toBeInTheDocument()
+    // One HPHT tile for R + Parr: 8+2 ongoing, 4+1 queued, 4+3 empty of 22.
+    expect(screen.queryByText('Parr Reactors')).not.toBeInTheDocument()
+    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(screen.getByText('/ 22 ongoing')).toBeInTheDocument()
+    expect(screen.getByText('5 queued · 7 empty')).toBeInTheDocument()
   })
 
   it('shows em-dash placeholders and no crash while summary is undefined (loading state)', () => {
@@ -100,12 +103,11 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     // Bars only render once `data` is defined (`{data && <SlotBar .../>}`), so
     // waiting for exactly 2 `[role="img"]` elements to appear is itself the
     // data-loaded signal — unlike a static label, this cannot resolve early.
-    await waitFor(() => expect(container.querySelectorAll('[role="img"]').length).toBe(3))
+    await waitFor(() => expect(container.querySelectorAll('[role="img"]').length).toBe(2))
     const bars = container.querySelectorAll('[role="img"]')
-    // Reactors (16), Parr (6, issue #147), core floods (3)
-    expect(bars[0].querySelectorAll(':scope > div').length).toBe(16)
-    expect(bars[1].querySelectorAll(':scope > div').length).toBe(6)
-    expect(bars[2].querySelectorAll(':scope > div').length).toBe(3)
+    // HPHT R01-R16 + Parr P01-P06 in one bar (22), core floods (3)
+    expect(bars[0].querySelectorAll(':scope > div').length).toBe(22)
+    expect(bars[1].querySelectorAll(':scope > div').length).toBe(3)
   })
 
   it('explains a zero GC count instead of implying an idle lab (issue #115)', async () => {

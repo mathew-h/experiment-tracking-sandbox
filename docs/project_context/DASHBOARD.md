@@ -12,7 +12,7 @@ Four cards at the top of the page:
 
 | Metric | Description |
 |--------|-------------|
-| **Reactor Occupancy** | Segmented bar over the 16 HPHT vessel slots (R01–R16): green ticks = ongoing, amber = queued, grey = empty. Subtitle shows queued/empty counts. |
+| **Reactor Occupancy** | Segmented bar over all 22 HPHT vessel slots as one pool — the 16 Yushen/Tan slots (R01–R16) plus the 6 Parr slots (P01–P06): green ticks = ongoing, amber = queued, grey = empty. Subtitle shows queued/empty counts. The reactor grid below still groups R and Parr vessels separately. |
 | **GC Measurements** | Count of results whose **GC Run Date** falls in the last 7 workdays, plus the number of distinct experiments they came from. |
 | **Serum Vials Started** | Count of Serum experiment vials (including replicates) whose start date falls in the last 7 workdays, plus the number of distinct base experiments. |
 | **Core Floods Ongoing** | Segmented bar over the 3 core flood rig slots (CF01–CF03), same tick treatment as Reactor Occupancy. |
