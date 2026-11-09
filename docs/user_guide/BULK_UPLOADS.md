@@ -89,7 +89,7 @@ uploads.)
 |--------|----------|-------|
 | Experiment ID | ✓ | Must match an existing experiment |
 | Duration (Days) | ✓ (column) | The **column** must exist; the **value** may be blank. Blank defers to the day in the ID's `-t<days>` token. A cell holding only spaces counts as blank — that is what the Sampling sheet's `=IF(ISBLANK([Date Started]), " ", …)` formula produces for an undated row. Blank *and* no `-t` token → the row is skipped |
-| Observation Note | | Free text about this sampling. Also accepted (template v3): `Description`. Stored as an **observation note** on the timepoint; blank writes nothing |
+| Observation Note | | Free text about this sampling. Also accepted (template v3): `Description`. Stored as a **result note** on the timepoint (shown as "Result Note/Sample Description" when you edit the result); blank writes nothing |
 | Sample Date | | Date |
 | NMR Run Date | | Date |
 | ICP Run Date | | Date |
@@ -124,7 +124,7 @@ and an overwrite upload leaves them exactly as they were.
 > error shown. If you ran an `OVERWRITE = TRUE` Master Results upload before that
 > date, check those fields on the affected timepoints.
 
-**Notes are typed (template v4, 2026-09-08).** The two free-text columns land in the experiment's Notes as an *observation* and a *modification* respectively, tagged as coming from the Master upload. Re-uploading the same workbook with edited text updates those notes rather than adding duplicates. Template v3 workbooks with the old `Description` / `Modification` headers upload identically **until 2026-12-31**, after which only the v4 headers are accepted — please move to the v4 headers before then.
+**Notes are typed (template v4, 2026-09-08).** The two free-text columns land in the experiment's Notes as a *result note* and a *modification* respectively (the first was an *observation* until 2026-11-09), tagged as coming from the Master upload. Re-uploading the same workbook with edited text updates those notes rather than adding duplicates. Template v3 workbooks with the old `Description` / `Modification` headers upload identically **until 2026-12-31**, after which only the v4 headers are accepted — please move to the v4 headers before then.
 
 **Replicates:** rows may carry either a full lettered ID (`SERUM_001a`) in Experiment ID, or the bare base ID plus the optional `Replicate` column (`a`–`z`; `0` or blank = the group parent). Base + letter is resolved to the sibling experiment before upsert. Unresolved or conflicting rows are skipped with a per-row error — the rest of the file still uploads. See the [Replicates guide](REPLICATES.md#uploading-replicate-results).
 
@@ -184,7 +184,7 @@ Bulk-creates or updates `ScalarResults` rows (solution chemistry measurements).
 |--------|----------|-------|
 | experiment_id | ✓ | Must match an existing experiment |
 | time_post_reaction_days | ✓ | Float |
-| description | | Optional. Stored as an **observation note** on the timepoint (tagged `scalar_results`; one per result — a re-upload updates it, a blank cell leaves it unchanged) |
+| description | | Optional. Stored as a **result note** on the timepoint (tagged `scalar_results`; one per result — a re-upload updates it, a blank cell leaves it unchanged) |
 | final_ph | | |
 | final_conductivity_mS_cm | | |
 | gross_ammonium_concentration_mM | | |

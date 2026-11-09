@@ -1,5 +1,6 @@
 """Issue #122 PR-D: the Solution Chemistry and quick-upload parsers' Description
-column is an 'observation' note signed by the parser (one slot per result);
+column is a 'result_note' (an 'observation' until 2026-11-09) signed by the
+parser (one slot per result);
 a blank cell writes nothing and leaves an earlier note in place; long-format
 has no text column and writes no note."""
 from __future__ import annotations
@@ -38,7 +39,7 @@ def _result_ids(db: Session, exp: Experiment):
 _SCALAR_HEADERS = ["Experiment ID", "Time (days)", "Description", "Gross Ammonium (mM)"]
 
 
-def test_scalar_description_becomes_an_observation_note_signed_by_the_parser(db_session: Session):
+def test_scalar_description_becomes_a_result_note_signed_by_the_parser(db_session: Session):
     exp = _seed(db_session, "PON_001", 9122401)
     created, updated, skipped, errors, _fb = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
         db_session, make_excel(_SCALAR_HEADERS, [["PON_001", 7.0, "Liquid clear, no gas", 1.2]]),
@@ -46,7 +47,7 @@ def test_scalar_description_becomes_an_observation_note_signed_by_the_parser(db_
     assert errors == [] and created == 1
     (rid,) = _result_ids(db_session, exp)
     assert [(n.note_type, n.result_id, n.note_text, n.created_by) for n in _notes(db_session, exp)] == [
-        (NoteType.observation, rid, "Liquid clear, no gas", "scalar_results"),
+        (NoteType.result_note, rid, "Liquid clear, no gas", "scalar_results"),
     ]
 
 
@@ -80,7 +81,7 @@ def test_scalar_blank_description_writes_no_note(db_session: Session):
 _QUICK_HEADERS = ["Experiment ID*", "Time (days)*", "H2 Conc (ppm)*", "Description"]
 
 
-def test_quick_upload_description_becomes_an_observation_note(db_session: Session):
+def test_quick_upload_description_becomes_a_result_note(db_session: Session):
     exp = _seed(db_session, "PON_004", 9122404)
     created, updated, skipped, errors, _fb = quick_upload_from_excel(
         db_session, make_excel(_QUICK_HEADERS, [["PON_004", 7.0, 120.0, "Headspace sampled twice"]], sheet_name="Data"),
@@ -92,7 +93,7 @@ def test_quick_upload_description_becomes_an_observation_note(db_session: Sessio
     assert created + updated == 1
     (rid,) = _result_ids(db_session, exp)
     assert [(n.note_type, n.result_id, n.note_text, n.created_by) for n in _notes(db_session, exp)] == [
-        (NoteType.observation, rid, "Headspace sampled twice", "quick_upload"),
+        (NoteType.result_note, rid, "Headspace sampled twice", "quick_upload"),
     ]
 
 
@@ -121,12 +122,12 @@ def test_long_format_writes_no_note(db_session: Session):
     assert _notes(db_session, exp) == []
 
 
-def test_scalar_numeric_description_cell_becomes_an_observation_note(db_session: Session):
+def test_scalar_numeric_description_cell_becomes_a_result_note(db_session: Session):
     exp = _seed(db_session, "PON_007", 9122407)
     created, updated, skipped, errors, _fb = ScalarResultsUploadService.bulk_upsert_from_excel_ex(
         db_session, make_excel(_SCALAR_HEADERS, [["PON_007", 7.0, 5, 1.2]]),
     )
     assert errors == [] and created == 1
     assert [(n.note_type, n.note_text, n.created_by) for n in _notes(db_session, exp)] == [
-        (NoteType.observation, "5", "scalar_results"),
+        (NoteType.result_note, "5", "scalar_results"),
     ]
