@@ -5,6 +5,7 @@ import { Card, useToast } from '@/components/ui'
 import type { ReactorCardData, ReactorSpec } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 import { labTodayISO } from '@/utils/labDate'
+import { runPathFor } from '@/utils/experimentId'
 
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
 type _ExperimentStatus = typeof STATUS_OPTIONS[number]
@@ -31,7 +32,7 @@ function isCoreFlood(label: string): boolean {
 /** HPHT run page of an R or P card's ONGOING experiment (issue #150); null otherwise. */
 export function runPagePath(card: ReactorCardData): string | null {
   if (isCoreFlood(card.reactor_label) || card.status !== 'ONGOING' || !card.base_experiment_id) return null
-  return `/hpht/${encodeURIComponent(card.base_experiment_id)}`
+  return runPathFor('HPHT', card.base_experiment_id)
 }
 
 function StatusBadge({

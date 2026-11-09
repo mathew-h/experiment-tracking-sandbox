@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { RunSegment } from '@/api/runs'
 import { experimentsApi } from '@/api/experiments'
@@ -7,6 +7,7 @@ import { Button, Input, Table, TableBody, TableHead, TableRow, Td, Th, useToast 
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { DescriptionEditor } from '@/pages/ExperimentDetail/DescriptionEditor'
 import { SegmentStatusSelect } from '@/components/runs/SegmentStatusSelect'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import type { RunWrites } from '@/components/runs/runWrites'
 import { CORE_FLOOD_WRITES } from './useCoreFloodWrites'
 
@@ -157,12 +158,7 @@ export function SegmentsTable({
                 />
               ) : (
                 <div className="flex items-center gap-2">
-                  <Link
-                    to={`/experiments/${encodeURIComponent(seg.experiment_id)}`}
-                    className="font-mono-data text-red-400 hover:text-red-300"
-                  >
-                    {seg.experiment_id}
-                  </Link>
+                  <SegmentLink id={seg.experiment_id} />
                   <Button
                     variant="ghost"
                     size="xs"

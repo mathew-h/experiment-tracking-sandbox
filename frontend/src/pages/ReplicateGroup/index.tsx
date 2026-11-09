@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import type {
@@ -20,7 +20,9 @@ import {
   Th,
   Td,
   PageSpinner,
+  Breadcrumb,
 } from '@/components/ui'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import { GroupedResultsView } from '@/pages/ExperimentDetail/GroupedResultsView'
 import { H2BackgroundRow } from './H2BackgroundRow'
 import { isSerumType } from '@/utils/experimentId'
@@ -123,12 +125,7 @@ function MemberRow({ member, isParent, divergentFields, child }: MemberRowProps)
         {isParent ? '0 (parent)' : (member.replicate_label ?? '—')}
       </Td>
       <Td>
-        <Link
-          to={`/experiments/${member.experiment_id}`}
-          className="font-mono-data text-red-400 hover:text-red-300"
-        >
-          {member.experiment_id}
-        </Link>
+        <SegmentLink id={member.experiment_id} />
         {member.is_background && <Badge variant="info" className="ml-2">Background</Badge>}
       </Td>
       <Td className="font-mono-data">
@@ -168,11 +165,13 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
     <div className="space-y-4">
       {/* Header */}
       <div>
-        <p className="text-xs text-ink-muted mb-1">
-          <Link to="/experiments" className="hover:text-ink-secondary">Experiments</Link>
-          <span className="mx-1.5">›</span>
-          <span className="font-mono-data">Group {baseId}</span>
-        </p>
+        <Breadcrumb
+          className="mb-1"
+          items={[
+            { label: 'Experiments', to: '/experiments' },
+            { label: `Group ${baseId}`, mono: true },
+          ]}
+        />
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold text-ink-primary font-mono-data">{baseId}</h1>
           <span className="text-xs text-ink-muted">

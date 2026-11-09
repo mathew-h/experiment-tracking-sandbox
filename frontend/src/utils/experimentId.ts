@@ -38,3 +38,23 @@ export function isCoreFloodType(t: unknown): boolean {
   const n = normalizeType(t)
   return n === 'core flood' || n === 'coreflood' || n === 'cf'
 }
+
+/** The run list a type belongs to: `/hpht`, `/core-floods`, or null for types
+ *  with no run page (Serum and the rest). */
+export function runListPathFor(experimentType: unknown): '/hpht' | '/core-floods' | null {
+  if (isHphtType(experimentType)) return '/hpht'
+  if (isCoreFloodType(experimentType)) return '/core-floods'
+  return null
+}
+
+/** Route of the run page for a base experiment ID, or null when the type has no
+ *  run page or the base ID is missing. The one place a run path is spelled
+ *  (issue #155); the base ID is URL-encoded here and nowhere else. The first
+ *  overload is for callers with a fixed run type and a non-empty base ID. */
+export function runPathFor(experimentType: 'HPHT' | 'Core Flood', baseId: string): string
+export function runPathFor(experimentType: unknown, baseId: string | null | undefined): string | null
+export function runPathFor(experimentType: unknown, baseId: string | null | undefined): string | null {
+  const list = runListPathFor(experimentType)
+  if (!list || !baseId) return null
+  return `${list}/${encodeURIComponent(baseId)}`
+}

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { coreFloodsApi, type CoreFloodSample } from '@/api/coreFloods'
-import { Badge, Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
+import { Badge, Breadcrumb, Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
 import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { CleanupPanel } from './CleanupPanel'
 import { Collapsible } from '@/components/runs/Collapsible'
@@ -79,9 +79,7 @@ export function CoreFloodRunPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <p className="text-xs text-ink-muted">
-            <Link to="/core-floods" className="hover:text-ink-secondary">Core Floods</Link>
-          </p>
+          <Breadcrumb items={[{ label: 'Core Floods', to: '/core-floods' }]} />
           <h1 className="text-lg font-semibold text-ink-primary font-mono-data">{run.base_id}</h1>
           {description && <p className="text-sm text-ink-secondary max-w-prose">{description}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">

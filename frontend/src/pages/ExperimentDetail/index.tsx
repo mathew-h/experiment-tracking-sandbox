@@ -3,7 +3,8 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { conditionsApi } from '@/api/conditions'
-import { StatusBadge, Badge, Button, Input, PageSpinner, useToast } from '@/components/ui'
+import { StatusBadge, Badge, Breadcrumb, Button, Input, PageSpinner, useToast } from '@/components/ui'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { CreateReplicatesModal } from '@/components/experiments/CreateReplicatesModal'
@@ -224,11 +225,13 @@ export function ExperimentDetailPage() {
     <div className="space-y-4">
       {/* Breadcrumb */}
       <div>
-        <p className="text-xs text-ink-muted mb-1">
-          <Link to="/experiments" className="hover:text-ink-secondary">Experiments</Link>
-          <span className="mx-1.5">›</span>
-          <span className="font-mono-data">{experiment.experiment_id}</span>
-        </p>
+        <Breadcrumb
+          className="mb-1"
+          items={[
+            { label: 'Experiments', to: '/experiments' },
+            { label: experiment.experiment_id, mono: true },
+          ]}
+        />
 
         {editingId ? (
           <div className="flex items-center gap-2">
@@ -313,13 +316,9 @@ export function ExperimentDetailPage() {
                         [{member.replicate_label ?? member.experiment_id}]
                       </span>
                     ) : (
-                      <Link
-                        key={member.id}
-                        to={`/experiments/${member.experiment_id}`}
-                        className="text-red-400 hover:text-red-300"
-                      >
+                      <SegmentLink key={member.id} id={member.experiment_id}>
                         {member.replicate_label ?? member.experiment_id}
-                      </Link>
+                      </SegmentLink>
                     ),
                   )}
                 </span>
