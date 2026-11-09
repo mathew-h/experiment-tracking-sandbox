@@ -1,5 +1,9 @@
+// Issue #156: the detail header (breadcrumb, run or group strip, status) — moved
+// from pages/ExperimentDetail/__tests__/GroupStrip.test.tsx. Rendered through the
+// page so the header sees the same queries it gets in the app.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui'
@@ -8,6 +12,7 @@ vi.mock('@/api/experiments', () => ({
   experimentsApi: {
     get: vi.fn(),
     patch: vi.fn(),
+    patchStatus: vi.fn(),
     getReplicateGroup: vi.fn(),
     getResults: vi.fn(),
     getRollup: vi.fn(),
@@ -16,12 +21,18 @@ vi.mock('@/api/experiments', () => ({
   },
 }))
 vi.mock('@/api/conditions', () => ({
-  conditionsApi: { getByExperiment: vi.fn().mockRejectedValue(new Error('none')) },
+  conditionsApi: { getByExperiment: vi.fn() },
 }))
+vi.mock('@/api/hpht', () => ({ hphtApi: { get: vi.fn() } }))
+vi.mock('@/api/coreFloods', () => ({ coreFloodsApi: { get: vi.fn() } }))
 
-import { ExperimentDetailPage } from '../index'
+import { ExperimentDetailPage } from '@/pages/ExperimentDetail'
 import { experimentsApi } from '@/api/experiments'
+import { conditionsApi } from '@/api/conditions'
+import { hphtApi } from '@/api/hpht'
+import { coreFloodsApi } from '@/api/coreFloods'
 import type { ExperimentDetail, ReplicateGroup } from '@/api/experiments'
+import type { RunSegment } from '@/api/runs'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 0 }, mutations: { retry: false } },
@@ -64,6 +75,156 @@ const BASE_DETAIL: ExperimentDetail = {
 beforeEach(() => {
   queryClient.clear()
   vi.clearAllMocks()
+  // Serum cases have no conditions row; run cases override this.
+  vi.mocked(conditionsApi.getByExperiment).mockRejectedValue(new Error('none'))
+  vi.mocked(experimentsApi.getReplicateGroup).mockRejectedValue(new Error('404'))
+  vi.mocked(experimentsApi.getGroup).mockRejectedValue(new Error('404'))
+})
+
+function segment(experiment_id: string, extra: Partial<RunSegment> = {}): RunSegment {
+  return {
+    id: experiment_id.length, experiment_id, status: 'COMPLETED', date: null,
+    parent_experiment_id: null, is_variant: false, description: null,
+    conditions_id: null, pore_volume_mL: null, rock_mass_g: null, reactor_slot: null,
+    ...extra,
+  }
+}
+
+/** A segment page whose conditions name the run type and reactor. */
+function mockSegmentPage(experimentId: string, baseId: string, experimentType: string) {
+  vi.mocked(experimentsApi.get).mockResolvedValue({
+    ...BASE_DETAIL,
+    id: 70,
+    experiment_id: experimentId,
+    base_experiment_id: baseId,
+    replicate_label: null,
+  })
+  vi.mocked(conditionsApi.getByExperiment).mockResolvedValue({
+    experiment_type: experimentType, reactor_number: 7, reactor_slot: 'R07',
+  } as never)
+}
+
+const HPHT_RUN = {
+  base_id: 'HPHT_297',
+  segments: [
+    segment('HPHT_297'),
+    segment('HPHT_297-2', { status: 'ONGOING', parent_experiment_id: 'HPHT_297' }),
+    segment('HPHT_297_Desorption', { parent_experiment_id: 'HPHT_297', is_variant: true }),
+  ],
+  conditions: null, samples: [], warnings: [],
+}
+
+const breadcrumb = () => screen.getByRole('navigation', { name: 'Breadcrumb' })
+
+describe('detail header run context — issue #156', () => {
+  it('names the HPHT run: breadcrumb, strip of every segment, reactor link', async () => {
+    mockSegmentPage('HPHT_297-2', 'HPHT_297', 'HPHT')
+    vi.mocked(hphtApi.get).mockResolvedValue(HPHT_RUN as never)
+
+    renderPage('HPHT_297-2')
+
+    const strip = await screen.findByRole('group', { name: 'Run HPHT_297' })
+    expect(breadcrumb()).toHaveTextContent(/^Experiments›Run HPHT_297›HPHT_297-2$/)
+    expect(within(breadcrumb()).getByRole('link', { name: 'Run HPHT_297' })).toHaveAttribute(
+      'href', '/hpht/HPHT_297',
+    )
+    expect(hphtApi.get).toHaveBeenCalledWith('HPHT_297')
+
+    // Variants follow their parent; the current segment is bracketed text, not a link.
+    expect(strip).toHaveTextContent(/HPHT_297.*HPHT_297_Desorption.*\[HPHT_297-2\]/)
+    expect(within(strip).getByRole('link', { name: 'HPHT_297_Desorption' })).toHaveAttribute(
+      'href', '/experiments/HPHT_297_Desorption',
+    )
+    expect(within(strip).queryByRole('link', { name: 'HPHT_297-2' })).toBeNull()
+    expect(within(strip).getByText('Ongoing')).toBeInTheDocument()
+    const runLinks = within(strip).getAllByRole('link', { name: 'HPHT_297' }).map((a) => a.getAttribute('href'))
+    expect(runLinks).toEqual(['/hpht/HPHT_297', '/experiments/HPHT_297'])
+
+    expect(screen.getByRole('link', { name: 'Reactor R07' })).toHaveAttribute('href', '/hpht/HPHT_297')
+  })
+
+  it('links a core flood variant to its parent run (#138)', async () => {
+    mockSegmentPage('CF_020-5_Bypass1', 'CF_020', 'Core Flood')
+    vi.mocked(coreFloodsApi.get).mockResolvedValue({
+      base_id: 'CF_020',
+      segments: [
+        segment('CF_020'),
+        segment('CF_020-5', { parent_experiment_id: 'CF_020' }),
+        segment('CF_020-5_Bypass1', { parent_experiment_id: 'CF_020-5', is_variant: true }),
+      ],
+      samples: [], warnings: [],
+    } as never)
+
+    renderPage('CF_020-5_Bypass1')
+
+    const strip = await screen.findByRole('group', { name: 'Run CF_020' })
+    expect(breadcrumb()).toHaveTextContent(/^Experiments›Run CF_020›CF_020-5_Bypass1$/)
+    expect(within(breadcrumb()).getByRole('link', { name: 'Run CF_020' })).toHaveAttribute(
+      'href', '/core-floods/CF_020',
+    )
+    expect(coreFloodsApi.get).toHaveBeenCalledWith('CF_020')
+    expect(hphtApi.get).not.toHaveBeenCalled()
+    expect(strip).toHaveTextContent(/CF_020.*CF_020-5.*\[CF_020-5_Bypass1\]/)
+    expect(within(strip).getByRole('link', { name: 'CF_020-5' })).toHaveAttribute('href', '/experiments/CF_020-5')
+  })
+
+  it('hides the strip when the run cannot be loaded and keeps the rest of the page', async () => {
+    mockSegmentPage('HPHT_297-2', 'HPHT_297', 'HPHT')
+    vi.mocked(hphtApi.get).mockRejectedValue(new Error('404'))
+
+    renderPage('HPHT_297-2')
+
+    await screen.findByRole('heading', { name: 'HPHT_297-2' })
+    await vi.waitFor(() => expect(hphtApi.get).toHaveBeenCalled())
+    expect(screen.queryByRole('group', { name: /^Run / })).toBeNull()
+    expect(breadcrumb()).toHaveTextContent(/^Experiments›Run HPHT_297›HPHT_297-2$/)
+    expect(screen.queryByText(/not changed|failed/i)).toBeNull()
+  })
+
+  it('changes status in place and refreshes the run and the dashboard', async () => {
+    mockSegmentPage('HPHT_297-2', 'HPHT_297', 'HPHT')
+    vi.mocked(hphtApi.get).mockResolvedValue(HPHT_RUN as never)
+    vi.mocked(experimentsApi.patchStatus).mockResolvedValue({} as never)
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    renderPage('HPHT_297-2')
+
+    const select = await screen.findByRole('combobox', { name: 'Status of HPHT_297-2' })
+    expect(select).toHaveValue('ONGOING')
+    await userEvent.selectOptions(select, 'COMPLETED')
+
+    await vi.waitFor(() => expect(experimentsApi.patchStatus).toHaveBeenCalledWith('HPHT_297-2', 'COMPLETED'))
+    await vi.waitFor(() => {
+      const keys = invalidate.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      expect(keys).toEqual(expect.arrayContaining([
+        JSON.stringify(['experiment', 'HPHT_297-2']),
+        JSON.stringify(['dashboard']),
+        JSON.stringify(['hpht-run', 'HPHT_297']),
+        JSON.stringify(['hpht-runs']),
+      ]))
+    })
+    invalidate.mockRestore()
+  })
+
+  it('shows the group trail for a serum replicate and the bare trail for a lone experiment', async () => {
+    vi.mocked(experimentsApi.get).mockResolvedValue({ ...BASE_DETAIL, id: 12, experiment_id: 'SERUM_001b', replicate_label: 'b' })
+    const view = renderPage('SERUM_001b')
+    await screen.findByRole('heading', { name: 'SERUM_001b' })
+    expect(breadcrumb()).toHaveTextContent(/^Experiments›Group SERUM_001›SERUM_001b$/)
+    expect(within(breadcrumb()).getByRole('link', { name: 'Group SERUM_001' })).toHaveAttribute(
+      'href', '/experiments/groups/SERUM_001',
+    )
+    expect(hphtApi.get).not.toHaveBeenCalled()
+    view.unmount()
+
+    queryClient.clear()
+    vi.mocked(experimentsApi.get).mockResolvedValue({
+      ...BASE_DETAIL, id: 9, experiment_id: 'SERUM_099', base_experiment_id: null, replicate_label: null,
+    })
+    renderPage('SERUM_099')
+    await screen.findByRole('heading', { name: 'SERUM_099' })
+    expect(breadcrumb()).toHaveTextContent(/^Experiments›SERUM_099$/)
+  })
 })
 
 describe('detail header group strip', () => {

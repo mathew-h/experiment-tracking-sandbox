@@ -3,8 +3,11 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { conditionsApi } from '@/api/conditions'
-import { StatusBadge, Badge, Breadcrumb, Button, Input, PageSpinner, useToast } from '@/components/ui'
-import { SegmentLink } from '@/components/runs/SegmentLink'
+import { Badge, Button, Input, PageSpinner, useToast } from '@/components/ui'
+import { SegmentStatusSelect } from '@/components/runs/SegmentStatusSelect'
+import { RunContextHeader } from '@/components/experiments/RunContextHeader'
+import { invalidateStatusChange, isInReplicateSet } from '@/components/experiments/runContext'
+import { runPathFor } from '@/utils/experimentId'
 import { SampleSelector } from '@/components/ui/SampleSelector'
 import { useExperimentIdValidation } from '@/hooks/useExperimentIdValidation'
 import { CreateReplicatesModal } from '@/components/experiments/CreateReplicatesModal'
@@ -207,12 +210,14 @@ export function ExperimentDetailPage() {
   if (isLoading) return <PageSpinner />
   if (error || !experiment) return <p className="text-red-400 text-sm p-6">Experiment not found</p>
 
-  const inReplicateSet =
-    experiment.replicate_label !== null ||
-    (replicateGroup?.members.length ?? 0) > 0 ||
-    // Issue #101: a letterless vial belongs to a group as soon as its stem holds
-    // more than one vial. ">1" so a lone '-t' vial does not link to a group of one.
-    (groupDetail?.member_count ?? 0) > 1
+  const experimentType = conditions?.experiment_type
+  // Issue #156: an HPHT or Core Flood segment links its reactor to its run.
+  const runPath = runPathFor(experimentType, experiment.base_experiment_id)
+  const inReplicateSet = isInReplicateSet(
+    experiment.replicate_label,
+    replicateGroup?.members.length,
+    groupDetail?.member_count,
+  )
 
   const idRightElement =
     renameValidation.status === 'checking' ? (
@@ -223,109 +228,78 @@ export function ExperimentDetailPage() {
 
   return (
     <div className="space-y-4">
-      {/* Breadcrumb */}
+      {/* Breadcrumb, ID row, run or group strip (issue #156) */}
       <div>
-        <Breadcrumb
-          className="mb-1"
-          items={[
-            { label: 'Experiments', to: '/experiments' },
-            { label: experiment.experiment_id, mono: true },
-          ]}
-        />
-
-        {editingId ? (
-          <div className="flex items-center gap-2">
-            <Input
-              value={idDraft}
-              onChange={(e) => setIdDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') confirmRename()
-                if (e.key === 'Escape') setEditingId(false)
-              }}
-              error={renameValidation.status === 'taken' ? renameValidation.message : undefined}
-              rightElement={idRightElement}
-              className="font-mono-data"
-              autoFocus
-            />
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={
-                renameValidation.status === 'taken' ||
-                renameValidation.status === 'checking' ||
-                !idDraft.trim()
-              }
-              onClick={confirmRename}
-            >
-              Save
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setEditingId(false)}>
-              Cancel
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-ink-primary font-mono-data">
-              {experiment.experiment_id}
-            </h1>
-            <button
-              onClick={startEdit}
-              className="text-ink-muted hover:text-ink-secondary transition-colors text-sm leading-none"
-              title="Rename experiment"
-              aria-label="Rename experiment"
-            >
-              ✎
-            </button>
-            <StatusBadge status={experiment.status} />
-            {experiment.is_outlier && (
-              <Badge variant="warning">Outlier — excluded from group stats</Badge>
-            )}
-            {experiment.is_background && <Badge variant="info">Background</Badge>}
-            {conditions?.experiment_type && (
-              <span className="text-xs text-ink-muted">{conditions.experiment_type}</span>
-            )}
-          </div>
-        )}
-
-        {inReplicateSet && (
-          <p className="text-xs text-ink-muted flex flex-wrap items-center gap-x-1.5">
-            {experiment.replicate_label !== null && (
-              <>
-                <span>Replicate {experiment.replicate_label}</span>
-                <span>·</span>
-              </>
-            )}
-            <span>
-              Group{' '}
-              <Link
-                to={`/experiments/groups/${
-                  replicateGroup?.base_experiment_id ?? experiment.base_experiment_id ?? experiment.experiment_id
-                }`}
-                className="text-red-400 hover:text-red-300 font-mono-data"
+        <RunContextHeader
+          experiment={experiment}
+          experimentType={experimentType}
+          replicateGroup={replicateGroup}
+          groupMemberCount={groupDetail?.member_count}
+        >
+          {editingId ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={idDraft}
+                onChange={(e) => setIdDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') confirmRename()
+                  if (e.key === 'Escape') setEditingId(false)
+                }}
+                error={renameValidation.status === 'taken' ? renameValidation.message : undefined}
+                rightElement={idRightElement}
+                className="font-mono-data"
+                autoFocus
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={
+                  renameValidation.status === 'taken' ||
+                  renameValidation.status === 'checking' ||
+                  !idDraft.trim()
+                }
+                onClick={confirmRename}
               >
-                {replicateGroup?.base_experiment_id ?? experiment.base_experiment_id ?? experiment.experiment_id}
-              </Link>
-            </span>
-            {(replicateGroup?.members.length ?? 0) > 0 && (
-              <>
-                <span>·</span>
-                <span className="flex flex-wrap items-center gap-1 font-mono-data">
-                  {replicateGroup!.members.map((member) =>
-                    member.id === experiment.id ? (
-                      <span key={member.id} className="font-semibold text-ink-primary">
-                        [{member.replicate_label ?? member.experiment_id}]
-                      </span>
-                    ) : (
-                      <SegmentLink key={member.id} id={member.experiment_id}>
-                        {member.replicate_label ?? member.experiment_id}
-                      </SegmentLink>
-                    ),
-                  )}
-                </span>
-              </>
-            )}
-          </p>
-        )}
+                Save
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setEditingId(false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold text-ink-primary font-mono-data">
+                {experiment.experiment_id}
+              </h1>
+              <button
+                onClick={startEdit}
+                className="text-ink-muted hover:text-ink-secondary transition-colors text-sm leading-none"
+                title="Rename experiment"
+                aria-label="Rename experiment"
+              >
+                ✎
+              </button>
+              <SegmentStatusSelect
+                segment={experiment}
+                onChanged={() =>
+                  invalidateStatusChange(
+                    queryClient,
+                    experiment.experiment_id,
+                    experiment.base_experiment_id,
+                    experimentType,
+                  )
+                }
+              />
+              {experiment.is_outlier && (
+                <Badge variant="warning">Outlier — excluded from group stats</Badge>
+              )}
+              {experiment.is_background && <Badge variant="info">Background</Badge>}
+              {conditions?.experiment_type && (
+                <span className="text-xs text-ink-muted">{conditions.experiment_type}</span>
+              )}
+            </div>
+          )}
+        </RunContextHeader>
 
         {/* Issue #118: the description is the note typed 'description';
             issue #122 PR-C: edited in place, or added when missing. */}
@@ -389,8 +363,21 @@ export function ExperimentDetailPage() {
                 : ' · Assign sample'}
             </button>
           )}
-          {conditions?.reactor_number != null &&
-            ` · Reactor ${conditions.reactor_slot ?? conditions.reactor_number}`}
+          {conditions?.reactor_number != null && (
+            <>
+              {' · '}
+              {runPath ? (
+                <Link
+                  to={runPath}
+                  className="underline decoration-dotted underline-offset-2 hover:text-ink-secondary"
+                >
+                  Reactor {conditions.reactor_slot ?? conditions.reactor_number}
+                </Link>
+              ) : (
+                `Reactor ${conditions.reactor_slot ?? conditions.reactor_number}`
+              )}
+            </>
+          )}
         </p>
 
         {/* Inline sample ID editor */}

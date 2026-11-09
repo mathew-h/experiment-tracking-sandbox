@@ -52,6 +52,8 @@ A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`,
 
 **Export.** **Export all** in the run header downloads one Excel workbook for the whole run: every segment and side sample, with a Core Flood tab of flow, pressures and cumulative values.
 
+**From a segment's experiment page.** The breadcrumb reads **Experiments › Run CF_020 › CF_020-5_Bypass1**, and the strip under the ID lists every segment and side sample of the run (side samples follow their segment). Click **Run CF_020** or any segment in the strip to move around the run.
+
 **Add a sample.** Click **+ Add sample**. With one ONGOING segment it is used automatically; otherwise pick a segment. Day here is the number of days since the chosen segment started (not the cumulative day shown in the table); it is filled from the sample date and the segment's start, and you can change it (a segment with no start date needs a Day typed in). If that segment already has a sample on the same day, a warning appears and the button becomes **Replace existing sample**: saving replaces that sample in the run. Enter a fractional day (for example 11.5) to keep both. The GC run date follows the sample date until you edit it, and flow rate, N₂ flow, inlet pressure and outlet pressure are filled from the previous sample. Flow rate is the rate since the previous sample: **enter 0 for a hold**. Enter gas pressure in **psi**; it is stored in MPa. When editing, only the fields you change are saved, and Day cannot be changed.
 
 ---
@@ -77,7 +79,7 @@ NH₃ is not shown on this page. It stays on the experiment's Results tab and in
 
 **Add a sample.** Click **+ Add sample**. It opens the same form as **+ Add Results** on the experiment page. With one ONGOING segment the sample goes there, and the form names it. Otherwise a **Segment** select appears at the top. **Day** counts from the chosen segment's start date, not from the start of the run. Edits work the same way; Day cannot be changed.
 
-**Other ways in.** On an HPHT experiment's Results tab, **Open run page** sits next to **+ Add Results**. On the Dashboard, clicking an occupied R or P reactor with an ONGOING experiment shows an **Open run page** button.
+**Other ways in.** On any HPHT segment's experiment page, the breadcrumb reads **Experiments › Run HPHT_297 › HPHT_297-2**: click **Run HPHT_297** to open the run. The strip under the ID lists every segment of the run, so a sibling is one click away, and **Reactor R07** in the line below the description also opens the run. On an HPHT experiment's Results tab, **Open run page** sits next to **+ Add Results**. On the Dashboard, clicking an occupied R or P reactor with an ONGOING experiment shows an **Open run page** button.
 
 ---
 
@@ -89,7 +91,7 @@ Experiments move through a defined lifecycle from creation to completion:
 2. **Add Conditions** — Open the experiment's detail view and complete the Conditions tab: temperature, pH, reactor number, rock mass, water volume, and chemical additives.
 3. **Add Results** — Upload analytical data via Bulk Uploads (preferred for multiple experiments at once) or enter results manually on the Results tab of the experiment detail view. The Results tab and the grouped rollup **display** hydrogen metrics (H₂ ppm/µmol/g/t, Fe²⁺ → H₂ %, pH, conductivity); ammonium fields are still recorded and stored — they remain in the database and Power BI datasets — but are no longer shown in these two on-screen tables. See `REPLICATES.md` for details.
 4. **Analyze** — Use the XRD tab (called Analysis before November 2026) to attach external analyses (XRD, pXRF, SEM, elemental) or view Aeris XRD time-series data.
-5. **Complete** — When the experiment is finished, change the status to **Completed** from the Dashboard or the experiment detail header. Cancelled experiments can be marked **Cancelled**.
+5. **Complete** — When the experiment is finished, change the status to **Completed** from the Dashboard, a run page's Segments table, or the status select next to the ID in the experiment detail header. Cancelled experiments can be marked **Cancelled**.
 
 ---
 
