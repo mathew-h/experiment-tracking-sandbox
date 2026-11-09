@@ -6,13 +6,13 @@ link graph built from every `<Link>`, `navigate()` and row `onClick` under
 `frontend/src/pages` and `frontend/src/components`, (3) a content-ownership
 matrix, (4) five cognitive walkthroughs (novice researcher, first week, knows
 the lab vocabulary, has not used the app) using the `cognitive-walkthrough`
-skill, (5) the visual pass is **not done** — it waits on confirmation that the
-backend and Vite are running. Every finding cites `file:line` as of develop
+skill, (5) a visual pass through the same five walkthroughs in Chrome against
+the running dev servers (§6). Every finding cites `file:line` as of develop
 `91cc2e7` (branch `chore/navigation-audit`).
 
-The deliverable is §4, a prioritized list of 22 concrete improvements
-(`NAV-01` … `NAV-22`). §1–§3 are the evidence. §5 names the three shared
-components that would close most of them together.
+The deliverable is §5, a prioritized list of 24 concrete improvements
+(`NAV-01` … `NAV-24`). §1–§4 and §6 are the evidence. §7 names the three
+shared components that would close most of them together.
 
 ---
 
@@ -44,7 +44,7 @@ route: it reaches the dashboard only through the catch-all redirect at
    (`ExperimentDetail/index.tsx:228`) and never mentions the run. The only
    way back to the run is the "Open run page" link inside the Results tab
    (`ResultsTab.tsx:256-271`), which is not the default tab
-   (`ExperimentDetail/index.tsx:50`). → NAV-03, NAV-18.
+   (`ExperimentDetail/index.tsx:50`). → NAV-03, NAV-20.
 2. **The detail page knows its reactor but not its run.** The header prints
    `Reactor R07` as text (`ExperimentDetail/index.tsx:393-394`) and the
    Conditions tab prints it again as text (`ConditionsTab.tsx:285`). Neither
@@ -57,7 +57,7 @@ route: it reaches the dashboard only through the catch-all redirect at
    neither, so an HPHT or Core Flood segment shows no siblings and no group
    link, while a serum vial shows both. The run page is the only place the
    segment family is listed, and there it is collapsed (`HphtRunPage.tsx:72`,
-   `CoreFloodRunPage.tsx:29`). → NAV-04, NAV-18.
+   `CoreFloodRunPage.tsx:29`). → NAV-04, NAV-20.
 4. **Run URLs accept only a base ID.** `GET /api/hpht/{base_id}` filters on
    `Experiment.base_experiment_id == base_id` (`run_service.py:56-57`) and maps a
    miss to 404 (`backend/api/routers/hpht.py:24-28`). `/hpht/HPHT_297-2`
@@ -240,7 +240,7 @@ four walkthrough questions scored ⚠️ or ❌; each stall maps to an improveme
 instead: View Detail → Conditions tab (default, `ExperimentDetail/index.tsx:50`) → Results tab
 (`ExperimentDetail/index.tsx:499-521`) → "+ Add Results" (`ResultsTab.tsx:273`) → Save =
 **5 clicks**, with no run context (cumulative H₂, sibling segments) and no
-way back to the run except the Results tab link. S-a4 (NAV-03, NAV-18).
+way back to the run except the Results tab link. S-a4 (NAV-03, NAV-20).
 
 ### (b) Find H₂ yield for a serum vial replicate set and compare replicates
 
@@ -264,8 +264,8 @@ ID ends at "Replicate group not found" with no link (`ReplicateGroup/index.tsx:3
 |---|---|---|---|---|---|---|---|
 | 1 | CF01 card | modal | ✅ | ✅ | ✅ | ✅ | — |
 | 2 | Footer has **no "Open run page"**: `runPagePath` returns null for `CF*` (`ReactorGrid.tsx:33`) although `/core-floods/CF_018` exists and the card carries `base_experiment_id` (`routers/dashboard.py:155`) | — | ✅ | ❌ the correct action is not offered | — | — | S-c1 (NAV-01) |
-| 3 | "View Detail →" | `/experiments/CF_018-3`, Conditions tab; no strip (`-3` is not a member, `replicate_groups.py:96-112`), no run link | ⚠️ "where are the other segments?" | ❌ | — | — | S-c2 (NAV-03, NAV-18) |
-| 4 | Results tab → "Open run page" (`ResultsTab.tsx:256-261`) | `/core-floods/CF_018` | ⚠️ nothing suggests segments live under Results | ⚠️ | ✅ | ✅ | S-c3 (NAV-19) |
+| 3 | "View Detail →" | `/experiments/CF_018-3`, Conditions tab; no strip (`-3` is not a member, `replicate_groups.py:96-112`), no run link | ⚠️ "where are the other segments?" | ❌ | — | — | S-c2 (NAV-03, NAV-20) |
+| 4 | Results tab → "Open run page" (`ResultsTab.tsx:256-261`) | `/core-floods/CF_018` | ⚠️ nothing suggests segments live under Results | ⚠️ | ✅ | ✅ | S-c3 (NAV-21) |
 | 5 | "Segments" collapsible, closed by default (`CoreFloodRunPage.tsx:29`, `:126-131`); summary lists IDs as text (`:128`) | `SegmentsTable` | ✅ | ⚠️ one more click, IDs visible but inert until opened | ✅ | ✅ | S-c4 (NAV-04, NAV-05) |
 
 **Count: 5 clicks** (card, View Detail, Results, Open run page, Segments).
@@ -277,11 +277,11 @@ With NAV-01 and NAV-04: 2. Via the sidebar today: Core Floods → row → Segmen
 |---|---|---|---|---|---|---|---|
 | 1 | Sidebar "Bulk Uploads" | `/bulk-uploads` | ✅ | ✅ | ✅ | ✅ | — |
 | 2 | Expand "ICP-OES Data" (`BulkUploads.tsx:250-261`) | drop zone | ✅ | ✅ | ✅ | ✅ | — |
-| 3 | Drop the CSV (`BulkUploadRow.tsx:169-174`) | badges "Created / Updated / Skipped", warnings (`:198-254`), toast "Upload complete — n created, n updated" (`:111`) | ✅ | ✅ | ✅ | ❌ **no experiment IDs and no links** — the user cannot tell *which* experiments received rows unless a warning names one | S-d1 (NAV-20) |
+| 3 | Drop the CSV (`BulkUploadRow.tsx:169-174`) | badges "Created / Updated / Skipped", warnings (`:198-254`), toast "Upload complete — n created, n updated" (`:111`) | ✅ | ✅ | ✅ | ❌ **no experiment IDs and no links** — the user cannot tell *which* experiments received rows unless a warning names one | S-d1 (NAV-22) |
 | 4 | Sidebar "Experiments" | list | ✅ | ✅ | ✅ | ✅ | — |
 | 5 | Type the ID from memory into "Experiment ID…" | filtered | ⚠️ depends on remembering the CSV label | ✅ | ✅ | ✅ | S-d1 |
-| 6 | Row click | `/experiments/{id}` — **or** the group page if the ID is a `-t` vial of a multi-vial stem (`ExperimentList.tsx:350-358`), which shows no ICP at all; then member link → detail (+2) | ⚠️ | ⚠️ | ⚠️ | ✅ | S-d2 (NAV-19) |
-| 7 | Results tab | rows with an "ICP" badge (`ResultsTab.tsx:326`) | ⚠️ page opened on Conditions | ✅ | ✅ | ✅ | S-d3 (NAV-19) |
+| 6 | Row click | `/experiments/{id}` — **or** the group page if the ID is a `-t` vial of a multi-vial stem (`ExperimentList.tsx:350-358`), which shows no ICP at all; then member link → detail (+2) | ⚠️ | ⚠️ | ⚠️ | ✅ | S-d2 (NAV-21) |
+| 7 | Results tab | rows with an "ICP" badge (`ResultsTab.tsx:326`) | ⚠️ page opened on Conditions | ✅ | ✅ | ✅ | S-d3 (NAV-21) |
 | 8 | Expand the row (`:313`) | ICP-OES block (`:145-163`), or scroll to "ICP over time" (`:348`) | ✅ | ✅ | ✅ | ✅ | — |
 
 **Count: 8 clicks minimum, 10 for a grouped `-t` vial.** The Dashboard's
@@ -295,8 +295,8 @@ Start: `/experiments/HPHT_297-2` (from D3, L3, D5 or D6).
 
 | Step | Click | Lands on | Q1 | Q2 | Q3 | Q4 | Stall |
 |---|---|---|---|---|---|---|---|
-| 1 | Look for siblings: breadcrumb `Experiments › HPHT_297-2`, "Reactor R07" text, no strip (`ExperimentDetail/index.tsx:209-214`, `:393-394`) | — | ✅ | ❌ nothing on the page names the run or its segments | — | — | S-e1 (NAV-03, NAV-18) |
-| 2 | Results tab | — | ⚠️ guess | ✅ | ⚠️ | ✅ | S-e2 (NAV-19) |
+| 1 | Look for siblings: breadcrumb `Experiments › HPHT_297-2`, "Reactor R07" text, no strip (`ExperimentDetail/index.tsx:209-214`, `:393-394`) | — | ✅ | ❌ nothing on the page names the run or its segments | — | — | S-e1 (NAV-03, NAV-20) |
+| 2 | Results tab | — | ⚠️ guess | ✅ | ⚠️ | ✅ | S-e2 (NAV-21) |
 | 3 | "Open run page" (`ResultsTab.tsx:266-271`) | `/hpht/HPHT_297` | ✅ | ✅ | ✅ | ✅ | — |
 | 4 | "Ongoing: HPHT_297-2" is text (`HphtRunPage.tsx:125`); Samples "Segment" column is text (`HphtSamplesTable.tsx:121`); open "Segments" (`HphtRunPage.tsx:172-177`) | `SegmentsTable` | ✅ | ⚠️ | ⚠️ IDs everywhere, links nowhere until the collapsible opens | ✅ | S-e3 (NAV-04, NAV-05) |
 | 5 | Sibling "HPHT_297" (`SegmentsTable.tsx:160-165`) | `/experiments/HPHT_297`, Conditions tab | ✅ | ✅ | ✅ | ✅ | — |
@@ -335,12 +335,12 @@ component or the lab PC is involved.
 - Files: `frontend/src/pages/ReactorGrid.tsx:526-547`
 - Effort: S
 - Tests affected: `src/pages/__tests__/ReactorGrid.test.tsx:305-309` (role/name query still passes; add a `variant` or class assertion); e2e `04-update-status-dashboard.spec.ts` (uses the badge only)
-- Risk: none. Confirm in the visual pass (§6) before merging.
+- Risk: none. Confirmed in the visual pass (§6, a1): "View Detail →" is the only filled red control in the modal.
 
 **NAV-03 — Breadcrumb states the real parent: run for a segment, group for a replicate**
 - Found at: §1 disagreements 1–3; walkthrough (a) S-a4, (c) step 3, (e) step 1; `ExperimentDetail/index.tsx:226-231`
 - Problem: every detail page claims `Experiments › {id}`. An HPHT or Core Flood segment has a run page and a serum replicate has a group page, and both are already known on this page (`experiment.base_experiment_id` at `:536`, `conditions.experiment_type` at `:534`, `replicateGroup` at `:74-78`). No extra fetch is needed.
-- Improvement: unify to `Experiments › Run HPHT_297 › HPHT_297-2` (middle crumb → `/hpht/{base}`, or `/core-floods/{base}` by `isCoreFloodType`) and `Experiments › Group SERUM_001 › SERUM_001a` (middle crumb → `/experiments/groups/{base}`) using the existing `isHphtType` / `isCoreFloodType` helpers (`utils/experimentId.ts:32-40`). Also make the "Reactor R07" text at `:393-394` a link to the same run path. The Results-tab "Open run page" links (E7/E8) can stay for now; NAV-19 retires them.
+- Improvement: unify to `Experiments › Run HPHT_297 › HPHT_297-2` (middle crumb → `/hpht/{base}`, or `/core-floods/{base}` by `isCoreFloodType`) and `Experiments › Group SERUM_001 › SERUM_001a` (middle crumb → `/experiments/groups/{base}`) using the existing `isHphtType` / `isCoreFloodType` helpers (`utils/experimentId.ts:32-40`). Also make the "Reactor R07" text at `:393-394` a link to the same run path. The Results-tab "Open run page" links (E7/E8) can stay for now; NAV-21 retires them.
 - Files: `frontend/src/pages/ExperimentDetail/index.tsx:226-231`, `:393-394`
 - Effort: S
 - Tests affected: `src/pages/ExperimentDetail/__tests__/GroupStrip.test.tsx:91`, `:194` (group link href unchanged, breadcrumb text changes); `Tabs.test.tsx`; e2e `16-results-tab-columns.spec.ts:21-23` (navigates by URL, unaffected)
@@ -385,7 +385,7 @@ component or the lab PC is involved.
 **NAV-08 — Not-found states on the detail and group pages link back**
 - Found at: walkthrough (b) S-b4; E11, R4
 - Problem: "Experiment not found" (`ExperimentDetail/index.tsx:207`) and "Replicate group not found" (`ReplicateGroup/index.tsx:311-313`) render a sentence and nothing else. The run pages already do this right (`HphtRunPage.tsx:95`, `CoreFloodRunPage.tsx:52`).
-- Improvement: add "Back to Experiments" (`/experiments`) to both; on the group page also "Search for {baseId}" → `/experiments?search={baseId}` once NAV-19's search-param pattern exists (plain link to `/experiments` until then).
+- Improvement: add "Back to Experiments" (`/experiments`) to both; on the group page also "Search for {baseId}" → `/experiments?search={baseId}` once NAV-21's search-param pattern exists (plain link to `/experiments` until then).
 - Files: `frontend/src/pages/ExperimentDetail/index.tsx:207`, `frontend/src/pages/ReplicateGroup/index.tsx:311-313`
 - Effort: S
 - Tests affected: `src/pages/ReplicateGroup/__tests__/ReplicateGroupPage.test.tsx` (if it asserts the not-found text, keep the text and add the link); `src/pages/ExperimentDetail/__tests__/DeleteExperiment.test.tsx`
@@ -465,16 +465,34 @@ component or the lab PC is involved.
 
 **NAV-17 — Keep the reactor modal's only red control from reading as "enter a reading" (confirm in visual pass)**
 - Found at: walkthrough (a) step 2; `ReactorGrid.tsx:480-523`
-- Problem: the body of the modal ends with a date, a textarea placeholder "Enter a reactor modification…" and a `bg-brand-red` "Save" (`:515-521`). A novice checking a reactor to log a sample reads this as the entry form; it writes a *modification note*.
+- Problem: the body of the modal ends with a date, a three-row textarea "Enter a reactor modification…" and a "Save" (`:515-521`) that is dimmed while empty and turns `bg-brand-red` as soon as text is typed. The textarea is the largest control in the modal (§6, a1). A novice checking a reactor to log a sample reads it as the entry form; it writes a *modification note*.
 - Improvement: head the section "Log a reactor modification note", make its Save `variant="secondary"`, and move the navigation footer directly under the Experiment section so the next step is above the note form. Pair with NAV-02.
 - Files: `frontend/src/pages/ReactorGrid.tsx:480-523`, `:526-547`
 - Effort: S
 - Tests affected: `src/pages/__tests__/ReactorGrid.test.tsx` (modification-note tests query by placeholder; unchanged)
-- Risk: none. Logged from code; verify emphasis with a screenshot in §6 before changing.
+- Risk: none. Confirmed in the visual pass (§6, a1).
+
+**NAV-18 — Recent Activity must not link a deleted experiment to a dead end**
+- Found at: visual pass (§6, x1); `ActivityFeed.tsx:51-60`
+- Problem: the feed renders every `experiment_id` as a button to `/experiments/{id}`, including rows whose `modification_type` is `delete` on `experiments` (`ActivityFeed.tsx:4-8`). On the dev dashboard 16 of the last 20 entries are deletions; each click lands on "Experiment not found" with no link back (E11).
+- Improvement: when the entry is a delete of `experiments`, render the ID as `font-mono-data` text with a `line-through` and the label "deleted"; keep the button for every other row. (NAV-08 makes the dead end itself recoverable; this stops the feed sending people into it.)
+- Files: `frontend/src/pages/ActivityFeed.tsx:51-60`
+- Effort: S
+- Tests affected: `src/pages/__tests__/Dashboard.test.tsx`
+- Risk: none
+
+**NAV-19 — Group chart legend overlaps the x-axis title**
+- Found at: visual pass (§6, b2); `GroupedResultsView.tsx:271-286`
+- Problem: the `ComposedChart` has an 8px bottom margin, the x-axis label sits `insideBottom` with a −4 offset and the `Legend` is at the default bottom position, so "replicate a / b / c" prints over "Time post-reaction (days)". It is the one chart in walkthrough (b) the user is sent to for the comparison.
+- Improvement: `margin.bottom` ≥ 24 and `<Legend verticalAlign="top" />`, matching the ICP chart on the run pages, which places its legend above the plot.
+- Files: `frontend/src/pages/ExperimentDetail/GroupedResultsView.tsx:271-286`
+- Effort: S
+- Tests affected: `src/pages/ExperimentDetail/__tests__/GroupedResultsView.test.tsx`
+- Risk: none
 
 ### M
 
-**NAV-18 — One `RunContextHeader` on the detail page: the run and its sibling segments**
+**NAV-20 — One `RunContextHeader` on the detail page: the run and its sibling segments**
 - Found at: §1 disagreement 3; walkthroughs (a) S-a4, (c) step 3, (e) steps 1 and 6–9
 - Problem: a serum vial's page shows "Replicate a · Group SERUM_001 · a [b] c" (`ExperimentDetail/index.tsx:287-329`); an HPHT or CF segment's page shows nothing about its run because `_member_clause` (`replicate_groups.py:96-112`) excludes sequential segments. Round-tripping between `HPHT_297` and `HPHT_297-2` costs eight clicks.
 - Improvement: when `isHphtType` / `isCoreFloodType`, fetch the run (`hphtApi.get(base)` / `coreFloodsApi.get(base)`, both existing) and render the same strip shape: "Run HPHT_297 · HPHT_297 [HPHT_297-2] HPHT_297_Desorption", current segment bold, others links, "Ongoing" badge on the ongoing one. NAV-03's breadcrumb carries the run link; this adds the siblings. Extract the serum strip and this one into `components/experiments/RunContextHeader.tsx` so both read from one component.
@@ -483,7 +501,7 @@ component or the lab PC is involved.
 - Tests affected: `src/pages/ExperimentDetail/__tests__/GroupStrip.test.tsx` (whole file: the strip moves into a component), `Tabs.test.tsx`
 - Risk: none (reads existing `GET /api/hpht/{base}` and `GET /api/core-floods/{base}`)
 
-**NAV-19 — Deep-link the detail page's tabs with `?tab=`**
+**NAV-21 — Deep-link the detail page's tabs with `?tab=`**
 - Found at: walkthrough (c) step 4, (d) steps 6–7, (e) step 2; the run ↔ segment cycle in §2
 - Problem: `activeTab` is local state defaulting to Conditions (`ExperimentDetail/index.tsx:50`). Every inbound link lands there: "Edit on Conditions tab" happens to be right, but the ICP verification, the activity feed's `icp_results` link, the group page's result counts and the Results-tab-only run link all need Results.
 - Improvement: read and write the tab through `useSearchParams` (`?tab=results|conditions|notes|xrd|logs`), keep Conditions as the default. Then: `ActivityFeed.tsx:55` links `icp_results` / `scalar_results` rows with `?tab=results`; `ReplicateGroup/index.tsx:139` makes the Results count a link to `?tab=results`; `ConditionsSummaryCard.tsx:49` appends `?tab=conditions`; the Results-tab "Open run page" links (E7/E8) can be retired once NAV-03 is in. No path changes, so no redirects.
@@ -492,16 +510,16 @@ component or the lab PC is involved.
 - Tests affected: `src/pages/ExperimentDetail/__tests__/Tabs.test.tsx`, `ResultsTab.columns.test.tsx:269-306` (if E7/E8 are retired), `src/pages/Hpht/__tests__/HphtRunPage.test.tsx:103-105` (href gains the query); e2e `16-results-tab-columns.spec.ts:21-23` and `15-wt-pct-fluid-additive.spec.ts:25` (still click the tab; unaffected)
 - Risk: none (search param only; existing URLs keep working)
 
-**NAV-20 — The ICP upload result names the experiments it wrote to, with links**
+**NAV-22 — The ICP upload result names the experiments it wrote to, with links**
 - Found at: walkthrough (d) step 3; `BulkUploadRow.tsx:198-254`
 - Problem: after a drop the user sees "Created: 12 · Updated: 3" and must reconstruct from the CSV which experiments and timepoints were touched, then find each one by hand (8–10 clicks per check).
-- Improvement: have the response carry `touched: [{experiment_id, time_post_reaction_days}]` and render them under the badges as links to `/experiments/{id}?tab=results` (NAV-19). The list is the verification step; one click per experiment.
+- Improvement: have the response carry `touched: [{experiment_id, time_post_reaction_days}]` and render them under the badges as links to `/experiments/{id}?tab=results` (NAV-21). The list is the verification step; one click per experiment.
 - Files: `frontend/src/pages/BulkUploadRow.tsx:198-254`, `frontend/src/api/bulkUploads.ts` (`BulkUploadResult`); backend `backend/api/routers/bulk_uploads.py` (ICP endpoint response), `backend/api/schemas/` for the response model
 - Effort: M
 - Tests affected: `src/pages/__tests__/BulkUploads.test.tsx`, `BulkUploadRow.delegation.test.tsx`; pytest `tests/api/` for the ICP endpoint; e2e `03-upload-icp.spec.ts`
 - Risk: backend/API need (additive response field). The IDs come from the rows `icp_service.py` already returns to the router; if collecting them needs a change inside `backend/services/icp_service.py` or `bulk_uploads/`, that is a locked parser — **Needs sign-off** for that part only.
 
-**NAV-21 — Delete a segment from the run page's Segments table**
+**NAV-23 — Delete a segment from the run page's Segments table**
 - Found at: §3 "Delete"
 - Problem: a run page that can rename, re-describe and re-status a segment sends the user to the segment's detail page (three clicks, via a closed collapsible) to delete a mistaken one.
 - Improvement: add a `variant="ghost"` "Delete" per row in `SegmentsTable` that opens the existing `DeleteExperimentModal` (`components/experiments/DeleteExperimentModal.tsx`, typed-ID gate included); on `onDeleted` call `writes.invalidate` and, if it was the only segment, `navigate(writes.runPath(...))` is wrong — go to the list route instead (`/hpht` or `/core-floods`, add `listPath` to `RunWrites`).
@@ -512,7 +530,7 @@ component or the lab PC is involved.
 
 ### L
 
-**NAV-22 — One samples table for the Results tab and both run pages**
+**NAV-24 — One samples table for the Results tab and both run pages**
 - Found at: §3 "Samples table"
 - Problem: the same result rows render through three tables with three column sets: `ResultsTab.tsx:292-343` (per segment, Fe²⁺ %, badges, expand-to-edit), `HphtSamplesTable.tsx` (per run, cumulative columns, click-to-edit, ICP expander) and `SamplesTable.tsx` (per run, flow/permeability). A user learns one and mis-reads the next; every column fix lands three times.
 - Improvement: a `RunSamplesTable` keyed by a column spec (`components/results/sampleFields.ts` already defines the shared field definitions) with a `scope: 'segment' | 'run'` prop; the Results tab renders it in segment scope. Keep Core Flood's extra column group as a spec extension.
@@ -523,9 +541,35 @@ component or the lab PC is involved.
 
 ---
 
-## 6. Patterns — shared components that close several items at once
+## 6. Visual pass — 2026-11-09, dev backend and Vite running, Chrome DevTools MCP, 1440 × 900
 
-1. **`RunContextHeader` (NAV-03, NAV-18, NAV-06, NAV-09's follow-on).** Every
+Driven through the Chrome DevTools MCP (the brief names Playwright MCP, which
+is not available in this session) against the logged-in dev app. Every
+walkthrough step in §4 was reproduced and screenshotted; nothing was saved to
+the database (the Add-sample modal was opened and dismissed, no upload was
+dropped). Screenshots are in the session scratchpad, not committed, because
+the brief limits writes to this file: `a0-dashboard`, `a1-reactor-modal`,
+`a2-hpht-run`, `a3-add-sample-modal`, `a4-detail-conditions-tab`,
+`a5-detail-results-tab`, `b1-experiments-list`, `b2-group-page-top`,
+`c1-cf-modal`, `c2-cf-segment-detail`, `c3-cf-segment-results-tab`,
+`c4-cf-run-page`, `c5-cf-segments-open`, `d1-bulk-uploads-icp-row`,
+`e1-hpht-segment-detail`, `e2-hpht-segment-id-in-run-url`,
+`e3-hpht-run-collapsed`, `e4-hpht-segments-open`,
+`x1-deleted-experiment-dead-end` (all `.png`).
+
+What each step showed, against the code reading:
+
+- **(a) a0 → a1, R08 / HPHT_312.** Footer `Close · Open run page · View Detail →`; "View Detail →" is the only filled `bg-brand-red` control in the modal, "Open run page" is bordered (confirms NAV-02). The Reactor Modification textarea is the largest control; its Save is dimmed while empty and turns red once text is typed (NAV-17 corrected to say so). **a2** run page: "+ Add sample" is the red button top-right; "Reactor R08" and "ONGOING: HPHT_312" are text; the breadcrumb "HPHT" is a 12px muted link (NAV-05). **a3** the modal that opens from "+ Add sample" is titled "Add Results" with a red "Save Results" (NAV-15). **a4** `/experiments/HPHT_312` opens on Conditions with nothing above the fold that names the run; "Reactor R08" is text (NAV-03). **a5** Results tab: bordered "Open run page" beside red "+ Add Results".
+- **(b) b1** list: group rows show a small `▸ 3 replicates: a, b, c` chip after the red ID; non-group rows show a status select, group rows a badge (NAV-16). **b2** `/experiments/groups/SERUM_P1Salt_005`: the Rollup header is the last thing above the fold at 900px; the chart is half visible and the table with the g/t column is below it (NAV-10). The members table lists `a / b / c · 2 vials` with every condition "—" and no yield. The chart legend prints over the x-axis title (NAV-19). Default metric H₂ (ppm).
+- **(c) c1** CF03 / CF_027-6 modal: footer `Close · View Detail →` only, no run link (NAV-01 confirmed); no Hardware section. **c2** `/experiments/CF_027-6`: breadcrumb `Experiments › CF_027-6`, "Reactor CF03" text, no sibling strip although the run has seven segments (NAV-03, NAV-20). **c3** Results tab: only "Open run page", no add, no edit, no explanation (NAV-13). **c4** `/core-floods/CF_027`: Samples, ICP over time open, `SEGMENTS 7 (CF_027, CF_027-1, … CF_027-6)` collapsed, `DATA CHECKS 4`, Run totals. **c5** Segments opened: ID link, Rename, status select, description per row (NAV-04).
+- **(d) d1** Bulk Uploads with ICP-OES expanded: drop zone and overwrite checkbox; nothing on the page says where the data will appear afterwards (NAV-22). No file was dropped.
+- **(e) e1** `/experiments/HPHT_297-2`: COMPLETED, "Reactor R09" text, no strip, breadcrumb `Experiments › HPHT_297-2` (NAV-03, NAV-20). **e2** `/hpht/HPHT_297-2`: "No HPHT run HPHT_297-2 · Back to HPHT" (NAV-09 confirmed). **e3** `/hpht/HPHT_297`: conditions card is for HPHT_297-2, `SEGMENTS 2 (HPHT_297, HPHT_297-2)` collapsed at the bottom, no Ongoing badge because both segments are complete. **e4** opened: two rows, each ID a link.
+- **x1** Dashboard Recent Activity: `DELETED experiments — ZZ152_SERUM_001a` is a button; it lands on "Experiment not found" with no link (NAV-18, NAV-08).
+- **Console:** only `404` resource errors across the pass (the deleted-experiment page and the group lookup for a run segment); no React or runtime errors.
+
+## 7. Patterns — shared components that close several items at once
+
+1. **`RunContextHeader` (NAV-03, NAV-20, NAV-06, NAV-09's follow-on).** Every
    stall on the detail page comes from one cause: the page is built for a
    serum vial and treats an HPHT/CF segment as the same thing. One header
    component that takes the experiment plus its conditions type and renders
@@ -539,7 +583,7 @@ component or the lab PC is involved.
    CF, which list, which path"). Put it beside `isHphtType` / `isCoreFloodType`
    in `utils/experimentId.ts` and have all callers use it; a future rename of
    either route then changes one line plus the redirect.
-3. **`SegmentLink` + `?tab=` (NAV-05, NAV-16, NAV-19, NAV-20).** Experiment IDs
+3. **`SegmentLink` + `?tab=` (NAV-05, NAV-16, NAV-21, NAV-22).** Experiment IDs
    are printed in `font-mono-data text-red-400` in eleven places and are links
    in six of them. A single component that always links, with an optional
    `tab` prop, makes "an ID is clickable" a rule the user can rely on and gives
@@ -547,24 +591,22 @@ component or the lab PC is involved.
 
 ---
 
-## 7. Verification of this audit
+## 8. Verification of this audit
 
 - Every edge in §2 and every `Found at` in §5 was read in this session from
   the file and line cited; nothing is inferred from names. "not found" is
   written where no control exists.
-- The `-2` segment membership claim (§1 item 3, NAV-18) is taken from the
+- The `-2` segment membership claim (§1 item 3, NAV-20) is taken from the
   `_member_clause` docstring and implementation at
   `backend/services/replicate_groups.py:96-112`, which admits only lettered
   replicates and letterless `-t` vials of the stem.
 - No two items propose the same change: NAV-03 (breadcrumb, data already on
-  the page) and NAV-18 (sibling strip, needs the run fetch) are split on that
+  the page) and NAV-20 (sibling strip, needs the run fetch) are split on that
   line; NAV-09 (frontend link) excludes the backend resolver it mentions.
-- **Not done:** §5 of the brief, the visual pass. It needs the backend on
-  :8000 and Vite on :5173 and I did not start either. The Playwright MCP named
-  in the brief is not available in this session; the Chrome DevTools MCP is,
-  and can drive the same login flow as `frontend/e2e/fixtures/auth.ts:34-44`
-  (credentials from `frontend/e2e/.env.e2e`). NAV-02 and NAV-17 are the two
-  items whose wording should be confirmed against a screenshot before they
-  are implemented.
+- The visual pass (§6) reproduced every §4 step in the running app. It
+  confirmed NAV-01, NAV-02, NAV-03, NAV-09, NAV-13, NAV-15, NAV-16, NAV-20
+  as described, corrected NAV-17's description of the Save button, and
+  added NAV-18 and NAV-19. The dev servers were already running; none was
+  started or stopped here.
 - No code, test or config file was changed. This file is the only addition;
   the docs hook copies it to `docs/project_context/`.
