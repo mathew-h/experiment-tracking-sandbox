@@ -979,7 +979,7 @@ Item fields: `base_id`, `description` (the root segment's `description` note: no
 
 ### GET /api/core-floods/{base_id}
 
-Returns 404 when no Core Flood experiment has that base ID.
+The path also accepts a segment or variant ID (issue #158): `GET /api/core-floods/CF_018-3` and `GET /api/core-floods/CF_020-5_Bypass1` return the same body as `GET /api/core-floods/CF_018` / `CF_020`. The ID is looked up in `experiments` and replaced by its `base_experiment_id` (`run_service.resolve_base_id`); the response's `base_id` is always the canonical run ID, and the run page rewrites its URL to it. Returns 404 when no Core Flood experiment has that base ID, including a segment ID of another type (`GET /api/core-floods/HPHT_297-2`); the 404 detail names the ID that was sent.
 
 - `segments`, ordered by start date (undated last), then `experiment_id`: `id`, `experiment_id`, `status`, `date`, `parent_experiment_id`, `is_variant`, `description` (the `description` note), `conditions_id`, `pore_volume_mL`, `rock_mass_g`, `reactor_slot`. `conditions_id` is not in the original spec: it lets the run page edit pore volume through `PATCH /api/conditions/{id}`. `is_variant` is true when the segment has a parent and its ID starts with `<parent experiment_id>_` (e.g. `CF_020-5_Bypass1`).
 - `samples`: rows of the `v_core_flood_samples` view for this run, read as-is so the app and Power BI share one definition. Field names are the view's column names, including the derived ones (`interval_days`, `cumulative_liquid_volume_mL`, `cumulative_pore_volumes`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `is_hold_interval`). Nothing is recomputed in the API. Each sample also carries `permeability_flow_rate_mL_min` (view column) and `notes` (issue #140): the sample's result-scoped `result_note`, `observation` and `modification` notes ordered by note id, each `{id, note_type, note_text, created_by}`; the experiment `description` note is never included. Variant rows keep their raw columns and have every derived column NULL. See `MODELS.md` and `docs/CALCULATIONS.md` ("Core flood run values").
@@ -995,7 +995,7 @@ Returns 404 when no Core Flood experiment has that base ID.
 
 ### GET /api/core-floods/{base_id}/icp
 
-ICP-OES readings for the run's samples (issue #140), in `v_core_flood_samples` order (cumulative day, undated last, then `result_id`). Returns 404 when no Core Flood experiment has that base ID. A sample with no `icp_results` row is omitted, so a run without ICP returns `[]`. Variant samples are included and flagged.
+ICP-OES readings for the run's samples (issue #140), in `v_core_flood_samples` order (cumulative day, undated last, then `result_id`). Accepts a segment or variant ID like the run endpoint (issue #158). Returns 404 when no Core Flood experiment has that base ID. A sample with no `icp_results` row is omitted, so a run without ICP returns `[]`. Variant samples are included and flagged.
 
 Row fields: `result_id`, `experiment_id`, `is_variant`, `cumulative_time_post_reaction_days`, `sample_date`, `elements`: a map of lowercase element symbol (the fixed `ICP_ELEMENTS` columns) to ppm as a float. NULL elements are omitted, so `elements` holds only measured values. The row schema (`IcpRow`) and its builder (`backend/services/icp_series.py`) are shared with `GET /api/experiments/{experiment_id}/icp` (issue #143).
 
@@ -1078,6 +1078,8 @@ Item fields (`HphtRunListItem`): `base_id`, `description` (same rule as Core Flo
 
 ### GET /api/hpht/{base_id}
 
+The path also accepts a segment or variant ID (issue #158): `GET /api/hpht/HPHT_297-2` returns the same body as `GET /api/hpht/HPHT_297`, with `base_id: "HPHT_297"`. Resolution is the same as on Core Flood (`run_service.resolve_base_id`). Returns 404 when no HPHT experiment has that base ID, including a Core Flood segment ID (`GET /api/hpht/CF_018-3`); the 404 detail names the ID that was sent.
+
 - `segments`: the shared `RunSegment` shape, identical to Core Flood segments (`pore_volume_mL` is always null here), ordered by start date (undated last), then `experiment_id`.
 - `conditions` (`HphtConditionsSummary`): the setup of the **latest non-variant segment**: `experiment_id`, `conditions_id`, experiment `date`, `sample_id`, `temperature_c`, `rxn_temp_pressure_psi`, `rock_mass_g`, `water_volume_mL`, `water_to_rock_ratio`, `catalyst`, `catalyst_ppm`, `feedstock`. `null` when every segment is a variant. **`catalyst` and `catalyst_ppm` are the legacy conditions columns**: in the 2026-10-23 dev data only 71 of 432 HPHT conditions rows have `catalyst_ppm` and none since 2025-10-16, so they are usually empty. Read catalysts from the additives endpoint.
 - `samples`: rows of `v_hpht_samples` for this run, read as-is, plus `notes` (the sample's `result_note`, `observation` and `modification` notes by id, as on Core Flood). Derived columns: `interval_days`, `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day`, `cumulative_h2_micromoles`, `cumulative_ferrous_iron_yield_h2_pct` (NULL on variant rows). See `docs/CALCULATIONS.md` ("HPHT run values").
@@ -1094,7 +1096,7 @@ Item fields (`HphtRunListItem`): `base_id`, `description` (same rule as Core Flo
 
 ### GET /api/hpht/{base_id}/icp
 
-Same as `GET /api/core-floods/{base_id}/icp`, joined on `v_hpht_samples`: `IcpRow`s in view order, samples without an `icp_results` row omitted, variants included and flagged.
+Same as `GET /api/core-floods/{base_id}/icp`, joined on `v_hpht_samples`: `IcpRow`s in view order, samples without an `icp_results` row omitted, variants included and flagged. Accepts a segment or variant ID like the run endpoint (issue #158).
 
 ### HPHT run page (issue #150)
 

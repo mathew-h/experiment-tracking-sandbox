@@ -111,14 +111,26 @@ def _conditions_summary(db: Session, segments: list[RunSegment]) -> HphtConditio
 
 
 def _segments(db: Session, base_id: str) -> list[RunSegment]:
+    """The run's segments by date; `base_id` must already be resolved."""
     segments = runs.load_segments(db, include=is_hpht, base_id=base_id).get(base_id)
     if not segments:
         raise HphtRunNotFound(base_id)
     return runs.by_date(segments)
 
 
+def _resolve(db: Session, requested_id: str) -> tuple[str, list[RunSegment]]:
+    """Base ID and segments of the HPHT run `requested_id` names: a
+    base, segment or variant ID (issue #158). Not-found reports the ID
+    the caller sent."""
+    base_id = runs.resolve_base_id(db, requested_id)
+    try:
+        return base_id, _segments(db, base_id)
+    except HphtRunNotFound:
+        raise HphtRunNotFound(requested_id) from None
+
+
 def get_run(db: Session, base_id: str) -> HphtRun:
-    segments = _segments(db, base_id)
+    base_id, segments = _resolve(db, base_id)
     samples = runs.fetch_samples(db, _VIEW, base_ids=[base_id])
     return HphtRun(
         base_id=base_id,
@@ -131,7 +143,7 @@ def get_run(db: Session, base_id: str) -> HphtRun:
 
 def get_run_icp(db: Session, base_id: str) -> list[IcpRow]:
     """ICP-OES readings for a run's samples, in view order; samples without ICP are omitted."""
-    _segments(db, base_id)
+    base_id, _ = _resolve(db, base_id)
     return runs.run_icp(db, _VIEW, base_id)
 
 

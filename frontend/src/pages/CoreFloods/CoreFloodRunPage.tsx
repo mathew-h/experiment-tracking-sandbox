@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { coreFloodsApi, type CoreFloodSample } from '@/api/coreFloods'
 import { Badge, Breadcrumb, Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
 import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { CleanupPanel } from './CleanupPanel'
 import { Collapsible } from '@/components/runs/Collapsible'
+import { RunNotFound, SegmentIdList, useCanonicalRunUrl } from '@/components/runs/runPageNav'
+import { CORE_FLOOD_WRITES } from './useCoreFloodWrites'
 import { latestSegment, ongoingIds, rootSegments, runDescription } from '@/components/runs/runSegments'
 import { CoreFloodSampleModal } from './CoreFloodSampleModal'
 import { SamplesTable } from './SamplesTable'
@@ -26,12 +28,15 @@ export function CoreFloodRunPage() {
   const [modal, setModal] = useState<{ editing?: CoreFloodSample } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [describing, setDescribing] = useState<string | null>(null)
-  const [segmentsOpen, setSegmentsOpen] = useState(false)
+  // null until the user toggles it: then a run with several segments opens with
+  // the table showing (issue #158).
+  const [segmentsOpen, setSegmentsOpen] = useState<boolean | null>(null)
 
   const { data: run, isLoading, error } = useQuery({
-    queryKey: ['core-flood', baseId],
+    queryKey: CORE_FLOOD_WRITES.runQueryKey(baseId),
     queryFn: () => coreFloodsApi.get(baseId),
   })
+  useCanonicalRunUrl(baseId, run, CORE_FLOOD_WRITES)
 
   // An ICP failure only hides the expanders; it never breaks the run page.
   const { data: icpRows } = useQuery({
@@ -46,14 +51,7 @@ export function CoreFloodRunPage() {
   if (isLoading) return <PageSpinner />
   if (error) {
     if ((error as ApiError).response?.status === 404) {
-      return (
-        <div className="space-y-2 py-4">
-          <p className="text-sm text-ink-primary">No core flood run {baseId}</p>
-          <Link to="/core-floods" className="text-sm text-red-400 hover:text-red-300">
-            Back to Core Floods
-          </Link>
-        </div>
-      )
+      return <RunNotFound kind="core flood" requestedId={baseId} writes={CORE_FLOOD_WRITES} listLabel="Core Floods" />
     }
     return (
       <p className="text-sm text-red-400 py-4">
@@ -84,7 +82,11 @@ export function CoreFloodRunPage() {
           {description && <p className="text-sm text-ink-secondary max-w-prose">{description}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
             <span>Rig {rig ?? '—'}</span>
-            {ongoing.length > 0 && <Badge variant="ongoing">Ongoing: {ongoing.join(', ')}</Badge>}
+            {ongoing.length > 0 && (
+              <Badge variant="ongoing">
+                Ongoing: <SegmentIdList ids={ongoing} inherit />
+              </Badge>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -123,8 +125,9 @@ export function CoreFloodRunPage() {
 
       <Collapsible
         title="Segments"
-        summary={`${run.segments.length} (${run.segments.map((s) => s.experiment_id).join(', ')})`}
-        open={segmentsOpen}
+        summary={run.segments.length}
+        links={<>(<SegmentIdList ids={run.segments.map((s) => s.experiment_id)} />)</>}
+        open={segmentsOpen ?? run.segments.length > 1}
         onOpenChange={setSegmentsOpen}
       >
         <SegmentsTable

@@ -243,3 +243,47 @@ def test_icp_omits_samples_without_icp(client, db_session, reporting_views):
 
 def test_icp_404_unknown_base(client, db_session, reporting_views):
     assert client.get("/api/hpht/NOPE_404/icp").status_code == 404
+
+
+# ---- a segment or variant ID in the run URL resolves to its run (#158) ----
+
+def test_run_resolves_a_segment_id_to_its_run(
+        client, db_session, reporting_views):
+    _hpht(db_session, "HPHTS_001", date=_d(1))
+    seg = _hpht(db_session, "HPHTS_001-2", date=_d(3))
+    _sample(db_session, seg, 2.0, date=_d(5))
+    by_base = client.get("/api/hpht/HPHTS_001").json()
+    resp = client.get("/api/hpht/HPHTS_001-2")
+    assert resp.status_code == 200
+    assert resp.json() == by_base
+    assert resp.json()["base_id"] == "HPHTS_001"
+
+
+def test_run_resolves_a_variant_id(client, db_session, reporting_views):
+    _hpht(db_session, "HPHTS_002", date=_d(1))
+    _hpht(db_session, "HPHTS_002_Desorption", date=_d(2))
+    body = client.get("/api/hpht/HPHTS_002_Desorption").json()
+    assert body["base_id"] == "HPHTS_002"
+    assert [s["experiment_id"] for s in body["segments"]] == [
+        "HPHTS_002", "HPHTS_002_Desorption"]
+
+
+def test_icp_resolves_a_segment_id(client, db_session, reporting_views):
+    _hpht(db_session, "HPHTS_003", date=_d(1))
+    seg = _hpht(db_session, "HPHTS_003-2", date=_d(3))
+    with_icp = _sample(db_session, seg, 2.0, date=_d(5))
+    db_session.add(ICPResults(result_id=with_icp.id, fe=3.2))
+    db_session.flush()
+    resp = client.get("/api/hpht/HPHTS_003-2/icp")
+    assert resp.status_code == 200
+    assert [r["result_id"] for r in resp.json()] == [with_icp.id]
+
+
+def test_segment_id_of_a_core_flood_stays_404_and_names_the_sent_id(
+        client, db_session, reporting_views):
+    _hpht(db_session, "HPHTC_002", experiment_type="Core Flood")
+    _hpht(db_session, "HPHTC_002-3", experiment_type="Core Flood")
+    for path in ("/api/hpht/HPHTC_002-3", "/api/hpht/HPHTC_002-3/icp"):
+        resp = client.get(path)
+        assert resp.status_code == 404
+        assert "HPHTC_002-3" in resp.json()["detail"]

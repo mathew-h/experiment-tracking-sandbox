@@ -41,6 +41,9 @@ export function isCoreFloodType(t: unknown): boolean {
 
 /** The run list a type belongs to: `/hpht`, `/core-floods`, or null for types
  *  with no run page (Serum and the rest). */
+export function runListPathFor(experimentType: 'HPHT'): '/hpht'
+export function runListPathFor(experimentType: 'Core Flood'): '/core-floods'
+export function runListPathFor(experimentType: unknown): '/hpht' | '/core-floods' | null
 export function runListPathFor(experimentType: unknown): '/hpht' | '/core-floods' | null {
   if (isHphtType(experimentType)) return '/hpht'
   if (isCoreFloodType(experimentType)) return '/core-floods'

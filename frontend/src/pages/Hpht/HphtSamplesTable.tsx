@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import type { HphtSample } from '@/api/hpht'
 import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import { IcpList } from '@/components/icp/IcpList'
 import { fmt } from '@/components/results/sampleFields'
 import { noteSummary } from '@/pages/CoreFloods/fields'
@@ -118,7 +119,10 @@ export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Prop
                 </Td>
                 <Td className={`${CELL} text-ink-muted ${STICKY_DATE} ${STICKY_ROW_BG}`}>{date}</Td>
                 <Td className={CELL}>{fmt(s.cumulative_time_post_reaction_days)}</Td>
-                <Td className={`${CELL} text-ink-secondary`}>{s.experiment_id}</Td>
+                <Td className={CELL}>
+                  {/* Issue #158: stops propagation, so the row's edit click does not fire. */}
+                  <SegmentLink id={s.experiment_id} />
+                </Td>
                 <Td className={CELL}>{fmt(s.sample_tube_number)}</Td>
                 <Td className="text-xs">
                   <span className="inline-flex items-center gap-2">

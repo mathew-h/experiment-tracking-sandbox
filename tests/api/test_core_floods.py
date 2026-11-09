@@ -820,3 +820,40 @@ def test_list_item_description_none_when_no_segment_has_one(
     _cf_experiment(db_session, "CF_911-2", date=_d(2), description=None)
     (item,) = client.get("/api/core-floods", params={"scope": "all", "q": "CF_911"}).json()
     assert item["description"] is None
+
+
+# ---- a segment or variant ID in the run URL resolves to its run (#158) ----
+
+def test_run_resolves_segment_and_variant_ids(
+        client, db_session, reporting_views):
+    _cf_experiment(db_session, "CFS_018", date=_d(1))
+    seg = _cf_experiment(db_session, "CFS_018-3", date=_d(3))
+    _cf_experiment(db_session, "CFS_018-3_Bypass1", date=_d(4))
+    _sample(db_session, seg, 2.0, date=_d(5))
+    by_base = client.get("/api/core-floods/CFS_018").json()
+    for alias in ("CFS_018-3", "CFS_018-3_Bypass1"):
+        resp = client.get(f"/api/core-floods/{alias}")
+        assert resp.status_code == 200
+        assert resp.json() == by_base
+    assert by_base["base_id"] == "CFS_018"
+
+
+def test_icp_resolves_a_segment_id(client, db_session, reporting_views):
+    _cf_experiment(db_session, "CFS_019", date=_d(1))
+    seg = _cf_experiment(db_session, "CFS_019-2", date=_d(3))
+    res = _sample(db_session, seg, 2.0, date=_d(5))
+    _icp(db_session, res, fe=2.5)
+    resp = client.get("/api/core-floods/CFS_019-2/icp")
+    assert resp.status_code == 200
+    assert [r["result_id"] for r in resp.json()] == [res.id]
+
+
+def test_segment_id_of_an_hpht_run_stays_404_and_names_the_sent_id(
+        client, db_session, reporting_views):
+    _cf_experiment(db_session, "CFS_020", experiment_type="HPHT")
+    _cf_experiment(db_session, "CFS_020-2", experiment_type="HPHT")
+    for path in ("/api/core-floods/CFS_020-2",
+                 "/api/core-floods/CFS_020-2/icp"):
+        resp = client.get(path)
+        assert resp.status_code == 404
+        assert "CFS_020-2" in resp.json()["detail"]

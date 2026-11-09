@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import type { CoreFloodSample } from '@/api/coreFloods'
 import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import { labDateOf } from '@/utils/labDate'
 import { fmt, noteSummary } from './fields'
 import { IcpList } from '@/components/icp/IcpList'
@@ -100,7 +101,12 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                 </Td>
                 <Td className={`${CELL} text-ink-muted ${STICKY_DATE} ${STICKY_ROW_BG}`}>
                   {date}
-                  {variant && <div className="text-ink-secondary">{s.experiment_id}</div>}
+                  {variant && (
+                    <div>
+                      {/* Issue #158: stops propagation, so the row's edit click does not fire. */}
+                      <SegmentLink id={s.experiment_id} />
+                    </div>
+                  )}
                 </Td>
                 <Td className={CELL}>{fmt(s.cumulative_time_post_reaction_days)}</Td>
                 <Td className={CELL}>{fmt(s.sample_tube_number)}</Td>

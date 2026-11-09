@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { hphtApi, type HphtRun, type HphtSample, type HphtWarning } from '@/api/hpht'
 import { Badge, Breadcrumb, Button, Card, CardHeader, PageSpinner } from '@/components/ui'
@@ -7,6 +7,7 @@ import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { IcpChart } from '@/components/icp/IcpChart'
 import { segmentStarts } from '@/components/icp/icpSeries'
 import { Collapsible } from '@/components/runs/Collapsible'
+import { RunNotFound, SegmentIdList, useCanonicalRunUrl } from '@/components/runs/runPageNav'
 import { SegmentStatusSelect } from '@/components/runs/SegmentStatusSelect'
 import { latestSegment, ongoingIds, rootSegments, runDescription } from '@/components/runs/runSegments'
 import { SegmentsTable } from '@/pages/CoreFloods/SegmentsTable'
@@ -69,12 +70,15 @@ export function HphtRunPage() {
   const [modal, setModal] = useState<{ editing?: HphtSample } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [describing, setDescribing] = useState<string | null>(null)
-  const [segmentsOpen, setSegmentsOpen] = useState(false)
+  // null until the user toggles it: then a run with several segments opens with
+  // the table showing (issue #158).
+  const [segmentsOpen, setSegmentsOpen] = useState<boolean | null>(null)
 
   const { data: run, isLoading, error } = useQuery({
-    queryKey: ['hpht-run', baseId],
+    queryKey: HPHT_WRITES.runQueryKey(baseId),
     queryFn: () => hphtApi.get(baseId),
   })
+  useCanonicalRunUrl(baseId, run, HPHT_WRITES)
 
   // An ICP failure only hides the expanders and chart; it never breaks the run page.
   const { data: icpRows } = useQuery({
@@ -89,12 +93,7 @@ export function HphtRunPage() {
   if (isLoading) return <PageSpinner />
   if (error) {
     if ((error as ApiError).response?.status === 404) {
-      return (
-        <div className="space-y-2 py-4">
-          <p className="text-sm text-ink-primary">No HPHT run {baseId}</p>
-          <Link to="/hpht" className="text-sm text-red-400 hover:text-red-300">Back to HPHT</Link>
-        </div>
-      )
+      return <RunNotFound kind="HPHT" requestedId={baseId} writes={HPHT_WRITES} listLabel="HPHT" />
     }
     return (
       <p className="text-sm text-red-400 py-4">Failed to load HPHT run: {(error as Error).message}</p>
@@ -120,7 +119,11 @@ export function HphtRunPage() {
           {description && <p className="text-sm text-ink-secondary max-w-prose">{description}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
             <span>Reactor {reactor ?? '—'}</span>
-            {ongoing.length > 0 && <Badge variant="ongoing">Ongoing: {ongoing.join(', ')}</Badge>}
+            {ongoing.length > 0 && (
+              <Badge variant="ongoing">
+                Ongoing: <SegmentIdList ids={ongoing} inherit />
+              </Badge>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -169,8 +172,9 @@ export function HphtRunPage() {
 
       <Collapsible
         title="Segments"
-        summary={`${run.segments.length} (${run.segments.map((s) => s.experiment_id).join(', ')})`}
-        open={segmentsOpen}
+        summary={run.segments.length}
+        links={<>(<SegmentIdList ids={run.segments.map((s) => s.experiment_id)} />)</>}
+        open={segmentsOpen ?? run.segments.length > 1}
         onOpenChange={setSegmentsOpen}
       >
         <SegmentsTable

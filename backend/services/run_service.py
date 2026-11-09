@@ -38,6 +38,23 @@ def _view(name: str) -> str:
     return name
 
 
+def resolve_base_id(db: Session, experiment_or_base_id: str) -> str:
+    """base_experiment_id of the experiment with this ID, or the ID
+    itself when it is already a base or matches no experiment (so the
+    caller's not-found path still runs).
+
+    Lets a run URL take the segment ID a researcher copies from a
+    reactor card (HPHT_297-2, CF_020-5_Bypass1) as well as the base
+    (issue #158). Type-blind: the caller's `include` predicate still
+    decides whether the run is its kind.
+    """
+    base = db.execute(
+        select(Experiment.base_experiment_id)
+        .where(Experiment.experiment_id == experiment_or_base_id)
+    ).scalar_one_or_none()
+    return base or experiment_or_base_id
+
+
 def load_segments(
     db: Session,
     *,
