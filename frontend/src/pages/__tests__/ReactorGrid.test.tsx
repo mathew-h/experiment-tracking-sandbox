@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
 import type { ReactorCardData } from '@/api/dashboard'
@@ -288,7 +288,7 @@ describe('ReactorGrid — Parr group (issue #147)', () => {
   })
 })
 
-describe('runPagePath — HPHT run page link (issue #150)', () => {
+describe('runPagePath — run page link (issues #150, #157)', () => {
   it('links an ONGOING R or P card to its base ID, not its own segment ID', () => {
     expect(runPagePath(makeCard({ experiment_id: 'HPHT_297-2', base_experiment_id: 'HPHT_297' })))
       .toBe('/hpht/HPHT_297')
@@ -296,15 +296,89 @@ describe('runPagePath — HPHT run page link (issue #150)', () => {
       .toBe('/hpht/HPHT_310')
   })
 
-  it('gives no link for Core Flood rigs, QUEUED cards or a missing base ID', () => {
-    expect(runPagePath(makeCard({ reactor_label: 'CF01', experiment_type: 'Core Flood' }))).toBeNull()
-    expect(runPagePath(makeCard({ status: 'QUEUED' }))).toBeNull()
-    expect(runPagePath(makeCard({ base_experiment_id: null }))).toBeNull()
+  it('links CF cards to /core-floods/{base} and non-ONGOING cards to their run', () => {
+    expect(runPagePath(makeCard({
+      reactor_label: 'CF01', experiment_type: 'Core Flood', experiment_id: 'CF_018-3', base_experiment_id: 'CF_018',
+    }))).toBe('/core-floods/CF_018')
+    expect(runPagePath(makeCard({ status: 'QUEUED', base_experiment_id: 'HPHT_330' }))).toBe('/hpht/HPHT_330')
+    expect(runPagePath(makeCard({ status: 'COMPLETED' }))).toBe('/hpht/HPHT_MH_072')
   })
 
-  it('shows Open run page in the card detail modal', async () => {
-    renderGrid([makeCard({ base_experiment_id: 'HPHT_MH_072' })])
-    fireEvent.click(screen.getByText('HPHT_MH_072'))
-    expect(await screen.findByRole('button', { name: 'Open run page' })).toBeInTheDocument()
+  it('gives no link without a base ID or for an unknown slot series', () => {
+    expect(runPagePath(makeCard({ base_experiment_id: null }))).toBeNull()
+    expect(runPagePath(makeCard({ reactor_label: 'X01' }))).toBeNull()
+  })
+})
+
+describe('reactor detail modal — leads to the run (issue #157)', () => {
+  const openModal = async (card: ReactorCardData) => {
+    renderGrid([card])
+    fireEvent.click(screen.getByText(card.experiment_id!))
+    return screen.findByRole('dialog', { name: `${card.reactor_label} ${card.experiment_id}` })
+  }
+  const primaries = (dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll('button')).filter((b) => b.className.includes('bg-red-500'))
+
+  it('makes Open run page the only primary action, after Close and Open segment', async () => {
+    const dialog = await openModal(makeCard({ base_experiment_id: 'HPHT_MH_072' }))
+    const run = within(dialog).getByRole('button', { name: 'Open run page' })
+    const segment = within(dialog).getByRole('button', { name: 'Open segment HPHT_MH_072' })
+    expect(primaries(dialog)).toEqual([run])
+    expect(segment).not.toHaveClass('bg-red-500')
+    expect(within(dialog).queryByRole('button', { name: /view detail/i })).toBeNull()
+
+    // Footer order: Close, Open segment, Open run page (primary last).
+    const footer = run.parentElement!
+    expect(Array.from(footer.querySelectorAll('button')).map((b) => b.textContent)).toEqual([
+      'Close', 'Open segment HPHT_MH_072', 'Open run page',
+    ])
+  })
+
+  it('offers the Core Flood run for a CF card and navigates to it', async () => {
+    const card = makeCard({
+      reactor_label: 'CF01', reactor_number: 1, experiment_type: 'Core Flood',
+      experiment_id: 'CF_018-3', base_experiment_id: 'CF_018',
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/" element={<ReactorGrid cards={[card]} rSlotCount={16} cfSlotCount={3} />} />
+              <Route path="/core-floods/:baseId" element={<p>core flood run page</p>} />
+            </Routes>
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByText('CF_018-3'))
+    const dialog = await screen.findByRole('dialog', { name: 'CF01 CF_018-3' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Open run page' }))
+    expect(await screen.findByText('core flood run page')).toBeInTheDocument()
+  })
+
+  it('makes Open segment primary when the card has no run', async () => {
+    const dialog = await openModal(makeCard({ base_experiment_id: null }))
+    expect(within(dialog).queryByRole('button', { name: 'Open run page' })).toBeNull()
+    expect(primaries(dialog)).toEqual([within(dialog).getByRole('button', { name: 'Open segment HPHT_MH_072' })])
+  })
+
+  it('puts the run actions above the modification note, whose Save is never primary', async () => {
+    const dialog = await openModal(makeCard())
+    const run = within(dialog).getByRole('button', { name: 'Open run page' })
+    const heading = within(dialog).getByText('Log a reactor modification note')
+    // The footer precedes the note section in document order.
+    expect(run.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+    expect(save).not.toHaveClass('bg-red-500')
+    expect(save).toBeDisabled()
+    fireEvent.change(within(dialog).getByPlaceholderText('Enter a reactor modification…'), {
+      target: { value: 'Swapped stir shaft' },
+    })
+    expect(save).toBeEnabled()
+    expect(save).not.toHaveClass('bg-red-500')
+    expect(primaries(dialog)).toEqual([run])
   })
 })

@@ -846,7 +846,7 @@ Returns all dashboard data in a single call. Response shape:
 **Notes:**
 - Only occupied reactor slots are returned; the frontend renders every fixed slot from the summary totals, in three groups: HPHT `R01`–`R16`, Parr `P01`–`P06` and Core Flood `CF01`–`CF03` (issue #147)
 - `summary.reactors` counts only `R01`–`R16` (Yushen/Tan); the Parr vessels are counted separately in `summary.parr`
-- `base_experiment_id` (issue #150) is the run the card's experiment belongs to, so a `-2` segment's card carries its root's base ID. The dashboard's "Open run page" button on an ONGOING R or P card links to `/hpht/{base_experiment_id}`.
+- `base_experiment_id` (issue #150) is the run the card's experiment belongs to, so a `-2` segment's card carries its root's base ID. The dashboard's "Open run page" button links an R or P card to `/hpht/{base_experiment_id}` and a CF card to `/core-floods/{base_experiment_id}`, whatever the card's status (issue #157); a card with a null base ID has no run link.
 - `reactor_specs` is the hardware spec per slot label (`R01`–`R16`, `P01`–`P06`; Core Flood labels have none). It is the only copy of the table (`REACTOR_SPECS` in `backend/api/routers/dashboard.py`); the frontend reads empty-slot specs from it. Each card's `volume_mL` / `material` / `vendor` is looked up by `reactor_label`, so CF01 and P01 never inherit R01's spec
 - `description` is the text of the oldest note for the experiment
 - Timeline limited to 100 most recent experiments

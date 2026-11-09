@@ -79,7 +79,7 @@ NH₃ is not shown on this page. It stays on the experiment's Results tab and in
 
 **Add a sample.** Click **+ Add sample**. It opens the same form as **+ Add Results** on the experiment page. With one ONGOING segment the sample goes there, and the form names it. Otherwise a **Segment** select appears at the top. **Day** counts from the chosen segment's start date, not from the start of the run. Edits work the same way; Day cannot be changed.
 
-**Other ways in.** On any HPHT segment's experiment page, the breadcrumb reads **Experiments › Run HPHT_297 › HPHT_297-2**: click **Run HPHT_297** to open the run. The strip under the ID lists every segment of the run, so a sibling is one click away, and **Reactor R07** in the line below the description also opens the run. On an HPHT experiment's Results tab, **Open run page** sits next to **+ Add Results**. On the Dashboard, clicking an occupied R or P reactor with an ONGOING experiment shows an **Open run page** button.
+**Other ways in.** On any HPHT segment's experiment page, the breadcrumb reads **Experiments › Run HPHT_297 › HPHT_297-2**: click **Run HPHT_297** to open the run. The strip under the ID lists every segment of the run, so a sibling is one click away, and **Reactor R07** in the line below the description also opens the run. On an HPHT experiment's Results tab, **Open run page** sits next to **+ Add Results**. On the Dashboard, clicking any occupied reactor (R, P or CF, whatever its status) shows **Open run page** as the main button.
 
 ---
 
