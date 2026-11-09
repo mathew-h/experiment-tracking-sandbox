@@ -88,13 +88,16 @@ class ScalarResultsService:
         # not opted in. See the overwrite branch below for why this matters.
         sheet_fields = result_data.pop('_sheet_fields', None)
 
-        # Issue #122 PR-D: a parser's free-text Description column is an
-        # 'observation' note on the result, not a result column. `_note_source`
-        # names the parser (the note's created_by, which is also its slot key in
-        # sync_result_note) and `description` is the text. Without `_note_source`
-        # the text is dropped: no caller may write a note it did not sign.
+        # Issue #122 PR-D: a parser's free-text Description column is a note on
+        # the result, not a result column. Since 2026-11-09 it is a 'result_note'
+        # (was 'observation'), the same type the Add Results form writes, so the
+        # form shows it as the sample's Result Note/Sample Description.
+        # `_note_source` names the parser (the note's created_by, which is also
+        # its slot key in sync_result_note) and `description` is the text.
+        # Without `_note_source` the text is dropped: no caller may write a note
+        # it did not sign.
         note_source = result_data.pop('_note_source', None)
-        observation = result_data.pop('description', None)
+        sheet_note = result_data.pop('description', None)
 
         # Ensure h2_concentration_unit defaults to ppm if concentration is present
         if result_data.get('h2_concentration') is not None:
@@ -238,10 +241,10 @@ class ScalarResultsService:
         # Touch parent entry and flush IDs if needed
         db.add(experimental_result)
         db.flush()
-        observation_text = _clean(observation) if observation is not None else None
+        note_text = _clean(sheet_note) if sheet_note is not None else None
         # Text present -> create or update the parser's slot. Blank -> an earlier
         # mirror stays, EXCEPT on an overwrite for a caller that declared
-        # `_sheet_fields` containing 'description': its sheet has an Observation
+        # `_sheet_fields` containing 'description': its sheet has a Description
         # column, so a blank cell there is a deliberate clear of its own slot
         # (sync_result_note deletes only the note signed `note_source`). Gated on
         # the declared set because only the Master parser declares one;
@@ -250,9 +253,9 @@ class ScalarResultsService:
         clears_own_slot = bool(
             overwrite and sheet_fields is not None and 'description' in sheet_fields
         )
-        if note_source and (observation_text is not None or clears_own_slot):
+        if note_source and (note_text is not None or clears_own_slot):
             sync_result_note(
-                db, experimental_result, NoteType.observation, observation_text,
+                db, experimental_result, NoteType.result_note, note_text,
                 created_by=note_source,
             )
         ensure_primary_result_for_timepoint(

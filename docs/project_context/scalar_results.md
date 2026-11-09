@@ -19,7 +19,7 @@ This service parses the Solution Chemistry Excel template and delegates the crea
 
 ### Optional Columns
 Date, Description, Replicate, Gross Ammonium (mM), Bkg Ammonium (mM), Bkg Exp ID, H2 Conc (ppm), Gas Sample Vol (mL), Gas Pressure (MPa), Final pH, Fe2+ Yield (%), Final DO (mg/L), Conductivity (mS/cm), Sampling Vol (mL), Overwrite.
-- `Description` is stored as an **observation note** on the timepoint (`created_by='scalar_results'`, one per result — a re-upload updates it, a blank cell leaves it unchanged). Since issue #122 PR-D nothing is written to the result row itself.
+- `Description` is stored as a **result note** on the timepoint (an observation note until 2026-11-09) (`created_by='scalar_results'`, one per result — a re-upload updates it, a blank cell leaves it unchanged). Since issue #122 PR-D nothing is written to the result row itself.
 
 ## Parsing Logic
 - **Header Normalization:** Performs case-insensitive lookups and supports legacy aliases (e.g., `time (days)`, `experimentid`) to ensure backward compatibility with older templates.

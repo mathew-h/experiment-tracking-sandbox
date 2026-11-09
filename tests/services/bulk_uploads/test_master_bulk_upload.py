@@ -2997,7 +2997,7 @@ def test_zero_observation_cell_writes_no_note(db_session: Session, cell):
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
     row = _result_for(db_session, "HPHT_ZERONOTE02")
-    assert _notes_for(db_session, row.id, NoteType.observation) == []
+    assert _notes_for(db_session, row.id, NoteType.result_note) == []
 
 
 def test_merged_vial_day_of_liq_and_zero_stores_liq(db_session: Session):
@@ -3012,7 +3012,7 @@ def test_merged_vial_day_of_liq_and_zero_stores_liq(db_session: Session):
 
     assert result.errors == [], f"unexpected errors: {result.errors}"
     row = _result_for(db_session, "HPHT_ZERONOTE03")
-    notes = _notes_for(db_session, row.id, NoteType.observation)
+    notes = _notes_for(db_session, row.id, NoteType.result_note)
     assert [(n.note_text, n.created_by) for n in notes] == [
         ("Liq", "master_bulk_upload")
     ]
