@@ -410,6 +410,8 @@ reads. Service: `backend/services/experiment_export.py`.
 |-----|------|--------|
 | Results | one per primary timepoint, all lineage members | `v_results_scalar` left-joined on `result_id` to `v_results_h2`, `v_results_icp` and `v_dim_timepoints` (tube number, modification note). Adds `is_variant` (same rule as `v_core_flood_samples`). Ordered by member, then cumulative day. |
 | Core Flood | one per sample; **only when a member is a Core Flood experiment** | `v_core_flood_samples` (flow, hold flag, permeability test flow, pressures, interval, cumulative liquid volume / pore volumes / H₂, H₂ rate) |
+| XRD | one per member × post-reaction day; **only when a member has experiment-linked XRD** | `v_experiment_xrd`, pivoted wide: Experiment ID, `is_variant`, Day, Measurement date, Rwp, then one `<mineral> (%)` column per mineral in the export (alphabetical, case-insensitive; names kept exactly as stored, so `Ilmenite` and `ilmenite` are two columns). A mineral not measured at that day is blank. Ordered by member, then day. |
+| Rock XRD | one per XRD analysis of a member's starting-rock sample; **only when one exists** | `v_sample_xrd` for the members' `sample_id` (from `v_experiments`), pivoted wide: Sample ID, Used by (the exported members with that sample, member order), Analysis date, Laboratory, Analyst, then `<mineral> (%)` columns as on XRD. Ordered by the sample's first user, then analysis date. |
 | Conditions | one per member | `v_experiment_conditions` |
 | Additives | one per member × compound | `v_chemical_additives` |
 | Notes | one per note | `v_notes` (type, event date, result ID, text, author, created at, needs review) |
@@ -449,7 +451,8 @@ Declared before `/{experiment_id}/export`, so `export` is never read as an exper
   - `Export too large: <n> experiments after expansion (limit 500). Narrow the selection or turn off Include whole series.`
 
 Tabs: **Experiments** first, then the same data tabs as the single-lineage export
-(Results, Core Flood when a member is a Core Flood, Conditions, Additives, Notes), then
+(Results, Core Flood when a member is a Core Flood, XRD and Rock XRD when there is XRD of
+that kind, Conditions, Additives, Notes), then
 **Summary** last.
 
 | Experiments column | Source |
