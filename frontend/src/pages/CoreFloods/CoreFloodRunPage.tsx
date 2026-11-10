@@ -10,7 +10,8 @@ import { RunNotFound, SegmentIdList, useCanonicalRunUrl } from '@/components/run
 import { CORE_FLOOD_WRITES } from './useCoreFloodWrites'
 import { latestSegment, ongoingIds, rootSegments, runDescription } from '@/components/runs/runSegments'
 import { CoreFloodSampleModal } from './CoreFloodSampleModal'
-import { SamplesTable } from './SamplesTable'
+import { RunSamplesTable } from '@/components/results/RunSamplesTable'
+import { fromCoreFlood } from '@/components/results/sampleRows'
 import { SegmentsTable } from './SegmentsTable'
 import { fmt } from './fields'
 import { IcpChart } from '@/components/icp/IcpChart'
@@ -103,7 +104,14 @@ export function CoreFloodRunPage() {
             <h2 id="samples-heading" className={HEADING}>Samples</h2>
           </CardHeader>
           <div className="p-4">
-            <SamplesTable samples={main} variant={false} onEdit={onEdit} icpByResult={icpByResult} />
+            {/* Issue #163: newest first (the server sends oldest first). */}
+            <RunSamplesTable
+              rows={[...main].reverse().map(fromCoreFlood)}
+              scope="run"
+              kind="core-flood"
+              onEdit={onEdit}
+              icpByResult={icpByResult}
+            />
           </div>
         </Card>
       </section>
@@ -113,7 +121,14 @@ export function CoreFloodRunPage() {
           title="Side samples"
           summary={`${side.length} (blanks, bypass)`}
         >
-          <SamplesTable samples={side} variant onEdit={onEdit} icpByResult={icpByResult} />
+          <RunSamplesTable
+            rows={[...side].reverse().map(fromCoreFlood)}
+            scope="run"
+            kind="core-flood"
+            variant
+            onEdit={onEdit}
+            icpByResult={icpByResult}
+          />
         </Collapsible>
       )}
 

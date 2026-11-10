@@ -1,168 +1,51 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { experimentsApi, type ExperimentNote, type ResultWithFlags } from '@/api/experiments'
-import { NoteBadge } from '@/components/experiments/NoteBadge'
+import { experimentsApi, type ResultWithFlags } from '@/api/experiments'
 import { resultsApi } from '@/api/results'
-import { Badge, Button, PageSpinner } from '@/components/ui'
+import { Button, PageSpinner, Spinner } from '@/components/ui'
+import { RunSamplesTable, type SampleKind } from '@/components/results/RunSamplesTable'
+import { fromResult, type SampleRow } from '@/components/results/sampleRows'
+import { fmt } from '@/components/results/sampleFields'
 import { ResultEntryModal } from './ResultEntryModal'
-import { isCoreFloodType, runPathFor } from '@/utils/experimentId'
+import { isCoreFloodType, isHphtType, runPathFor } from '@/utils/experimentId'
 import { GroupedResultsView } from './GroupedResultsView'
 import { IcpSection } from './IcpSection'
 
-function fmt(n: number | null | undefined, decimals = 2) {
-  return n != null ? n.toFixed(decimals) : '—'
-}
-
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  return iso.slice(0, 10)
-}
-
-function fmtPct(n: number | null | undefined, decimals = 1) {
-  return n != null ? `${n.toFixed(decimals)}%` : '—'
-}
-
-const GRID = 'grid-cols-[1.5rem_5rem_6rem_3.5rem_5rem_5rem_5rem_4.5rem_4rem_6rem_9rem_1.5rem]'
-
-/** Instrument run dates carried on ResultWithFlags — provenance, not measurements. */
-const RUN_DATE_FIELDS = [
-  ['NMR', 'nmr_run_date'],
-  ['ICP', 'icp_run_date'],
-  ['GC', 'gc_run_date'],
-  ['XRD', 'xrd_run_date'],
-] as const
-
-/** One typed note on a timepoint (issue #118). The badge is the shared
- *  NoteBadge (issue #122 PR-C) so this row, the Notes timeline and
- *  /notes/review all label a note the same way. */
-function NoteLine({ note }: { note: ExperimentNote }) {
-  return (
-    <li className="text-xs flex items-start gap-2">
-      <NoteBadge type={note.note_type} />
-      <span className="text-ink-primary">
-        {note.note_text}
-        {note.needs_review && <span className="text-status-error"> · needs review</span>}
-      </span>
-    </li>
-  )
-}
-
-function hasNonModificationNote(r: ResultWithFlags): boolean {
-  return r.notes.some((n) => n.note_type !== 'modification')
-}
-
-interface ExpandedRowProps {
-  result: ResultWithFlags
-  /** Opens the edit form; absent when this row can't be edited here. */
-  onEdit?: () => void
-}
-
-function ExpandedRow({ result, onEdit }: ExpandedRowProps) {
-  const { data: scalar, isLoading: loadingScalar } = useQuery({
-    queryKey: ['scalar', result.id],
-    queryFn: () => resultsApi.getScalar(result.id),
-    enabled: result.has_scalar,
+/** DETAILS extras on the Results tab: scalar values that are not table columns.
+ *  Loaded when the section opens (the list payload does not carry them). */
+function ScalarExtras({ resultId }: { resultId: number }) {
+  const { data: scalar, isLoading } = useQuery({
+    queryKey: ['scalar', resultId],
+    queryFn: () => resultsApi.getScalar(resultId),
   })
-
-  const { data: icp } = useQuery({
-    queryKey: ['icp', result.id],
-    queryFn: () => resultsApi.getIcp(result.id),
-    enabled: result.has_icp,
-  })
-
-  // GC renders even when blank if an H2 reading exists: a field that appears
-  // only when populated cannot show a researcher that it is missing, which is
-  // the whole point here (issue #115).
-  const gcMissing = result.gc_run_date == null && result.h2_concentration != null
-  const anyRunDate = RUN_DATE_FIELDS.some(([, key]) => result[key] != null)
-
+  if (isLoading) return <Spinner size="sm" />
+  if (!scalar) return null
+  const values = ([
+    ['DO', scalar.final_dissolved_oxygen_mg_L, 'mg/L'],
+    ['Fe(II)', scalar.ferrous_iron_yield, ''],
+  ] as const).filter(([, v]) => v != null)
+  if (values.length === 0) return null
   return (
-    <div className="bg-surface-raised border-t border-surface-border px-6 py-3 space-y-3">
-      {onEdit && (
-        <div className="flex justify-end">
-          <Button variant="secondary" size="xs" onClick={onEdit}>
-            Edit
-          </Button>
-        </div>
-      )}
-      {loadingScalar ? (
-        <PageSpinner />
-      ) : scalar && (
-        <div>
-          <p className="text-xs font-semibold text-ink-secondary mb-1">Scalar Results</p>
-          <div className="grid grid-cols-3 gap-x-6 gap-y-1">
-            {[
-              ['Final pH', scalar.final_ph, ''],
-              ['Conductivity', scalar.final_conductivity_mS_cm, 'mS/cm'],
-              ['H₂ (ppm)', scalar.h2_concentration, 'ppm'],
-              ['H₂ (µmol)', scalar.h2_micromoles, 'µmol'],
-              ['H₂ Yield', scalar.h2_grams_per_ton_yield, 'g/t'],
-              ['DO', scalar.final_dissolved_oxygen_mg_L, 'mg/L'],
-              ['Fe(II)', scalar.ferrous_iron_yield, ''],
-            ].map(([label, val, unit]) => val != null ? (
-              <div key={String(label)} className="text-xs">
-                <span className="text-ink-muted">{label}: </span>
-                <span className="font-mono-data text-ink-primary">{fmt(val as number, 1)}{unit ? ` ${unit}` : ''}</span>
-              </div>
-            ) : null)}
+    <div>
+      <p className="text-xs font-semibold text-ink-secondary mb-1">Scalar Results</p>
+      <div className="grid grid-cols-4 gap-x-4 gap-y-1">
+        {values.map(([label, v, unit]) => (
+          <div key={label} className="text-xs">
+            <span className="text-ink-muted">{label}: </span>
+            <span className="font-mono-data text-ink-primary">{fmt(v)}{unit ? ` ${unit}` : ''}</span>
           </div>
-        </div>
-      )}
-      {(anyRunDate || gcMissing) && (
-        <div>
-          <p className="text-xs font-semibold text-ink-secondary mb-1">Instrument Run Dates</p>
-          <div className="grid grid-cols-4 gap-x-4 gap-y-1">
-            {RUN_DATE_FIELDS.map(([label, key]) => {
-              const missing = key === 'gc_run_date' && gcMissing
-              if (result[key] == null && !missing) return null
-              return (
-                <div key={label} className="text-xs">
-                  <span className="text-ink-muted">{label}: </span>
-                  <span className={`font-mono-data ${missing ? 'text-status-warning' : 'text-ink-primary'}`}>
-                    {missing ? 'not recorded' : fmtDate(result[key])}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          {gcMissing && (
-            <p className="text-xs text-ink-muted mt-1">
-              An H₂ reading is stored for this timepoint but no GC run date, so it is
-              not counted by the Dashboard's GC Measurements card.
-            </p>
-          )}
-        </div>
-      )}
-      {result.notes.length > 0 && (
-        <div data-testid="timepoint-notes">
-          <p className="text-xs font-semibold text-ink-secondary mb-1">Notes</p>
-          <ul className="space-y-1">
-            {result.notes.map((n) => <NoteLine key={n.id} note={n} />)}
-          </ul>
-        </div>
-      )}
-      {icp && (
-        <div>
-          <p className="text-xs font-semibold text-ink-secondary mb-1">ICP-OES</p>
-          <div className="grid grid-cols-4 gap-x-4 gap-y-1">
-            {['fe','si','mg','ca','ni','cu','mo','zn','mn','cr','co','al','na','v','s','ti'].map((el) => {
-              const val = (icp as unknown as Record<string, unknown>)[el]
-              return val != null ? (
-                <div key={el} className="text-xs">
-                  <span className="text-ink-muted uppercase">{el}: </span>
-                  <span className="font-mono-data text-ink-primary">{String(val)}</span>
-                </div>
-              ) : null
-            })}
-          </div>
-          {icp.dilution_factor && (
-            <p className="text-xs text-ink-muted mt-1">Dilution: {icp.dilution_factor}× · {icp.instrument_used ?? ''}</p>
-          )}
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   )
+}
+
+/** The experiment kind for the shared column spec. */
+function sampleKind(experimentType: string | null | undefined): SampleKind {
+  if (isCoreFloodType(experimentType)) return 'core-flood'
+  if (isHphtType(experimentType)) return 'hpht'
+  return 'other'
 }
 
 interface Props {
@@ -178,7 +61,7 @@ interface Props {
   baseExperimentId?: string | null
 }
 
-/** Results tab: timepoint result cards with scalar chemistry and ICP data. */
+/** Results tab: the segment's timepoints in the shared samples table (issue #163). */
 export function ResultsTab({
   experimentId,
   idTimepointDays,
@@ -186,7 +69,6 @@ export function ResultsTab({
   experimentStart,
   baseExperimentId,
 }: Props) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
   /** 'new' to add a result, a result to edit it, null when the form is closed. */
   const [entry, setEntry] = useState<ResultWithFlags | 'new' | null>(null)
   const coreFlood = isCoreFloodType(experimentType)
@@ -221,11 +103,16 @@ export function ResultsTab({
     queryFn: () => experimentsApi.getResults(experimentId),
   })
 
-  const toggle = (id: number) => setExpanded((s) => {
-    const n = new Set(s)
-    n.has(id) ? n.delete(id) : n.add(id)
-    return n
+  // The series ICP, read once here for the table's ICP flags and passed to the chart
+  // below, so the tab makes one request (issue #163).
+  const { data: seriesIcp } = useQuery({
+    queryKey: ['experiment-icp', experimentId],
+    queryFn: () => experimentsApi.getIcp(experimentId),
   })
+  const icpByResult = useMemo(
+    () => new Map((seriesIcp?.rows ?? []).map((r) => [r.result_id, r.elements])),
+    [seriesIcp],
+  )
 
   if (isLoading) return <PageSpinner />
 
@@ -290,62 +177,25 @@ export function ResultsTab({
           )}
 
           {results && results.length > 0 && (
-            <>
-              {/* Header row */}
-              <div className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border text-xs text-ink-muted`}>
-                <span></span>
-                <span>Time (d)</span>
-                <span>Sample Date</span>
-                <span>Tube</span>
-                <span>H₂ (ppm)</span>
-                <span>H₂ (µmol)</span>
-                <span>H₂ (g/t)</span>
-                <span>Fe²⁺ H₂ (%)</span>
-                <span>pH</span>
-                <span>Cond. (mS/cm)</span>
-                <span>ICP / XRD / MOD / NOTE</span>
-                <span></span>
-              </div>
-              {results.map((r) => (
-                <div key={r.id}>
-                  <div
-                    className={`grid ${GRID} gap-2 px-4 py-2 border-b border-surface-border/50 hover:bg-surface-raised cursor-pointer items-center`}
-                    onClick={() => toggle(r.id)}
-                  >
-                    <span className="text-xs text-ink-muted">{r.is_primary_timepoint_result ? '★' : ''}</span>
-                    <span className="font-mono-data text-sm text-ink-primary">T+{r.time_post_reaction_days ?? '?'}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmtDate(r.scalar_measurement_date)}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{r.sample_tube_number ?? '—'}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_concentration, 1)}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_micromoles)}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.h2_grams_per_ton_yield)}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmtPct(r.ferrous_iron_yield_h2_pct)}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_ph, 1)}</span>
-                    <span className="font-mono-data text-xs text-ink-secondary">{fmt(r.final_conductivity_mS_cm)}</span>
-                    <span className="flex items-center gap-1">
-                      {r.has_icp && <Badge variant="info" dot>ICP</Badge>}
-                      {r.xrd_run_date && <Badge variant="info" dot>XRD</Badge>}
-                      {r.has_modification_note && <Badge variant="warning" dot>MOD</Badge>}
-                      {hasNonModificationNote(r) && <Badge variant="default">NOTE</Badge>}
-                    </span>
-                    <span className="text-ink-muted text-xs">{expanded.has(r.id) ? '▲' : '▼'}</span>
-                  </div>
-                  {expanded.has(r.id) && (
-                    <ExpandedRow
-                      result={r}
-                      // Only primary rows are editable, matching the PATCH guard.
-                      onEdit={!coreFlood && r.is_primary_timepoint_result ? () => setEntry(r) : undefined}
-                    />
-                  )}
-                </div>
-              ))}
-            </>
+            <div className="p-4">
+              <RunSamplesTable
+                rows={results.map((r) => fromResult(r, experimentId))}
+                scope="segment"
+                kind={sampleKind(experimentType)}
+                // Only primary rows are editable, matching the PATCH guard; core
+                // flood samples are edited on the run page.
+                onEdit={coreFlood ? undefined : (r: ResultWithFlags) => setEntry(r)}
+                canEdit={(row: SampleRow<ResultWithFlags>) => row.isPrimary}
+                icpByResult={icpByResult}
+                detailsExtra={(row) => (row.source.has_scalar ? <ScalarExtras resultId={row.resultId} /> : null)}
+              />
+            </div>
           )}
         </>
       )}
 
       {/* Issue #143: whole-series ICP chart, below the table in both modes. */}
-      <IcpSection experimentId={experimentId} />
+      <IcpSection experimentId={experimentId} icp={seriesIcp} />
 
       <ResultEntryModal
         open={entry !== null}

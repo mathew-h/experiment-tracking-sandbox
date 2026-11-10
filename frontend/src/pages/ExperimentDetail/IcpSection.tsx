@@ -1,19 +1,27 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
+import type { ExperimentIcp } from '@/api/icp'
 import { IcpChart } from '@/components/icp/IcpChart'
 import { Collapsible } from '@/components/runs/Collapsible'
 
-interface Props { experimentId: string }
+interface Props {
+  experimentId: string
+  /** The series ICP when the caller already has it (the Results tab reads it for
+   *  the table's ICP flags, issue #163); otherwise this section fetches it. */
+  icp?: ExperimentIcp
+}
 
 /** ICP over time for the experiment's whole series (issue #143); hidden when
  *  the series has no ICP readings. Shares IcpChart with the run pages and, like
  *  them, opens collapsed with the sample count in the header (issue #161). */
-export function IcpSection({ experimentId }: Props) {
-  const { data } = useQuery({
+export function IcpSection({ experimentId, icp }: Props) {
+  const { data: fetched } = useQuery({
     queryKey: ['experiment-icp', experimentId],
     queryFn: () => experimentsApi.getIcp(experimentId),
+    enabled: icp === undefined,
   })
+  const data = icp ?? fetched
   const markers = useMemo(
     () => (data?.segment_starts ?? []).map((s) => ({ day: s.day, experimentId: s.experiment_id })),
     [data],
