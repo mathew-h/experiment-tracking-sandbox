@@ -164,14 +164,16 @@ describe('SamplesTable', () => {
     expect(empty).toHaveLength(0)
   })
 
-  it('the date column is the sticky first column; there is no expander column (issue #164)', () => {
+  it('Segment then Date stay pinned; there is no expander column (#164; Mat, 2026-11-10)', () => {
     const icp = new Map([[1, { fe: 1 }]])
     render(<SamplesTable samples={[sample({ result_id: 1 })]} variant={false} onEdit={vi.fn()} icpByResult={icp} />)
     const cells = within(screen.getAllByRole('row')[2]).getAllByRole('cell')
     expect(cells[0].className).toMatch(/sticky left-0/)
+    expect(cells[1].className).toMatch(/sticky left-44/)
     // Second header row (the first holds the GC / Solution / Core flood groups).
-    expect(within(screen.getAllByRole('row')[1]).getAllByRole('columnheader')[0]).toHaveTextContent('Date')
-    expect(screen.getByRole('columnheader', { name: 'Date' }).className).toMatch(/sticky left-0/)
+    expect(within(screen.getAllByRole('row')[1]).getAllByRole('columnheader')[0]).toHaveTextContent('Segment')
+    expect(screen.getByRole('columnheader', { name: 'Segment' }).className).toMatch(/sticky left-0/)
+    expect(screen.getByRole('columnheader', { name: 'Date' }).className).toMatch(/sticky left-44/)
     // The only buttons left are flags (their own ▸/▾ is a state cue, not a column).
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['ICP▸'])
   })
@@ -215,19 +217,19 @@ describe('SamplesTable side-sample IDs (issue #158)', () => {
 })
 
 describe('SamplesTable Segment column (Core Floods)', () => {
-  it('names and links each sample segment in a column after Day', () => {
+  it('names and links each sample segment in the first column, then Date and Day', () => {
     const samples = [
       sample({ result_id: 1, experiment_id: 'CF_020' }),
       sample({ result_id: 2, experiment_id: 'CF_020-3' }),
     ]
     render(<SamplesTable samples={samples} variant={false} onEdit={vi.fn()} icpByResult={noIcp} />)
     const heads = within(screen.getAllByRole('row')[1]).getAllByRole('columnheader').map((h) => h.textContent)
-    expect(heads.slice(0, 4)).toEqual(['Date', 'Day', 'Segment', 'Tube'])
+    expect(heads.slice(0, 4)).toEqual(['Segment', 'Date', 'Day', 'Tube'])
     // Newest first: CF_020-3 then CF_020.
     const rows = screen.getAllByRole('row').slice(2)
-    expect(within(rows[0]).getAllByRole('cell')[2]).toHaveTextContent('CF_020-3')
+    expect(within(rows[0]).getAllByRole('cell')[0]).toHaveTextContent('CF_020-3')
     expect(within(rows[0]).getByRole('link', { name: 'CF_020-3' })).toHaveAttribute('href', '/experiments/CF_020-3')
-    expect(within(rows[1]).getAllByRole('cell')[2]).toHaveTextContent('CF_020')
+    expect(within(rows[1]).getAllByRole('cell')[0]).toHaveTextContent('CF_020')
   })
 
   it('does not open the editor from the segment link', async () => {
@@ -241,7 +243,7 @@ describe('SamplesTable Segment column (Core Floods)', () => {
     const s = sample({ result_id: 1, experiment_id: 'CF_020-5_Bypass1', is_variant: true })
     render(<SamplesTable samples={[s]} variant onEdit={vi.fn()} icpByResult={noIcp} />)
     const cells = within(screen.getAllByRole('row')[2]).getAllByRole('cell')
-    expect(cells[0]).not.toHaveTextContent('CF_020-5_Bypass1')
-    expect(cells[2]).toHaveTextContent('CF_020-5_Bypass1')
+    expect(cells[0]).toHaveTextContent('CF_020-5_Bypass1')
+    expect(cells[1]).not.toHaveTextContent('CF_020-5_Bypass1')
   })
 })
