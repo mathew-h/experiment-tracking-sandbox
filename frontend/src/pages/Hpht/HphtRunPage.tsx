@@ -165,7 +165,10 @@ export function HphtRunPage() {
       )}
 
       {icpRows && icpRows.length > 0 && (
-        <Collapsible title="ICP over time" summary={`${icpRows.length} samples`}>
+        <Collapsible
+          title="ICP over time"
+          summary={`${icpRows.length} ${icpRows.length === 1 ? 'sample' : 'samples'}`}
+        >
           <IcpChart rows={icpRows} markers={segmentStarts(run.samples)} />
         </Collapsible>
       )}

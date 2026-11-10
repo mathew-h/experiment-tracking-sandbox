@@ -122,6 +122,24 @@ beforeEach(() => {
   getScalar.mockResolvedValue(scalar)
 })
 
+describe('ResultEntryModal — naming (issue #161)', () => {
+  it('defaults to Add Results / Save Results', () => {
+    wrap(<ResultEntryModal {...addProps} />)
+    expect(screen.getByRole('heading', { name: 'Add Results' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save Results' })).toBeInTheDocument()
+  })
+
+  it('uses the noun the caller passes for add and edit', async () => {
+    const { unmount } = wrap(<ResultEntryModal {...addProps} noun="sample" />)
+    expect(screen.getByRole('heading', { name: 'Add sample' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save sample' })).toBeInTheDocument()
+    unmount()
+    wrap(<ResultEntryModal {...addProps} noun="sample" results={[result]} editing={result} />)
+    expect(await screen.findByRole('heading', { name: /^Edit sample — T\+6/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Save sample' })).toBeInTheDocument()
+  })
+})
+
 describe('ResultEntryModal — add', () => {
   it('submits exactly one POST with tube, description, MPa pressure and GC date', async () => {
     const user = userEvent.setup()

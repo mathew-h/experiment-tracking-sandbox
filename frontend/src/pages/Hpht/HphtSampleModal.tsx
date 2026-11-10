@@ -49,7 +49,8 @@ function Body({ onClose, run, editing }: Omit<Props, 'open'>) {
     enabled: !!segmentId,
   })
 
-  const title = editing ? 'Edit result' : 'Add Results'
+  // Named for the run page's "+ Add sample" button (issue #161, NAV-15).
+  const title = editing ? 'Edit sample' : 'Add sample'
   if (!segment) {
     return (
       <Modal open onClose={onClose} title={title} size="xl">
@@ -112,6 +113,7 @@ function Body({ onClose, run, editing }: Omit<Props, 'open'>) {
       results={results ?? []}
       editing={editRow}
       headerSlot={header}
+      noun="sample"
     />
   )
 }

@@ -388,7 +388,9 @@ describe('CoreFloodRunPage', () => {
     ])
     const { unmount } = renderPage()
     const btn = await screen.findByRole('button', { name: /^ICP over time/ })
-    expect(btn).toHaveAttribute('aria-expanded', 'true')
+    // Issue #161 (NAV-14): collapsed with the count, as on the HPHT run page.
+    expect(btn).toHaveAttribute('aria-expanded', 'false')
+    expect(btn).toHaveTextContent(/1 sample$/)
     unmount()
     vi.mocked(coreFloodsApi.icp).mockResolvedValue([])
     renderPage()

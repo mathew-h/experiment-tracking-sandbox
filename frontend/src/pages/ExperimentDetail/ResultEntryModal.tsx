@@ -40,6 +40,10 @@ interface Props {
   baseId?: string | null
   /** Shown at the top of the form, e.g. the HPHT run page's segment select (issue #150). */
   headerSlot?: ReactNode
+  /** What the caller's button calls a row, e.g. "sample" on the HPHT run page, so the
+   *  dialog reads "Add sample" / "Save sample". Omitted: "Add Results" / "Save Results"
+   *  (issue #161). */
+  noun?: string
   /** The experiment's results, used to warn before a same-day add replaces one. */
   results?: ResultWithFlags[]
   /** Set to edit this (primary) result instead of adding one. */
@@ -150,7 +154,7 @@ function EditLoader(props: Props & { editing: ResultWithFlags }) {
   })
   if (editing.has_scalar && isLoading) {
     return (
-      <Modal open onClose={props.onClose} title="Edit result" size="xl">
+      <Modal open onClose={props.onClose} title={`Edit ${props.noun ?? 'result'}`} size="xl">
         <PageSpinner />
       </Modal>
     )
@@ -166,6 +170,7 @@ function ModalBody({
   idTimepointDays,
   baseId,
   headerSlot,
+  noun,
   results = [],
   editing,
   initialEdit,
@@ -327,8 +332,9 @@ function ModalBody({
   }
 
   const title = editing
-    ? `Edit result — T+${fmt(editing.time_post_reaction_days)}`
-    : 'Add Results'
+    ? `Edit ${noun ?? 'result'} — T+${fmt(editing.time_post_reaction_days)}`
+    : noun ? `Add ${noun}` : 'Add Results'
+  const saveLabel = noun ? `Save ${noun}` : editing ? 'Save' : 'Save Results'
 
   return (
     <Modal
@@ -343,7 +349,7 @@ function ModalBody({
             Cancel
           </Button>
           <Button variant="primary" size="sm" onClick={handleSubmit} loading={mutation.isPending}>
-            {editing ? 'Save' : armed ? 'Replace existing result' : 'Save Results'}
+            {!editing && armed ? 'Replace existing result' : saveLabel}
           </Button>
         </>
       }
