@@ -132,7 +132,7 @@ Subject-line prefixes and body bullets by task type: "Commit Format" in `.claude
 
 ## Pre-Merge Checklist
 - [ ] All tests pass (`pytest` backend, `vitest` frontend)
-- [ ] No linting errors (`flake8`/`black` backend, `eslint` frontend)
+- [ ] No linting errors (`flake8`/`black` backend, `eslint` frontend). Frontend: `npm run lint` and `npm run type-check` exit 0 (zero baseline since #106)
 - [ ] No hardcoded secrets, URLs, file paths, or hex color values
 - [ ] All new functions have type hints (Python) or TypeScript types
 - [ ] All new API endpoints have docstrings
@@ -141,3 +141,12 @@ Subject-line prefixes and body bullets by task type: "Commit Format" in `.claude
 - [ ] Migration files (if any) have both `upgrade` and `downgrade` implemented
 - [ ] `.env.example` updated if new env vars added
 - [ ] Calculation events appear in `logs/calculations.log` for any write operations tested
+
+## Continuous integration
+
+`.github/workflows/frontend-checks.yml` (issue #106) runs `npm ci`, `npm run lint`,
+`npm run type-check` and `npm test` in `frontend/` on every push to `develop` or `main`
+and every PR to `develop` that touches `frontend/`. Since most merges here are local, the
+push trigger is what runs it; check the result with `gh run list --limit 5`. A failure
+blocks nothing, but fix it before the next deploy: `npm ci` is also what the lab PC's
+`update.ps1` runs. Backend `pytest` is not in CI (it needs a Postgres service).

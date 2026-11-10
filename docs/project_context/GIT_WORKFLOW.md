@@ -132,7 +132,7 @@ Subject-line prefixes and body bullets by task type: "Commit Format" in `.claude
 
 ## Pre-Merge Checklist
 - [ ] All tests pass (`pytest` backend, `vitest` frontend)
-- [ ] No linting errors (`flake8`/`black` backend, `eslint` frontend)
+- [ ] No linting errors (`flake8`/`black` backend, `eslint` frontend). Frontend: `npm run lint` and `npm run type-check` exit 0 (zero baseline since #106)
 - [ ] No hardcoded secrets, URLs, file paths, or hex color values
 - [ ] All new functions have type hints (Python) or TypeScript types
 - [ ] All new API endpoints have docstrings
