@@ -218,7 +218,8 @@ describe('ResultsTab — ICP over time (issue #143)', () => {
       segment_starts: [],
     })
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const heading = await screen.findByRole('heading', { name: 'ICP over time' })
+    // Issue #161: the section is a Collapsible, so its header is a toggle button.
+    const heading = await screen.findByRole('button', { name: /^ICP over time/ })
     const header = screen.getByText('H₂ (ppm)')
     // DOCUMENT_POSITION_FOLLOWING: the chart comes after the table header.
     expect(header.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -276,8 +277,12 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
         baseExperimentId="CF_007"
       />,
     )
-    const link = await screen.findByRole('link', { name: 'Open run page' })
+    // Issue #161 (NAV-13): the link names the action and the tab says why it lives there.
+    const link = await screen.findByRole('link', { name: 'Add or edit samples on the run page' })
     expect(link).toHaveAttribute('href', '/core-floods/CF_007')
+    expect(
+      screen.getByText('Core flood samples record flow and permeability, which only the run page captures.'),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '+ Add Results' })).not.toBeInTheDocument()
     fireEvent.click(await screen.findByText('T+7'))
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
@@ -296,6 +301,7 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
     const link = await screen.findByRole('link', { name: 'Open run page' })
     expect(link).toHaveAttribute('href', '/hpht/HPHT_297')
     expect(screen.getByRole('button', { name: '+ Add Results' })).toBeInTheDocument()
+    expect(screen.queryByText(/only the run page captures/)).not.toBeInTheDocument()
   })
 
   it('keeps + Add Results for a non-core-flood experiment', async () => {

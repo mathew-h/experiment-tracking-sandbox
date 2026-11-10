@@ -167,6 +167,9 @@ describe('HphtRunPage (issue #150)', () => {
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByTestId('target-segment')).toHaveTextContent('HPHT_297-2')
     expect(within(dialog).queryByLabelText('Segment')).not.toBeInTheDocument()
+    // Issue #161 (NAV-15): the dialog is named for the button that opened it.
+    expect(within(dialog).getByRole('heading', { name: 'Add sample' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Save sample' })).toBeInTheDocument()
     expect(experimentsApi.getResults).toHaveBeenCalledWith('HPHT_297-2')
   })
 
@@ -190,7 +193,8 @@ describe('HphtRunPage (issue #150)', () => {
     const region = await samplesRegion()
     await userEvent.click(within(region).getByTestId('sample-11'))
     const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByText(/^Edit result — T\+4/)).toBeInTheDocument()
+    expect(await within(dialog).findByText(/^Edit sample — T\+4/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Save sample' })).toBeInTheDocument()
     expect(experimentsApi.getResults).toHaveBeenCalledWith('HPHT_297')
     await waitFor(() => expect(resultsApi.getScalar).toHaveBeenCalledWith(11))
     expect(within(dialog).queryByLabelText('Segment')).not.toBeInTheDocument()

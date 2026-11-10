@@ -253,13 +253,14 @@ export function ResultsTab({
             </div>
           )}
           {coreFlood ? (
-            // Core flood samples need flow and permeability, which only the run page records.
+            // Core flood samples need flow and permeability, which only the run page records;
+            // the line under the action bar tells the user so (issue #161, NAV-13).
             runPath && (
               <Link
                 to={runPath}
                 className="inline-flex items-center h-7 px-3 rounded text-xs font-medium border border-surface-border text-ink-primary hover:bg-surface-raised"
               >
-                Open run page
+                Add or edit samples on the run page
               </Link>
             )
           ) : (
@@ -280,6 +281,12 @@ export function ResultsTab({
           )}
         </div>
       </div>
+
+      {coreFlood && (
+        <p className="px-4 pt-3 text-xs text-ink-muted">
+          Core flood samples record flow and permeability, which only the run page captures.
+        </p>
+      )}
 
       {mode === 'grouped' && hasGroup ? (
         <div className="p-4">

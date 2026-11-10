@@ -118,7 +118,10 @@ export function CoreFloodRunPage() {
       )}
 
       {icpRows && icpRows.length > 0 && (
-        <Collapsible title="ICP over time" defaultOpen>
+        <Collapsible
+          title="ICP over time"
+          summary={`${icpRows.length} ${icpRows.length === 1 ? 'sample' : 'samples'}`}
+        >
           <IcpChart rows={icpRows} markers={segmentStarts(run.samples)} />
         </Collapsible>
       )}
