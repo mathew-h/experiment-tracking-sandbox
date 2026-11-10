@@ -144,6 +144,11 @@ The parser expects the standard instrument CSV format:
 
 No template available — use the raw instrument export.
 
+After an upload, the row says **Wrote to N experiments** and lists each experiment and
+day it wrote to (new or updated), for example `HPHT_297-2 · day 3`. Each ID opens that
+experiment's Results tab, so you can check the readings landed where you meant them to.
+The first 20 are shown; **and n more** shows the rest.
+
 ---
 
 ## 3 — XRD Mineralogy

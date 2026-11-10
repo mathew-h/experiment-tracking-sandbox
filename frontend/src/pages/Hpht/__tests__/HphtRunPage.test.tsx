@@ -114,8 +114,9 @@ describe('HphtRunPage (issue #150)', () => {
       'href', '/experiments/HPHT_297-2',
     )
     expect(screen.getByText('1500 psi')).toBeInTheDocument()
+    // Issue #162: explicit, in case the detail page's default tab ever changes.
     expect(screen.getByRole('link', { name: 'Edit on Conditions tab' })).toHaveAttribute(
-      'href', '/experiments/HPHT_297-2',
+      'href', '/experiments/HPHT_297-2?tab=conditions',
     )
   })
 

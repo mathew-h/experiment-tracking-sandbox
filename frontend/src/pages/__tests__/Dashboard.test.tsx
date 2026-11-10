@@ -160,4 +160,21 @@ describe('ActivityFeed — deleted experiments (issue #159)', () => {
     // A deleted note does not mean the experiment is gone.
     expect(screen.getByRole('link', { name: 'LIVE_002' })).toHaveAttribute('href', '/experiments/LIVE_002')
   })
+
+  it('links result rows to the Results tab (issue #162)', async () => {
+    const { ActivityFeed } = await import('../ActivityFeed')
+    const at = new Date().toISOString()
+    render(
+      <MemoryRouter>
+        <ActivityFeed entries={[
+          { id: 1, experiment_id: 'ICP_001', modified_by: null, modification_type: 'create', modified_table: 'icp_results', created_at: at },
+          { id: 2, experiment_id: 'SCA_001', modified_by: null, modification_type: 'update', modified_table: 'scalar_results', created_at: at },
+          { id: 3, experiment_id: 'EXP_001', modified_by: null, modification_type: 'update', modified_table: 'experiments', created_at: at },
+        ]} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: 'ICP_001' })).toHaveAttribute('href', '/experiments/ICP_001?tab=results')
+    expect(screen.getByRole('link', { name: 'SCA_001' })).toHaveAttribute('href', '/experiments/SCA_001?tab=results')
+    expect(screen.getByRole('link', { name: 'EXP_001' })).toHaveAttribute('href', '/experiments/EXP_001')
+  })
 })

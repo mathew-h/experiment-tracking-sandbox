@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom'
 interface SegmentLinkProps {
   /** Experiment ID of the segment or vial; the link goes to its detail page. */
   id: string
-  /** Detail-page tab to open, sent as `?tab=` (read by the detail page from issue #162). */
+  /** Detail-page tab to open, sent as `?tab=`: conditions, results, notes, xrd or logs
+   *  (issue #162). */
   tab?: string
   /** Text to show in place of the ID, e.g. a replicate label. */
   children?: ReactNode
@@ -16,6 +17,8 @@ interface SegmentLinkProps {
   className?: string
   /** Keep the click from reaching a click-to-edit row around the link (default true). */
   stopPropagation?: boolean
+  /** Tooltip, for a link whose text is not the ID (e.g. a result count). */
+  title?: string
 }
 
 const ID_LINK = 'text-red-400 hover:text-red-300'
@@ -32,6 +35,7 @@ export function SegmentLink({
   inherit = false,
   className,
   stopPropagation = true,
+  title,
 }: SegmentLinkProps) {
   const to = `/experiments/${encodeURIComponent(id)}${tab ? `?tab=${encodeURIComponent(tab)}` : ''}`
   const onClick = stopPropagation ? (e: MouseEvent) => e.stopPropagation() : undefined
@@ -39,6 +43,7 @@ export function SegmentLink({
     <Link
       to={to}
       onClick={onClick}
+      title={title}
       className={['font-mono-data', outlier ? OUTLIER_LINK : inherit ? INHERIT_LINK : ID_LINK, className].filter(Boolean).join(' ')}
     >
       {children ?? id}

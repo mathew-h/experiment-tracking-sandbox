@@ -870,8 +870,17 @@ All endpoints return `UploadResponse`:
 {
   "created": 0, "updated": 0, "skipped": 0,
   "errors": [], "warnings": [], "feedbacks": [], "message": "", "dry_run": false,
-  "plan": null, "plan_hash": null
+  "plan": null, "plan_hash": null, "touched": []
 }
+```
+
+**`touched` (issue #162, `icp-oes` only):** the distinct `(experiment_id, time_post_reaction_days)` pairs the upload wrote to — new and updated timepoints alike (`bulk_create_icp_results` returns them in one list, so the two cannot be told apart per entry without changing the locked `icp_service.py`) — sorted by experiment ID, then day. On a `dry_run` it lists what *would* be written. The parse-failure and exception responses return `[]`, as does every other endpoint. When #107 gives every endpoint a structured `plan`, this can be derived from `plan.creates` + `plan.overwrites`.
+
+```json
+"touched": [
+  {"experiment_id": "HPHT_297-2", "time_post_reaction_days": 1.0},
+  {"experiment_id": "HPHT_297-2", "time_post_reaction_days": 3.0}
+]
 ```
 
 **`dry_run` (issue #100 item 1):** every POST endpoint below accepts a `dry_run` form field (default `false`). When `true`, the parser still runs in full — the response's `created`/`updated`/`skipped`/`errors`/`warnings` reflect what *would* happen — but the transaction is rolled back instead of committed, so nothing is persisted. The `message` is prefixed `[DRY RUN]` and the response's `dry_run` field is `true`. For `actlabs-rock`, `dry_run` applies to both write paths (the no-conflict direct import and the resolutions-supplied Phase 2 import); Phase 1's preflight-only response (`ConflictCheckResponse`) never writes regardless of `dry_run`. For `new-experiments` specifically, `dry_run` is also the preview half of the plan-hash handshake described below.
@@ -947,7 +956,7 @@ POST /api/bulk-uploads/experiment-deletion   file=<xlsx with experiment_id colum
 | POST | `/api/bulk-uploads/master-results` | Master Results upload. `file` required — the no-file SharePoint sync mode and the GET/PATCH /master-results/config endpoints were removed (issue #74). Runs calc engine on affected `ScalarResults`. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
 | POST | `/api/bulk-uploads/scalar-results` | Bulk-create/update `ScalarResults` rows from Excel template. Runs calc engine. Rows may carry either a full replicate ID (`SERUM_001a`) or a base ID plus an optional `Replicate` column (letter `a`–`z`, or `0`/blank for the group parent). Base + letter is resolved to the sibling experiment before upsert; unresolved or conflicting rows produce per-row errors in `errors`/`feedbacks` without aborting the upload. Replicate siblings are never auto-created by result uploads. |
 | POST | `/api/bulk-uploads/new-experiments` | Create `Experiment` + `ExperimentalConditions` rows in bulk. Returns a structured `plan` + `plan_hash` (see above). Any conflict in the plan rejects the whole file; optional `plan_hash` form field enforces the preview→commit handshake. |
-| POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. |
+| POST | `/api/bulk-uploads/icp-oes` | Import raw ICP-OES instrument CSV. Response `touched` lists the experiments and days written to (issue #162). |
 | POST | `/api/bulk-uploads/xrd-mineralogy` | Unified XRD upload — auto-detects Aeris or ActLabs format. |
 | POST | `/api/bulk-uploads/timepoint-modifications` | Bulk-add `modification` notes to result timepoints (one slot per uploader). Writes audit log (`modified_table='experiment_notes'`). |
 | POST | `/api/bulk-uploads/rock-inventory` | Create/update `SampleInfo` records. Normalises sample IDs to uppercase, no underscores. |

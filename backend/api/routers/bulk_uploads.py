@@ -15,7 +15,7 @@ from backend.api.schemas.bulk_upload import (
     UploadResponse, ConflictCheckResponse, SampleConflict, SampleConflictMatch,
     UploadPlan as UploadPlanSchema, PlanCreate as PlanCreateSchema, PlanRename as PlanRenameSchema,
     PlanOverwrite as PlanOverwriteSchema, PlanSkip as PlanSkipSchema, PlanConflict as PlanConflictSchema,
-    PlanFieldChange as PlanFieldChangeSchema,
+    PlanFieldChange as PlanFieldChangeSchema, TouchedExperiment,
 )
 from backend.services.bulk_uploads.actlabs_titration_data import ActlabsRockTitrationService
 from backend.config.settings import get_settings
@@ -23,6 +23,17 @@ from database.models.chemicals import ADDITION_METHOD_MAX_LENGTH
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/bulk-uploads", tags=["bulk-uploads"])
+
+
+def _touched(rows: list) -> list[TouchedExperiment]:
+    """The distinct (experiment ID, day) pairs of written result rows, sorted.
+
+    Must run before _finalize_write: a dry-run rollback expires the rows, and
+    reading `row.experiment` afterwards would reload rows that no longer exist.
+    """
+    pairs = {(row.experiment.experiment_id, row.time_post_reaction_days) for row in rows}
+    return [TouchedExperiment(experiment_id=e, time_post_reaction_days=d)
+            for e, d in sorted(pairs, key=lambda p: (p[0], p[1] is None, p[1] or 0))]
 
 
 def _finalize_write(db: Session, dry_run: bool, had_errors: bool = False) -> None:
@@ -458,6 +469,9 @@ async def upload_icp_oes(
             db, processed_data, overwrite=overwrite
         )
         all_errors = parse_errors + ingest_errors
+        # Issue #162: created_rows holds new and updated rows alike. Read before
+        # _finalize_write, so a dry run reports what it would have touched.
+        touched = _touched(created_rows)
         _finalize_write(db, dry_run)
     except Exception as exc:
         db.rollback()
@@ -465,12 +479,13 @@ async def upload_icp_oes(
         return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
                               message="Upload failed")
     new_count = len(created_rows) - updated_count
-    log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email, dry_run=dry_run)
+    log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email,
+             dry_run=dry_run, touched=len(touched))
     return UploadResponse(
         created=new_count, updated=updated_count, skipped=skipped_count,
         errors=all_errors, warnings=parse_warnings,
         message=_finalize_message(f"ICP-OES: {new_count} created, {updated_count} updated", dry_run),
-        dry_run=dry_run,
+        dry_run=dry_run, touched=touched,
     )
 
 

@@ -13,6 +13,9 @@ const ACTION_COLOR: Record<string, string> = {
   delete: 'text-status-cancelled',
 }
 
+/** Audit tables whose rows are shown on the detail page's Results tab (issue #162). */
+const RESULT_TABLES = new Set(['experimental_results', 'scalar_results', 'icp_results'])
+
 /** The experiment itself was deleted (not one of its notes or results). */
 function isExperimentDeletion(entry: ActivityEntry): boolean {
   return entry.modification_type === 'delete' && entry.modified_table === 'experiments'
@@ -63,7 +66,12 @@ export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
                       <span className="text-ink-muted">deleted</span>
                     </>
                   ) : (
-                    <SegmentLink id={entry.experiment_id} className="hover:underline" />
+                    <SegmentLink
+                      id={entry.experiment_id}
+                      // Issue #162: a result change opens where the result is.
+                      tab={RESULT_TABLES.has(entry.modified_table) ? 'results' : undefined}
+                      className="hover:underline"
+                    />
                   )}
                 </>
               )}

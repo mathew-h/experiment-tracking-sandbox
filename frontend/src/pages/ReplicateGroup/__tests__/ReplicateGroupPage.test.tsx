@@ -97,6 +97,14 @@ describe('ReplicateGroupPage', () => {
     expect(screen.queryByText('0 (parent)')).not.toBeInTheDocument()
   })
 
+  it("links each member's Results count to its Results tab (issue #162)", async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(ORPHAN_GROUP)
+    renderAtBase('SERUM_001')
+    const link = await screen.findByTitle('Open the Results tab of SERUM_001a')
+    expect(link).toHaveAttribute('href', '/experiments/SERUM_001a?tab=results')
+    expect(link).toHaveTextContent('2')
+  })
+
   it('shows the additive summary when additives do not diverge', async () => {
     vi.mocked(experimentsApi.getGroup).mockResolvedValue(ORPHAN_GROUP)
     renderAtBase('SERUM_001')
