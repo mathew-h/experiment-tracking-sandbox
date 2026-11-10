@@ -3067,3 +3067,9 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Verification:** vitest **71 files / 692 passed**.
 - **Deploy:** frontend tests and one comment change only; no runtime change, no package change.
 - **Tests added:** no (lint/type fixes in existing tests). **Docs updated:** no. **Decision logged:** no.
+
+## 2026-11-10 | issue #106 (part 2) — Frontend CI workflow (`chore/issue-106-frontend-ci`)
+- **Files changed:** new `.github/workflows/frontend-checks.yml`; docs `docs/GIT_WORKFLOW.md` (+ `project_context` copy).
+- **What:** Mat chose (2026-11-10) a workflow on push and PR: `npm ci`, `npm run lint`, `npm run type-check`, `npm test` in `frontend/`, Node 22, on push to `develop`/`main` and PRs to `develop`, filtered to `frontend/**` and the workflow file. Push is included because merges here are local; a PR-only trigger would rarely run. Read-only permissions. GIT_WORKFLOW gains a CI section and the zero-baseline note in the pre-merge checklist.
+- **Verification:** YAML parsed locally (triggers and steps as above); the first GitHub run is the one triggered by pushing this merge to `develop`.
+- **Tests added:** no. **Docs updated:** yes. **Decision logged:** no.
