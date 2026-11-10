@@ -410,8 +410,8 @@ describe('CoreFloodRunPage', () => {
     expect(within(rows[0]).getByText('12')).toBeInTheDocument()
     expect(within(rows[1]).getByText('11')).toBeInTheDocument()
     const cells = within(rows[1]).getAllByRole('cell')
-    // No ICP expander column since issue #164: Date is cells[0].
-    expect(cells[1]).toHaveTextContent('—') // Day
+    // Segment, Date, Day lead the row (no expander since #164).
+    expect(cells[2]).toHaveTextContent('—') // Day
     expect(cells[9]).toHaveTextContent('—') // Liq mL (after the Segment column)
   })
 

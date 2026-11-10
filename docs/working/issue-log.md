@@ -3012,3 +3012,10 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Verification:** vitest **71 files / 671 passed** (668 + 3); eslint 5 / tsc 3 = develop baseline (#106). Red check: the 3 new tests (and the shifted Liq mL index) failed before the change. Chrome DevTools on `/core-floods/CF_020`: headers Date, Day, Segment, Tube; 10 samples labelled across CF_020, -2, -3, -4, -5; links go to `/experiments/{id}`; console clean.
 - **Deploy:** frontend only, no migration, no package change.
 - **Tests added:** yes — vitest column order and per-row segment link, link does not open the editor, side samples use the column. **Docs updated:** yes. **Decision logged:** no.
+
+## 2026-11-10 | inline — Core Flood samples: Segment is the first column (`feat/cf-samples-segment-first`)
+- **Files changed:** `frontend/src/pages/CoreFloods/SamplesTable.tsx`; tests `pages/CoreFloods/__tests__/SamplesTable.test.tsx`, `pages/CoreFloods/__tests__/CoreFloodRunPage.test.tsx`; docs `docs/user_guide/USER_MANUAL.md` (+ `project_context` copy).
+- **What:** follow-up to the Segment column (5bc6634), at Mat's request (2026-11-10): the Core Flood Samples and Side samples tables now read Segment, Date, Day, Tube, … Segment and Date are both sticky: Segment `sticky left-0` with a fixed `w-44` (11rem = 154 px at the app's 14 px root; `truncate` with the full ID in `title`), Date `sticky left-44`. HPHT run table unchanged (still Date, Day, Segment).
+- **Verification:** vitest **71 files / 671 passed**; eslint 5 / tsc 3 = develop baseline (#106). Red check: 4 tests failed before the reorder. Chrome DevTools on `/core-floods/CF_020`: headers Segment, Date, Day, Tube; Segment 154 px wide and Date pinned at 154 px; scrolling the table 44 px moved Day (514 → 470) while Segment and Date stayed; every side-sample ID fits untruncated, including `CF_020-5_Background2`; console clean.
+- **Deploy:** frontend only, no migration, no package change.
+- **Tests added:** yes — vitest column order, per-row segment in the first cell, side samples, both sticky offsets. **Docs updated:** yes. **Decision logged:** no.
