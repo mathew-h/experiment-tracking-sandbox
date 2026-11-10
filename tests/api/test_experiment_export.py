@@ -19,6 +19,9 @@ from database.models.conditions import ExperimentalConditions
 from database.models.enums import AmountUnit, ExperimentStatus, NoteType
 from database.models.experiments import ExperimentNotes
 from database.models.results import ICPResults
+from database.models.analysis import ExternalAnalysis
+from database.models.samples import SampleInfo
+from database.models.xrd import XRDPhase
 
 # 23:30 lab time on 2026-11-06 is already 2026-11-07 in UTC.
 _FROZEN_NOW = datetime(2026, 11, 6, 23, 30, tzinfo=LAB_TZ)
@@ -553,3 +556,125 @@ def test_selection_more_than_500_ids_gets_string_detail(
     detail = resp.json()["detail"]
     assert isinstance(detail, str)
     assert detail.startswith("Unknown experiment IDs: ")
+
+
+# ---------------------------------------------------------------------------
+# XRD tabs: post-reaction XRD (v_experiment_xrd) and starting-rock XRD
+# (v_sample_xrd), one wide row per timepoint / analysis.
+# ---------------------------------------------------------------------------
+
+def _xrd(db, exp, day, phases, *, rwp, measured):
+    for mineral, amount in phases.items():
+        db.add(XRDPhase(experiment_fk=exp.id, experiment_id=exp.experiment_id,
+                        time_post_reaction_days=day, mineral_name=mineral,
+                        amount=amount, rwp=rwp, measurement_date=measured))
+    db.flush()
+
+
+def _rock_xrd(db, sample_id, phases, *, analysis_date=None, lab="ActLabs",
+              analyst="J. Doe"):
+    if db.get(SampleInfo, sample_id) is None:
+        db.add(SampleInfo(sample_id=sample_id))
+        db.flush()
+    ea = ExternalAnalysis(sample_id=sample_id, analysis_type="XRD",
+                          analysis_date=analysis_date, laboratory=lab, analyst=analyst)
+    db.add(ea)
+    db.flush()
+    for mineral, amount in phases.items():
+        db.add(XRDPhase(sample_id=sample_id, external_analysis_id=ea.id,
+                        mineral_name=mineral, amount=amount))
+    db.flush()
+
+
+def _seed_run_with_xrd(db):
+    root, seg2, bypass = _seed_run(db)
+    _xrd(db, root, 0, {"Forsterite": 60.0, "Lizardite": 30.0},
+         rwp=2.5, measured=_lab(2026, 10, 1))
+    _xrd(db, seg2, 10, {"Forsterite": 52.0, "Magnetite": 4.0, "Lizardite": 33.0},
+         rwp=3.1, measured=_lab(2026, 10, 11))
+    _rock_xrd(db, "CFE_ROCK_1", {"Forsterite": 61.9, "Amphibole": 6.3},
+              analysis_date=_lab(2026, 9, 1))
+    root.sample_id = "CFE_ROCK_1"
+    seg2.sample_id = "CFE_ROCK_1"
+    db.flush()
+    return root, seg2, bypass
+
+
+def test_xrd_tabs_follow_core_flood(client, db_session, reporting_views):
+    _seed_run_with_xrd(db_session)
+    _resp, wb = _get(client, "CFE_001")
+    assert wb.sheetnames == ["Results", "Core Flood", "XRD", "Rock XRD", "Conditions",
+                             "Additives", "Notes", "Summary"]
+    summary = _summary(wb)
+    assert summary["Rows: XRD"] == 2
+    assert summary["Rows: Rock XRD"] == 1
+
+
+def test_xrd_tab_is_wide_and_matches_view(client, db_session, reporting_views):
+    _seed_run_with_xrd(db_session)
+    _resp, wb = _get(client, "CFE_001-2")
+    headers, rows = _table(wb["XRD"])
+    # Minerals present anywhere in the export, alphabetical, after the fixed columns.
+    assert headers == ["Experiment ID", "is_variant", "Day", "Measurement date", "Rwp",
+                       "Forsterite (%)", "Lizardite (%)", "Magnetite (%)"]
+    assert [(r["Experiment ID"], r["Day"]) for r in rows] == [
+        ("CFE_001", 0), ("CFE_001-2", 10)]
+    view = {(v["experiment_id"], v["mineral_name"]): v for v in _view(
+        db_session, "SELECT * FROM v_experiment_xrd"
+                    " WHERE experiment_id IN ('CFE_001', 'CFE_001-2')")}
+    seg = rows[1]
+    assert seg["is_variant"] is False
+    assert seg["Forsterite (%)"] == view[("CFE_001-2", "Forsterite")]["amount_pct"] == 52.0
+    assert seg["Magnetite (%)"] == 4.0
+    assert seg["Rwp"] == pytest.approx(3.1)
+    assert seg["Measurement date"] == _naive_lab(view[("CFE_001-2", "Magnetite")]
+                                                 ["measurement_date"])
+    # A mineral not measured at a timepoint is blank, not 0.
+    assert rows[0]["Magnetite (%)"] is None
+
+
+def test_rock_xrd_tab_names_the_experiments_using_the_sample(
+        client, db_session, reporting_views):
+    _seed_run_with_xrd(db_session)
+    _resp, wb = _get(client, "CFE_001")
+    headers, rows = _table(wb["Rock XRD"])
+    assert headers == ["Sample ID", "Used by", "Analysis date", "Laboratory", "Analyst",
+                       "Amphibole (%)", "Forsterite (%)"]
+    assert len(rows) == 1
+    assert rows[0]["Sample ID"] == "CFE_ROCK_1"
+    assert rows[0]["Used by"] == "CFE_001, CFE_001-2"
+    assert rows[0]["Analysis date"] == datetime(2026, 9, 1)
+    assert rows[0]["Laboratory"] == "ActLabs"
+    assert rows[0]["Forsterite (%)"] == 61.9
+    assert rows[0]["Amphibole (%)"] == 6.3
+
+
+def test_post_reaction_xrd_never_counts_as_rock_xrd(
+        client, db_session, reporting_views):
+    """An experiment's own XRD stays off Rock XRD even when it has a sample ID."""
+    exp = _experiment(db_session, "HPE_020", experiment_type="HPHT")
+    db_session.add(SampleInfo(sample_id="HPE_ROCK_2"))
+    db_session.flush()
+    exp.sample_id = "HPE_ROCK_2"
+    _xrd(db_session, exp, 7, {"Talc": 12.0}, rwp=4.0, measured=_lab(2026, 10, 8))
+    _resp, wb = _get(client, "HPE_020")
+    assert wb.sheetnames == ["Results", "XRD", "Conditions", "Additives", "Notes",
+                             "Summary"]
+
+
+def test_selection_includes_xrd_tabs(client, db_session, reporting_views):
+    _seed_run_with_xrd(db_session)
+    hp = _experiment(db_session, "HPE_010", experiment_type="HPHT")
+    _sample(db_session, hp, 2.0)
+    _rock_xrd(db_session, "HPE_ROCK_1", {"Quartz": 90.0})
+    hp.sample_id = "HPE_ROCK_1"
+    db_session.flush()
+    _resp, wb = _post(client, ["CFE_001", "HPE_010"])
+    assert wb.sheetnames == ["Experiments", "Results", "Core Flood", "XRD", "Rock XRD",
+                             "Conditions", "Additives", "Notes", "Summary"]
+    _h, rock = _table(wb["Rock XRD"])
+    # Member order: the CFE series first, then HPE_010.
+    assert [(r["Sample ID"], r["Used by"]) for r in rock] == [
+        ("CFE_ROCK_1", "CFE_001, CFE_001-2"), ("HPE_ROCK_1", "HPE_010")]
+    assert rock[0]["Quartz (%)"] is None
+    assert rock[1]["Quartz (%)"] == 90.0

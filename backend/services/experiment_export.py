@@ -213,6 +213,28 @@ ADDITIVE_COLUMNS: list[Column] = [
     ("catalyst_ppm", "Catalyst (ppm)"),
 ]
 
+XRD_COLUMNS: list[Column] = [
+    ("experiment_id", "Experiment ID"),
+    ("is_variant", "is_variant"),
+    ("time_post_reaction_days", "Day"),
+    ("measurement_date", "Measurement date"),
+    ("rwp", "Rwp"),
+    # One "<mineral> (%)" column per mineral in the export is appended.
+]
+
+ROCK_XRD_COLUMNS: list[Column] = [
+    ("sample_id", "Sample ID"),
+    ("used_by", "Used by"),
+    ("analysis_date", "Analysis date"),
+    ("laboratory", "Laboratory"),
+    ("analyst", "Analyst"),
+    # One "<mineral> (%)" column per mineral in the export is appended.
+]
+
+# Row-dict key prefix for mineral columns, so a mineral can never collide with
+# a fixed column key.
+_MINERAL_KEY = "mineral:"
+
 NOTE_COLUMNS: list[Column] = [
     ("experiment_id", "Experiment ID"),
     ("note_id", "Note ID"),
@@ -417,6 +439,87 @@ def additive_rows(db: Session, members: list[Member]) -> list[dict]:
         r["addition_order"] is None, r["addition_order"] or 0, r["compound_name"]))
 
 
+def _pivot_minerals(long_rows: list[dict], key: Callable[[dict], tuple],
+                    fixed: Callable[[dict], dict]
+                    ) -> tuple[list[dict], list[str]]:
+    """Long view rows (one per mineral) as one wide row per `key`.
+
+    Mineral names are kept exactly as stored (no case folding), as everywhere
+    else in the export. Returns the rows in first-seen key order and the
+    minerals present, alphabetical (case-insensitive).
+    """
+    wide: dict[tuple, dict] = {}
+    for r in long_rows:
+        row = wide.setdefault(key(r), fixed(r))
+        row[_MINERAL_KEY + r["mineral_name"]] = r["amount_pct"]
+    minerals = sorted({r["mineral_name"] for r in long_rows},
+                      key=lambda m: (m.casefold(), m))
+    return list(wide.values()), minerals
+
+
+def _mineral_columns(minerals: list[str]) -> list[Column]:
+    return [(_MINERAL_KEY + m, f"{m} (%)") for m in minerals]
+
+
+def xrd_rows(db: Session, members: list[Member]) -> tuple[list[dict], list[str]]:
+    """Post-reaction XRD (Aeris time series): one row per experiment and day."""
+    long_rows = _rows(db, "SELECT * FROM v_experiment_xrd"
+                          " WHERE experiment_id = ANY(:ids)", {"ids": _ids(members)})
+    variant = {m.experiment_id: m.is_variant for m in members}
+    # rwp and measurement_date are per scan, so every mineral row of one
+    # (experiment, day) carries the same values; the first one is kept.
+    rows, minerals = _pivot_minerals(
+        long_rows,
+        key=lambda r: (r["experiment_id"], r["time_post_reaction_days"]),
+        fixed=lambda r: {
+            "experiment_id": r["experiment_id"],
+            "is_variant": variant[r["experiment_id"]],
+            "time_post_reaction_days": r["time_post_reaction_days"],
+            "measurement_date": r["measurement_date"],
+            "rwp": r["rwp"],
+        })
+    rows = _ordered_by_member(members, rows, lambda r: (
+        r["time_post_reaction_days"] is None, r["time_post_reaction_days"] or 0))
+    return rows, minerals
+
+
+def rock_xrd_rows(db: Session, members: list[Member]
+                  ) -> tuple[list[dict], list[str]]:
+    """Starting-rock XRD: one row per analysis of a sample the members use.
+
+    `Used by` lists the exported members with that sample ID, in member order.
+    """
+    sample_of = {r["experiment_id"]: r["sample_id"] for r in _rows(
+        db, "SELECT experiment_id, sample_id FROM v_experiments"
+            " WHERE experiment_id = ANY(:ids) AND sample_id IS NOT NULL",
+        {"ids": _ids(members)})}
+    used_by: dict[str, list[str]] = {}
+    for m in members:
+        if m.experiment_id in sample_of:
+            used_by.setdefault(sample_of[m.experiment_id], []).append(m.experiment_id)
+    if not used_by:
+        return [], []
+
+    long_rows = _rows(db, "SELECT * FROM v_sample_xrd WHERE sample_id = ANY(:sids)",
+                      {"sids": list(used_by)})
+    rows, minerals = _pivot_minerals(
+        long_rows,
+        key=lambda r: (r["sample_id"], r["analysis_date"], r["laboratory"],
+                       r["analyst"]),
+        fixed=lambda r: {
+            "sample_id": r["sample_id"],
+            "used_by": ", ".join(used_by[r["sample_id"]]),
+            "analysis_date": r["analysis_date"],
+            "laboratory": r["laboratory"],
+            "analyst": r["analyst"],
+        })
+    # Samples in the order their first user appears, then by analysis date.
+    first_use = {sid: i for i, sid in enumerate(used_by)}
+    rows.sort(key=lambda r: (first_use[r["sample_id"]], r["analysis_date"] is None,
+                             r["analysis_date"] or _EPOCH))
+    return rows, minerals
+
+
 def note_rows(db: Session, members: list[Member]) -> list[dict]:
     rows = _rows(db, "SELECT * FROM v_notes WHERE experiment_id = ANY(:ids)",
                  {"ids": _ids(members)})
@@ -499,6 +602,14 @@ def _data_tabs(db: Session, members: list[Member]
         ("Results", _results_columns(elements), results)]
     if any(m.is_core_flood for m in members):
         tabs.append(("Core Flood", CORE_FLOOD_COLUMNS, core_flood_rows(db, members)))
+    # XRD tabs only when the export has XRD of that kind.
+    xrd, xrd_minerals = xrd_rows(db, members)
+    if xrd:
+        tabs.append(("XRD", XRD_COLUMNS + _mineral_columns(xrd_minerals), xrd))
+    rock, rock_minerals = rock_xrd_rows(db, members)
+    if rock:
+        tabs.append(("Rock XRD", ROCK_XRD_COLUMNS + _mineral_columns(rock_minerals),
+                     rock))
     tabs += [
         ("Conditions", CONDITION_COLUMNS, condition_rows(db, members)),
         ("Additives", ADDITIVE_COLUMNS, additive_rows(db, members)),
