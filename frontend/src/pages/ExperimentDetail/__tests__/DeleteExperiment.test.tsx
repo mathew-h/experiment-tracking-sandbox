@@ -137,6 +137,35 @@ describe('experiment deletion from the detail page', () => {
     invalidateSpy.mockRestore()
   })
 
+  it('refreshes the group caches keyed by base ID and evicts the series ICP (issue #105)', async () => {
+    // Group caches are keyed by the BASE ID ('SERUM_050' here is its own base, but a
+    // vial 'SERUM_050a-t5' would leave ['replicate-group-detail', 'SERUM_050']), so
+    // an eviction by the deleted experiment ID cannot reach them.
+    queryClient.setQueryData(['replicate-group-detail', 'SERUM_050_BASE'], { member_count: 3 })
+    queryClient.setQueryData(['group-h2-bkg-rollup', 'SERUM_050_BASE'], [])
+    queryClient.setQueryData(['experiment-icp', 'SERUM_050_SIBLING'], { rows: [], segment_starts: [] })
+    const removeSpy = vi.spyOn(queryClient, 'removeQueries')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /delete experiment/i }))
+    await user.click(await screen.findByRole('button', { name: /^delete$/i }))
+    await waitFor(() => expect(experimentsApi.delete).toHaveBeenCalledWith('SERUM_050'))
+
+    await waitFor(() =>
+      expect(removeSpy).toHaveBeenCalledWith({ queryKey: ['experiment-icp', 'SERUM_050'] }),
+    )
+    // The group page, its H₂ background rollup and a sibling's series ICP are all
+    // marked stale, so their next render refetches instead of showing the deleted vial.
+    for (const key of [
+      ['replicate-group-detail', 'SERUM_050_BASE'],
+      ['group-h2-bkg-rollup', 'SERUM_050_BASE'],
+      ['experiment-icp', 'SERUM_050_SIBLING'],
+    ]) {
+      await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true))
+    }
+    removeSpy.mockRestore()
+  })
+
   it('evicts caches only after navigating away from the detail page', async () => {
     // Regression guard for the eviction ORDER. Several evicted keys are still
     // actively observed by this page, and removing/invalidating an active query

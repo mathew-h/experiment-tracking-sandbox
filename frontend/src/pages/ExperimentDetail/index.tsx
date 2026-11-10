@@ -48,6 +48,9 @@ function tabFromParam(value: string | null): Tab {
  * Not reachable this way: ['scalar', resultId] and ['icp', resultId] are keyed
  * by result ID, so they cannot be targeted from the experiment ID alone. They
  * are harmless — a reused experiment ID never gets the old result IDs back.
+ *
+ * Also not reachable: the group caches, keyed by the BASE ID (or `-t` stem),
+ * not the deleted experiment's ID — see GROUP_QUERY_PREFIXES (issue #105).
  */
 const PER_EXPERIMENT_QUERY_KEYS = [
   'experiment',
@@ -55,9 +58,31 @@ const PER_EXPERIMENT_QUERY_KEYS = [
   'conditions',
   'additives',
   'experiment-results',
+  'experiment-icp',
   'xrd',
   'external-analysis',
   'replicate-group',
+] as const
+
+/**
+ * Query-key prefixes refreshed (invalidated, every entry) after a delete, because
+ * the deletion changes data shown for OTHER experiments: the group page and the
+ * grouped Results view (['replicate-group-detail', baseId]), the group's H₂
+ * background rollup (['group-h2-bkg-rollup', baseId]), the group rollup
+ * (['group-rollup', baseId]), the letter-only group wrapper, and the series ICP
+ * of surviving siblings (['experiment-icp', siblingId]). They are keyed by a base
+ * ID or a sibling's ID, which the delete handler does not know, so the whole
+ * prefix is refreshed; each holds a handful of entries and only the ones on
+ * screen refetch. 'group-rollup' was already refreshed this way before issue
+ * #105; 'replicate-group-detail', 'group-h2-bkg-rollup' and 'experiment-icp'
+ * were not, so a deleted vial stayed on its group page until a reload.
+ */
+const GROUP_QUERY_PREFIXES = [
+  'replicate-group',
+  'replicate-group-detail',
+  'group-rollup',
+  'group-h2-bkg-rollup',
+  'experiment-icp',
 ] as const
 
 /** Full experiment detail page with tabbed navigation (Results, Conditions, XRD, Notes, Modifications). */
@@ -512,8 +537,9 @@ export function ExperimentDetailPage() {
               queryClient.removeQueries({ queryKey: [key, deletedId] }),
             )
             queryClient.invalidateQueries({ queryKey: ['experiments'] })
-            queryClient.invalidateQueries({ queryKey: ['replicate-group'] })
-            queryClient.invalidateQueries({ queryKey: ['group-rollup'] })
+            GROUP_QUERY_PREFIXES.forEach((key) =>
+              queryClient.invalidateQueries({ queryKey: [key] }),
+            )
           }, 0)
         }}
       />
