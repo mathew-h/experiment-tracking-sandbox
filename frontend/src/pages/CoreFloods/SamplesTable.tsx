@@ -1,51 +1,45 @@
-import { Fragment, useState } from 'react'
+import { Fragment } from 'react'
 import type { CoreFloodSample } from '@/api/coreFloods'
 import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
 import { SegmentLink } from '@/components/runs/SegmentLink'
 import { labDateOf } from '@/utils/labDate'
 import { fmt, noteSummary } from './fields'
-import { IcpList } from '@/components/icp/IcpList'
+import { SampleFlagButtons, SampleFlagDetail, useSampleFlags } from '@/components/runs/SampleFlags'
 
 interface Props {
   samples: CoreFloodSample[]
   /** Side samples: the same columns, plus the segment ID under the date (blanks, bypasses). */
   variant: boolean
   onEdit: (s: CoreFloodSample) => void
-  /** ICP element ppm by result id; a row gets an expander only when present. */
+  /** ICP element ppm by result id; a row gets an ICP flag only when present. */
   icpByResult: Map<number, Record<string, number>>
 }
 
 const CELL = 'font-mono-data text-xs'
-const COLS = 14
+const COLS = 13
 const GROUP = 'text-center border-l border-surface-border'
-// Expander and Date stay put while the table scrolls sideways; opaque so cells do not show through.
-const STICKY_EXPANDER = 'sticky left-0 z-10 w-10 min-w-[2.5rem] max-w-[2.5rem]'
-const STICKY_DATE = 'sticky left-10 z-10'
+// Date stays put while the table scrolls sideways; opaque so cells do not show through.
+// The ICP expander column it once shared the edge with is gone (issue #164).
+const STICKY_DATE = 'sticky left-0 z-10'
 const STICKY_HEAD_BG = 'bg-surface-overlay'
 const STICKY_ROW_BG = 'bg-surface-raised group-hover:bg-surface-overlay'
 
 /** Core flood samples, newest first (the server sends oldest first); values go through `fmt`. */
 export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
-  const toggle = (id: number) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (!next.delete(id)) next.add(id)
-      return next
-    })
+  // Issue #164: the ICP and MOD flags open their own sections under the row.
+  const flags = useSampleFlags()
   const rows = [...samples].reverse()
 
   return (
     <Table>
       <TableHead>
         <tr>
-          <td colSpan={5} aria-hidden="true" />
+          <td colSpan={4} aria-hidden="true" />
           <Th colSpan={2} className={GROUP}>GC</Th>
           <Th colSpan={3} className={GROUP}>Solution</Th>
           <Th colSpan={4} className={GROUP}>Core flood</Th>
         </tr>
         <tr>
-          <Th className={`${STICKY_EXPANDER} ${STICKY_HEAD_BG}`}><span className="sr-only">ICP</span></Th>
           <Th className={`${STICKY_DATE} ${STICKY_HEAD_BG}`}>Date</Th>
           <Th>Day</Th>
           <Th>Tube</Th>
@@ -64,9 +58,14 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
       <TableBody>
         {rows.map((s) => {
           const icp = icpByResult.get(s.result_id)
-          const isOpen = icp !== undefined && expanded.has(s.result_id)
           const date = s.sample_date ? labDateOf(s.sample_date) : '—'
           const note = noteSummary(s)
+          // Unique per row: side samples by experiment, main samples by tube when known.
+          const which = variant
+            ? `${s.experiment_id} ${date}`
+            : s.sample_tube_number != null
+              ? `${date}, tube ${s.sample_tube_number}`
+              : date
           return (
             <Fragment key={s.result_id}>
               <TableRow
@@ -77,28 +76,6 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                   if (e.key === 'Enter' && e.target === e.currentTarget) onEdit(s)
                 }}
               >
-                <Td className={`${STICKY_EXPANDER} ${STICKY_ROW_BG}`}>
-                  {icp !== undefined && (
-                    <button
-                      type="button"
-                      aria-label={
-                        variant
-                          ? `Show ICP for ${s.experiment_id} ${date}`
-                          : s.sample_tube_number != null
-                            ? `Show ICP for ${date}, tube ${s.sample_tube_number}`
-                            : `Show ICP for ${date}`
-                      }
-                      aria-expanded={isOpen}
-                      className="text-ink-muted hover:text-ink-primary px-1"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        toggle(s.result_id)
-                      }}
-                    >
-                      {isOpen ? '▾' : '▸'}
-                    </button>
-                  )}
-                </Td>
                 <Td className={`${CELL} text-ink-muted ${STICKY_DATE} ${STICKY_ROW_BG}`}>
                   {date}
                   {variant && (
@@ -113,7 +90,14 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                 <Td className="text-xs">
                   <span className="inline-flex items-center gap-2">
                     <span className="block max-w-[16rem] truncate" title={note.text}>{note.text}</span>
-                    {note.hasModification && <Badge variant="info">MOD</Badge>}
+                    <SampleFlagButtons
+                      resultId={s.result_id}
+                      icpLabel={`Show ICP for ${which}`}
+                      modLabel={`Show modification for ${which}`}
+                      icp={icp}
+                      notes={s.notes}
+                      flags={flags}
+                    />
                   </span>
                 </Td>
                 <Td className={CELL}>{fmt(s.h2_concentration)}</Td>
@@ -136,13 +120,7 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
                 <Td className={CELL}>{fmt(s.inlet_pressure_psi)}</Td>
                 <Td className={CELL}>{fmt(s.outlet_pressure_psi)}</Td>
               </TableRow>
-              {isOpen && (
-                <tr className="bg-surface-overlay">
-                  <Td colSpan={COLS} className="px-6 py-2">
-                    <IcpList elements={icp} />
-                  </Td>
-                </tr>
-              )}
+              <SampleFlagDetail resultId={s.result_id} colSpan={COLS} icp={icp} notes={s.notes} flags={flags} />
             </Fragment>
           )
         })}

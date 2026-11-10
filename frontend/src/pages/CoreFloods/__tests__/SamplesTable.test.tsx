@@ -164,13 +164,41 @@ describe('SamplesTable', () => {
     expect(empty).toHaveLength(0)
   })
 
-  it('the expander and date columns are sticky', () => {
+  it('the date column is the sticky first column; there is no expander column (issue #164)', () => {
     const icp = new Map([[1, { fe: 1 }]])
     render(<SamplesTable samples={[sample({ result_id: 1 })]} variant={false} onEdit={vi.fn()} icpByResult={icp} />)
     const cells = within(screen.getAllByRole('row')[2]).getAllByRole('cell')
     expect(cells[0].className).toMatch(/sticky left-0/)
-    expect(cells[1].className).toMatch(/sticky/)
-    expect(screen.getByRole('columnheader', { name: 'Date' }).className).toMatch(/sticky/)
+    // Second header row (the first holds the GC / Solution / Core flood groups).
+    expect(within(screen.getAllByRole('row')[1]).getAllByRole('columnheader')[0]).toHaveTextContent('Date')
+    expect(screen.getByRole('columnheader', { name: 'Date' }).className).toMatch(/sticky left-0/)
+    // The only buttons left are flags (their own ▸/▾ is a state cue, not a column).
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['ICP▸'])
+  })
+
+  it('the ICP flag sits in the note column and opens the readings (issue #164)', async () => {
+    const onEdit = vi.fn()
+    const icp = new Map([[1, { fe: 3 }]])
+    render(<SamplesTable samples={[sample({ result_id: 1 })]} variant={false} onEdit={onEdit} icpByResult={icp} />)
+    const flag = screen.getByRole('button', { name: /Show ICP for/ })
+    expect(flag).toHaveTextContent('ICP')
+    await userEvent.click(flag)
+    expect(screen.getByText('Fe 3')).toBeInTheDocument()
+    expect(onEdit).not.toHaveBeenCalled()
+  })
+
+  it('the MOD flag opens the modification note (issue #164)', async () => {
+    const onEdit = vi.fn()
+    const s = sample({
+      result_id: 1,
+      notes: [{ id: 9, note_type: 'modification', note_text: 'Swapped backpressure regulator', created_by: 'tech@x' }],
+    })
+    render(<SamplesTable samples={[s]} variant={false} onEdit={onEdit} icpByResult={noIcp} />)
+    await userEvent.click(screen.getByRole('button', { name: /^Show modification for/ }))
+    expect(screen.getByRole('region', { name: 'Modification notes' })).toHaveTextContent(
+      'Swapped backpressure regulator',
+    )
+    expect(onEdit).not.toHaveBeenCalled()
   })
 })
 

@@ -131,6 +131,24 @@ describe('HphtRunPage (issue #150)', () => {
     expect(within(rows[0]).getByText('5')).toBeInTheDocument()
   })
 
+  it('MOD and ICP flags open the note and the readings, not the editor (issue #164)', async () => {
+    vi.mocked(hphtApi.icp).mockResolvedValue([
+      { result_id: 12, experiment_id: 'HPHT_297-2', is_variant: false, sample_date: null,
+        cumulative_time_post_reaction_days: 5, elements: { fe: 4.5 } },
+    ] as never)
+    renderPage()
+    const region = await samplesRegion()
+    const row = within(region).getByTestId('sample-12')
+    await userEvent.click(within(row).getByRole('button', { name: /^Show modification for/ }))
+    expect(within(region).getByRole('region', { name: 'Modification notes' })).toHaveTextContent('Topped up brine')
+    const icpFlag = await within(row).findByRole('button', { name: /^Show ICP for/ })
+    await userEvent.click(icpFlag)
+    expect(within(region).getByText('Fe 4.5')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // No expander column: every button in the table is an ICP or MOD flag.
+    expect(within(region).getAllByRole('button').every((b) => /^(ICP|MOD)/.test(b.textContent ?? ''))).toBe(true)
+  })
+
   it('shows variants only under Side samples', async () => {
     renderPage()
     const region = await samplesRegion()

@@ -1,8 +1,8 @@
-import { Fragment, useState } from 'react'
+import { Fragment } from 'react'
 import type { HphtSample } from '@/api/hpht'
-import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
+import { Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
 import { SegmentLink } from '@/components/runs/SegmentLink'
-import { IcpList } from '@/components/icp/IcpList'
+import { SampleFlagButtons, SampleFlagDetail, useSampleFlags } from '@/components/runs/SampleFlags'
 import { fmt } from '@/components/results/sampleFields'
 import { noteSummary } from '@/pages/CoreFloods/fields'
 import { labDateOf } from '@/utils/labDate'
@@ -12,15 +12,15 @@ interface Props {
   /** Side samples (variants): raw values only, so the running-total columns are dropped. */
   variant: boolean
   onEdit: (s: HphtSample) => void
-  /** ICP element ppm by result id; a row gets an expander only when present. */
+  /** ICP element ppm by result id; a row gets an ICP flag only when present. */
   icpByResult: Map<number, Record<string, number>>
 }
 
 const CELL = 'font-mono-data text-xs'
 const GROUP = 'text-center border-l border-surface-border'
-// Expander and Date stay put while the table scrolls sideways; opaque so cells do not show through.
-const STICKY_EXPANDER = 'sticky left-0 z-10 w-10 min-w-[2.5rem] max-w-[2.5rem]'
-const STICKY_DATE = 'sticky left-10 z-10'
+// Date stays put while the table scrolls sideways; opaque so cells do not show through.
+// The ICP expander column it once shared the edge with is gone (issue #164).
+const STICKY_DATE = 'sticky left-0 z-10'
 const STICKY_HEAD_BG = 'bg-surface-overlay'
 const STICKY_ROW_BG = 'bg-surface-raised group-hover:bg-surface-overlay'
 
@@ -38,7 +38,7 @@ const SOLUTION_COLUMNS: readonly Column[] = [
   { head: 'pH', value: (s) => s.final_ph },
   { head: 'Cond.', value: (s) => s.final_conductivity_mS_cm },
 ]
-const LEAD_COLUMNS = 6 // expander, Date, Day, Segment, Tube, Result Note/Sample Description
+const LEAD_COLUMNS = 5 // Date, Day, Segment, Tube, Result Note/Sample Description
 
 /** Headers are upper-cased by CSS, which turns µ into Greek capital Mu ("MMOL" reads
  *  as millimoles), so the µ prefix is kept lower case. */
@@ -50,13 +50,8 @@ function headLabel(head: string) {
 
 /** HPHT run samples, newest first (the server sends oldest first). Clicking a row edits it. */
 export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
-  const toggle = (id: number) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (!next.delete(id)) next.add(id)
-      return next
-    })
+  // Issue #164: the ICP and MOD flags open their own sections under the row.
+  const flags = useSampleFlags()
   const gc = GC_COLUMNS.filter((c) => !variant || !c.runTotal)
   const colCount = LEAD_COLUMNS + gc.length + SOLUTION_COLUMNS.length
   const rows = [...samples].reverse()
@@ -70,7 +65,6 @@ export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Prop
           <Th colSpan={SOLUTION_COLUMNS.length} className={GROUP}>Solution</Th>
         </tr>
         <tr>
-          <Th className={`${STICKY_EXPANDER} ${STICKY_HEAD_BG}`}><span className="sr-only">ICP</span></Th>
           <Th className={`${STICKY_DATE} ${STICKY_HEAD_BG}`}>Date</Th>
           <Th>Day</Th>
           <Th>Segment</Th>
@@ -87,7 +81,6 @@ export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Prop
         )}
         {rows.map((s) => {
           const icp = icpByResult.get(s.result_id)
-          const isOpen = icp !== undefined && expanded.has(s.result_id)
           const date = s.sample_date ? labDateOf(s.sample_date) : '—'
           const note = noteSummary(s)
           return (
@@ -101,22 +94,6 @@ export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Prop
                   if (e.key === 'Enter' && e.target === e.currentTarget) onEdit(s)
                 }}
               >
-                <Td className={`${STICKY_EXPANDER} ${STICKY_ROW_BG}`}>
-                  {icp !== undefined && (
-                    <button
-                      type="button"
-                      aria-label={`Show ICP for ${s.experiment_id} ${date}`}
-                      aria-expanded={isOpen}
-                      className="text-ink-muted hover:text-ink-primary px-1"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        toggle(s.result_id)
-                      }}
-                    >
-                      {isOpen ? '▾' : '▸'}
-                    </button>
-                  )}
-                </Td>
                 <Td className={`${CELL} text-ink-muted ${STICKY_DATE} ${STICKY_ROW_BG}`}>{date}</Td>
                 <Td className={CELL}>{fmt(s.cumulative_time_post_reaction_days)}</Td>
                 <Td className={CELL}>
@@ -127,20 +104,21 @@ export function HphtSamplesTable({ samples, variant, onEdit, icpByResult }: Prop
                 <Td className="text-xs">
                   <span className="inline-flex items-center gap-2">
                     <span className="block max-w-[16rem] truncate" title={note.text}>{note.text}</span>
-                    {note.hasModification && <Badge variant="info">MOD</Badge>}
+                    <SampleFlagButtons
+                      resultId={s.result_id}
+                      icpLabel={`Show ICP for ${s.experiment_id} ${date}`}
+                      modLabel={`Show modification for ${s.experiment_id} ${date}`}
+                      icp={icp}
+                      notes={s.notes}
+                      flags={flags}
+                    />
                   </span>
                 </Td>
                 {[...gc, ...SOLUTION_COLUMNS].map((c) => (
                   <Td key={c.head} className={CELL}>{fmt(c.value(s))}</Td>
                 ))}
               </TableRow>
-              {isOpen && (
-                <tr className="bg-surface-overlay">
-                  <Td colSpan={colCount} className="px-6 py-2">
-                    <IcpList elements={icp} />
-                  </Td>
-                </tr>
-              )}
+              <SampleFlagDetail resultId={s.result_id} colSpan={colCount} icp={icp} notes={s.notes} flags={flags} />
             </Fragment>
           )
         })}
