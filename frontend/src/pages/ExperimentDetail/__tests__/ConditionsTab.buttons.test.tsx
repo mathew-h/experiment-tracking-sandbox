@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
 import { ConditionsTab } from '../ConditionsTab'
 import * as chemicalsApi from '@/api/chemicals'
-import { conditionsApi } from '@/api/conditions'
+import { conditionsApi, type ConditionsResponse } from '@/api/conditions'
+import type { AxiosResponse } from 'axios'
 
 // Minimal stubs
 vi.mock('@/api/chemicals', () => ({
@@ -60,11 +61,16 @@ const mockConditions = {
   pore_pressure: null,
   core_height_cm: null,
   core_width_cm: null,
-} as any
+}
+
+/** The API sends null for unset optionals, which ConditionsResponse (it extends the
+ *  write payload) types as `?: number`; so fixtures keep their real nulls and are
+ *  cast here once, rather than hiding the whole object behind `any` (issue #106). */
+const conditionsRow = (c: object) => c as unknown as ConditionsResponse
 
 describe('ConditionsTab additives action buttons', () => {
   it('renders edit and delete buttons with aria-labels', async () => {
-    wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(mockConditions)} experimentId="HPHT_001" experimentFk={1} />)
 
     const editBtn = await screen.findByRole('button', { name: /edit additive/i })
     const deleteBtn = await screen.findByRole('button', { name: /delete additive/i })
@@ -74,7 +80,7 @@ describe('ConditionsTab additives action buttons', () => {
   })
 
   it('edit and delete buttons are not aria-hidden', async () => {
-    wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(mockConditions)} experimentId="HPHT_001" experimentFk={1} />)
 
     const editBtn = await screen.findByRole('button', { name: /edit additive/i })
     expect(editBtn).not.toHaveAttribute('aria-hidden', 'true')
@@ -82,10 +88,10 @@ describe('ConditionsTab additives action buttons', () => {
 
   it('clicking delete opens confirm modal without firing mutation', async () => {
     const user = userEvent.setup()
-    const deleteFn = vi.fn(() => Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config: {} } as any))
+    const deleteFn = vi.fn(() => Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config: {} } as unknown as AxiosResponse))
     vi.mocked(chemicalsApi.chemicalsApi.deleteAdditiveById).mockImplementation(deleteFn)
 
-    wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(mockConditions)} experimentId="HPHT_001" experimentFk={1} />)
 
     const deleteBtn = await screen.findByRole('button', { name: /delete additive/i })
     await user.click(deleteBtn)
@@ -99,13 +105,13 @@ describe('ConditionsTab — serum vial size', () => {
   const serum = { ...mockConditions, experiment_type: 'Serum', serum_vial_size_mL: 120 }
 
   it('shows the read row when set', () => {
-    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(serum)} experimentId="SERUM_001" experimentFk={1} />)
     expect(screen.getByText('Serum Vial Size')).toBeInTheDocument()
     expect(screen.getByText('120 mL')).toBeInTheDocument()
   })
 
   it('shows no read row when null', () => {
-    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...serum, serum_vial_size_mL: null })} experimentId="SERUM_001" experimentFk={1} />)
     expect(screen.queryByText('Serum Vial Size')).not.toBeInTheDocument()
   })
 
@@ -114,38 +120,38 @@ describe('ConditionsTab — serum vial size', () => {
   }
 
   it('edit modal shows the input for Serum, seeded with the stored value', async () => {
-    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(serum)} experimentId="SERUM_001" experimentFk={1} />)
     await openEditModal()
     expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(120)
   })
 
   it('edit modal shows the input for a Serum with no stored value', async () => {
-    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...serum, serum_vial_size_mL: null })} experimentId="SERUM_001" experimentFk={1} />)
     await openEditModal()
     expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(null)
   })
 
   it('edit modal hides the input for HPHT with no stored value', async () => {
-    wrap(<ConditionsTab conditions={mockConditions} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(mockConditions)} experimentId="HPHT_001" experimentFk={1} />)
     await openEditModal()
     expect(screen.queryByLabelText('Serum Vial Size (mL)')).not.toBeInTheDocument()
   })
 
   it('edit modal shows the input for HPHT when a value is already stored', async () => {
-    wrap(<ConditionsTab conditions={{ ...mockConditions, serum_vial_size_mL: 60 }} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...mockConditions, serum_vial_size_mL: 60 })} experimentId="HPHT_001" experimentFk={1} />)
     await openEditModal()
     expect(screen.getByLabelText('Serum Vial Size (mL)')).toHaveValue(60)
   })
 
   it('keeps the input visible while the user clears a stored value', async () => {
-    wrap(<ConditionsTab conditions={{ ...mockConditions, serum_vial_size_mL: 60 }} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...mockConditions, serum_vial_size_mL: 60 })} experimentId="HPHT_001" experimentFk={1} />)
     await openEditModal()
     await userEvent.clear(screen.getByLabelText('Serum Vial Size (mL)'))
     expect(screen.getByLabelText('Serum Vial Size (mL)')).toBeInTheDocument()
   })
 
   it('omits a hidden vial size from the save payload after switching to HPHT', async () => {
-    wrap(<ConditionsTab conditions={{ ...serum, serum_vial_size_mL: null }} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...serum, serum_vial_size_mL: null })} experimentId="SERUM_001" experimentFk={1} />)
     await openEditModal()
     await userEvent.type(screen.getByLabelText('Serum Vial Size (mL)'), '120')
     await userEvent.selectOptions(screen.getByLabelText('Experiment Type'), 'HPHT')
@@ -162,39 +168,39 @@ describe('ConditionsTab — pore volume', () => {
   const core = { ...mockConditions, experiment_type: 'Core Flood', pore_volume_mL: 42 }
 
   it('shows the read row with unit', () => {
-    wrap(<ConditionsTab conditions={core} experimentId="CF_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(core)} experimentId="CF_001" experimentFk={1} />)
     expect(screen.getByText('Pore Volume')).toBeInTheDocument()
     expect(screen.getByText('42 mL')).toBeInTheDocument()
   })
 
   it('edit modal input is seeded with the stored value', async () => {
-    wrap(<ConditionsTab conditions={core} experimentId="CF_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(core)} experimentId="CF_001" experimentFk={1} />)
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(42)
   })
 
   it('edit modal shows the input for a Core Flood with no stored value', async () => {
-    wrap(<ConditionsTab conditions={{ ...core, pore_volume_mL: null }} experimentId="CF_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...core, pore_volume_mL: null })} experimentId="CF_001" experimentFk={1} />)
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(null)
   })
 
   it('edit modal hides the input for a Serum with no stored value', async () => {
     const serum = { ...mockConditions, experiment_type: 'Serum', pore_volume_mL: null }
-    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(serum)} experimentId="SERUM_001" experimentFk={1} />)
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     expect(screen.queryByLabelText('Pore Volume (mL)')).not.toBeInTheDocument()
   })
 
   it('edit modal shows the input for a Serum when a value is already stored', async () => {
     const serum = { ...mockConditions, experiment_type: 'Serum', pore_volume_mL: 15 }
-    wrap(<ConditionsTab conditions={serum} experimentId="SERUM_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(serum)} experimentId="SERUM_001" experimentFk={1} />)
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     expect(screen.getByLabelText('Pore Volume (mL)')).toHaveValue(15)
   })
 
   it('omits a hidden pore volume from the save payload after switching to HPHT', async () => {
-    wrap(<ConditionsTab conditions={{ ...core, pore_volume_mL: null }} experimentId="CF_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow({ ...core, pore_volume_mL: null })} experimentId="CF_001" experimentFk={1} />)
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     await userEvent.type(screen.getByLabelText('Pore Volume (mL)'), '30')
     await userEvent.selectOptions(screen.getByLabelText('Experiment Type'), 'HPHT')
@@ -219,13 +225,13 @@ describe('ConditionsTab — reactor slot (issue #147)', () => {
   }
 
   it('shows the slot label, not the bare number', () => {
-    wrap(<ConditionsTab conditions={parr} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(parr)} experimentId="HPHT_001" experimentFk={1} />)
     expect(screen.getByText('P03')).toBeInTheDocument()
   })
 
   it('seeds the picker with the stored slot and leaves it out of an unrelated save', async () => {
     vi.mocked(conditionsApi.patch).mockClear()
-    wrap(<ConditionsTab conditions={parr} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(parr)} experimentId="HPHT_001" experimentFk={1} />)
     await userEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     expect(screen.getByLabelText('Reactor')).toHaveValue('P03')
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
@@ -237,7 +243,7 @@ describe('ConditionsTab — reactor slot (issue #147)', () => {
 
   it('sends number and series when moving from P03 to R05', async () => {
     vi.mocked(conditionsApi.patch).mockClear()
-    wrap(<ConditionsTab conditions={parr} experimentId="HPHT_001" experimentFk={1} />)
+    wrap(<ConditionsTab conditions={conditionsRow(parr)} experimentId="HPHT_001" experimentFk={1} />)
     const payload = await editAndSave('R05')
     expect(payload).toMatchObject({ reactor_number: 5, reactor_series: null })
   })
@@ -246,7 +252,7 @@ describe('ConditionsTab — reactor slot (issue #147)', () => {
     vi.mocked(conditionsApi.patch).mockClear()
     wrap(
       <ConditionsTab
-        conditions={{ ...mockConditions, reactor_number: 7, reactor_slot: 'R07' }}
+        conditions={conditionsRow({ ...mockConditions, reactor_number: 7, reactor_slot: 'R07' })}
         experimentId="HPHT_001"
         experimentFk={1}
       />,
