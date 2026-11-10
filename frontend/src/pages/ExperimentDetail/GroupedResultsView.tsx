@@ -60,7 +60,8 @@ interface GroupedResultsViewProps {
 /** Base-level grouped results: mean ± std per timepoint from the rollup view,
  *  with individual replicate series overlay and drill-in links. */
 export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps) {
-  const [metricKey, setMetricKey] = useState('h2_ppm')
+  // null until the user picks one: then the default below applies (issue #160).
+  const [metricKey, setMetricKey] = useState<string | null>(null)
   const [showIndividual, setShowIndividual] = useState(true)
 
   // NEW query keys — these hit the /experiments/groups/{base_id}[/rollup] endpoints,
@@ -76,8 +77,6 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     () => (hasBackground ? [...METRICS, ...NET_METRICS] : METRICS),
     [hasBackground],
   )
-  // If the link is cleared while a net metric is selected, fall back to H2 (ppm).
-  const metric = metrics.find((m) => m.key === metricKey) ?? METRICS[0]
 
   const { data: bkgRollup } = useQuery({
     queryKey: ['group-h2-bkg-rollup', baseExperimentId],
@@ -101,6 +100,14 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
     queryKey: ['group-rollup', baseExperimentId],
     queryFn: () => experimentsApi.getGroupRollup(baseExperimentId),
   })
+
+  // Issue #160: open on H2 (g/t), the unit every run list and results table
+  // headlines. A group with no rock mass (a background set, #151/#152) has no
+  // g/t at all, so it opens on H2 (ppm) rather than on an empty chart.
+  const hasGpt = (rollup ?? []).some((r) => r.mean_h2_grams_per_ton != null)
+  const defaultKey = hasGpt ? 'h2_gpt' : 'h2_ppm'
+  // If the link is cleared while a net metric is selected, fall back to H2 (ppm).
+  const metric = metrics.find((m) => m.key === (metricKey ?? defaultKey)) ?? METRICS[0]
 
   // Issue #98: one series per REPLICATE LETTER, not per vial. A letter
   // sacrificed across timepoints is several rows whose single result each form
@@ -264,7 +271,7 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
       {/* Chart — single y-axis; mean emphasized, members thin; legend always on */}
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+          <ComposedChart data={chartData} margin={{ top: 8, right: 16, bottom: 24, left: 0 }}>
             <CartesianGrid stroke={chartColors.grid} strokeDasharray="3 3" />
             <XAxis
               dataKey="bucket" type="number" domain={['dataMin', 'dataMax']}
@@ -279,7 +286,9 @@ export function GroupedResultsView({ baseExperimentId }: GroupedResultsViewProps
               contentStyle={{ backgroundColor: chartColors.tooltipBg, border: `1px solid ${chartColors.grid}`, fontSize: 12 }}
               labelFormatter={(v) => `Day ${v}`}
             />
-            <Legend wrapperStyle={{ fontSize: 11, color: chartColors.label }} />
+            {/* Above the plot, as in IcpChart: at the bottom it printed over the
+                x-axis title (issue #160). */}
+            <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11, color: chartColors.label }} />
             {showIndividual && metric.source !== 'bkg' &&
               seriesLetters.map((letter, i) => (
                 <Line

@@ -164,6 +164,17 @@ describe('ReplicateGroupPage', () => {
     expect(screen.getByRole('link', { name: 'Back to Experiments' })).toHaveAttribute('href', '/experiments')
   })
 
+  it('puts the Rollup first, then Members, then Conditions (issue #160)', async () => {
+    vi.mocked(experimentsApi.getGroup).mockResolvedValue(ORPHAN_GROUP)
+    renderAtBase('SERUM_001')
+    const rollup = await screen.findByText('Rollup')
+    const members = screen.getByRole('columnheader', { name: 'Replicate' })
+    const conditions = screen.getByText('Conditions')
+    const follows = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(follows(rollup, members)).toBe(true)
+    expect(follows(members, conditions)).toBe(true)
+  })
+
   it('issues the group query against the base ID, not a per-experiment endpoint', async () => {
     vi.mocked(experimentsApi.getGroup).mockResolvedValue(ORPHAN_GROUP)
     renderAtBase('SERUM_001')

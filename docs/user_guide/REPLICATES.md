@@ -65,8 +65,13 @@ own page at `/experiments/groups/{base}` (e.g. `/experiments/groups/SERUM_001`).
 it from the **Group {base}** link in the experiment detail header strip of any member,
 or from the breadcrumb above the ID (**Experiments › Group SERUM_001 › SERUM_001a**).
 
-It shows:
+It shows, from the top (issue #160):
 
+- The cross-replicate **rollup chart** (mean ± std per timepoint) and its table — the
+  same data as the Grouped (n=N) mode on an individual member's Results tab. The
+  **Metric** select opens on **H₂ (g/t)**; a group with no g/t values (no rock mass,
+  such as a background set) opens on **H₂ (ppm)** instead. The legend sits above the
+  chart.
 - A **members table** — one row per replicate (the parent, if one exists, plus every
   lettered member), with status, outlier flag, and result count per row. Any condition
   that differs from the rest of the group (e.g. actual rock mass) is called out per row.
@@ -77,8 +82,6 @@ It shows:
   of repeated per row.
 - An **additive summary** — a single summary line if every member's additives agree, or
   a "varies" note if they don't.
-- The cross-replicate **rollup chart** (mean ± std per timepoint) — the same data as the
-  Grouped (n=N) mode on an individual member's Results tab.
 
 The page does not edit replicates: "Replicates are edited individually; only the H₂
 background is set here." Edit a replicate's conditions, additives, or results from its
@@ -90,7 +93,7 @@ base ID had no parent row — the common case for lettered-only replicate sets.
 
 ### H₂ background (Serum groups)
 
-Serum group pages have an **H₂ background** row in the header. **Set** (or **Change**) picks a blank serum experiment to subtract from this group's H₂, either the **whole group** (all its vials averaged) or **this vial only** (that vial and its `-t` vials). **Clear** removes the link after a confirmation. Once linked, the grouped results view adds **Net H₂ (µmol)**, **Net H₂ (g/t)** and **Net Fe²⁺ → H₂ (%)** with mean ± SD. Each timepoint uses the nearest background day: a warning chip shows the matched day when it differs, "≤ bkg" marks a mean below the background, and "no bkg match" means that bucket has no usable background. The default metric stays raw H₂ ppm, and stored H₂ values are never changed. Renaming the group or the background disconnects the link; set it again.
+Serum group pages have an **H₂ background** row in the header. **Set** (or **Change**) picks a blank serum experiment to subtract from this group's H₂, either the **whole group** (all its vials averaged) or **this vial only** (that vial and its `-t` vials). **Clear** removes the link after a confirmation. Once linked, the grouped results view adds **Net H₂ (µmol)**, **Net H₂ (g/t)** and **Net Fe²⁺ → H₂ (%)** with mean ± SD. Each timepoint uses the nearest background day: a warning chip shows the matched day when it differs, "≤ bkg" marks a mean below the background, and "no bkg match" means that bucket has no usable background. The default metric stays a raw (not net) value, H₂ (g/t) since issue #160, and stored H₂ values are never changed. Renaming the group or the background disconnects the link; set it again.
 
 ### Timepoint vials with no letters
 

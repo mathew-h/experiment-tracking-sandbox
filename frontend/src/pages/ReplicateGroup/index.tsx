@@ -189,6 +189,14 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
         {showH2Background && <H2BackgroundRow baseId={baseId} link={group.h2_background} />}
       </div>
 
+      {/* Rollup first: the yield is what the page is for (issue #160). */}
+      <Card padding="none">
+        <CardHeader label="Rollup" />
+        <CardBody>
+          <GroupedResultsView baseExperimentId={baseId} />
+        </CardBody>
+      </Card>
+
       {/* Members table */}
       <Table>
         <TableHead>
@@ -280,14 +288,6 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
               <span className="text-ink-primary">—</span>
             )}
           </div>
-        </CardBody>
-      </Card>
-
-      {/* Rollup */}
-      <Card padding="none">
-        <CardHeader label="Rollup" />
-        <CardBody>
-          <GroupedResultsView baseExperimentId={baseId} />
         </CardBody>
       </Card>
     </div>
