@@ -15,6 +15,14 @@ export interface BulkUploadResult {
   plan?: UploadPlan | null
   /** sha256 of the plan; replay it on commit to prove the plan is unchanged. */
   plan_hash?: string | null
+  /** Experiments and days written to (would be, on a dry run). ICP-OES only; [] elsewhere (issue #162). */
+  touched?: TouchedExperiment[]
+}
+
+/** One (experiment, day) an upload wrote to. Mirrors schemas/bulk_upload.py. */
+export interface TouchedExperiment {
+  experiment_id: string
+  time_post_reaction_days: number | null
 }
 
 // ─── Upload plan (issue #100 items 2, 6-9) ───────────────────────────────────

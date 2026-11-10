@@ -89,6 +89,13 @@ class UploadPlan(BaseModel):
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+class TouchedExperiment(BaseModel):
+    """One (experiment, day) an upload wrote to, or would write to on a dry run."""
+
+    experiment_id: str
+    time_post_reaction_days: Optional[float] = None
+
+
 class UploadResponse(BaseModel):
     created: int
     updated: int
@@ -100,6 +107,10 @@ class UploadResponse(BaseModel):
     dry_run: bool = False
     plan: Optional[UploadPlan] = None
     plan_hash: Optional[str] = None
+    # Issue #162: populated by the ICP-OES endpoint only; [] everywhere else.
+    # When #107 gives every endpoint a structured `plan`, this can be derived
+    # from plan.creates + plan.overwrites and become a convenience view of it.
+    touched: list[TouchedExperiment] = []
 
 
 class SampleConflictMatch(BaseModel):

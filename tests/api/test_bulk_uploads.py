@@ -452,6 +452,76 @@ def test_icp_oes_reports_skips_when_nothing_parses(client):
     assert body["skipped"] == 1
     assert len(body["warnings"]) == 1
     assert "HPHT_232_21x" in body["warnings"][0]
+    # Issue #162: nothing was written, so nothing is touched.
+    assert body["touched"] == []
+
+
+def _seed_icp_targets(db):
+    """Two experiments the ICP labels below resolve to (issue #162)."""
+    from database.models import Experiment  # noqa: PLC0415
+    from database.models.enums import ExperimentStatus  # noqa: PLC0415
+    for n, exp_id in enumerate(("HPHT_9902", "HPHT_9901")):
+        db.add(Experiment(experiment_id=exp_id, experiment_number=99901 + n,
+                          status=ExperimentStatus.ONGOING))
+    db.flush()
+
+
+_TOUCHED_LABELS = ("HPHT_9902_Day1_21x", "HPHT_9901_Day3_21x", "HPHT_9901_Day1_21x")
+_TOUCHED = [
+    {"experiment_id": "HPHT_9901", "time_post_reaction_days": 1.0},
+    {"experiment_id": "HPHT_9901", "time_post_reaction_days": 3.0},
+    {"experiment_id": "HPHT_9902", "time_post_reaction_days": 1.0},
+]
+
+
+def test_icp_oes_touched_lists_each_experiment_and_day(client, db_session):
+    """Issue #162: the response names the experiments and days written to,
+    sorted by experiment ID then day, whatever the CSV order."""
+    _seed_icp_targets(db_session)
+    resp = client.post(
+        "/api/bulk-uploads/icp-oes",
+        files={"file": ("icp.csv", io.BytesIO(_icp_csv(*_TOUCHED_LABELS)), "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["errors"] == []
+    assert body["created"] == 3
+    assert body["touched"] == _TOUCHED
+
+
+def test_icp_oes_touched_includes_updated_timepoints_once(client, db_session):
+    """A second upload of the same timepoint is an update: still touched, listed once."""
+    _seed_icp_targets(db_session)
+    csv = _icp_csv("HPHT_9901_Day1_21x")
+    client.post("/api/bulk-uploads/icp-oes",
+                files={"file": ("icp.csv", io.BytesIO(csv), "text/csv")})
+    resp = client.post("/api/bulk-uploads/icp-oes",
+                       files={"file": ("icp.csv", io.BytesIO(csv), "text/csv")})
+    body = resp.json()
+    assert body["updated"] == 1
+    assert body["touched"] == [_TOUCHED[0]]
+
+
+def test_icp_oes_dry_run_reports_touched_without_committing(client, db_session):
+    _seed_icp_targets(db_session)
+    with patch.object(db_session, "commit") as mock_commit:
+        resp = client.post(
+            "/api/bulk-uploads/icp-oes",
+            files={"file": ("icp.csv", io.BytesIO(_icp_csv(*_TOUCHED_LABELS)), "text/csv")},
+            data={"dry_run": "true"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dry_run"] is True
+    assert body["touched"] == _TOUCHED
+    mock_commit.assert_not_called()
+
+
+def test_other_uploads_default_touched_to_empty(client):
+    """touched is ICP-only for now; every other endpoint returns []."""
+    from backend.api.schemas.bulk_upload import UploadResponse  # noqa: PLC0415
+    assert UploadResponse(created=0, updated=0, skipped=0, errors=[],
+                          message="x").touched == []
 
 
 def test_icp_oes_returns_upload_response_shape(client):
@@ -488,7 +558,11 @@ def test_icp_oes_dry_run_rolls_back(client, db_session):
     stub_vc.ICP_FIXED_ELEMENT_FIELDS = ["fe", "si", "mg"]
     mock_icp = MagicMock()
     mock_icp.parse_and_process_icp_file_ex.return_value = ([{"experiment_fk": 1}], [], [], 0)
-    mock_icp.bulk_create_icp_results.return_value = ([MagicMock()], 0, [])
+    # The row needs a real experiment ID and day: the router builds `touched`
+    # from them (issue #162), and a bare MagicMock fails validation there.
+    row = MagicMock(time_post_reaction_days=1.0)
+    row.experiment.experiment_id = "HPHT_9901"
+    mock_icp.bulk_create_icp_results.return_value = ([row], 0, [])
     fake_mod = MagicMock()
     fake_mod.ICPService = mock_icp
 

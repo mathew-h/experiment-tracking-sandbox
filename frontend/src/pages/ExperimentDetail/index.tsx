@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import { conditionsApi } from '@/api/conditions'
@@ -23,6 +23,21 @@ import { AnalysisTab } from './AnalysisTab'
 // 'XRD' renders AnalysisTab (XRD phases and external analyses); relabelled in issue #143.
 const TABS = ['Conditions', 'Results', 'Notes', 'XRD', 'Entry Logs'] as const
 type Tab = typeof TABS[number]
+
+/** `?tab=` values (issue #162). Links use these, e.g. SegmentLink's `tab`. */
+const TAB_PARAM: Record<Tab, string> = {
+  Conditions: 'conditions',
+  Results: 'results',
+  Notes: 'notes',
+  XRD: 'xrd',
+  'Entry Logs': 'logs',
+}
+
+/** The tab named by `?tab=` (case-insensitive); Conditions when absent or unknown. */
+function tabFromParam(value: string | null): Tab {
+  const wanted = value?.toLowerCase()
+  return TABS.find((t) => TAB_PARAM[t] === wanted) ?? 'Conditions'
+}
 
 /**
  * Query-key prefixes whose second element is an experiment ID. All are EVICTED
@@ -51,7 +66,20 @@ export function ExperimentDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { success, error: toastError } = useToast()
-  const [activeTab, setActiveTab] = useState<Tab>('Conditions')
+  // The active tab lives in the URL so a link can open a tab (issue #162).
+  // Switching replaces the history entry, so Back leaves the page instead of
+  // stepping through tabs.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = tabFromParam(searchParams.get('tab'))
+  const setActiveTab = (tab: Tab) =>
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('tab', TAB_PARAM[tab])
+        return next
+      },
+      { replace: true },
+    )
   const [editingId, setEditingId] = useState(false)
   const [idDraft, setIdDraft] = useState('')
   const [editingDate, setEditingDate] = useState(false)
@@ -496,6 +524,7 @@ export function ExperimentDetailPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
+            aria-pressed={activeTab === tab}
             className={`px-4 py-2 text-sm border-b-2 transition-colors ${
               activeTab === tab
                 ? 'border-brand-red text-ink-primary'

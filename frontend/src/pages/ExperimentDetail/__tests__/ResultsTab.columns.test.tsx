@@ -288,7 +288,8 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
   })
 
-  it('links an HPHT experiment to its run page and keeps + Add Results (issue #150)', async () => {
+  it('keeps + Add Results on an HPHT experiment with no run-page link (issue #162)', async () => {
+    // The breadcrumb and segment strip carry the run link since #156 (decision 6 in #154).
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([])
     wrapFull(
       <ResultsTab
@@ -298,9 +299,8 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
         baseExperimentId="HPHT_297"
       />,
     )
-    const link = await screen.findByRole('link', { name: 'Open run page' })
-    expect(link).toHaveAttribute('href', '/hpht/HPHT_297')
-    expect(screen.getByRole('button', { name: '+ Add Results' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '+ Add Results' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open run page' })).not.toBeInTheDocument()
     expect(screen.queryByText(/only the run page captures/)).not.toBeInTheDocument()
   })
 

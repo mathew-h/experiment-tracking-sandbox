@@ -46,7 +46,8 @@ export function ConditionsSummaryCard({ conditions }: { conditions: HphtConditio
             </h2>
             {experimentId && (
               <Link
-                to={`/experiments/${encodeURIComponent(experimentId)}`}
+                // Explicit tab (issue #162), in case the detail page's default ever changes.
+                to={`/experiments/${encodeURIComponent(experimentId)}?tab=conditions`}
                 className="text-xs text-red-400 hover:text-red-300"
               >
                 Edit on Conditions tab

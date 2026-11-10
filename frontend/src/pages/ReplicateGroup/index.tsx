@@ -133,7 +133,16 @@ function MemberRow({ member, isParent, divergentFields, child }: MemberRowProps)
       </Td>
       <Td>{member.status ? <StatusBadge status={member.status} /> : '—'}</Td>
       <Td>{member.is_outlier ? <Badge variant="warning">Outlier</Badge> : '—'}</Td>
-      <Td className="font-mono-data">{member.result_count}</Td>
+      <Td>
+        {/* Issue #162: the count opens the vial's results, not its Conditions. */}
+        <SegmentLink
+          id={member.experiment_id}
+          tab="results"
+          title={`Open the Results tab of ${member.experiment_id}`}
+        >
+          {member.result_count}
+        </SegmentLink>
+      </Td>
       {divergentFields.map((field) => (
         <Td key={field} className="font-mono-data">
           {formatValue(member.conditions[field])}

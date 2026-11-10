@@ -6,7 +6,7 @@ import { NoteBadge } from '@/components/experiments/NoteBadge'
 import { resultsApi } from '@/api/results'
 import { Badge, Button, PageSpinner } from '@/components/ui'
 import { ResultEntryModal } from './ResultEntryModal'
-import { isCoreFloodType, isHphtType, runPathFor } from '@/utils/experimentId'
+import { isCoreFloodType, runPathFor } from '@/utils/experimentId'
 import { GroupedResultsView } from './GroupedResultsView'
 import { IcpSection } from './IcpSection'
 
@@ -190,7 +190,6 @@ export function ResultsTab({
   /** 'new' to add a result, a result to edit it, null when the form is closed. */
   const [entry, setEntry] = useState<ResultWithFlags | 'new' | null>(null)
   const coreFlood = isCoreFloodType(experimentType)
-  const hpht = isHphtType(experimentType)
   const runPath = runPathFor(experimentType, baseExperimentId ?? experimentId)
   const [mode, setMode] = useState<'individual' | 'grouped'>('individual')
 
@@ -264,20 +263,11 @@ export function ResultsTab({
               </Link>
             )
           ) : (
-            <>
-              {hpht && runPath && (
-                // Issue #150: the run page shows this segment's samples alongside the others in its run.
-                <Link
-                  to={runPath}
-                  className="inline-flex items-center h-7 px-3 rounded text-xs font-medium border border-surface-border text-ink-primary hover:bg-surface-raised"
-                >
-                  Open run page
-                </Link>
-              )}
-              <Button variant="primary" size="sm" onClick={() => setEntry('new')}>
-                + Add Results
-              </Button>
-            </>
+            // HPHT segments reach their run through the breadcrumb and segment strip
+            // (#156), so the Results tab no longer repeats the link (issue #162).
+            <Button variant="primary" size="sm" onClick={() => setEntry('new')}>
+              + Add Results
+            </Button>
           )}
         </div>
       </div>

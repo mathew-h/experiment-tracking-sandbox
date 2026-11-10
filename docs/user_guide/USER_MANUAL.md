@@ -28,7 +28,7 @@ The sidebar lists these pages in this order (issue #159): the pages you start fr
 | Page | What it does |
 |------|--------------|
 | **Dashboard** (`/`, also `/dashboard`) | Reactor grid showing all ONGOING experiments. Click a status badge to change an experiment's status (Ongoing → Completed or Cancelled). |
-| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and XRD tabs. A row marked **group** opens its replicate group page (click the "replicates" chip instead to list the vials in place). On an HPHT or core flood row, the **Reactor** number links to the run page. |
+| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and XRD tabs. The open tab is part of the address (`/experiments/HPHT_297-2?tab=results`), so a copied link opens the same tab; links from Recent Activity result changes, a group page's Results count and an ICP upload open the Results tab. A row marked **group** opens its replicate group page (click the "replicates" chip instead to list the vials in place). On an HPHT or core flood row, the **Reactor** number links to the run page. |
 | **HPHT** (`/hpht`) | One row per HPHT run, with a run page for samples, charts and segments. See [HPHT runs](#hpht-runs) below. |
 | **Core Floods** (`/core-floods`) | One row per core flood run, with a run page for samples and cleanup. See [Core Floods](#core-floods) below. |
 | **New Experiment** (`/experiments/new`) | 4-step guided form to create a new experiment: basic info, conditions, chemical additives, and confirmation. |
@@ -90,7 +90,7 @@ NH₃ is not shown on this page. It stays on the experiment's Results tab and in
 
 **Add a sample.** Click **+ Add sample**. It opens the same form as **+ Add Results** on the experiment page, titled **Add sample** (**Edit sample** when editing), with a **Save sample** button. With one ONGOING segment the sample goes there, and the form names it. Otherwise a **Segment** select appears at the top. **Day** counts from the chosen segment's start date, not from the start of the run. Edits work the same way; Day cannot be changed.
 
-**Other ways in.** On any HPHT segment's experiment page, the breadcrumb reads **Experiments › Run HPHT_297 › HPHT_297-2**: click **Run HPHT_297** to open the run. The strip under the ID lists every segment of the run, so a sibling is one click away, and **Reactor R07** in the line below the description also opens the run. On an HPHT experiment's Results tab, **Open run page** sits next to **+ Add Results**. On the Dashboard, clicking any occupied reactor (R, P or CF, whatever its status) shows **Open run page** as the main button.
+**Other ways in.** On any HPHT segment's experiment page, the breadcrumb reads **Experiments › Run HPHT_297 › HPHT_297-2**: click **Run HPHT_297** to open the run. The strip under the ID lists every segment of the run, so a sibling is one click away, and **Reactor R07** in the line below the description also opens the run. On the Dashboard, clicking any occupied reactor (R, P or CF, whatever its status) shows **Open run page** as the main button.
 
 ---
 
@@ -114,7 +114,7 @@ Experiments move through a defined lifecycle from creation to completion:
 | Upload solution chemistry results | **Bulk Uploads** → Solution Chemistry → download template → fill in values → upload |
 | Update experiment status | **Dashboard** → click the status badge on a reactor card → select new status |
 | Check Water:Rock Ratio | Open an experiment → **Conditions** tab |
-| Upload ICP data | **Bulk Uploads** → ICP-OES Data → upload the instrument CSV |
+| Upload ICP data | **Bulk Uploads** → ICP-OES Data → upload the instrument CSV. The row then lists every experiment and day it wrote to; click one to check its Results tab |
 | View all results for an experiment | Open an experiment → **Results** tab |
 | Plot ICP concentrations over time | Open any experiment with ICP data → **Results** tab → **ICP over time**, below the results table (not shown when the series has no ICP). It opens collapsed, as on both run pages; its header shows how many samples and experiments it covers, and a click opens the chart. It plots ppm against cumulative day for the experiment's whole series: every segment, side sample and timepoint vial sharing its base ID. Dashed vertical lines mark where each chained segment starts. Click element chips to add or remove lines; **All** toggles every element; **Log scale** switches the y axis. Ca, Si, Fe, Ni, Mg, Mn and Al are on by default (Cu is off). The first four lines are solid; from the fifth on, lines reuse the four colours with a dash pattern, and the legend shows each line's colour and dash. The core flood run page has the same chart |
 | Add or fix an experiment's description | Fill in "Experiment Description" in step 1 of **New Experiment**; it is saved as the experiment's Description note and shows on the reactor card and detail header. Later, open the experiment and click the description under its ID to edit it in place — or click **Add description** if it has none. Only one Description is allowed per experiment |

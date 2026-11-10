@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui'
 
 vi.mock('@/api/bulkUploads', () => ({
@@ -101,5 +102,34 @@ describe('BulkUploadsPage — layout (issue #74)', () => {
 
     expect(screen.getByText('Solution Chemistry')).toBeInTheDocument()
     expect(screen.getByText('pXRF Readings')).toBeInTheDocument()
+  })
+})
+
+describe('BulkUploadsPage — ICP upload names what it wrote to (issue #162)', () => {
+  it('lists the touched experiments as Results-tab links after a drop', async () => {
+    const { bulkUploadsApi } = await import('@/api/bulkUploads')
+    vi.mocked(bulkUploadsApi.uploadIcpOes).mockResolvedValue({
+      created: 1, updated: 1, skipped: 0, errors: [], warnings: [], feedbacks: [],
+      message: 'ICP-OES: 1 created, 1 updated',
+      touched: [
+        { experiment_id: 'HPHT_297-2', time_post_reaction_days: 3 },
+        { experiment_id: 'SERUM_001a-t5', time_post_reaction_days: 5 },
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <BulkUploadsPage />
+      </MemoryRouter>,
+      { wrapper },
+    )
+    await userEvent.click(screen.getByRole('button', { name: /ICP-OES Data/ }))
+    const row = screen.getByRole('button', { name: /ICP-OES Data/ }).parentElement as HTMLElement
+    const input = row.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['x'], 'icp.csv', { type: 'text/csv' }))
+    expect(await screen.findByText('Wrote to 2 experiments')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'HPHT_297-2' })).toHaveAttribute(
+      'href', '/experiments/HPHT_297-2?tab=results')
+    expect(screen.getByRole('link', { name: 'SERUM_001a-t5' })).toHaveAttribute(
+      'href', '/experiments/SERUM_001a-t5?tab=results')
   })
 })

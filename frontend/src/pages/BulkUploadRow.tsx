@@ -2,6 +2,47 @@ import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Button, Badge, FileUpload, Spinner, useToast } from '@/components/ui'
 import { bulkUploadsApi, BulkUploadResult, ConflictCheckResult, isConflictCheckResult, TemplateType } from '@/api/bulkUploads'
+import type { TouchedExperiment } from '@/api/bulkUploads'
+import { SegmentLink } from '@/components/runs/SegmentLink'
+
+/** Entries shown before "and n more" (issue #162). */
+const TOUCHED_VISIBLE = 20
+
+/** The experiments an upload wrote to, each a link to its Results tab, so the
+ *  upload can be checked without reconstructing the file (issue #162). */
+function TouchedList({ touched, dryRun }: { touched: TouchedExperiment[]; dryRun: boolean }) {
+  const [showAll, setShowAll] = useState(false)
+  const experiments = new Set(touched.map((t) => t.experiment_id)).size
+  const shown = showAll ? touched : touched.slice(0, TOUCHED_VISIBLE)
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-ink-secondary">
+        {dryRun ? 'Would write to' : 'Wrote to'} {experiments}{' '}
+        {experiments === 1 ? 'experiment' : 'experiments'}
+      </p>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        {shown.map((t) => (
+          <li key={`${t.experiment_id}|${t.time_post_reaction_days}`} className="text-xs">
+            <SegmentLink id={t.experiment_id} tab="results" />
+            {t.time_post_reaction_days != null && (
+              <span className="text-ink-muted"> · day {t.time_post_reaction_days}</span>
+            )}
+          </li>
+        ))}
+        {!showAll && touched.length > TOUCHED_VISIBLE && (
+          <li>
+            <button
+              className="text-2xs text-ink-muted underline hover:text-ink-secondary"
+              onClick={() => setShowAll(true)}
+            >
+              and {touched.length - TOUCHED_VISIBLE} more
+            </button>
+          </li>
+        )}
+      </ul>
+    </div>
+  )
+}
 
 // ─── Minimal inline icons ────────────────────────────────────────────────────
 export function IconChevron({ open }: { open: boolean }) {
@@ -208,6 +249,10 @@ export function UploadRow({
                   <Badge variant="warning">Warnings: {result.warnings.length}</Badge>
                 )}
               </div>
+
+              {result.touched && result.touched.length > 0 && (
+                <TouchedList touched={result.touched} dryRun={!!result.dry_run} />
+              )}
 
               {result.skipped > 0 && skippedMessage && (
                 <p className="text-xs text-amber-400 leading-relaxed">{skippedMessage}</p>
