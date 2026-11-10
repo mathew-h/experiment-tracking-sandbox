@@ -412,7 +412,7 @@ describe('CoreFloodRunPage', () => {
     const cells = within(rows[1]).getAllByRole('cell')
     // No ICP expander column since issue #164: Date is cells[0].
     expect(cells[1]).toHaveTextContent('—') // Day
-    expect(cells[8]).toHaveTextContent('—') // Liq mL
+    expect(cells[9]).toHaveTextContent('—') // Liq mL (after the Segment column)
   })
 
   it("the rig is the latest-dated segment's slot, as in the run list", async () => {

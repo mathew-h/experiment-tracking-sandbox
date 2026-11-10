@@ -8,7 +8,7 @@ import { SampleFlagButtons, SampleFlagDetail, useSampleFlags } from '@/component
 
 interface Props {
   samples: CoreFloodSample[]
-  /** Side samples: the same columns, plus the segment ID under the date (blanks, bypasses). */
+  /** Side samples (blanks, bypasses): the same columns. */
   variant: boolean
   onEdit: (s: CoreFloodSample) => void
   /** ICP element ppm by result id; a row gets an ICP flag only when present. */
@@ -16,7 +16,7 @@ interface Props {
 }
 
 const CELL = 'font-mono-data text-xs'
-const COLS = 13
+const COLS = 14
 const GROUP = 'text-center border-l border-surface-border'
 // Date stays put while the table scrolls sideways; opaque so cells do not show through.
 // The ICP expander column it once shared the edge with is gone (issue #164).
@@ -34,7 +34,7 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
     <Table>
       <TableHead>
         <tr>
-          <td colSpan={4} aria-hidden="true" />
+          <td colSpan={5} aria-hidden="true" />
           <Th colSpan={2} className={GROUP}>GC</Th>
           <Th colSpan={3} className={GROUP}>Solution</Th>
           <Th colSpan={4} className={GROUP}>Core flood</Th>
@@ -42,6 +42,7 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
         <tr>
           <Th className={`${STICKY_DATE} ${STICKY_HEAD_BG}`}>Date</Th>
           <Th>Day</Th>
+          <Th>Segment</Th>
           <Th>Tube</Th>
           <Th>Result note</Th>
           <Th>H₂ ppm</Th>
@@ -78,14 +79,13 @@ export function SamplesTable({ samples, variant, onEdit, icpByResult }: Props) {
               >
                 <Td className={`${CELL} text-ink-muted ${STICKY_DATE} ${STICKY_ROW_BG}`}>
                   {date}
-                  {variant && (
-                    <div>
-                      {/* Issue #158: stops propagation, so the row's edit click does not fire. */}
-                      <SegmentLink id={s.experiment_id} />
-                    </div>
-                  )}
                 </Td>
                 <Td className={CELL}>{fmt(s.cumulative_time_post_reaction_days)}</Td>
+                <Td className={CELL}>
+                  {/* Which segment the sample came from, as on the HPHT run page. The link
+                      stops propagation, so the row's edit click does not fire. */}
+                  <SegmentLink id={s.experiment_id} />
+                </Td>
                 <Td className={CELL}>{fmt(s.sample_tube_number)}</Td>
                 <Td className="text-xs">
                   <span className="inline-flex items-center gap-2">

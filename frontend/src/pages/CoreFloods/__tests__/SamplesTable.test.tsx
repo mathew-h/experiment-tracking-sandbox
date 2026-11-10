@@ -213,3 +213,35 @@ describe('SamplesTable side-sample IDs (issue #158)', () => {
     expect(onEdit).not.toHaveBeenCalled()
   })
 })
+
+describe('SamplesTable Segment column (Core Floods)', () => {
+  it('names and links each sample segment in a column after Day', () => {
+    const samples = [
+      sample({ result_id: 1, experiment_id: 'CF_020' }),
+      sample({ result_id: 2, experiment_id: 'CF_020-3' }),
+    ]
+    render(<SamplesTable samples={samples} variant={false} onEdit={vi.fn()} icpByResult={noIcp} />)
+    const heads = within(screen.getAllByRole('row')[1]).getAllByRole('columnheader').map((h) => h.textContent)
+    expect(heads.slice(0, 4)).toEqual(['Date', 'Day', 'Segment', 'Tube'])
+    // Newest first: CF_020-3 then CF_020.
+    const rows = screen.getAllByRole('row').slice(2)
+    expect(within(rows[0]).getAllByRole('cell')[2]).toHaveTextContent('CF_020-3')
+    expect(within(rows[0]).getByRole('link', { name: 'CF_020-3' })).toHaveAttribute('href', '/experiments/CF_020-3')
+    expect(within(rows[1]).getAllByRole('cell')[2]).toHaveTextContent('CF_020')
+  })
+
+  it('does not open the editor from the segment link', async () => {
+    const onEdit = vi.fn()
+    render(<SamplesTable samples={[sample({ result_id: 1, experiment_id: 'CF_020-3' })]} variant={false} onEdit={onEdit} icpByResult={noIcp} />)
+    await userEvent.click(screen.getByRole('link', { name: 'CF_020-3' }))
+    expect(onEdit).not.toHaveBeenCalled()
+  })
+
+  it('side samples use the same column instead of a line under the date', () => {
+    const s = sample({ result_id: 1, experiment_id: 'CF_020-5_Bypass1', is_variant: true })
+    render(<SamplesTable samples={[s]} variant onEdit={vi.fn()} icpByResult={noIcp} />)
+    const cells = within(screen.getAllByRole('row')[2]).getAllByRole('cell')
+    expect(cells[0]).not.toHaveTextContent('CF_020-5_Bypass1')
+    expect(cells[2]).toHaveTextContent('CF_020-5_Bypass1')
+  })
+})
