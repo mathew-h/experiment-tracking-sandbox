@@ -38,7 +38,7 @@ export function CompoundFormModal({ open, onClose, onSuccess, initial, initialNa
   useEffect(() => {
     if (!open) return
     if (initial) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset form when modal opens with initial data
+      // Intentional: reset the form whenever the modal opens with initial data.
       setForm({
         name: initial.name,
         formula: initial.formula ?? '',
@@ -54,7 +54,7 @@ export function CompoundFormModal({ open, onClose, onSuccess, initial, initialNa
         notes: initial.notes ?? '',
       })
     } else {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset form when modal opens in create mode
+      // Intentional: reset the form whenever the modal opens in create mode.
       setForm({ ...EMPTY_FORM, name: initialName ?? '' })
     }
   }, [open, initial, initialName])

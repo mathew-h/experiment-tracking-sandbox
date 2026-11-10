@@ -3059,3 +3059,11 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Verification:** vitest **71 files / 692 passed** (+1); eslint 5 = baseline; tsc 0. Red check: the new test failed before the change. No live delete (it would destroy data); Chrome DevTools: `/experiments/groups/SERUM_BO_001` and `/experiments/SERUM_BO_001a-t5?tab=results` load, console clean.
 - **Deploy:** frontend only, no migration, no package change.
 - **Tests added:** yes — vitest: seeded group/sibling caches are invalidated and the deleted ID's series ICP is evicted after a delete. **Docs updated:** no (no user-facing or API change). **Decision logged:** no.
+
+## 2026-11-10 | issue #106 — ESLint baseline to zero (`chore/issue-106-eslint-baseline`)
+- **Files changed:** `frontend/src/components/CompoundFormModal.tsx`; tests `frontend/src/pages/ExperimentDetail/__tests__/ConditionsTab.buttons.test.tsx`, `NotesTab.buttons.test.tsx`.
+- **What:** the 5 errors were (1-2) two `eslint-disable-next-line react-hooks/set-state-in-effect` comments in `CompoundFormModal.tsx` naming a rule the installed `eslint-plugin-react-hooks` 5.x does not define (removed; the intent kept as plain comments), and (3-5) three `as any` casts in tests. The two axios mocks are now `as unknown as AxiosResponse`. The conditions fixture's `any` was hiding real mismatches: the tests pass `null` for `pore_volume_mL` / `serum_vial_size_mL` (as the API does), which `ConditionsResponse` types as `?: number`, and `reactor_series: 'P'` widened to `string`; the fixtures now keep their real values and go through one documented `conditionsRow` cast at each use (20 sites). The shared API type was not widened (out of scope; it extends the write payload).
+- **Acceptance:** `npm run lint` exit 0 and `npm run type-check` exit 0 (neither did before); no `eslint-disable` added; no severities lowered, no `ignorePatterns`. **Not done:** "CI runs both commands on every PR to develop" — the repo has no `.github/workflows`; asked Mat before adding the first workflow.
+- **Verification:** vitest **71 files / 692 passed**.
+- **Deploy:** frontend tests and one comment change only; no runtime change, no package change.
+- **Tests added:** no (lint/type fixes in existing tests). **Docs updated:** no. **Decision logged:** no.

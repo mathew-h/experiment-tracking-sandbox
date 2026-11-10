@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/ui'
+import type { AxiosResponse } from 'axios'
 import { NotesTab } from '../NotesTab'
 
 vi.mock('@/api/experiments', () => ({
@@ -48,7 +49,7 @@ describe('NotesTab action buttons', () => {
   it('clicking delete opens confirm modal without firing mutation', async () => {
     const user = userEvent.setup()
     const { experimentsApi } = await import('@/api/experiments')
-    const deleteFn = vi.fn(() => Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config: {} } as any))
+    const deleteFn = vi.fn(() => Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config: {} } as unknown as AxiosResponse))
     vi.mocked(experimentsApi.deleteNote).mockImplementation(deleteFn)
 
     wrap(<NotesTab experimentId="HPHT_001" notes={sampleNotes} />)
