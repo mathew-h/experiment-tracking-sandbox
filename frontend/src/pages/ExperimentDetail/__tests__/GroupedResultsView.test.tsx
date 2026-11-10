@@ -137,12 +137,37 @@ describe('GroupedResultsView', () => {
     )
   })
 
-  it('defaults the metric selector to H₂ (ppm)', async () => {
+  it('defaults the metric selector to H₂ (g/t), the headline unit (issue #160)', async () => {
     render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
-    expect(select.value).toBe('h2_ppm')
-    expect(select.options[select.selectedIndex].text).toBe('H₂ (ppm)')
+    expect(select.value).toBe('h2_gpt')
+    expect(select.options[select.selectedIndex].text).toBe('H₂ (g/t)')
+  })
+
+  it('falls back to H₂ (ppm) when no bucket has a g/t value (no rock mass)', async () => {
+    vi.mocked(experimentsApi.getGroupRollup).mockResolvedValue(
+      ROLLUP.map((r) => ({ ...r, mean_h2_grams_per_ton: null, sd_h2_grams_per_ton: null })),
+    )
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    expect((screen.getByLabelText(/metric/i) as HTMLSelectElement).value).toBe('h2_ppm')
+  })
+
+  it('still switches to H₂ (ppm) from the g/t default', async () => {
+    const user = userEvent.setup()
+    render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/metric/i), 'h2_ppm')
+    expect((screen.getByLabelText(/metric/i) as HTMLSelectElement).value).toBe('h2_ppm')
+  })
+
+  it('puts the legend above the plot, clear of the x-axis title (issue #160)', async () => {
+    const { container } = render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
+    await waitFor(() => expect(container.querySelector('.recharts-legend-wrapper')).not.toBeNull())
+    const legend = container.querySelector('.recharts-legend-wrapper') as HTMLElement
+    expect(legend.style.top).not.toBe('')
+    expect(legend.style.bottom).toBe('')
   })
 
   it('lists exactly the five H₂-first metric options', async () => {
@@ -371,7 +396,9 @@ describe('GroupedResultsView — issue #144 net H₂ metrics', () => {
     const select = screen.getByLabelText(/metric/i) as HTMLSelectElement
     const texts = Array.from(select.options).map((o) => o.text)
     expect(texts).toEqual(expect.arrayContaining(['Net H₂ (µmol)', 'Net H₂ (g/t)', 'Net Fe²⁺ → H₂ (%)']))
-    expect(select.options[select.selectedIndex].text).toBe('H₂ (ppm)')
+    // A background link never changes the default to a net metric (#144); the raw
+    // default itself moved from ppm to g/t in issue #160.
+    expect(select.options[select.selectedIndex].text).toBe('H₂ (g/t)')
     expect(experimentsApi.getGroupH2BackgroundRollup).toHaveBeenCalledWith('SERUM_001')
   })
 
