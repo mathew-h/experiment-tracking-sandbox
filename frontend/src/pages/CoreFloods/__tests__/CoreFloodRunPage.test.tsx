@@ -414,7 +414,8 @@ describe('CoreFloodRunPage', () => {
     const cells = within(rows[1]).getAllByRole('cell')
     // Segment, Date, Day lead the row (no expander since #164).
     expect(cells[2]).toHaveTextContent('—') // Day
-    expect(cells[9]).toHaveTextContent('—') // Liq mL (after the Segment column)
+    // Issue #163: Cum. H₂ g/t and g/t/day now sit in the GC group, so Liq mL moved.
+    expect(cells[12]).toHaveTextContent('—') // Liq mL
   })
 
   it("the rig is the latest-dated segment's slot, as in the run list", async () => {

@@ -96,7 +96,7 @@ beforeEach(() => {
 })
 
 describe('ResultsTab — typed notes', () => {
-  it('shows MOD for a modification note and NOTE for any other note type', async () => {
+  it('shows MOD for a modification note and other notes in the Result note column (issue #163)', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
       {
         ...baseResult,
@@ -111,14 +111,17 @@ describe('ResultsTab — typed notes', () => {
       { ...baseResult, id: 3, time_post_reaction_days: 21 },
     ])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const rows = await screen.findAllByText(/^T\+/)
+    const rows = await screen.findAllByTestId(/^sample-/)
     expect(rows).toHaveLength(3)
-    expect(screen.getAllByText('MOD')).toHaveLength(1)
-    // day 7 (observation) and day 14 (result_note) get NOTE; day 21 gets nothing
-    expect(screen.getAllByText('NOTE')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /^Show modification for/ })).toHaveLength(1)
+    // The NOTE badge became the Result note column: observations and result notes
+    // show there; a modification shows only behind MOD.
+    expect(within(rows[0]).getByTitle('slightly cloudy')).toBeInTheDocument()
+    expect(within(rows[1]).getByTitle('only a remark')).toBeInTheDocument()
+    expect(within(rows[0]).queryByTitle(/brine swapped/)).toBeNull()
   })
 
-  it('lists every typed note with its label in the expanded row', async () => {
+  it('lists every typed note with its label under DETAILS', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
       {
         ...baseResult,
@@ -130,7 +133,7 @@ describe('ResultsTab — typed notes', () => {
       },
     ])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    fireEvent.click(await screen.findByText('T+7'))
+    fireEvent.click(await screen.findByRole('button', { name: /^Show details for/ }))
     const panel = await screen.findByTestId('timepoint-notes')
     expect(within(panel).getByText(/brine swapped/)).toBeInTheDocument()
     expect(within(panel).getByText(/slightly cloudy/)).toBeInTheDocument()

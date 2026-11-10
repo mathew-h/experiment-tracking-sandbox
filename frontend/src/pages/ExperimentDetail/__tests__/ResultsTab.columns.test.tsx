@@ -57,19 +57,28 @@ const baseResult: ResultWithFlags = {
   xrd_run_date: null,
 }
 
-describe('ResultsTab — H2-first columns', () => {
-  it('renders the H₂ (ppm) column header', async () => {
+// Issue #163: the Results tab renders the shared RunSamplesTable (segment scope);
+// column order, formatting and the DETAILS section are covered in
+// components/results/__tests__/RunSamplesTable.test.tsx. These pin the tab's wiring.
+const row = () => screen.findByTestId('sample-1')
+
+describe('ResultsTab — samples table (issue #163)', () => {
+  it('renders the shared segment-scope headers', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('H₂ (ppm)')).toBeInTheDocument()
+    await row()
+    const heads = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(heads).toEqual(expect.arrayContaining(['Date', 'Day', 'Tube', 'Result note', 'H₂ ppm', 'Fe²⁺ H₂ %']))
+    expect(heads).not.toContain('Segment')
   })
 
-  it('renders the H₂ (ppm) value from the /results payload', async () => {
+  it('renders the H₂ (ppm) and Fe²⁺ H₂ values from the /results payload', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, h2_concentration: 512 },
+      { ...baseResult, h2_concentration: 512, ferrous_iron_yield_h2_pct: 16.8 },
     ])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('512.0')).toBeInTheDocument()
+    expect(within(await row()).getByText('512')).toBeInTheDocument()
+    expect(within(await row()).getByText('16.8')).toBeInTheDocument()
   })
 
   it('renders no NH₄ text anywhere in the table', async () => {
@@ -77,133 +86,83 @@ describe('ResultsTab — H2-first columns', () => {
       { ...baseResult, gross_ammonium_concentration_mM: 3.2, ferrous_iron_yield_nh3_pct: 24.6 },
     ])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    await screen.findByText('T+7')
+    await row()
     expect(screen.queryByText(/NH₄/)).not.toBeInTheDocument()
   })
 
   it('does not render the Background NH₄ action-bar button', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    await screen.findByText('T+7')
+    await row()
     expect(screen.queryByText(/Background NH₄/)).not.toBeInTheDocument()
   })
 
-  it('renders Fe²⁺ H₂ (%) column header', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('Fe²⁺ H₂ (%)')).toBeInTheDocument()
-  })
-
-  it('renders 16.8% for ferrous_iron_yield_h2_pct = 16.8', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, ferrous_iron_yield_h2_pct: 16.8 },
-    ])
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('16.8%')).toBeInTheDocument()
-  })
-
-  it('renders XRD badge when xrd_run_date is set', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, xrd_run_date: '2026-04-15T00:00:00Z' },
-    ])
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findByText('XRD')).toBeInTheDocument()
-  })
-
-  it('does not render XRD badge when xrd_run_date is null', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    await screen.findByText('T+7')
-    expect(screen.queryByText('XRD')).not.toBeInTheDocument()
-  })
-
-  it('renders MOD badge in the main row when has_modification_note is true', async () => {
+  it('shows MOD only for a result with a modification note', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
       { ...baseResult, has_modification_note: true, notes: [{ id: 5, note_text: 'Added HCl', note_type: 'modification', result_id: 1, created_by: null, needs_review: false, created_at: '2026-04-01T00:00:00Z', updated_at: null }] },
+      { ...baseResult, id: 2 },
     ])
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    expect(await screen.findAllByText('MOD')).not.toHaveLength(0)
+    expect(within(await row()).getByRole('button', { name: /^Show modification for/ })).toBeInTheDocument()
+    expect(within(screen.getByTestId('sample-2')).queryByRole('button', { name: /^Show modification for/ })).toBeNull()
   })
 
-  it('does not render MOD badge when has_modification_note is false', async () => {
+  it('takes the ICP flag from the series ICP query, fetched once for table and chart', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
+    vi.mocked(experimentsApiModule.experimentsApi.getIcp).mockClear()
+    vi.mocked(experimentsApiModule.experimentsApi.getIcp).mockResolvedValueOnce({
+      rows: [{
+        result_id: 1, experiment_id: 'HPHT_001', is_variant: false,
+        cumulative_time_post_reaction_days: 7, sample_date: null, elements: { fe: 3 },
+      }],
+      segment_starts: [],
+    })
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    await screen.findByText('T+7')
-    expect(screen.queryByText('MOD')).not.toBeInTheDocument()
+    const flag = await within(await row()).findByRole('button', { name: /^Show ICP for/ })
+    fireEvent.click(flag)
+    expect(await screen.findByText('Fe 3')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^ICP over time/ })).toBeInTheDocument()
+    expect(experimentsApiModule.experimentsApi.getIcp).toHaveBeenCalledTimes(1)
   })
 
-  it('shows the GC run date in the expanded row when it is set', async () => {
+  it('DETAILS shows the GC run date and the XRD run date', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, has_scalar: true, h2_concentration: 512, gc_run_date: '2026-07-29T00:00:00Z' },
+      { ...baseResult, h2_concentration: 512, gc_run_date: '2026-07-29T00:00:00Z', xrd_run_date: '2026-04-15T00:00:00Z' },
     ])
-    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValue(null)
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const row = await screen.findByText('T+7')
-    fireEvent.click(row)
-    expect(await screen.findByText('Instrument Run Dates')).toBeInTheDocument()
-    expect(await screen.findByText('2026-07-29')).toBeInTheDocument()
+    fireEvent.click(within(await row()).getByRole('button', { name: /^Show details for/ }))
+    const details = screen.getByRole('region', { name: 'Sample details' })
+    expect(details).toHaveTextContent('GC: 2026-07-29')
+    expect(details).toHaveTextContent('XRD: 2026-04-15')
   })
 
-  it('flags a missing GC run date when the row has an H2 reading', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, has_scalar: true, h2_concentration: 512, gc_run_date: null },
-    ])
-    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValue(null)
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const row = await screen.findByText('T+7')
-    fireEvent.click(row)
-    expect(await screen.findByText('not recorded')).toBeInTheDocument()
-    expect(
-      await screen.findByText(/not counted by the Dashboard's GC Measurements card/)
-    ).toBeInTheDocument()
-  })
-
-  it('does not flag a missing GC run date when the row has no H2 reading', async () => {
-    vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      { ...baseResult, has_scalar: true, h2_concentration: null, gc_run_date: null },
-    ])
-    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValue(null)
-    wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const row = await screen.findByText('T+7')
-    fireEvent.click(row)
-    expect(screen.queryByText('not recorded')).not.toBeInTheDocument()
-    expect(screen.queryByText('Instrument Run Dates')).not.toBeInTheDocument()
-  })
-
-  it('shows the missing-GC flag even while the scalar fetch is still pending', async () => {
+  it('DETAILS shows the missing-GC flag even while the scalar fetch is still pending', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
       { ...baseResult, has_scalar: true, h2_concentration: 512, gc_run_date: null },
     ])
-    // Never-resolving promise (same idiom as Dashboard.test.tsx:82) — pins that the
-    // run-dates block does not wait behind the scalar query's loading spinner.
-    // mockReturnValueOnce, not mockReturnValue: this mock must not leak into
-    // later tests in the file (there is no clearMocks/restoreMocks configured).
+    // Never-resolving promise: pins that the run-dates block does not wait behind
+    // the scalar query. mockReturnValueOnce so it cannot leak into later tests.
     vi.mocked(resultsApiModule.resultsApi.getScalar).mockReturnValueOnce(new Promise(() => {}))
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const row = await screen.findByText('T+7')
-    fireEvent.click(row)
+    fireEvent.click(within(await row()).getByRole('button', { name: /^Show details for/ }))
     expect(await screen.findByText('not recorded')).toBeInTheDocument()
   })
 
-  it('renders set NMR and XRD run dates without rendering the unset ICP date', async () => {
+  it('DETAILS loads DO and Fe(II) from the scalar row', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
-      {
-        ...baseResult,
-        nmr_run_date: '2026-05-01T00:00:00Z',
-        xrd_run_date: '2026-06-15T00:00:00Z',
-        icp_run_date: null,
-        h2_concentration: null,
-        gc_run_date: null,
-      },
+      { ...baseResult, has_scalar: true },
     ])
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockClear()
+    vi.mocked(resultsApiModule.resultsApi.getScalar).mockResolvedValueOnce({
+      final_dissolved_oxygen_mg_L: 2.5, ferrous_iron_yield: 0.4,
+    } as never)
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
-    const row = await screen.findByText('T+7')
-    fireEvent.click(row)
-    const heading = await screen.findByText('Instrument Run Dates')
-    const section = heading.parentElement as HTMLElement
-    expect(within(section).getByText('2026-05-01')).toBeInTheDocument()
-    expect(within(section).getByText('2026-06-15')).toBeInTheDocument()
-    expect(within(section).queryByText(/^ICP:/)).not.toBeInTheDocument()
+    expect(resultsApiModule.resultsApi.getScalar).not.toHaveBeenCalled()
+    fireEvent.click(within(await row()).getByRole('button', { name: /^Show details for/ }))
+    expect(await screen.findByText('Scalar Results')).toBeInTheDocument()
+    const details = screen.getByRole('region', { name: 'Sample details' })
+    expect(details).toHaveTextContent('DO: 2.5 mg/L')
+    expect(details).toHaveTextContent('Fe(II): 0.4')
   })
 })
 
@@ -220,7 +179,7 @@ describe('ResultsTab — ICP over time (issue #143)', () => {
     wrap(<ResultsTab experimentId="HPHT_001" experimentFk={10} />)
     // Issue #161: the section is a Collapsible, so its header is a toggle button.
     const heading = await screen.findByRole('button', { name: /^ICP over time/ })
-    const header = screen.getByText('H₂ (ppm)')
+    const header = screen.getByRole('columnheader', { name: 'H₂ ppm' })
     // DOCUMENT_POSITION_FOLLOWING: the chart comes after the table header.
     expect(header.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(experimentsApiModule.experimentsApi.getIcp).toHaveBeenCalledWith('HPHT_001')
@@ -239,22 +198,21 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
     )
   }
 
-  it('renders a Tube column after Sample Date with the tube number', async () => {
+  it('renders a Tube column after Day with the tube number', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([
       { ...baseResult, sample_tube_number: 14 },
     ])
     wrapFull(<ResultsTab experimentId="HPHT_001" experimentFk={10} experimentType="HPHT" />)
-    const tube = await screen.findByText('Tube')
-    const headers = Array.from(tube.parentElement!.children).map((c) => c.textContent)
-    expect(headers.indexOf('Tube')).toBe(headers.indexOf('Sample Date') + 1)
-    expect(screen.getByText('14')).toBeInTheDocument()
+    await screen.findByTestId('sample-1')
+    const heads = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(heads.indexOf('Tube')).toBe(heads.indexOf('Day') + 1)
+    expect(within(screen.getByTestId('sample-1')).getByText('14')).toBeInTheDocument()
   })
 
-  it('offers Edit on an expanded primary row and opens the edit form', async () => {
+  it('a click on a primary row opens the edit form (issue #163: row click, as on the run pages)', async () => {
     vi.mocked(experimentsApiModule.experimentsApi.getResults).mockResolvedValue([baseResult])
     wrapFull(<ResultsTab experimentId="HPHT_001" experimentFk={10} experimentType="HPHT" />)
-    fireEvent.click(await screen.findByText('T+7'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.click(await screen.findByTestId('sample-1'))
     expect(await screen.findByText('Edit result — T+7')).toBeInTheDocument()
   })
 
@@ -263,8 +221,8 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
       { ...baseResult, is_primary_timepoint_result: false },
     ])
     wrapFull(<ResultsTab experimentId="HPHT_001" experimentFk={10} experimentType="HPHT" />)
-    fireEvent.click(await screen.findByText('T+7'))
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId('sample-1'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('links a Core Flood experiment to its run page instead of + Add Results, with no Edit', async () => {
@@ -284,8 +242,8 @@ describe('ResultsTab — tube, edit and core flood entry (issue #148)', () => {
       screen.getByText('Core flood samples record flow and permeability, which only the run page captures.'),
     ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '+ Add Results' })).not.toBeInTheDocument()
-    fireEvent.click(await screen.findByText('T+7'))
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId('sample-1'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('keeps + Add Results on an HPHT experiment with no run-page link (issue #162)', async () => {

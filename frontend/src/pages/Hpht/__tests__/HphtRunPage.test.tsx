@@ -126,7 +126,8 @@ describe('HphtRunPage (issue #150)', () => {
     const rows = within(region).getAllByTestId(/^sample-/)
     expect(rows.map((r) => r.dataset.testid)).toEqual(['sample-12', 'sample-11', 'sample-10'])
     expect(within(region).getByRole('columnheader', { name: 'Tube' })).toBeInTheDocument()
-    expect(within(region).getByRole('columnheader', { name: 'Result Note/Sample Description' })).toBeInTheDocument()
+    // Issue #163: one note header across the three tables.
+    expect(within(region).getByRole('columnheader', { name: 'Result note' })).toBeInTheDocument()
     expect(within(rows[2]).getByText('First draw')).toBeInTheDocument()
     expect(within(rows[0]).getByText('MOD')).toBeInTheDocument()
     expect(within(rows[0]).getByText('5')).toBeInTheDocument()
@@ -146,8 +147,8 @@ describe('HphtRunPage (issue #150)', () => {
     await userEvent.click(icpFlag)
     expect(within(region).getByText('Fe 4.5')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    // No expander column: every button in the table is an ICP or MOD flag.
-    expect(within(region).getAllByRole('button').every((b) => /^(ICP|MOD)/.test(b.textContent ?? ''))).toBe(true)
+    // No expander column: every button in the table is an ICP, MOD or DETAILS flag.
+    expect(within(region).getAllByRole('button').every((b) => /^(ICP|MOD|DETAILS)/.test(b.textContent ?? ''))).toBe(true)
   })
 
   it('shows variants only under Side samples', async () => {

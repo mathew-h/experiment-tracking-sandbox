@@ -14,7 +14,8 @@ import { SegmentsTable } from '@/pages/CoreFloods/SegmentsTable'
 import { ConditionsSummaryCard } from './ConditionsSummaryCard'
 import { HphtCharts } from './HphtCharts'
 import { HphtSampleModal } from './HphtSampleModal'
-import { HphtSamplesTable } from './HphtSamplesTable'
+import { RunSamplesTable } from '@/components/results/RunSamplesTable'
+import { fromHpht } from '@/components/results/sampleRows'
 import { HPHT_WRITES, invalidateHphtWrites } from './hphtWrites'
 
 interface ApiError extends Error {
@@ -142,7 +143,15 @@ export function HphtRunPage() {
             <h2 id="samples-heading" className={HEADING}>Samples</h2>
           </CardHeader>
           <div className="p-4">
-            <HphtSamplesTable samples={main} variant={false} onEdit={onEdit} icpByResult={icpByResult} />
+            {/* Issue #163: newest first (the server sends oldest first). */}
+            <RunSamplesTable
+              rows={[...main].reverse().map(fromHpht)}
+              scope="run"
+              kind="hpht"
+              onEdit={onEdit}
+              icpByResult={icpByResult}
+              emptyText="No samples yet"
+            />
           </div>
         </Card>
       </section>
@@ -160,7 +169,14 @@ export function HphtRunPage() {
 
       {side.length > 0 && (
         <Collapsible title="Side samples" summary={`${side.length} (variants, raw values)`}>
-          <HphtSamplesTable samples={side} variant onEdit={onEdit} icpByResult={icpByResult} />
+          <RunSamplesTable
+            rows={[...side].reverse().map(fromHpht)}
+            scope="run"
+            kind="hpht"
+            variant
+            onEdit={onEdit}
+            icpByResult={icpByResult}
+          />
         </Collapsible>
       )}
 
