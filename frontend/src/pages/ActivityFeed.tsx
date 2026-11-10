@@ -13,6 +13,11 @@ const ACTION_COLOR: Record<string, string> = {
   delete: 'text-status-cancelled',
 }
 
+/** The experiment itself was deleted (not one of its notes or results). */
+function isExperimentDeletion(entry: ActivityEntry): boolean {
+  return entry.modification_type === 'delete' && entry.modified_table === 'experiments'
+}
+
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diffMs / 60_000)
@@ -49,7 +54,17 @@ export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
               {entry.experiment_id && (
                 <>
                   {' — '}
-                  <SegmentLink id={entry.experiment_id} className="hover:underline" />
+                  {isExperimentDeletion(entry) ? (
+                    // Issue #159: the experiment is gone, so a link would only reach
+                    // "Experiment not found".
+                    <>
+                      <span className="font-mono-data line-through text-ink-muted">{entry.experiment_id}</span>
+                      {' '}
+                      <span className="text-ink-muted">deleted</span>
+                    </>
+                  ) : (
+                    <SegmentLink id={entry.experiment_id} className="hover:underline" />
+                  )}
                 </>
               )}
             </p>

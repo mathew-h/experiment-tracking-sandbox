@@ -73,6 +73,15 @@ beforeEach(() => {
   })
 })
 
+describe('experiment not found (issue #159)', () => {
+  it('offers a way back to the list', async () => {
+    vi.mocked(experimentsApi.get).mockRejectedValue(new Error('404'))
+    renderPage()
+    expect(await screen.findByText('Experiment not found')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to Experiments' })).toHaveAttribute('href', '/experiments')
+  })
+})
+
 describe('experiment deletion from the detail page', () => {
   it('exposes a Delete Experiment action', async () => {
     renderPage()

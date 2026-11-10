@@ -17,6 +17,7 @@ import { AnalysisPage } from '@/pages/Analysis'
 import { NotesReviewPage } from '@/pages/NotesReview'
 import { CoreFloodListPage, CoreFloodRunPage } from '@/pages/CoreFloods'
 import { HphtListPage, HphtRunPage } from '@/pages/Hpht'
+import { NotFoundPage } from '@/pages/NotFound'
 
 /** Root component: sets up React Query, React Router, and the auth/toast providers. */
 export default function App() {
@@ -37,6 +38,9 @@ export default function App() {
           }
         >
           <Route index element={<DashboardPage />} />
+          {/* Issue #159: explicit, so bookmarks and the e2e specs keep working now
+              that unknown paths show a not-found page instead of redirecting. */}
+          <Route path="/dashboard" element={<Navigate to="/" replace />} />
           <Route path="/experiments" element={<ExperimentListPage />} />
           <Route path="/experiments/new" element={<NewExperimentPage />} />
           <Route path="/experiments/groups/:baseId" element={<ReplicateGroupPage />} />
@@ -52,9 +56,9 @@ export default function App() {
           <Route path="/data-export" element={<DataExportPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
           <Route path="/notes/review" element={<NotesReviewPage />} />
+          {/* Inside the protected layout so a miss keeps the sidebar (issue #159). */}
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
-
-        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   )

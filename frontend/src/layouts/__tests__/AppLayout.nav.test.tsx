@@ -26,10 +26,12 @@ describe('AppLayout navigation', () => {
     )
     expect(screen.getByRole('link', { name: /core floods/i })).toHaveAttribute('href', '/core-floods')
     expect(screen.getByRole('link', { name: /^experiments$/i })).not.toHaveClass('border-red-500')
-    // Just above Notes review, below HPHT (#150).
+    // Ordered by task (issue #159): the run lists follow Experiments.
     const navHrefs = within(screen.getByRole('navigation')).getAllByRole('link').map((a) => a.getAttribute('href'))
-    expect(navHrefs[navHrefs.indexOf('/chemicals') + 1]).toBe('/data-export')
-    expect(navHrefs.slice(-3)).toEqual(['/hpht', '/core-floods', '/notes/review'])
+    expect(navHrefs).toEqual([
+      '/', '/experiments', '/hpht', '/core-floods', '/experiments/new', '/bulk-uploads',
+      '/samples', '/chemicals', '/data-export', '/notes/review',
+    ])
   })
 
   it('sidebar shows HPHT directly above Core Floods (issue #150)', () => {
