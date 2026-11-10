@@ -138,3 +138,26 @@ describe('DashboardPage — KPI cards (issue #85)', () => {
     expect(screen.queryByText(/no GC Run Date recorded/)).not.toBeInTheDocument()
   })
 })
+
+describe('ActivityFeed — deleted experiments (issue #159)', () => {
+  it('shows a deleted experiment as struck text, and links the others', async () => {
+    const { ActivityFeed } = await import('../ActivityFeed')
+    const at = new Date().toISOString()
+    render(
+      <MemoryRouter>
+        <ActivityFeed entries={[
+          { id: 1, experiment_id: 'GONE_001', modified_by: null, modification_type: 'delete', modified_table: 'experiments', created_at: at },
+          { id: 2, experiment_id: 'LIVE_001', modified_by: null, modification_type: 'update', modified_table: 'experiments', created_at: at },
+          { id: 3, experiment_id: 'LIVE_002', modified_by: null, modification_type: 'delete', modified_table: 'notes', created_at: at },
+        ]} />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('link', { name: 'GONE_001' })).toBeNull()
+    const gone = screen.getByText('GONE_001')
+    expect(gone).toHaveClass('line-through')
+    expect(gone.parentElement).toHaveTextContent('GONE_001 deleted')
+    expect(screen.getByRole('link', { name: 'LIVE_001' })).toHaveAttribute('href', '/experiments/LIVE_001')
+    // A deleted note does not mean the experiment is gone.
+    expect(screen.getByRole('link', { name: 'LIVE_002' })).toHaveAttribute('href', '/experiments/LIVE_002')
+  })
+})

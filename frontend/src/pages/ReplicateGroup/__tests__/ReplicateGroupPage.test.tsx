@@ -160,6 +160,8 @@ describe('ReplicateGroupPage', () => {
     vi.mocked(experimentsApi.getGroup).mockRejectedValue(new Error('404'))
     renderAtBase('UNKNOWN_BASE')
     await waitFor(() => expect(screen.getByText('Replicate group not found')).toBeInTheDocument())
+    // Issue #159: a way out of the dead end.
+    expect(screen.getByRole('link', { name: 'Back to Experiments' })).toHaveAttribute('href', '/experiments')
   })
 
   it('issues the group query against the base ID, not a per-experiment endpoint', async () => {

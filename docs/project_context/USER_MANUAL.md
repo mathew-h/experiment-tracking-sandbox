@@ -23,10 +23,13 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 
 ## Main Pages
 
+The sidebar lists these pages in this order (issue #159): the pages you start from first, then the entry and reference pages.
+
 | Page | What it does |
 |------|--------------|
-| **Dashboard** (`/dashboard`) | Reactor grid showing all ONGOING experiments. Click a status badge to change an experiment's status (Ongoing → Completed or Cancelled). |
-| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and XRD tabs. |
+| **Dashboard** (`/`, also `/dashboard`) | Reactor grid showing all ONGOING experiments. Click a status badge to change an experiment's status (Ongoing → Completed or Cancelled). |
+| **Experiments** (`/experiments`) | List all experiments. Click an experiment to open its detail view with Conditions, Results, Notes, and XRD tabs. A row marked **group** opens its replicate group page (click the "replicates" chip instead to list the vials in place). On an HPHT or core flood row, the **Reactor** number links to the run page. |
+| **HPHT** (`/hpht`) | One row per HPHT run, with a run page for samples, charts and segments. See [HPHT runs](#hpht-runs) below. |
 | **Core Floods** (`/core-floods`) | One row per core flood run, with a run page for samples and cleanup. See [Core Floods](#core-floods) below. |
 | **New Experiment** (`/experiments/new`) | 4-step guided form to create a new experiment: basic info, conditions, chemical additives, and confirmation. |
 | **Bulk Uploads** (`/bulk-uploads`) | Accordion panel for uploading analytical data in bulk (solution chemistry, ICP-OES, XRD, pXRF, and more). See the [Bulk Uploads Guide](BULK_UPLOADS.md). |
@@ -34,6 +37,8 @@ For detailed guides on specific features, see the sub-guides linked in the navig
 | **Chemicals** (`/chemicals`) | Browse the reagent/compound inventory used in experiment conditions. |
 | **Data Export** (`/data-export`) | Filter experiments (status, type, ID, sample, reactor, description, additive, researcher, dates), tick any number, and download one Excel workbook for all of them. |
 | **Notes review** (`/notes/review`) | Global queue of notes flagged for review after the typed-notes migration. Filter by researcher, experiment, type or text; select rows (or every row reading the same text) and mark reviewed, retype, or delete them in one audited action. |
+
+**A wrong address.** A URL that matches no page shows **Page not found** with the address you tried and links to Dashboard, Experiments, HPHT and Core Floods (it used to send you to the Dashboard without a word). A deleted or mistyped experiment or replicate group shows "not found" with a **Back to Experiments** link.
 
 ---
 
@@ -62,7 +67,7 @@ A core flood run is split across `-N` segment experiments (`CF_020`, `CF_020-2`,
 
 ## HPHT runs
 
-An HPHT run is every experiment sharing a base ID: the first segment (`HPHT_297`), later segments (`HPHT_297-2`) and side samples such as `HPHT_068_Acidified`. The **HPHT** page (in the sidebar above Core Floods) treats the whole run as one record. It covers both the R vessels and the Parr vessels (P01–P06).
+An HPHT run is every experiment sharing a base ID: the first segment (`HPHT_297`), later segments (`HPHT_297-2`) and side samples such as `HPHT_068_Acidified`. The **HPHT** page (in the sidebar below Experiments, above Core Floods) treats the whole run as one record. It covers both the R vessels and the Parr vessels (P01–P06).
 
 **List.** One row per run: description, reactor slot (`R07`, `P03`), sample count, last sample date, cumulative H₂ (g/t) and status. It opens on **Active** (runs with an ONGOING segment); **All** shows every run. Type in the search box to filter by run ID or description. A run with no reactor (for example HPHT_Synth_001) shows an empty Reactor cell.
 

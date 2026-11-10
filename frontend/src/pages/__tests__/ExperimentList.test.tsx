@@ -651,3 +651,91 @@ describe('ExperimentListPage — background filter and badge (issue #152)', () =
     )
   })
 })
+
+describe('ExperimentListPage — run links and group cues (issue #159)', () => {
+  const row = (over: Partial<ExperimentListItem>): ExperimentListItem => ({
+    id: 1, experiment_id: 'HPHT_297-2', experiment_number: 297, status: 'ONGOING',
+    researcher: null, date: null, sample_id: null, created_at: '2026-07-01T00:00:00Z',
+    experiment_type: 'HPHT', reactor_number: 7, additives_summary: null, description: null,
+    base_experiment_id: 'HPHT_297', parent_experiment_fk: null, replicate_label: null,
+    is_outlier: false, id_timepoint_days: null, ...over,
+  })
+
+  function renderWithRunRoutes() {
+    return render(
+      <MemoryRouter initialEntries={['/experiments']}>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/experiments" element={<ExperimentListPage />} />
+              <Route path="/experiments/groups/:baseId" element={<GroupRouteProbe />} />
+              <Route path="/experiments/:id" element={<DetailRouteProbe />} />
+              <Route path="/hpht/:baseId" element={<p data-testid="hpht-route">hpht</p>} />
+            </Routes>
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  afterEach(() => { vi.clearAllMocks() })
+
+  it('links HPHT and core flood reactor cells to their runs; serum stays text', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [
+        row({}),
+        row({ id: 2, experiment_id: 'CF_018-3', experiment_type: 'Core Flood', reactor_number: 2,
+              base_experiment_id: 'CF_018' }),
+        row({ id: 3, experiment_id: 'SERUM_099', experiment_type: 'Serum', reactor_number: 5,
+              base_experiment_id: null }),
+      ],
+      total: 3, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    const hpht = await screen.findByRole('link', { name: '7' })
+    expect(hpht).toHaveAttribute('href', '/hpht/HPHT_297')
+    expect(hpht).toHaveAttribute('title', 'Open run HPHT_297')
+    expect(screen.getByRole('link', { name: '2' })).toHaveAttribute('href', '/core-floods/CF_018')
+    expect(screen.queryByRole('link', { name: '5' })).toBeNull()
+    expect(screen.getByText('5')).toBeInTheDocument()
+  })
+
+  it('opens the run, not the row, from the reactor link', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({ items: [row({})], total: 1, skip: 0, limit: 25 })
+    const user = userEvent.setup()
+    renderWithRunRoutes()
+    await user.click(await screen.findByRole('link', { name: '7' }))
+    expect(await screen.findByTestId('hpht-route')).toBeInTheDocument()
+    expect(screen.queryByTestId('detail-route')).not.toBeInTheDocument()
+  })
+
+  it('marks a group row: linked ID, "group" badge, titled expander', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [row({
+        id: 3, experiment_id: 'SERUM_001a-t1', experiment_type: 'Serum', reactor_number: null,
+        base_experiment_id: 'SERUM_001', replicate_label: 'a', group_display_id: 'SERUM_001',
+        vial_count: 4, replicate_letters: ['a', 'b'],
+        replicates: [row({ id: 4, experiment_id: 'SERUM_001a-t1', experiment_type: 'Serum',
+                           replicate_label: 'a', group_display_id: 'SERUM_001a', vial_count: 2 })],
+      })],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    const id = await screen.findByRole('link', { name: 'SERUM_001' })
+    expect(id).toHaveAttribute('href', '/experiments/groups/SERUM_001')
+    expect(id).toHaveAttribute('title', 'Open group page')
+    expect(id.closest('td')).toHaveTextContent('group')
+    expect(screen.getByRole('button', { name: 'Expand replicates' })).toHaveAttribute('title', 'Show replicates here')
+  })
+
+  it('leaves a plain row ID unlinked and unbadged', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({
+      items: [row({ experiment_type: 'Serum', base_experiment_id: null, experiment_id: 'SERUM_098' })],
+      total: 1, skip: 0, limit: 25,
+    })
+    render(<ExperimentListPage />, { wrapper })
+    await screen.findByText('SERUM_098')
+    expect(screen.queryByRole('link', { name: 'SERUM_098' })).toBeNull()
+    expect(screen.queryByText('group')).toBeNull()
+  })
+})

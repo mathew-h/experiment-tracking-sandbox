@@ -120,7 +120,7 @@ Shows the last 20 entries from the modifications audit log:
 
 - **Action** — Created / Updated / Deleted (color-coded)
 - **Table** — which database table was affected
-- **Experiment ID** — click to navigate to the experiment (when available)
+- **Experiment ID** — click to navigate to the experiment (when available). A deleted experiment shows its ID struck through with "deleted" and no link, since its page no longer exists (issue #159)
 - **Who** — the user who made the change (if recorded)
 - **When** — relative time (e.g. "5m ago", "2d ago")
 

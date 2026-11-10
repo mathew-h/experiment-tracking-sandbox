@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi } from '@/api/experiments'
 import type {
@@ -308,7 +308,17 @@ export function ReplicateGroupPage() {
 
   if (isLoading) return <PageSpinner />
   if (isError || !group) {
-    return <p className="text-red-400 text-sm p-6">Replicate group not found</p>
+    return (
+      <div className="space-y-2 p-6">
+        <p className="text-red-400 text-sm">Replicate group not found</p>
+        {/* Issue #159. The list keeps its search box in component state, not
+            the URL, so this cannot pre-fill a search for the base ID yet; see
+            #162 for the search-param pattern. */}
+        <Link to="/experiments" className="text-sm text-red-400 hover:text-red-300">
+          Back to Experiments
+        </Link>
+      </div>
+    )
   }
 
   return <ReplicateGroupContent group={group} baseId={baseId!} />

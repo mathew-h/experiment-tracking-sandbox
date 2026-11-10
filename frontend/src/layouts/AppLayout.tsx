@@ -36,6 +36,27 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    path: '/hpht',
+    label: 'HPHT',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="4" y="2" width="8" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M6 2V1M10 2V1M6.5 9.5h3M8 8v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    path: '/core-floods',
+    label: 'Core Floods',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <ellipse cx="8" cy="3.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M3 3.5v9c0 1.1 2.2 2 5 2s5-.9 5-2v-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" stroke="currentColor" strokeWidth="1.5"/>
+      </svg>
+    ),
+  },
+  {
     path: '/experiments/new',
     label: 'New Experiment',
     icon: (
@@ -82,27 +103,6 @@ const navItems: NavItem[] = [
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    ),
-  },
-  {
-    path: '/hpht',
-    label: 'HPHT',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <rect x="4" y="2" width="8" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M6 2V1M10 2V1M6.5 9.5h3M8 8v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
-  {
-    path: '/core-floods',
-    label: 'Core Floods',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <ellipse cx="8" cy="3.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M3 3.5v9c0 1.1 2.2 2 5 2s5-.9 5-2v-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        <path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" stroke="currentColor" strokeWidth="1.5"/>
       </svg>
     ),
   },

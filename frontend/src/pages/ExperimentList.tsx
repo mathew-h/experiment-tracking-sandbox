@@ -1,7 +1,8 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { experimentsApi, type ExperimentListItem, type ExperimentStatus } from '@/api/experiments'
+import { runPathFor } from '@/utils/experimentId'
 import {
   Table, TableHead, TableBody, TableRow, Th, Td,
   Badge, Button, Input, Select, PageSpinner, StatusBadge, useToast,
@@ -236,6 +237,7 @@ export function ExperimentListPage() {
                           hasReplicates ? (
                             <button
                               aria-label="Expand replicates"
+                              title="Show replicates here"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 setExpandedGroups((prev) => {
@@ -356,6 +358,7 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
   const target = isGroupRow
     ? `/experiments/groups/${encodeURIComponent(displayId)}`
     : `/experiments/${encodeURIComponent(exp.experiment_id)}`
+  const runPath = runPathFor(exp.experiment_type, exp.base_experiment_id)
 
   const statusMutation = useMutation({
     mutationFn: ({ experimentId, status }: { experimentId: string; status: ExperimentStatus }) =>
@@ -377,8 +380,17 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
       <Td>
         <span className={`font-mono-data text-red-400 hover:text-red-300 ${child ? 'pl-6 inline-flex items-center gap-1' : ''}`}>
           {child && <span className="text-ink-muted">↳ {exp.replicate_label}</span>}
-          {displayId}
+          {isGroupRow ? (
+            // Issue #159: say what a click on a group row does. The row click
+            // still goes to the same place; this is the cue.
+            <Link to={target} title="Open group page" onClick={(e) => e.stopPropagation()}>
+              {displayId}
+            </Link>
+          ) : (
+            displayId
+          )}
         </span>
+        {isGroupRow && <Badge className="ml-2">group</Badge>}
         {exp.is_background && <Badge variant="info" className="ml-2">BG</Badge>}
         {groupBadge}
       </Td>
@@ -389,7 +401,21 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
         {exp.sample_id ?? <span className="text-ink-muted">—</span>}
       </Td>
       <Td className="font-mono-data text-xs">
-        {exp.reactor_number ?? <span className="text-ink-muted">—</span>}
+        {exp.reactor_number == null ? (
+          <span className="text-ink-muted">—</span>
+        ) : runPath ? (
+          // Issue #159: the list's only way to an HPHT or Core Flood run page.
+          <Link
+            to={runPath}
+            title={`Open run ${exp.base_experiment_id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-red-400 hover:text-red-300"
+          >
+            {exp.reactor_number}
+          </Link>
+        ) : (
+          exp.reactor_number
+        )}
       </Td>
       <Td onClick={(e) => e.stopPropagation()}>
         {statusReadOnly ? (

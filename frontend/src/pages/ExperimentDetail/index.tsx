@@ -208,7 +208,17 @@ export function ExperimentDetailPage() {
   }
 
   if (isLoading) return <PageSpinner />
-  if (error || !experiment) return <p className="text-red-400 text-sm p-6">Experiment not found</p>
+  if (error || !experiment) {
+    return (
+      <div className="space-y-2 p-6">
+        <p className="text-red-400 text-sm">Experiment not found</p>
+        {/* Issue #159: a way out of the dead end. */}
+        <Link to="/experiments" className="text-sm text-red-400 hover:text-red-300">
+          Back to Experiments
+        </Link>
+      </div>
+    )
+  }
 
   const experimentType = conditions?.experiment_type
   // Issue #156: an HPHT or Core Flood segment links its reactor to its run.
