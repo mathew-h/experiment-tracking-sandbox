@@ -1,4 +1,6 @@
 import { Input, Select } from '@/components/ui'
+import { DateRangeFilter } from '@/components/filters/DateRangeFilter'
+import { SAMPLE_DATE_PRESETS } from '@/components/filters/dateRanges'
 
 export interface ExportFilterValues {
   status: string
@@ -9,8 +11,12 @@ export interface ExportFilterValues {
   description: string
   additive: string
   researcher: string
+  /** Experiment start date bounds (experiments.date). */
   dateFrom: string
   dateTo: string
+  /** Issue #168: last result date bounds (latest sample measurement date). */
+  lastResultFrom: string
+  lastResultTo: string
 }
 
 export const EMPTY_FILTERS: ExportFilterValues = {
@@ -24,6 +30,8 @@ export const EMPTY_FILTERS: ExportFilterValues = {
   researcher: '',
   dateFrom: '',
   dateTo: '',
+  lastResultFrom: '',
+  lastResultTo: '',
 }
 
 const STATUS_OPTIONS = [
@@ -44,7 +52,6 @@ interface TextField {
   key: keyof ExportFilterValues
   placeholder: string
   width: string
-  type?: string
 }
 
 const TEXT_FIELDS: TextField[] = [
@@ -54,8 +61,6 @@ const TEXT_FIELDS: TextField[] = [
   { key: 'description', placeholder: 'Description…', width: 'w-44' },
   { key: 'additive', placeholder: 'Additive…', width: 'w-40' },
   { key: 'researcher', placeholder: 'Researcher…', width: 'w-40' },
-  { key: 'dateFrom', placeholder: 'From', width: 'w-36', type: 'date' },
-  { key: 'dateTo', placeholder: 'To', width: 'w-36', type: 'date' },
 ]
 
 interface ExportFiltersProps {
@@ -68,38 +73,54 @@ export function ExportFilters({ value, onChange }: ExportFiltersProps) {
   const set = (key: keyof ExportFilterValues, v: string) => onChange({ ...value, [key]: v })
 
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <div className="w-40">
-        <Select
-          label=""
-          aria-label="Status"
-          options={STATUS_OPTIONS}
-          placeholder="All statuses"
-          value={value.status}
-          onChange={(e) => set('status', e.target.value)}
-        />
-      </div>
-      <div className="w-40">
-        <Select
-          label=""
-          aria-label="Type"
-          options={TYPE_OPTIONS}
-          placeholder="All types"
-          value={value.experimentType}
-          onChange={(e) => set('experimentType', e.target.value)}
-        />
-      </div>
-      {TEXT_FIELDS.map((f) => (
-        <div key={f.key} className={f.width}>
-          <Input
-            type={f.type}
-            aria-label={f.placeholder.replace('…', '')}
-            placeholder={f.placeholder}
-            value={value[f.key]}
-            onChange={(e) => set(f.key, e.target.value)}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-40">
+          <Select
+            label=""
+            aria-label="Status"
+            options={STATUS_OPTIONS}
+            placeholder="All statuses"
+            value={value.status}
+            onChange={(e) => set('status', e.target.value)}
           />
         </div>
-      ))}
+        <div className="w-40">
+          <Select
+            label=""
+            aria-label="Type"
+            options={TYPE_OPTIONS}
+            placeholder="All types"
+            value={value.experimentType}
+            onChange={(e) => set('experimentType', e.target.value)}
+          />
+        </div>
+        {TEXT_FIELDS.map((f) => (
+          <div key={f.key} className={f.width}>
+            <Input
+              aria-label={f.placeholder.replace('…', '')}
+              placeholder={f.placeholder}
+              value={value[f.key]}
+              onChange={(e) => set(f.key, e.target.value)}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-stretch gap-3">
+        <DateRangeFilter
+          title="Experiment start date"
+          hint="When the run began"
+          value={{ begin: value.dateFrom, end: value.dateTo }}
+          onChange={(r) => onChange({ ...value, dateFrom: r.begin, dateTo: r.end })}
+        />
+        <DateRangeFilter
+          title="Last sample date"
+          hint="Its most recent dated result"
+          value={{ begin: value.lastResultFrom, end: value.lastResultTo }}
+          onChange={(r) => onChange({ ...value, lastResultFrom: r.begin, lastResultTo: r.end })}
+          presets={SAMPLE_DATE_PRESETS}
+        />
+      </div>
     </div>
   )
 }

@@ -1,10 +1,11 @@
 from __future__ import annotations
 import io
+from datetime import date
 from typing import Callable, Literal, TypeVar
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, text, case, or_, exists
+from sqlalchemy import ColumnElement, Date, cast, select, func, text, case, or_, exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -48,6 +49,7 @@ from backend.services.experiment_deletion import (
     DeleteImpact, collect_delete_impact, delete_experiment_cascade,
 )
 from backend.services.denormalized_ids import sync_denormalized_experiment_id
+from backend.services.workdays import LAB_TZ
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -71,6 +73,44 @@ def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
     and for sequential re-runs (e.g. SERUM_040-2), which are never parents.
     """
     return treatment is None and replicate_label is None and (derivation is None or derivation in (0, 1))
+
+
+def _lab_date(expr: ColumnElement) -> ColumnElement[date]:
+    """A timestamptz expression as its lab-local (America/New_York) calendar date.
+
+    Comparing the raw timestamp to a date string means midnight, so a sample
+    or start at 14:00 on the upper bound's day would fall outside it.
+    """
+    return cast(func.timezone(LAB_TZ.key, expr), Date)
+
+
+def _last_result_date_expr(experiment_pk: ColumnElement[int] | int) -> ColumnElement[date]:
+    """An experiment's last result date (issue #168): the lab-local calendar
+    date of MAX(scalar_results.measurement_date) over its own results; NULL
+    when none is dated. No fallback to start date + days.
+
+    `experiment_pk` is a column (correlated subquery) or a plain id. The list
+    filter and the list item's `last_result_date` both use this, so they
+    cannot drift apart.
+    """
+    latest = (
+        select(func.max(ScalarResults.measurement_date))
+        .join(ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id)
+        .where(ExperimentalResults.experiment_fk == experiment_pk)
+        .scalar_subquery()
+    )
+    return _lab_date(latest)
+
+
+def _latest_last_result_date(db: Session, experiment_pks: list[int]) -> date | None:
+    """The latest last result date among `experiment_pks` (None if none dated):
+    what a list row standing for several experiments shows (issue #168)."""
+    if not experiment_pks:
+        return None
+    return db.execute(
+        select(func.max(_last_result_date_expr(Experiment.id)))
+        .where(Experiment.id.in_(experiment_pks))
+    ).scalar_one()
 
 
 def _build_list_item(db: Session, exp: Experiment) -> dict:
@@ -114,8 +154,10 @@ def list_experiments(
     sample_id: str | None = None,
     experiment_type: str | None = None,
     reactor_number: int | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    last_result_from: date | None = None,
+    last_result_to: date | None = None,
     description: str | None = None,
     additive: str | None = None,
     is_background: bool | None = None,
@@ -147,10 +189,20 @@ def list_experiments(
         stmt = stmt.where(Experiment.experiment_id.ilike(f"%{search}%"))
     if sample_id:
         stmt = stmt.where(Experiment.sample_id.ilike(f"%{sample_id}%"))
+    # Issue #168: both date pairs are inclusive lab-local calendar dates, so a
+    # start or sample at 14:00 on the `_to` day is inside the range. A NULL
+    # date compares false, so setting either bound drops undated experiments.
+    # Applied to `stmt` before the grouping branch, so `total` reflects them.
     if date_from:
-        stmt = stmt.where(Experiment.date >= date_from)
+        stmt = stmt.where(_lab_date(Experiment.date) >= date_from)
     if date_to:
-        stmt = stmt.where(Experiment.date <= date_to)
+        stmt = stmt.where(_lab_date(Experiment.date) <= date_to)
+    if last_result_from or last_result_to:
+        last_result = _last_result_date_expr(Experiment.id)
+        if last_result_from:
+            stmt = stmt.where(last_result >= last_result_from)
+        if last_result_to:
+            stmt = stmt.where(last_result <= last_result_to)
     if experiment_type:
         stmt = stmt.where(ExperimentalConditions.experiment_type == experiment_type)
     if reactor_number is not None:
@@ -284,22 +336,30 @@ def list_experiments(
                 ),
             ).label("rn"),
             func.count().over(partition_by=stem).label("vial_count"),
+            # Issue #168 (Mat, 2026-11-11): a row standing for several vials
+            # shows the latest last result date among the vials it stands for
+            # -- those that passed the filters, like vial_count -- since
+            # picking the row exports all of them.
+            func.max(_last_result_date_expr(matched_sq.c.id))
+            .over(partition_by=stem).label("last_result_date"),
         ).subquery()
         reps_sq = (
-            select(ranked_sq.c.id, ranked_sq.c.stem, ranked_sq.c.vial_count)
+            select(ranked_sq.c.id, ranked_sq.c.stem, ranked_sq.c.vial_count,
+                   ranked_sq.c.last_result_date)
             .where(ranked_sq.c.rn == 1)
             .subquery()
         )
         total = db.execute(select(func.count()).select_from(reps_sq)).scalar_one()
         rep_rows = db.execute(
-            select(Experiment, reps_sq.c.stem, reps_sq.c.vial_count)
+            select(Experiment, reps_sq.c.stem, reps_sq.c.vial_count,
+                   reps_sq.c.last_result_date)
             .join(reps_sq, reps_sq.c.id == Experiment.id)
             .order_by(Experiment.experiment_number.desc())
             .offset(skip)
             .limit(limit)
         ).all()
         rows = [row[0] for row in rep_rows]
-        flat_collapse = {row[0].id: (row[1], row[2]) for row in rep_rows}
+        flat_collapse = {row[0].id: (row[1], row[2], row[3]) for row in rep_rows}
 
     items = []
     for exp in rows:
@@ -307,9 +367,10 @@ def list_experiments(
         if not group_replicates:
             # Issue #98: label the row by its timepoint stem so the internal
             # '-t<days>' token never reaches the UI.
-            stem, vial_count = flat_collapse[exp.id]
+            stem, vial_count, last_result_date = flat_collapse[exp.id]
             item_data["group_display_id"] = stem
             item_data["vial_count"] = vial_count
+            item_data["last_result_date"] = last_result_date
         if group_replicates:
             # Bucket key for this representative -- mirrors Block A: a
             # lettered representative (orphan-set case) buckets on its own
@@ -349,6 +410,10 @@ def list_experiments(
             ).scalars().all()
             members = [m for m in bucket_rows if m.replicate_label is not None]
             item_data["vial_count"] = len(bucket_rows)
+            # Issue #168: like vial_count, the latest across the whole
+            # (unfiltered) bucket, as the flat row does across its vials.
+            item_data["last_result_date"] = _latest_last_result_date(
+                db, [r.id for r in bucket_rows])
 
             if len(bucket_rows) > 1 and members:
                 # A real group: label the row by the group stem (issue #98 D2).
@@ -365,6 +430,9 @@ def list_experiments(
                     child = _build_list_item(db, group.representative)
                     child["group_display_id"] = group.stem
                     child["vial_count"] = group.vial_count
+                    child["last_result_date"] = _latest_last_result_date(db, [
+                        m.id for m in members
+                        if split_timepoint_token(m.experiment_id)[0] == group.stem])
                     item_data["replicates"].append(
                         ExperimentListItem.model_validate(child)
                     )

@@ -38,6 +38,8 @@ export function DataExportPage() {
       researcher: debouncedFilters.researcher.trim() || undefined,
       date_from: debouncedFilters.dateFrom || undefined,
       date_to: debouncedFilters.dateTo || undefined,
+      last_result_from: debouncedFilters.lastResultFrom || undefined,
+      last_result_to: debouncedFilters.lastResultTo || undefined,
       limit: LIST_LIMIT,
       group_replicates: false,
     }),

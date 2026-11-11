@@ -7,7 +7,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `search` (case-insensitive partial match on `experiment_id`), `reactor_number`, `date_from`, `date_to`, `description` (matches the experiment's first note / Description column), `additive` (case-insensitive partial match on the compound name of any of the experiment's chemical additives), `is_background` (bool, issue #152: `true` = backgrounds only, `false` = samples only, omitted = both), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, `description`, and `additive` are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
+| GET | `/api/experiments` | List experiments. Query: `skip`, `limit`, `status`, `experiment_type`, `sample_id`, `researcher`, `search` (case-insensitive partial match on `experiment_id`), `reactor_number`, `date_from`, `date_to` (start date, `YYYY-MM-DD`, inclusive lab-local calendar dates since issue #168: a run started at 14:00 ET on `date_to` is included; an invalid date is a 422), `last_result_from`, `last_result_to` (issue #168: the experiment's last result date, see `last_result_date` below; inclusive, `YYYY-MM-DD`, validated; setting either drops experiments with no dated result), `description` (matches the experiment's first note / Description column), `additive` (case-insensitive partial match on the compound name of any of the experiment's chemical additives), `is_background` (bool, issue #152: `true` = backgrounds only, `false` = samples only, omitted = both), `group_replicates` (bool, default false). `experiment_type`, `reactor_number`, `description`, `additive` and both date pairs are applied in SQL before `skip`/`limit`, so `total` and the returned page always reflect the fully-filtered set (#64). |
 | GET | `/api/experiments/next-id` | Next auto-incremented experiment ID. Query: `type` (Serum/HPHT/Autoclave/Core Flood). Returns `{"next_id": "HPHT_004"}` |
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}/export` | **Export all** (issue #141): one `.xlsx` for the experiment's whole lineage. See below. |
@@ -77,6 +77,15 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
   for. Flat mode counts matched rows sharing the stem; grouped mode counts every
   row in the bucket, parent included. A row with `vial_count > 1` must not offer
   an inline status edit — the PATCH would reach only the representative.
+- `last_result_date` (date `YYYY-MM-DD`, nullable; issue #168) — the
+  America/New_York calendar date of `MAX(scalar_results.measurement_date)`
+  over the experiment's own results; null when none is dated. No fallback to
+  start date + days, and ICP `sample_date` is not counted (on the 2026-11-06
+  dump that changed no experiment). The same expression (`_last_result_date_expr`)
+  drives the `last_result_from`/`last_result_to` filter, which tests each
+  experiment row. Flat mode: the latest over the vials the row stands for (those
+  that passed the filters, as `vial_count`), since picking the row exports all of
+  them (Mat, 2026-11-11). Grouped mode, by the same rule: a group row carries the latest over its whole bucket (unfiltered, like its `vial_count`), and each `replicates` child the latest over its own vials (`_latest_last_result_date`).
 - `replicate_letters` (array of string, nullable) — grouped mode only: the
   group's DISTINCT replicate letters, for the "N replicates: a, b" badge. Null
   in flat mode and for rows that are not groups.
@@ -470,7 +479,7 @@ that kind, Conditions, Additives, Notes), then
 
 | Experiments column | Source |
 |--------------------|--------|
-| Experiment ID, Status, Experiment type, Date, Researcher, Sample ID, Reactor number, Description | `v_experiments` |
+| Experiment ID, Status, Experiment type, Start date, Researcher, Sample ID, Reactor number, Description | `v_experiments` (**Start date** is `date`, the experiment start; the header read `Date` before issue #168, so an Excel lookup on that header text needs updating) |
 | Base ID, is_variant | computed from the lineage |
 
 Summary keys, in order: `Experiment count`, `Series count`, `Base IDs`,

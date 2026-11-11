@@ -100,6 +100,10 @@ export interface ExperimentListItem {
   additives_summary: string | null
   /** The note typed 'description' (issue #118). */
   description: string | null
+  /** Issue #168: lab-local YYYY-MM-DD of the latest dated result; null when none.
+   *  A flat-mode vial row carries the latest over its vials. Render as is (no slicing).
+   *  Always sent by the API; optional so payloads built before #168 stay valid. */
+  last_result_date?: string | null
   base_experiment_id: string | null
   parent_experiment_fk: number | null
   replicate_label: string | null
@@ -256,8 +260,12 @@ export interface ExperimentListParams {
   sample_id?: string
   experiment_type?: string
   reactor_number?: number
+  /** Start date bounds, inclusive lab-local (America/New_York) YYYY-MM-DD. */
   date_from?: string
   date_to?: string
+  /** Issue #168: last result date bounds (latest scalar measurement date, lab-local), inclusive. */
+  last_result_from?: string
+  last_result_to?: string
   description?: string
   additive?: string
   /** Issue #152: true = backgrounds only, false = samples only. */

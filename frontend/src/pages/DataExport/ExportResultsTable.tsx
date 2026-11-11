@@ -1,5 +1,8 @@
 import type { ExperimentListItem } from '@/api/experiments'
 import { Table, TableHead, TableBody, TableRow, Th, Td, StatusBadge } from '@/components/ui'
+import { labDateOf } from '@/utils/labDate'
+
+const COLUMN_COUNT = 8
 
 interface ExportResultsTableProps {
   rows: ExperimentListItem[]
@@ -31,7 +34,8 @@ export function ExportResultsTable({ rows, selected, onToggle, onToggleAll }: Ex
           <Th>ID</Th>
           <Th>Type</Th>
           <Th>Status</Th>
-          <Th>Date</Th>
+          <Th>Start date</Th>
+          <Th>Last sample</Th>
           <Th>Description</Th>
           <Th>Additives</Th>
         </tr>
@@ -39,7 +43,7 @@ export function ExportResultsTable({ rows, selected, onToggle, onToggleAll }: Ex
       <TableBody>
         {rows.length === 0 ? (
           <TableRow>
-            <Td colSpan={7} className="text-center py-8 text-ink-muted">No experiments found</Td>
+            <Td colSpan={COLUMN_COUNT} className="text-center py-8 text-ink-muted">No experiments found</Td>
           </TableRow>
         ) : (
           rows.map((row) => {
@@ -66,8 +70,13 @@ export function ExportResultsTable({ rows, selected, onToggle, onToggleAll }: Ex
                 <Td>
                   {row.status ? <StatusBadge status={row.status} /> : <span className="text-ink-muted">—</span>}
                 </Td>
+                {/* Lab-local, matching the server's Started from/to filter. */}
                 <Td className="font-mono-data text-xs text-ink-muted">
-                  {row.date ? row.date.slice(0, 10) : '—'}
+                  {row.date ? labDateOf(row.date) : '—'}
+                </Td>
+                {/* Already a lab-local calendar date from the server: no slicing. */}
+                <Td className="font-mono-data text-xs text-ink-muted">
+                  {row.last_result_date ?? '—'}
                 </Td>
                 <Td className="text-xs text-ink-secondary max-w-48 truncate">
                   {row.description ?? <span className="text-ink-muted">—</span>}

@@ -838,3 +838,15 @@ Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
 - Existing data is flagged only from a list the experimenters confirm (`set_background_flags_023.py`, after #151).
 
 **Related:** Alembic `e4b9c2d7a6f1`; `.claude/rules/MODELS.md`; `.claude/rules/MODELS-views.md`; `docs/user_guide/REPLICATES.md`.
+
+## 2026-11-11 — Last sample date and lab-local date filters (issue #168)
+
+**Decision (Mat):** an experiment's last sample date (`last_result_date`) is the America/New_York calendar date of `MAX(scalar_results.measurement_date)` over its own results, with no fallback to start date + days and no ICP `sample_date`. A list row that stands for several experiments shows the **latest** date among them: a flat vial row over its matched vials, a grouped row over its whole group, a letter child over its own vials. Both date filter pairs (start date, last sample date) compare as inclusive lab-local calendar dates.
+
+**Consequences:**
+- `date_from`/`date_to` are typed dates; a run started at 14:00 ET on the End day is now included (333 of 2,067 dated experiments in the 2026-11-06 dump had a non-midnight start time and could be dropped before).
+- The filter tests each experiment row; the latest-date rule applies only to what a collapsed row displays.
+- The Data Export workbook's Experiments tab header changed from `Date` to `Start date`.
+- The 500-experiment export cap is gone; the only export limit is Excel's sheet row limit.
+
+**Related:** `backend/api/routers/experiments.py` (`_last_result_date_expr`, `_latest_last_result_date`); `docs/api/API_REFERENCE.md`.

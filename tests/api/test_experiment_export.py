@@ -768,3 +768,13 @@ def test_formula_guard_leaves_numbers_and_plain_text(
     assert not any(c.quotePrefix for row in ws.iter_rows(min_row=2) for c in row)
     _h, res = _table(wb["Results"])
     assert all(isinstance(r["pH"], (int, float)) for r in res)
+
+
+def test_experiments_tab_header_is_start_date(client, db_session, reporting_views):
+    """#168: the start date is labeled as such (the source key stays `date`)."""
+    root, _seg2, _bypass = _seed_run(db_session)
+    _resp, wb = _post(client, ["CFE_001"])
+    headers, exps = _table(wb["Experiments"])
+    assert "Start date" in headers and "Date" not in headers
+    by_id = {r["Experiment ID"]: r for r in exps}
+    assert by_id["CFE_001"]["Start date"] == _naive_lab(root.date)
