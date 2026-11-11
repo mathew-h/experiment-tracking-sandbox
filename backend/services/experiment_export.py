@@ -692,7 +692,7 @@ EXPERIMENT_COLUMNS: list[Column] = [
     ("is_variant", "is_variant"),
     ("status", "Status"),
     ("experiment_type", "Experiment type"),
-    ("date", "Date"),
+    ("date", "Start date"),  # issue #168: was "Date"
     ("researcher", "Researcher"),
     ("sample_id", "Sample ID"),
     ("reactor_number", "Reactor number"),

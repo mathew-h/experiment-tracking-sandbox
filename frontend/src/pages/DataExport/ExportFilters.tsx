@@ -9,8 +9,12 @@ export interface ExportFilterValues {
   description: string
   additive: string
   researcher: string
+  /** Experiment start date bounds (experiments.date). */
   dateFrom: string
   dateTo: string
+  /** Issue #168: last result date bounds (latest sample measurement date). */
+  lastResultFrom: string
+  lastResultTo: string
 }
 
 export const EMPTY_FILTERS: ExportFilterValues = {
@@ -24,6 +28,8 @@ export const EMPTY_FILTERS: ExportFilterValues = {
   researcher: '',
   dateFrom: '',
   dateTo: '',
+  lastResultFrom: '',
+  lastResultTo: '',
 }
 
 const STATUS_OPTIONS = [
@@ -45,6 +51,8 @@ interface TextField {
   placeholder: string
   width: string
   type?: string
+  /** Visible label above the input; date inputs show no placeholder, so they need one. */
+  label?: string
 }
 
 const TEXT_FIELDS: TextField[] = [
@@ -54,8 +62,16 @@ const TEXT_FIELDS: TextField[] = [
   { key: 'description', placeholder: 'Description…', width: 'w-44' },
   { key: 'additive', placeholder: 'Additive…', width: 'w-40' },
   { key: 'researcher', placeholder: 'Researcher…', width: 'w-40' },
-  { key: 'dateFrom', placeholder: 'From', width: 'w-36', type: 'date' },
-  { key: 'dateTo', placeholder: 'To', width: 'w-36', type: 'date' },
+  { key: 'dateFrom', placeholder: 'Started from', label: 'Started from', width: 'w-36', type: 'date' },
+  { key: 'dateTo', placeholder: 'Started to', label: 'Started to', width: 'w-36', type: 'date' },
+  {
+    key: 'lastResultFrom', placeholder: 'Last result from', label: 'Last result from',
+    width: 'w-36', type: 'date',
+  },
+  {
+    key: 'lastResultTo', placeholder: 'Last result to', label: 'Last result to',
+    width: 'w-36', type: 'date',
+  },
 ]
 
 interface ExportFiltersProps {
@@ -93,6 +109,7 @@ export function ExportFilters({ value, onChange }: ExportFiltersProps) {
         <div key={f.key} className={f.width}>
           <Input
             type={f.type}
+            label={f.label}
             aria-label={f.placeholder.replace('…', '')}
             placeholder={f.placeholder}
             value={value[f.key]}

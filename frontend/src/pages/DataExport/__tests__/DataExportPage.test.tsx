@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -167,5 +167,61 @@ describe('DataExportPage', () => {
     expect(
       await screen.findByText('Showing 3 of 812. Narrow your filters to see the rest.'),
     ).toBeInTheDocument()
+  })
+
+  // Issue #168 Part 3: start date vs last result date.
+
+  it('passes both date pairs to the list', async () => {
+    renderPage()
+    await screen.findByText('CF_027')
+    await userEvent.type(screen.getByLabelText('Started from'), '2026-07-01')
+    await userEvent.type(screen.getByLabelText('Started to'), '2026-07-31')
+    await userEvent.type(screen.getByLabelText('Last result from'), '2026-10-01')
+    await userEvent.type(screen.getByLabelText('Last result to'), '2026-10-31')
+    await waitFor(() =>
+      expect(experimentsApi.list).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          date_from: '2026-07-01',
+          date_to: '2026-07-31',
+          last_result_from: '2026-10-01',
+          last_result_to: '2026-10-31',
+        }),
+      ),
+    )
+  })
+
+  it('omits unset last-result bounds', async () => {
+    renderPage()
+    await screen.findByText('CF_027')
+    const params = vi.mocked(experimentsApi.list).mock.calls[0][0]
+    expect(params?.last_result_from).toBeUndefined()
+    expect(params?.last_result_to).toBeUndefined()
+  })
+
+  it('labels the start date and shows the last result date', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue(page([
+      // 22:00 ET on 10-01 is 10-02 in UTC; the lab date is shown.
+      item({ id: 1, experiment_id: 'CF_027', date: '2026-10-02T02:00:00Z',
+             last_result_date: '2026-11-10' }),
+      item({ id: 2, experiment_id: 'HPHT_001', last_result_date: null }),
+    ]))
+    renderPage()
+    await screen.findByText('CF_027')
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(headers).toEqual(
+      ['', 'ID', 'Type', 'Status', 'Start date', 'Last result', 'Description', 'Additives'],
+    )
+    const cf = screen.getByText('CF_027').closest('tr')!
+    expect(within(cf).getByText('2026-10-01')).toBeInTheDocument()
+    expect(within(cf).getByText('2026-11-10')).toBeInTheDocument()
+    const hp = screen.getByText('HPHT_001').closest('tr')!
+    expect(within(hp).getAllByText('—').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('spans every column on the empty row', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue(page([]))
+    renderPage()
+    const cell = await screen.findByText('No experiments found')
+    expect(cell.closest('td')).toHaveAttribute('colspan', '8')
   })
 })

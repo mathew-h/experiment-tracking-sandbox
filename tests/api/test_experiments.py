@@ -1853,3 +1853,171 @@ def test_status_ongoing_in_p03_ignores_r03_but_409s_on_p03(client, db_session):
     detail = resp.json()["detail"]
     assert "Reactor P03" in detail and "HPHT_ST147_P03A" in detail
     assert "HPHT_ST147_R03" not in detail
+
+
+# ---------------------------------------------------------------------------
+# Issue #168 Part 3: last-result date filter and field; lab-local start date.
+# An experiment's last result date is MAX(scalar_results.measurement_date)
+# over its own results, as an America/New_York calendar date.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime as _dt  # noqa: E402
+
+from backend.services.workdays import LAB_TZ as _LAB_TZ  # noqa: E402
+from database.models.results import (  # noqa: E402
+    ExperimentalResults as _ER, ScalarResults as _SR,
+)
+
+_LR_NUM = iter(range(96000, 96500))
+
+
+def _lab_dt(y, m, d, hh=0, mm=0):
+    return _dt(y, m, d, hh, mm, tzinfo=_LAB_TZ)
+
+
+def _lr_exp(db, exp_id, *, started=None, measured=()):
+    """An experiment with one result per entry of `measured` (None = undated)."""
+    exp = Experiment(experiment_id=exp_id, experiment_number=next(_LR_NUM),
+                     status=ExperimentStatus.ONGOING, date=started)
+    db.add(exp)
+    db.flush()
+    for i, when in enumerate(measured, start=1):
+        res = _ER(experiment_fk=exp.id, time_post_reaction_days=float(i),
+                  is_primary_timepoint_result=True)
+        db.add(res)
+        db.flush()
+        db.add(_SR(result_id=res.id, final_ph=7.0, measurement_date=when))
+    db.flush()
+    return exp
+
+
+def _lr_seed(db):
+    # LRA: latest result 2026-10-20 (an earlier one on 10-01).
+    _lr_exp(db, "LR168_A", started=_lab_dt(2026, 7, 1, 9),
+            measured=[_lab_dt(2026, 10, 1, 10), _lab_dt(2026, 10, 20, 10)])
+    _lr_exp(db, "LR168_B", started=_lab_dt(2026, 9, 1, 9),
+            measured=[_lab_dt(2026, 9, 15, 10)])
+    _lr_exp(db, "LR168_C", started=_lab_dt(2026, 9, 1, 9), measured=[None, None])
+    _lr_exp(db, "LR168_D", started=_lab_dt(2026, 9, 1, 9))
+    db.commit()
+    db.expire_all()
+
+
+def _lr_ids(client, query):
+    resp = client.get(f"/api/experiments?search=LR168_&limit=500&{query}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    return sorted(i["experiment_id"] for i in body["items"]), body["total"]
+
+
+def test_last_result_range_uses_latest_result(client, db_session):
+    _lr_seed(db_session)
+    assert _lr_ids(client, "last_result_from=2026-10-10&last_result_to=2026-10-31") == (
+        ["LR168_A"], 1)
+    # LR168_A has a result on 10-01, but its LATEST is 10-20: out of range.
+    assert _lr_ids(client, "last_result_to=2026-10-05") == (["LR168_B"], 1)
+    assert _lr_ids(client, "last_result_from=2026-09-15") == (
+        ["LR168_A", "LR168_B"], 2)
+
+
+def test_last_result_to_is_inclusive_in_lab_time(client, db_session):
+    _lr_exp(db_session, "LR168_PM", measured=[_lab_dt(2026, 11, 10, 14)])
+    # 23:30 ET on 11-10 is already 11-11 in UTC.
+    _lr_exp(db_session, "LR168_LATE", measured=[_lab_dt(2026, 11, 10, 23, 30)])
+    _lr_exp(db_session, "LR168_NEXT", measured=[_lab_dt(2026, 11, 11, 0, 30)])
+    db_session.commit()
+    db_session.expire_all()
+    assert _lr_ids(client, "last_result_to=2026-11-10") == (
+        ["LR168_LATE", "LR168_PM"], 2)
+    assert _lr_ids(client, "last_result_from=2026-11-11") == (["LR168_NEXT"], 1)
+
+
+def test_undated_results_excluded_only_when_a_bound_is_set(client, db_session):
+    _lr_seed(db_session)
+    ids, _ = _lr_ids(client, "")
+    assert "LR168_C" in ids and "LR168_D" in ids
+    for q in ("last_result_from=2000-01-01", "last_result_to=2100-01-01"):
+        ids, _ = _lr_ids(client, q)
+        assert "LR168_C" not in ids and "LR168_D" not in ids
+
+
+def test_last_result_filter_total_in_grouped_mode(client, db_session):
+    _lr_seed(db_session)
+    resp = client.get("/api/experiments?search=LR168_&group_replicates=true"
+                      "&last_result_from=2026-10-10")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert [i["experiment_id"] for i in body["items"]] == ["LR168_A"]
+
+
+def test_list_item_last_result_date(client, db_session):
+    _lr_seed(db_session)
+    _lr_exp(db_session, "LR168_TZ", measured=[_lab_dt(2026, 11, 10, 23, 30)])
+    db_session.commit()
+    db_session.expire_all()
+    for grouped in ("false", "true"):
+        resp = client.get(f"/api/experiments?search=LR168_&group_replicates={grouped}")
+        got = {i["experiment_id"]: i["last_result_date"] for i in resp.json()["items"]}
+        assert got == {"LR168_A": "2026-10-20", "LR168_B": "2026-09-15",
+                       "LR168_C": None, "LR168_D": None,
+                       "LR168_TZ": "2026-11-10"}, grouped
+
+
+def test_vial_row_shows_latest_matching_vial(client, db_session):
+    # One flat row for three vials; each vial has its own last result.
+    for day, when in ((1, _lab_dt(2026, 10, 1, 10)), (3, _lab_dt(2026, 10, 5, 10)),
+                      (7, _lab_dt(2026, 10, 9, 10))):
+        exp = Experiment(experiment_id=f"LR168_V_001a-t{day}",
+                         experiment_number=next(_LR_NUM),
+                         status=ExperimentStatus.COMPLETED)
+        db_session.add(exp)
+        db_session.flush()
+        res = _ER(experiment_fk=exp.id, time_post_reaction_days=float(day),
+                  is_primary_timepoint_result=True)
+        db_session.add(res)
+        db_session.flush()
+        db_session.add(_SR(result_id=res.id, final_ph=7.0, measurement_date=when))
+    db_session.commit()
+    db_session.expire_all()
+
+    def row(query=""):
+        resp = client.get(f"/api/experiments?search=LR168_V_&{query}")
+        items = resp.json()["items"]
+        assert len(items) == 1
+        return items[0]
+
+    assert (row()["last_result_date"], row()["vial_count"]) == ("2026-10-09", 3)
+    # Filtered: only the vials that pass count, as vial_count already does.
+    filtered = row("last_result_to=2026-10-06")
+    assert (filtered["last_result_date"], filtered["vial_count"]) == ("2026-10-05", 2)
+
+
+def test_start_date_bounds_are_lab_calendar_dates(client, db_session):
+    _lr_exp(db_session, "LR168_S_AM", started=_lab_dt(2026, 10, 10, 9))
+    # 22:00 ET on 10-10 is 10-11 in UTC.
+    _lr_exp(db_session, "LR168_S_PM", started=_lab_dt(2026, 10, 10, 22))
+    _lr_exp(db_session, "LR168_S_NEXT", started=_lab_dt(2026, 10, 11, 9))
+    db_session.commit()
+    db_session.expire_all()
+    assert _lr_ids(client, "date_to=2026-10-10") == (["LR168_S_AM", "LR168_S_PM"], 2)
+    assert _lr_ids(client, "date_from=2026-10-11") == (["LR168_S_NEXT"], 1)
+    assert _lr_ids(client, "date_from=2026-10-10&date_to=2026-10-10") == (
+        ["LR168_S_AM", "LR168_S_PM"], 2)
+
+
+def test_last_result_combined_with_start_date(client, db_session):
+    _lr_seed(db_session)
+    # Started in September and last sampled from October on: nothing (A began in July).
+    assert _lr_ids(client, "date_from=2026-08-01&last_result_from=2026-10-01") == ([], 0)
+    assert _lr_ids(client, "date_to=2026-07-31&last_result_from=2026-10-01") == (
+        ["LR168_A"], 1)
+    assert _lr_ids(client, "date_from=2026-08-01&last_result_to=2026-09-30") == (
+        ["LR168_B"], 1)
+
+
+@pytest.mark.parametrize("param", ["date_from", "date_to", "last_result_from",
+                                   "last_result_to"])
+def test_date_params_are_validated(client, param):
+    resp = client.get(f"/api/experiments?{param}=not-a-date")
+    assert resp.status_code == 422
