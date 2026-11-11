@@ -813,7 +813,9 @@ Returns all dashboard data in a single call. Response shape:
         "note_text": "Swapped stir shaft; topped up catalyst",
         "event_date": "2026-09-24",
         "created_at": "2026-09-24T14:12:00Z"
-      }
+      },
+      "last_sampled_date": "2026-11-06",
+      "cumulative_h2_grams_per_ton": 72.838
     }
   ],
   "reactor_specs": {
@@ -851,6 +853,7 @@ Returns all dashboard data in a single call. Response shape:
 - `summary.reactors` counts only `R01`–`R16` (Yushen/Tan); the Parr vessels are counted separately in `summary.parr`
 - `base_experiment_id` (issue #150) is the run the card's experiment belongs to, so a `-2` segment's card carries its root's base ID. The dashboard's "Open run page" button links an R or P card to `/hpht/{base_experiment_id}` and a CF card to `/core-floods/{base_experiment_id}`, whatever the card's status (issue #157); a card with a null base ID has no run link.
 - `reactor_specs` is the hardware spec per slot label (`R01`–`R16`, `P01`–`P06`; Core Flood labels have none). It is the only copy of the table (`REACTOR_SPECS` in `backend/api/routers/dashboard.py`); the frontend reads empty-slot specs from it. Each card's `volume_mL` / `material` / `vendor` is looked up by `reactor_label`, so CF01 and P01 never inherit R01's spec
+- `last_sampled_date` and `cumulative_h2_grams_per_ton` (issue #165) describe the card's **run**: every segment sharing its `base_experiment_id`, read from `v_hpht_samples` (R and P cards) or `v_core_flood_samples` (CF cards), one query per view. Both come from the run's **last non-variant sample in view order** (`cumulative_time_post_reaction_days` NULLS LAST, then `result_id`): `cumulative_h2_grams_per_ton` is that row's run H₂ to date (g/t), and `last_sampled_date` is its `sample_date` as a lab-local (`America/New_York`) calendar date. Both are `null` when the card has no base ID or the run has no samples; `last_sampled_date` is also `null` when that last sample has no `sample_date` (no fallback to an earlier dated sample). This deliberately differs from `GET /api/hpht/runs`, whose `last_sample_date` is the latest dated sample (Mat, 2026-11-10)
 - `description` is the text of the oldest note for the experiment
 - Timeline limited to 100 most recent experiments
 - Activity limited to last 20 modification log entries

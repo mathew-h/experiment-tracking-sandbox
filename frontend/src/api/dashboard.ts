@@ -53,6 +53,11 @@ export interface ReactorCardData {
   todays_modification: string | null
   /** Most recent 'modification' note on this card's experiment (issue #122 PR-B). */
   latest_modification: { note_text: string; event_date: string | null; created_at: string } | null
+  /** Issue #165: from the run's last non-variant sample (all segments of the base ID).
+   *  Lab-local calendar date (YYYY-MM-DD); null if there is none or it has no date. */
+  last_sampled_date: string | null
+  /** Run H₂ to date, g/t (cumulative_h2_grams_per_ton of that sample). */
+  cumulative_h2_grams_per_ton: number | null
 }
 
 export interface GanttEntry {

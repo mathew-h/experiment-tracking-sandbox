@@ -16,6 +16,8 @@ from backend.api.schemas.dashboard import (
     LatestModification, ReactorSpec,
 )
 from backend.services.workdays import workday_window, LAB_TZ
+from backend.services import run_service
+from backend.services.result_entry_service import _aware
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -72,6 +74,12 @@ def _occupancy(cards: list[ReactorCardData], prefix: str, total: int) -> SlotOcc
         queued=queued,
         empty=total - ongoing - queued,
     )
+
+
+def _samples_view(label: str) -> str:
+    """The run samples view a slot's card reads (issue #165): CF rigs read
+    v_core_flood_samples, R and P vessels v_hpht_samples."""
+    return "v_core_flood_samples" if label.startswith("CF") else "v_hpht_samples"
 
 
 @router.get("/", response_model=DashboardResponse)
@@ -210,6 +218,35 @@ def get_dashboard(
                 c.latest_modification = LatestModification(
                     note_text=r.note_text or "", event_date=r.event_date, created_at=r.created_at,
                 )
+
+    # ── 2d. Run H2 to date and last sampled date per card (issue #165) ────
+    # A card's run is every segment sharing its base ID. CF cards read
+    # v_core_flood_samples, R/P cards v_hpht_samples: one fetch per view, so at
+    # most two queries for any number of cards. Both values come from the run's
+    # last non-variant sample in view order (cumulative time NULLS LAST); the
+    # date is that sample's sample_date as a lab-local calendar date, with no
+    # fallback to an earlier dated sample. This deliberately differs from
+    # hpht_service.list_runs' "max dated sample" (Mat, 2026-11-10).
+    bases_by_view: dict[str, set[str]] = {}
+    for c in reactor_cards:
+        if c.base_experiment_id:
+            view = _samples_view(c.reactor_label)
+            bases_by_view.setdefault(view, set()).add(c.base_experiment_id)
+    latest_by_view = {
+        view: run_service.latest_sample_by_base(
+            run_service.fetch_samples(db, view, base_ids=sorted(bases)))
+        for view, bases in bases_by_view.items()
+    }
+    for c in reactor_cards:
+        if not c.base_experiment_id:
+            continue
+        view = _samples_view(c.reactor_label)
+        last = latest_by_view.get(view, {}).get(c.base_experiment_id)
+        if last is None:
+            continue
+        c.cumulative_h2_grams_per_ton = last["cumulative_h2_grams_per_ton"]
+        if last["sample_date"] is not None:
+            c.last_sampled_date = _aware(last["sample_date"]).astimezone(LAB_TZ).date()
 
     # ── 2c. Workday-window KPI counts + slot occupancy ─────────────────────
     # ET is used here (not UTC) because "last 7 workdays" is a statement about
