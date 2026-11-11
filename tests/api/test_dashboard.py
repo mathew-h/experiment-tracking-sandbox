@@ -18,6 +18,10 @@ from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.services.workdays import LAB_TZ
 
+# The dashboard reads v_hpht_samples / v_core_flood_samples for occupied cards
+# (issue #165); the views only exist in experiments_test inside a test transaction.
+pytestmark = pytest.mark.usefixtures("reporting_views")
+
 
 # ---------------------------------------------------------------------------
 # Extra fixtures
@@ -1557,3 +1561,171 @@ def test_dashboard_payload_carries_reactor_specs(client):
     assert specs["R07"] == {"volume_mL": 300, "material": "Titanium", "vendor": "Tan"}
     assert specs["P06"] == {"volume_mL": 75, "material": "Hastelloy", "vendor": "Parr"}
     assert "CF01" not in specs
+
+
+# ---------------------------------------------------------------------------
+# Run H2 to date and last sampled date on reactor cards (issue #165)
+# ---------------------------------------------------------------------------
+
+def _run_exp(db, eid, number, rn, etype="HPHT", status=None):
+    """A slotted experiment; base_experiment_id and parent are set by the lineage listener."""
+    from database.models.experiments import Experiment
+    from database.models.conditions import ExperimentalConditions
+    from database.models.enums import ExperimentStatus
+    exp = Experiment(experiment_id=eid, experiment_number=number,
+                     status=status or ExperimentStatus.COMPLETED)
+    db.add(exp)
+    db.flush()
+    db.add(ExperimentalConditions(experiment_fk=exp.id, experiment_id=eid,
+                                  reactor_number=rn, experiment_type=etype))
+    db.flush()
+    return exp
+
+
+def _run_sample(db, exp, cum_days, h2_gpt, measured):
+    from database.models.results import ExperimentalResults, ScalarResults
+    r = ExperimentalResults(
+        experiment_fk=exp.id, cumulative_time_post_reaction_days=cum_days,
+        time_post_reaction_days=cum_days, time_post_reaction_bucket_days=cum_days,
+        is_primary_timepoint_result=True,
+    )
+    db.add(r)
+    db.flush()
+    db.add(ScalarResults(result_id=r.id, h2_grams_per_ton_yield=h2_gpt,
+                         measurement_date=measured))
+    db.flush()
+    return r
+
+
+def _utc(y, m, d, hh=12):
+    return datetime.datetime(y, m, d, hh, tzinfo=datetime.timezone.utc)
+
+
+def _cards(client):
+    resp = client.get("/api/dashboard/")
+    assert resp.status_code == 200, resp.text
+    return {c["reactor_label"]: c for c in resp.json()["reactors"]}
+
+
+def test_reactor_card_schema_run_fields_default_none():
+    from backend.api.schemas.dashboard import ReactorCardData
+    r = ReactorCardData(reactor_number=5, reactor_label="R05")
+    assert r.last_sampled_date is None
+    assert r.cumulative_h2_grams_per_ton is None
+
+
+def test_card_sums_h2_across_every_segment_of_the_run(client, db_session):
+    """The ONGOING -2 segment's card shows the whole run's H2 (root + -2), and the
+    date of the run's last sample."""
+    from database.models.enums import ExperimentStatus
+    root = _run_exp(db_session, "RUNH2_001", 73001, 5)
+    seg = _run_exp(db_session, "RUNH2_001-2", 73002, 5, status=ExperimentStatus.ONGOING)
+    _run_sample(db_session, root, 1.0, 0.5, _utc(2026, 10, 2))
+    _run_sample(db_session, root, 3.0, 0.25, _utc(2026, 10, 4))
+    _run_sample(db_session, seg, 7.0, 1.0, _utc(2026, 10, 8))
+    db_session.commit()
+
+    card = _cards(client)["R05"]
+    assert card["experiment_id"] == "RUNH2_001-2"
+    assert card["cumulative_h2_grams_per_ton"] == pytest.approx(1.75)
+    assert card["last_sampled_date"] == "2026-10-08"
+
+
+def test_card_ignores_variant_samples(client, db_session):
+    """A `_Text` variant's samples never count: neither its H2 nor its later date."""
+    from database.models.enums import ExperimentStatus
+    root = _run_exp(db_session, "RUNVAR_001", 73011, 6, status=ExperimentStatus.ONGOING)
+    variant = _run_exp(db_session, "RUNVAR_001_Desorption", 73012, 6)
+    assert variant.parent_experiment_fk == root.id
+    _run_sample(db_session, root, 2.0, 0.4, _utc(2026, 10, 3))
+    _run_sample(db_session, variant, 9.0, 5.0, _utc(2026, 10, 20))
+    db_session.commit()
+
+    card = _cards(client)["R06"]
+    assert card["experiment_id"] == "RUNVAR_001"
+    assert card["cumulative_h2_grams_per_ton"] == pytest.approx(0.4)
+    assert card["last_sampled_date"] == "2026-10-03"
+
+
+def test_last_sample_without_date_gives_no_date(client, db_session):
+    """The last sample (by cumulative time) has no sample_date: the date is None,
+    with no fallback to the earlier dated sample. Its H2 still counts."""
+    from database.models.enums import ExperimentStatus
+    exp = _run_exp(db_session, "RUNNODATE_001", 73021, 7, status=ExperimentStatus.ONGOING)
+    _run_sample(db_session, exp, 1.0, 0.3, _utc(2026, 10, 2))
+    _run_sample(db_session, exp, 4.0, 0.2, None)
+    db_session.commit()
+
+    card = _cards(client)["R07"]
+    assert card["last_sampled_date"] is None
+    assert card["cumulative_h2_grams_per_ton"] == pytest.approx(0.5)
+
+
+def test_card_without_samples_has_no_run_values(client, db_session):
+    from database.models.enums import ExperimentStatus
+    _run_exp(db_session, "RUNEMPTY_001", 73031, 8, status=ExperimentStatus.ONGOING)
+    db_session.commit()
+
+    card = _cards(client)["R08"]
+    assert card["last_sampled_date"] is None
+    assert card["cumulative_h2_grams_per_ton"] is None
+
+
+def test_core_flood_card_reads_core_flood_view(client, db_session):
+    """CF02 reads v_core_flood_samples, while R02 (same reactor_number) reads
+    v_hpht_samples; neither picks up the other's run."""
+    from database.models.enums import ExperimentStatus
+    cf = _run_exp(db_session, "RUNCF_001", 73041, 2, etype="Core Flood",
+                  status=ExperimentStatus.ONGOING)
+    hp = _run_exp(db_session, "RUNHP_002", 73042, 2, status=ExperimentStatus.ONGOING)
+    _run_sample(db_session, cf, 1.0, 0.9, _utc(2026, 10, 5))
+    _run_sample(db_session, hp, 1.0, 0.1, _utc(2026, 10, 6))
+    db_session.commit()
+
+    cards = _cards(client)
+    assert cards["CF02"]["cumulative_h2_grams_per_ton"] == pytest.approx(0.9)
+    assert cards["CF02"]["last_sampled_date"] == "2026-10-05"
+    assert cards["R02"]["cumulative_h2_grams_per_ton"] == pytest.approx(0.1)
+    assert cards["R02"]["last_sampled_date"] == "2026-10-06"
+
+
+def test_last_sampled_date_is_the_lab_day(client, db_session):
+    """03:00 UTC on Nov 7 is 22:00 on Nov 6 in the lab (America/New_York)."""
+    from database.models.enums import ExperimentStatus
+    exp = _run_exp(db_session, "RUNTZ_001", 73051, 9, status=ExperimentStatus.ONGOING)
+    _run_sample(db_session, exp, 1.0, 0.1, _utc(2026, 11, 7, hh=3))
+    db_session.commit()
+    db_session.expire_all()
+
+    assert _cards(client)["R09"]["last_sampled_date"] == "2026-11-06"
+
+
+def test_run_values_are_one_query_per_samples_view(client, db_session):
+    """Five cards across HPHT and Core Flood: one statement per samples view,
+    however many cards there are."""
+    import sqlalchemy
+    from sqlalchemy.engine import Engine
+    from database.models.enums import ExperimentStatus
+    seeds = [("RUNQ_R1", 1, "HPHT"), ("RUNQ_R3", 3, "HPHT"), ("RUNQ_R4", 4, "HPHT"),
+             ("RUNQ_CF1", 1, "Core Flood"), ("RUNQ_CF3", 3, "Core Flood")]
+    for i, (eid, rn, etype) in enumerate(seeds):
+        exp = _run_exp(db_session, eid, 73100 + i, rn, etype=etype,
+                       status=ExperimentStatus.ONGOING)
+        _run_sample(db_session, exp, 1.0, 0.1, _utc(2026, 10, 2))
+    db_session.commit()
+
+    statements: list[str] = []
+
+    def counter(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sqlalchemy.event.listen(Engine, "before_cursor_execute", counter)
+    try:
+        cards = _cards(client)
+    finally:
+        sqlalchemy.event.remove(Engine, "before_cursor_execute", counter)
+
+    assert all(cards[k]["cumulative_h2_grams_per_ton"] == pytest.approx(0.1)
+               for k in ("R01", "R03", "R04", "CF01", "CF03"))
+    assert len([s for s in statements if "v_hpht_samples" in s]) == 1
+    assert len([s for s in statements if "v_core_flood_samples" in s]) == 1

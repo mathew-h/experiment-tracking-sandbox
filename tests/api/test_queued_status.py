@@ -9,6 +9,9 @@ from database.models.experiments import Experiment
 from database.models.conditions import ExperimentalConditions
 from database.models.enums import ExperimentStatus
 
+# The dashboard reads v_hpht_samples / v_core_flood_samples for occupied cards (#165).
+pytestmark = pytest.mark.usefixtures("reporting_views")
+
 
 def test_experiment_status_queued_enum_value():
     """ExperimentStatus('QUEUED') must not raise."""

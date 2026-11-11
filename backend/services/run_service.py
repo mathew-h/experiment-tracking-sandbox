@@ -193,6 +193,23 @@ def fetch_samples(
     return [dict(r) for r in db.execute(text(sql), params).mappings()]
 
 
+def latest_sample_by_base(rows: Iterable[dict]) -> dict[str, dict]:
+    """The last non-variant row per run_base_id, given rows in view order.
+
+    Rows come from `fetch_samples`, ordered by run_base_id, then
+    cumulative_time_post_reaction_days NULLS LAST, then result_id, so the last
+    row seen for a base is the run's latest sample. Rows without a base ID are
+    skipped. The dashboard's reactor cards read their run H2 and last sampled
+    date from this row (issue #165).
+    """
+    latest: dict[str, dict] = {}
+    for r in rows:
+        if r["is_variant"] or r["run_base_id"] is None:
+            continue
+        latest[r["run_base_id"]] = r
+    return latest
+
+
 def attach_notes(db: Session, rows: list[dict]) -> list[dict]:
     """Add `notes` (result-scoped result_note/observation/modification, by id) to each row."""
     by_result: dict[int, list[dict]] = defaultdict(list)

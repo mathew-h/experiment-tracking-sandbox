@@ -37,6 +37,8 @@ function makeCard(overrides: Partial<ReactorCardData> = {}): ReactorCardData {
     vendor: null,
     todays_modification: null,
     latest_modification: null,
+    last_sampled_date: null,
+    cumulative_h2_grams_per_ton: null,
     ...overrides,
   }
 }
@@ -84,7 +86,7 @@ describe('ReactorCard — todays_modification (issue #72)', () => {
 describe('ReactorGrid — slot counts derived from props (issue #85)', () => {
   it('renders 19 slots (16 R + 3 CF) and includes CF03', () => {
     const { container } = renderGrid([])
-    const labels = Array.from(container.querySelectorAll('p.font-mono-data.text-xl')).map(
+    const labels = Array.from(container.querySelectorAll('[data-testid="reactor-slot-label"]')).map(
       (el) => el.textContent
     )
     expect(labels.length).toBe(19)
@@ -94,7 +96,7 @@ describe('ReactorGrid — slot counts derived from props (issue #85)', () => {
 
   it('renders a different total when rSlotCount/cfSlotCount props change', () => {
     const { container } = renderGrid([], 2, 1)
-    const labels = Array.from(container.querySelectorAll('p.font-mono-data.text-xl')).map(
+    const labels = Array.from(container.querySelectorAll('[data-testid="reactor-slot-label"]')).map(
       (el) => el.textContent
     )
     expect(labels.length).toBe(3)
@@ -255,7 +257,7 @@ describe('ReactorGrid — Parr group (issue #147)', () => {
     )
   }
   const labelsIn = (el: HTMLElement) =>
-    Array.from(el.querySelectorAll('p.font-mono-data.text-xl')).map((n) => n.textContent)
+    Array.from(el.querySelectorAll('[data-testid="reactor-slot-label"]')).map((n) => n.textContent)
 
   it('renders six Parr slots in their own group between HPHT and Core Flood', () => {
     const { container } = renderWithParr([])
@@ -380,5 +382,82 @@ describe('reactor detail modal — leads to the run (issue #157)', () => {
     expect(save).toBeEnabled()
     expect(save).not.toHaveClass('bg-red-500')
     expect(primaries(dialog)).toEqual([run])
+  })
+})
+
+describe('ReactorCard — experiment-first layout (issue #165)', () => {
+  const header = (container: HTMLElement, label: string) => {
+    const slot = Array.from(container.querySelectorAll('[data-testid="reactor-slot-label"]'))
+      .find((el) => el.textContent?.trim() === label)!
+    return slot.closest('[data-testid="reactor-card-header"]') as HTMLElement
+  }
+  const cardOf = (container: HTMLElement, label: string) => header(container, label).parentElement as HTMLElement
+
+  it('puts slot label, experiment ID and status on one header row, ID largest', () => {
+    const { container } = renderGrid([makeCard()])
+    const h = header(container, 'R05')
+    const [slot, id] = Array.from(h.children) as HTMLElement[]
+    expect(slot).toHaveTextContent('R05')
+    expect(slot).toHaveClass('text-sm', 'text-ink-muted')
+    expect(id).toHaveTextContent('HPHT_MH_072')
+    expect(id).toHaveClass('text-lg', 'font-bold', 'truncate')
+    expect(id).toHaveAttribute('title', 'HPHT_MH_072')
+    expect(within(h).getByTitle('Change status')).toBeInTheDocument()
+  })
+
+  it('no longer shows the Sample line on the card', () => {
+    const { container } = renderGrid([makeCard({ sample_id: 'ROCK-7' })])
+    expect(cardOf(container, 'R05')).not.toHaveTextContent('Sample:')
+    expect(screen.queryByText('ROCK-7')).toBeNull()
+  })
+
+  it('shows the last sampled date as a calendar date', () => {
+    const { container } = renderGrid([makeCard({ last_sampled_date: '2026-11-06' })])
+    expect(within(cardOf(container, 'R05')).getByTestId('reactor-card-last-sampled'))
+      .toHaveTextContent('Last sampled: Nov 6, 2026')
+  })
+
+  it('shows run H2 to date in g/t, formatted like the run tables', () => {
+    const { container } = renderGrid([makeCard({ cumulative_h2_grams_per_ton: 1.234567 })])
+    const metrics = within(cardOf(container, 'R05')).getByTestId('reactor-card-metrics')
+    expect(metrics).toHaveTextContent('200 °C')
+    expect(metrics).toHaveTextContent('Day 3')
+    expect(metrics).toHaveTextContent('H₂ 1.235 g/t')
+  })
+
+  it('shows placeholders when values are missing', () => {
+    const { container } = renderGrid([makeCard({ temperature_c: null, days_running: null })])
+    const card = within(cardOf(container, 'R05'))
+    expect(card.getByTestId('reactor-card-last-sampled')).toHaveTextContent('Last sampled: —')
+    const metrics = card.getByTestId('reactor-card-metrics')
+    expect(metrics).toHaveTextContent('— °C')
+    expect(metrics).toHaveTextContent('Day —')
+    expect(metrics).toHaveTextContent('H₂ — g/t')
+  })
+
+  it('gives empty slots the same rows, with placeholders', () => {
+    const { container } = renderGrid([])
+    const card = cardOf(container, 'R01')
+    expect(card).toHaveTextContent('No experiment assigned')
+    expect(card).toHaveTextContent('Empty')
+    expect(within(card).getByTestId('reactor-card-last-sampled')).toHaveTextContent('Last sampled: —')
+    expect(within(card).getByTestId('reactor-card-metrics')).toHaveTextContent('H₂ — g/t')
+  })
+
+  it('lays the groups out R 4 wide, P 3 wide and CF 3 wide', () => {
+    const queryClient = new QueryClient()
+    const { container } = render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <ReactorGrid cards={[]} rSlotCount={16} pSlotCount={6} cfSlotCount={3} />
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    const grid = (k: string) => container.querySelector(`[data-testid="reactor-grid-${k}"]`)!
+    expect(grid('R')).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-4')
+    expect(grid('P')).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-3')
+    expect(grid('CF')).toHaveClass('grid-cols-1', 'sm:grid-cols-3')
   })
 })

@@ -89,6 +89,13 @@ class ReactorCardData(BaseModel):
     # Issue #122 PR-B: both read 'modification' notes, not the retired change-request table.
     todays_modification: Optional[str] = None   # notes with event_date == today (UTC), '; '-joined in id order
     latest_modification: Optional[LatestModification] = None
+    # Issue #165: read from the run's samples view (v_hpht_samples for R/P,
+    # v_core_flood_samples for CF), over every segment of the card's base ID.
+    # Both come from the run's LAST non-variant sample in view order; None if
+    # the card has no base ID, the run has no samples, or (for the date) that
+    # sample has no sample_date. No fallback to an earlier dated sample.
+    last_sampled_date: Optional[date] = None             # lab-local (LAB_TZ) calendar date
+    cumulative_h2_grams_per_ton: Optional[float] = None  # run H2 to date, g/t
 
 
 class GanttEntry(BaseModel):

@@ -6,6 +6,7 @@ import type { ReactorCardData, ReactorSpec } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 import { labTodayISO } from '@/utils/labDate'
 import { runPathFor } from '@/utils/experimentId'
+import { fmt } from '@/components/results/sampleFields'
 
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
 type _ExperimentStatus = typeof STATUS_OPTIONS[number]
@@ -23,6 +24,17 @@ function statusColors(status: string | null) {
     default:
       return 'text-ink-muted bg-surface-overlay'
   }
+}
+
+/** Date-only strings (YYYY-MM-DD) are calendar dates, not instants: parse them
+ *  as LOCAL midnight so the rendered day never shifts west of UTC. Full ISO
+ *  datetimes (started_at, created_at) still go through Date normally. */
+export function formatDateShort(iso: string): string {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  const d = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(iso)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function isCoreFlood(label: string): boolean {
@@ -157,6 +169,13 @@ function ReactorSpecsBadge({
   )
 }
 
+const PLACEHOLDER = '—'
+
+/** One reactor slot (issue #165). Every card, occupied or empty, has the same
+ *  rows in the same order, so cards in a grid row line up: header (slot label,
+ *  experiment ID, status), description (two lines reserved), "Modified today"
+ *  when there is one, last sampled date, metrics (temperature, day, run H2 to
+ *  date), and hardware specs for R and P vessels. Missing values show "—". */
 function ReactorCard({
   label,
   card,
@@ -178,83 +197,88 @@ function ReactorCard({
     <Card
       padding="none"
       className={[
-        'transition-colors duration-150 select-none min-h-[100px] p-4 px-5 border-l-2',
+        'h-full flex flex-col gap-1.5 transition-colors duration-150 select-none p-4 px-5 border-l-2',
         isCF ? 'border-l-status-info/70' : 'border-l-transparent',
         occupied ? 'hover:border-ink-muted cursor-pointer' : 'opacity-35 border-dashed',
       ].join(' ')}
       onClick={() => occupied && onClick(card!)}
     >
-      <div className="flex items-start justify-between mb-1">
-        <p className="text-xl font-bold text-ink-primary font-mono-data leading-none">{label}</p>
+      <div className="flex items-center gap-2 min-w-0" data-testid="reactor-card-header">
+        <span className="shrink-0 text-sm font-medium font-mono-data text-ink-muted" data-testid="reactor-slot-label">
+          {label}
+        </span>
         {occupied ? (
-          <StatusBadge card={card!} />
-        ) : (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium uppercase tracking-wide text-ink-muted bg-surface-overlay">
-            <span className="w-1.5 h-1.5 rounded-full bg-surface-border" />
-            Empty
+          <span
+            className="min-w-0 flex-1 truncate text-lg font-bold leading-tight text-ink-primary font-mono-data"
+            title={card!.experiment_id ?? undefined}
+          >
+            {card!.experiment_id}
           </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">No experiment assigned</span>
         )}
+        <span className="ml-auto shrink-0">
+          {occupied ? (
+            <StatusBadge card={card!} />
+          ) : (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium uppercase tracking-wide text-ink-muted bg-surface-overlay">
+              <span className="w-1.5 h-1.5 rounded-full bg-surface-border" />
+              Empty
+            </span>
+          )}
+        </span>
       </div>
 
-      {occupied ? (
-        <div className="space-y-1.5">
-          <p className="text-base font-semibold text-ink-primary font-mono-data leading-snug">
-            {card!.experiment_id}
-          </p>
-          {card!.sample_id && (
-            <p className="text-xs text-ink-secondary leading-snug">
-              <span className="text-ink-muted">Sample:</span>{' '}
-              <span className="font-mono-data">{card!.sample_id}</span>
-            </p>
-          )}
-          {card!.description && (
-            <p
-              className="text-xs text-ink-secondary line-clamp-2 leading-snug italic"
-              title={card!.description}
-            >
-              {card!.description}
-            </p>
-          )}
-          {card!.todays_modification && (
-            <p
-              className="text-xs text-ink-secondary line-clamp-2 leading-snug"
-              title={card!.todays_modification}
-            >
-              <span className="text-ink-muted">Modified today:</span>{' '}
-              {card!.todays_modification}
-            </p>
-          )}
-          <div className="flex items-center gap-3 pt-0.5">
-            {card!.temperature_c != null && (
-              <span className="text-xs text-ink-muted">
-                <span className="font-mono-data text-ink-secondary">{card!.temperature_c}</span> °C
-              </span>
-            )}
-            {card!.days_running != null && (
-              <span className="inline-flex items-center gap-1 rounded bg-surface-overlay px-1.5 py-0.5 text-xs font-semibold text-ink-primary">
-                Day <span className="font-mono-data">{card!.days_running}</span>
-              </span>
-            )}
-          </div>
-          {showSpecsBadge && (
-            <ReactorSpecsBadge
-              volume_mL={card!.volume_mL ?? spec?.volume_mL ?? null}
-              material={card!.material ?? spec?.material ?? null}
-              vendor={card!.vendor ?? spec?.vendor ?? null}
-            />
-          )}
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          <p className="text-xs text-ink-muted mt-1">No experiment assigned</p>
-          {showSpecsBadge && (
-            <ReactorSpecsBadge
-              volume_mL={spec?.volume_mL ?? null}
-              material={spec?.material ?? null}
-              vendor={spec?.vendor ?? null}
-            />
-          )}
-        </div>
+      {/* Two lines reserved whether or not there is a description. */}
+      <p
+        className="min-h-[2lh] text-xs text-ink-secondary line-clamp-2 leading-snug italic"
+        title={card?.description ?? undefined}
+      >
+        {card?.description ?? ''}
+      </p>
+
+      {card?.todays_modification && (
+        <p
+          className="text-xs text-ink-secondary line-clamp-2 leading-snug"
+          title={card.todays_modification}
+        >
+          <span className="text-ink-muted">Modified today:</span>{' '}
+          {card.todays_modification}
+        </p>
+      )}
+
+      <p className="text-xs text-ink-muted" data-testid="reactor-card-last-sampled">
+        Last sampled:{' '}
+        <span className="font-mono-data text-ink-secondary">
+          {card?.last_sampled_date ? formatDateShort(card.last_sampled_date) : PLACEHOLDER}
+        </span>
+      </p>
+
+      <div className="mt-auto flex items-center gap-3" data-testid="reactor-card-metrics">
+        <span className="text-xs text-ink-muted">
+          <span className="font-mono-data text-ink-secondary">
+            {card?.temperature_c != null ? card.temperature_c : PLACEHOLDER}
+          </span>{' '}
+          °C
+        </span>
+        <span className="inline-flex items-center gap-1 rounded bg-surface-overlay px-1.5 py-0.5 text-xs font-semibold text-ink-primary">
+          Day <span className="font-mono-data">{card?.days_running ?? PLACEHOLDER}</span>
+        </span>
+        <span className="text-xs text-ink-muted" title="Run H₂ to date, all segments">
+          H₂{' '}
+          <span className="font-mono-data text-ink-secondary">
+            {fmt(card?.cumulative_h2_grams_per_ton)}
+          </span>{' '}
+          g/t
+        </span>
+      </div>
+
+      {showSpecsBadge && (
+        <ReactorSpecsBadge
+          volume_mL={card?.volume_mL ?? spec?.volume_mL ?? null}
+          material={card?.material ?? spec?.material ?? null}
+          vendor={card?.vendor ?? spec?.vendor ?? null}
+        />
       )}
     </Card>
   )
@@ -321,17 +345,6 @@ function ReactorDetailModal({
     const trimmed = dateDraft.trim()
     if (trimmed) dateMutation.mutate(`${trimmed}T00:00:00`)
     else setEditingDate(false)
-  }
-
-  /** Date-only strings (YYYY-MM-DD) are calendar dates, not instants: parse them
-   *  as LOCAL midnight so the rendered day never shifts west of UTC. Full ISO
-   *  datetimes (started_at, created_at) still go through Date normally. */
-  function formatDateShort(iso: string): string {
-    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-    const d = dateOnly
-      ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
-      : new Date(iso)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
   const runPath = runPagePath(card)
@@ -595,9 +608,13 @@ export function ReactorGrid({
   // vessels, the Parr HPHT vessels, then the Core Flood rigs. A group with no
   // slots is not rendered.
   const groups = [
-    { key: 'R', title: 'HPHT', slots: slots('R', rSlotCount) },
-    { key: 'P', title: 'Parr', slots: slots('P', pSlotCount) },
-    { key: 'CF', title: 'Core Flood', slots: slots('CF', cfSlotCount) },
+    // Columns per group (issue #165): R 4x4, P 3x2, CF 3x1 at full width.
+    { key: 'R', title: 'HPHT', slots: slots('R', rSlotCount),
+      cols: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' },
+    { key: 'P', title: 'Parr', slots: slots('P', pSlotCount),
+      cols: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' },
+    { key: 'CF', title: 'Core Flood', slots: slots('CF', cfSlotCount),
+      cols: 'grid-cols-1 sm:grid-cols-3' },
   ].filter((g) => g.slots.length > 0)
 
   return (
@@ -612,7 +629,7 @@ export function ReactorGrid({
                 {g.slots[0]}–{g.slots[g.slots.length - 1]}
               </span>
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <div className={`grid ${g.cols} gap-2`} data-testid={`reactor-grid-${g.key}`}>
               {g.slots.map((label) => (
                 <ReactorCard
                   key={label}

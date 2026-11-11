@@ -35,6 +35,25 @@ def db_session(create_test_tables) -> Session:
     connection.close()
 
 
+@pytest.fixture()
+def reporting_views(db_session: Session):
+    """Create the reporting views inside the test transaction.
+
+    experiments_test is built by create_all, which makes tables only; the views
+    (database/event_listeners.py::_VIEWS) are created at app import on the dev
+    engine. DDL here is rolled back with the test. Some test files define their
+    own copy of this fixture, which takes precedence.
+    """
+    from sqlalchemy import text
+    from database.event_listeners import _VIEWS
+    for view_name, _ in _VIEWS:
+        db_session.execute(text(f"DROP VIEW IF EXISTS {view_name} CASCADE"))
+    for _, view_sql in _VIEWS:
+        db_session.execute(text(view_sql))
+    db_session.flush()
+    yield
+
+
 _FAKE_USER = FirebaseUser(uid="test-uid", email="test@addisenergy.com", display_name="Test User")
 
 
