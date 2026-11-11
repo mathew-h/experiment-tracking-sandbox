@@ -102,6 +102,17 @@ def _last_result_date_expr(experiment_pk):
     return _lab_date(latest)
 
 
+def _latest_last_result_date(db: Session, experiment_pks: list[int]):
+    """The latest last result date among `experiment_pks` (None if none dated):
+    what a list row standing for several experiments shows (issue #168)."""
+    if not experiment_pks:
+        return None
+    return db.execute(
+        select(func.max(_last_result_date_expr(Experiment.id)))
+        .where(Experiment.id.in_(experiment_pks))
+    ).scalar_one()
+
+
 def _build_list_item(db: Session, exp: Experiment) -> dict:
     """Build the ExperimentListItem payload dict for one experiment row."""
     item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
@@ -360,10 +371,6 @@ def list_experiments(
             item_data["group_display_id"] = stem
             item_data["vial_count"] = vial_count
             item_data["last_result_date"] = last_result_date
-        else:
-            # Grouped mode: the representative's own last result date.
-            item_data["last_result_date"] = db.execute(
-                select(_last_result_date_expr(exp.id))).scalar_one()
         if group_replicates:
             # Bucket key for this representative -- mirrors Block A: a
             # lettered representative (orphan-set case) buckets on its own
@@ -403,6 +410,10 @@ def list_experiments(
             ).scalars().all()
             members = [m for m in bucket_rows if m.replicate_label is not None]
             item_data["vial_count"] = len(bucket_rows)
+            # Issue #168: like vial_count, the latest across the whole
+            # (unfiltered) bucket, as the flat row does across its vials.
+            item_data["last_result_date"] = _latest_last_result_date(
+                db, [r.id for r in bucket_rows])
 
             if len(bucket_rows) > 1 and members:
                 # A real group: label the row by the group stem (issue #98 D2).
@@ -419,6 +430,9 @@ def list_experiments(
                     child = _build_list_item(db, group.representative)
                     child["group_display_id"] = group.stem
                     child["vial_count"] = group.vial_count
+                    child["last_result_date"] = _latest_last_result_date(db, [
+                        m.id for m in members
+                        if split_timepoint_token(m.experiment_id)[0] == group.stem])
                     item_data["replicates"].append(
                         ExperimentListItem.model_validate(child)
                     )

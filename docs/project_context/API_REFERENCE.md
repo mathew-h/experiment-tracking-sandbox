@@ -85,7 +85,7 @@ When `group_replicates=true`, pagination runs over **top-level rows** instead of
   drives the `last_result_from`/`last_result_to` filter, which tests each
   experiment row. Flat mode: the latest over the vials the row stands for (those
   that passed the filters, as `vial_count`), since picking the row exports all of
-  them (Mat, 2026-11-11). Grouped mode: the representative's own date.
+  them (Mat, 2026-11-11). Grouped mode, by the same rule: a group row carries the latest over its whole bucket (unfiltered, like its `vial_count`), and each `replicates` child the latest over its own vials (`_latest_last_result_date`).
 - `replicate_letters` (array of string, nullable) — grouped mode only: the
   group's DISTINCT replicate letters, for the "N replicates: a, b" badge. Null
   in flat mode and for rows that are not groups.

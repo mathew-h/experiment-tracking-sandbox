@@ -2021,3 +2021,33 @@ def test_last_result_combined_with_start_date(client, db_session):
 def test_date_params_are_validated(client, param):
     resp = client.get(f"/api/experiments?{param}=not-a-date")
     assert resp.status_code == 422
+
+
+def test_grouped_row_shows_latest_across_its_members(client, db_session):
+    """#168: as for flat vial rows, a group row stands for its whole group
+    (unfiltered, like its vial_count) and each letter child for its vials."""
+    for exp_id, day, when in (("LR168_G_001a-t1", 1, _lab_dt(2026, 10, 1, 10)),
+                              ("LR168_G_001a-t3", 3, _lab_dt(2026, 10, 5, 10)),
+                              ("LR168_G_001b", 1, _lab_dt(2026, 10, 9, 10)),
+                              ("LR168_G_001c", 1, None)):
+        exp = Experiment(experiment_id=exp_id, experiment_number=next(_LR_NUM),
+                         status=ExperimentStatus.COMPLETED)
+        db_session.add(exp)
+        db_session.flush()
+        res = _ER(experiment_fk=exp.id, time_post_reaction_days=float(day),
+                  is_primary_timepoint_result=True)
+        db_session.add(res)
+        db_session.flush()
+        db_session.add(_SR(result_id=res.id, final_ph=7.0, measurement_date=when))
+    db_session.commit()
+    db_session.expire_all()
+
+    resp = client.get("/api/experiments?search=LR168_G_&group_replicates=true")
+    items = resp.json()["items"]
+    assert len(items) == 1
+    group = items[0]
+    assert group["group_display_id"] == "LR168_G_001"
+    assert group["last_result_date"] == "2026-10-09"
+    children = {c["group_display_id"]: c["last_result_date"] for c in group["replicates"]}
+    assert children == {"LR168_G_001a": "2026-10-05", "LR168_G_001b": "2026-10-09",
+                        "LR168_G_001c": None}

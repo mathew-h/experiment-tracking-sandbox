@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom'
@@ -737,5 +737,90 @@ describe('ExperimentListPage — run links and group cues (issue #159)', () => {
     await screen.findByText('SERUM_098')
     expect(screen.queryByRole('link', { name: 'SERUM_098' })).toBeNull()
     expect(screen.queryByText('group')).toBeNull()
+  })
+})
+
+describe('ExperimentListPage — issue #168: start date and last sample date', () => {
+  const base = makeItems(0, 1)[0]
+  const one = (over: Partial<ExperimentListItem>) => ({
+    items: [{ ...base, ...over }], total: 1, skip: 0, limit: 25,
+  })
+
+  beforeEach(() => {
+    vi.mocked(experimentsApi.list).mockImplementation(async (params) => {
+      const skip = params?.skip ?? 0
+      const limit = params?.limit ?? LIMIT
+      return { items: makeItems(skip, limit), total: TOTAL, skip, limit }
+    })
+  })
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows both range cards; presets only on Last sample date', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await screen.findByText('Page 1 of 4')
+    const start = screen.getByRole('group', { name: 'Experiment start date' })
+    const last = screen.getByRole('group', { name: 'Last sample date' })
+    expect(within(start).getByText('Begin')).toBeInTheDocument()
+    expect(within(start).queryByRole('button', { name: 'Last month' })).toBeNull()
+    expect(within(last).getByRole('button', { name: 'Last month' })).toBeInTheDocument()
+  })
+
+  it('sends the last sample bounds and resets to page 1', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await screen.findByText('Page 1 of 4')
+    fireEvent.click(screen.getByRole('button', { name: '→' }))
+    await screen.findByText('Page 2 of 4')
+    fireEvent.change(screen.getByLabelText('Last sample date begin'), {
+      target: { value: '2026-10-01' },
+    })
+    fireEvent.change(screen.getByLabelText('Experiment start date end'), {
+      target: { value: '2026-09-30' },
+    })
+    await waitFor(() => {
+      const p = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+      expect(p).toEqual(expect.objectContaining({
+        skip: 0, last_result_from: '2026-10-01', date_to: '2026-09-30',
+      }))
+    })
+  })
+
+  it('the page Clear also clears both date ranges', async () => {
+    render(<ExperimentListPage />, { wrapper })
+    await screen.findByText('Page 1 of 4')
+    fireEvent.change(screen.getByLabelText('Last sample date end'), {
+      target: { value: '2026-10-31' },
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByLabelText('Last sample date end')).toHaveValue('')
+    await waitFor(() => {
+      const p = vi.mocked(experimentsApi.list).mock.calls.at(-1)![0]
+      expect(p?.last_result_to).toBeUndefined()
+    })
+  })
+
+  it('labels Start date (lab-local) and shows the Last sample column', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue(one({
+      experiment_id: 'HPHT_900',
+      // 22:00 ET on 10-01 is 10-02 in UTC.
+      date: '2026-10-02T02:00:00Z',
+      last_result_date: '2026-11-10',
+    }))
+    render(<ExperimentListPage />, { wrapper })
+    const id = await screen.findByText('HPHT_900')
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(headers).toEqual(['#', 'Experiment ID', 'Description', 'Sample', 'Reactor',
+      'Status', 'Start date', 'Last sample', 'Additives'])
+    const tr = id.closest('tr')!
+    expect(within(tr).getByText('2026-10-01')).toBeInTheDocument()
+    expect(within(tr).getByText('2026-11-10')).toBeInTheDocument()
+  })
+
+  it('spans every column on the empty row', async () => {
+    vi.mocked(experimentsApi.list).mockResolvedValue({ items: [], total: 0, skip: 0, limit: 25 })
+    render(<ExperimentListPage />, { wrapper })
+    const cell = await screen.findByText('No experiments found')
+    expect(cell.closest('td')).toHaveAttribute('colspan', '9')
   })
 })

@@ -7,6 +7,9 @@ import {
   Table, TableHead, TableBody, TableRow, Th, Td,
   Badge, Button, Input, Select, PageSpinner, StatusBadge, useToast,
 } from '@/components/ui'
+import { DateRangeFilter } from '@/components/filters/DateRangeFilter'
+import { SAMPLE_DATE_PRESETS } from '@/components/filters/dateRanges'
+import { labDateOf } from '@/utils/labDate'
 
 const STATUS_OPTIONS = [
   { value: 'QUEUED', label: 'Queued' },
@@ -47,13 +50,16 @@ export function ExperimentListPage() {
   const [descriptionFilter, setDescriptionFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  // Issue #168: latest sample (last result) date bounds.
+  const [lastFrom, setLastFrom] = useState('')
+  const [lastTo, setLastTo] = useState('')
   const [backgroundFilter, setBackgroundFilter] = useState('')
   const [skip, setSkip] = useState(0)
   const [limit, setLimit] = useState(25)
   const [groupReplicates, setGroupReplicates] = useState(true)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
 
-  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, backgroundFilter, skip, limit, groupReplicates]
+  const queryKey = ['experiments', statusFilter, typeFilter, experimentIdFilter, sampleFilter, reactorFilter, descriptionFilter, dateFrom, dateTo, lastFrom, lastTo, backgroundFilter, skip, limit, groupReplicates]
   const { data, isLoading, error } = useQuery({
     queryKey,
     queryFn: () => experimentsApi.list({
@@ -65,6 +71,8 @@ export function ExperimentListPage() {
       description: descriptionFilter || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
+      last_result_from: lastFrom || undefined,
+      last_result_to: lastTo || undefined,
       is_background: backgroundFilter ? backgroundFilter === 'true' : undefined,
       skip,
       limit,
@@ -75,7 +83,7 @@ export function ExperimentListPage() {
   const resetPage = () => setSkip(0)
   const totalPages = data ? Math.ceil(data.total / limit) : 0
   const currentPage = Math.floor(skip / limit) + 1
-  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || descriptionFilter || dateFrom || dateTo || backgroundFilter)
+  const hasActiveFilters = !!(statusFilter || typeFilter || experimentIdFilter || sampleFilter || reactorFilter || descriptionFilter || dateFrom || dateTo || lastFrom || lastTo || backgroundFilter)
 
   return (
     <div className="space-y-4">
@@ -102,103 +110,105 @@ export function ExperimentListPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="w-40">
-          <Select
-            label=""
-            aria-label="Status filter"
-            options={STATUS_OPTIONS}
-            placeholder="All statuses"
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); resetPage() }}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="w-40">
+            <Select
+              label=""
+              aria-label="Status filter"
+              options={STATUS_OPTIONS}
+              placeholder="All statuses"
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <div className="w-44">
+            <Select
+              label=""
+              aria-label="Background filter"
+              options={BACKGROUND_OPTIONS}
+              placeholder="Samples and backgrounds"
+              value={backgroundFilter}
+              onChange={(e) => { setBackgroundFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <div className="w-40">
+            <Select
+              label=""
+              options={TYPE_OPTIONS}
+              placeholder="All types"
+              value={typeFilter}
+              onChange={(e) => { setTypeFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <div className="w-44">
+            <Input
+              placeholder="Experiment ID…"
+              value={experimentIdFilter}
+              onChange={(e) => { setExperimentIdFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <div className="w-36">
+            <Input
+              placeholder="Sample ID…"
+              value={sampleFilter}
+              onChange={(e) => { setSampleFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <div className="w-24">
+            <Input
+              placeholder="Reactor #"
+              value={reactorFilter}
+              onChange={(e) => { setReactorFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <div className="w-44">
+            <Input
+              placeholder="Description…"
+              value={descriptionFilter}
+              onChange={(e) => { setDescriptionFilter(e.target.value); resetPage() }}
+            />
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-ink-secondary pb-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              aria-label="Group replicates"
+              checked={groupReplicates}
+              onChange={(e) => { setGroupReplicates(e.target.checked); resetPage() }}
+              className="accent-brand-red"
+            />
+            Group replicates
+          </label>
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Clear filters"
+              onClick={() => {
+                setStatusFilter(''); setTypeFilter(''); setExperimentIdFilter('')
+                setSampleFilter(''); setReactorFilter(''); setDescriptionFilter(''); setBackgroundFilter('')
+                setDateFrom(''); setDateTo(''); setLastFrom(''); setLastTo(''); resetPage()
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-stretch gap-3">
+          <DateRangeFilter
+            title="Experiment start date"
+            hint="When the run began"
+            value={{ begin: dateFrom, end: dateTo }}
+            onChange={(r) => { setDateFrom(r.begin); setDateTo(r.end); resetPage() }}
+          />
+          <DateRangeFilter
+            title="Last sample date"
+            hint="Its most recent dated result"
+            value={{ begin: lastFrom, end: lastTo }}
+            onChange={(r) => { setLastFrom(r.begin); setLastTo(r.end); resetPage() }}
+            presets={SAMPLE_DATE_PRESETS}
           />
         </div>
-        <div className="w-44">
-          <Select
-            label=""
-            aria-label="Background filter"
-            options={BACKGROUND_OPTIONS}
-            placeholder="Samples and backgrounds"
-            value={backgroundFilter}
-            onChange={(e) => { setBackgroundFilter(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-40">
-          <Select
-            label=""
-            options={TYPE_OPTIONS}
-            placeholder="All types"
-            value={typeFilter}
-            onChange={(e) => { setTypeFilter(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-44">
-          <Input
-            placeholder="Experiment ID…"
-            value={experimentIdFilter}
-            onChange={(e) => { setExperimentIdFilter(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-36">
-          <Input
-            placeholder="Sample ID…"
-            value={sampleFilter}
-            onChange={(e) => { setSampleFilter(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-24">
-          <Input
-            placeholder="Reactor #"
-            value={reactorFilter}
-            onChange={(e) => { setReactorFilter(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-44">
-          <Input
-            placeholder="Description…"
-            value={descriptionFilter}
-            onChange={(e) => { setDescriptionFilter(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-36">
-          <Input
-            type="date"
-            placeholder="From"
-            value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); resetPage() }}
-          />
-        </div>
-        <div className="w-36">
-          <Input
-            type="date"
-            placeholder="To"
-            value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); resetPage() }}
-          />
-        </div>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary pb-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            aria-label="Group replicates"
-            checked={groupReplicates}
-            onChange={(e) => { setGroupReplicates(e.target.checked); resetPage() }}
-            className="accent-brand-red"
-          />
-          Group replicates
-        </label>
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setStatusFilter(''); setTypeFilter(''); setExperimentIdFilter('')
-              setSampleFilter(''); setReactorFilter(''); setDescriptionFilter(''); setBackgroundFilter('')
-              setDateFrom(''); setDateTo(''); resetPage()
-            }}
-          >
-            Clear
-          </Button>
-        )}
       </div>
 
       {isLoading && <PageSpinner />}
@@ -215,14 +225,15 @@ export function ExperimentListPage() {
                 <Th>Sample</Th>
                 <Th>Reactor</Th>
                 <Th>Status</Th>
-                <Th>Date</Th>
+                <Th>Start date</Th>
+                <Th>Last sample</Th>
                 <Th>Additives</Th>
               </tr>
             </TableHead>
             <TableBody>
               {data.items.length === 0 ? (
                 <TableRow>
-                  <Td colSpan={8} className="text-center py-8 text-ink-muted">No experiments found</Td>
+                  <Td colSpan={9} className="text-center py-8 text-ink-muted">No experiments found</Td>
                 </TableRow>
               ) : (
                 data.items.map((exp) => {
@@ -445,7 +456,10 @@ function ExperimentRow({ exp, child, groupBadge }: { exp: ExperimentListItem; ch
           </div>
         )}
       </Td>
-      <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? exp.date.slice(0, 10) : '—'}</Td>
+      {/* Lab-local, matching the server's start date filter. */}
+      <Td className="font-mono-data text-xs text-ink-muted">{exp.date ? labDateOf(exp.date) : '—'}</Td>
+      {/* Issue #168: a lab-local date from the server; a group or vial row carries its latest. */}
+      <Td className="font-mono-data text-xs text-ink-muted">{exp.last_result_date ?? '—'}</Td>
       <Td className="text-xs text-ink-secondary max-w-48 truncate">
         {exp.additives_summary ?? <span className="text-ink-muted">—</span>}
       </Td>
