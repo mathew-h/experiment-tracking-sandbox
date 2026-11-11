@@ -5,7 +5,7 @@ from typing import Callable, Literal, TypeVar
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import Date, cast, select, func, text, case, or_, exists
+from sqlalchemy import ColumnElement, Date, cast, select, func, text, case, or_, exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -75,7 +75,7 @@ def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
     return treatment is None and replicate_label is None and (derivation is None or derivation in (0, 1))
 
 
-def _lab_date(expr):
+def _lab_date(expr: ColumnElement) -> ColumnElement[date]:
     """A timestamptz expression as its lab-local (America/New_York) calendar date.
 
     Comparing the raw timestamp to a date string means midnight, so a sample
@@ -84,7 +84,7 @@ def _lab_date(expr):
     return cast(func.timezone(LAB_TZ.key, expr), Date)
 
 
-def _last_result_date_expr(experiment_pk):
+def _last_result_date_expr(experiment_pk: ColumnElement[int] | int) -> ColumnElement[date]:
     """An experiment's last result date (issue #168): the lab-local calendar
     date of MAX(scalar_results.measurement_date) over its own results; NULL
     when none is dated. No fallback to start date + days.
@@ -102,7 +102,7 @@ def _last_result_date_expr(experiment_pk):
     return _lab_date(latest)
 
 
-def _latest_last_result_date(db: Session, experiment_pks: list[int]):
+def _latest_last_result_date(db: Session, experiment_pks: list[int]) -> date | None:
     """The latest last result date among `experiment_pks` (None if none dated):
     what a list row standing for several experiments shows (issue #168)."""
     if not experiment_pks:
