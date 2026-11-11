@@ -41,7 +41,14 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _EPOCH = datetime.min.replace(tzinfo=LAB_TZ)
 
 
-EXPORT_MAX_EXPERIMENTS: int = 500
+# The only size limit is the file format's: an Excel sheet holds 1,048,576
+# rows including the header (issue #168). Measured on the 2026-11-06 dump,
+# exporting every experiment takes ~3 s and its largest tab has ~5,700 rows.
+EXCEL_MAX_ROWS: int = 1_048_576
+
+# Text starting with one of these is a formula to Excel (openpyxl writes
+# "=..." as one); such cells are written as text (issue #168, B6).
+_FORMULA_CHARS = ("=", "+", "-", "@")
 
 
 class ExportNotFound(Exception):
@@ -349,12 +356,6 @@ def resolve_selection(db: Session, experiment_ids: list[str],
         if bases:
             exps.update({e.id: e for e in _load_experiments(
                 db, Experiment.base_experiment_id.in_(bases))})
-
-    if len(exps) > EXPORT_MAX_EXPERIMENTS:
-        raise ExportRejected(
-            f"Export too large: {len(exps)} experiments after expansion "
-            f"(limit {EXPORT_MAX_EXPERIMENTS}). Narrow the selection or turn "
-            "off Include whole series.")
     return _series_order(_load_members(db, list(exps.values())))
 
 
@@ -408,12 +409,21 @@ def results_rows(db: Session, members: list[Member]) -> tuple[list[dict], list[s
 
 
 def core_flood_rows(db: Session, members: list[Member]) -> list[dict]:
-    return _rows(
+    """Series in member order; within a series, segments before side samples,
+    then cumulative day (issue #168, B5: the view order alone interleaved
+    the series of a multi-series selection)."""
+    rows = _rows(
         db,
         "SELECT * FROM v_core_flood_samples WHERE experiment_fk = ANY(:fks)"
         " ORDER BY is_variant, cumulative_time_post_reaction_days NULLS LAST,"
         " result_id",
         {"fks": [m.id for m in members]})
+    series = {}
+    for m in members:
+        series.setdefault(m.base_id, len(series))
+    series_of = {m.id: series[m.base_id] for m in members}
+    # Stable sort: keeps the view's order within each series.
+    return sorted(rows, key=lambda r: series_of[r["experiment_fk"]])
 
 
 def _ordered_by_member(members: list[Member], rows: list[dict],
@@ -574,12 +584,27 @@ def _write_tab(wb: Workbook, title: str, columns: list[Column],
         for c in cells:
             if isinstance(c.value, date) and not isinstance(c.value, datetime):
                 c.number_format = _DATE_FMT
+            elif isinstance(c.value, str) and c.value.startswith(_FORMULA_CHARS):
+                # Text, never a formula; quotePrefix keeps Excel from
+                # re-reading it as one when the cell is edited.
+                c.data_type = "s"
+                c.quotePrefix = True
         if dts:
             width = max(len(header), 16)
         else:
             width = max([len(header)] + [min(len(str(c.value)), 60)
                                          for c in cells if c.value is not None])
         ws.column_dimensions[get_column_letter(idx)].width = max(10, width + 2)
+
+
+def _check_sheet_limits(tabs: list[tuple[str, list[Column], list[dict]]]) -> None:
+    """Raise ExportRejected for the first tab that would not fit on a sheet."""
+    limit = EXCEL_MAX_ROWS - 1  # the header takes one row
+    for title, _columns, rows in tabs:
+        if len(rows) > limit:
+            raise ExportRejected(
+                f"Export too large: the {title} tab has {len(rows):,} rows and "
+                f"an Excel sheet holds at most {limit:,}. Narrow the selection.")
 
 
 def _results_columns(elements: list[str]) -> list[Column]:
@@ -622,12 +647,14 @@ def build_workbook(db: Session, experiment_id: str,
                    exported_by: str | None = None) -> tuple[str, bytes]:
     """(filename, xlsx bytes) for the lineage of `experiment_id`.
 
-    Raises ExportNotFound when the experiment does not exist.
+    Raises ExportNotFound when the experiment does not exist, ExportRejected
+    when a tab would exceed Excel's sheet row limit.
     """
     lineage = resolve_lineage(db, experiment_id)
     now = lab_now()
 
     tabs = _data_tabs(db, lineage.members)
+    _check_sheet_limits(tabs)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -678,7 +705,8 @@ def build_selection_workbook(db: Session, experiment_ids: list[str],
                              exported_by: str | None = None) -> tuple[str, bytes]:
     """(filename, xlsx bytes) for a picked list of experiments.
 
-    Raises ExportRejected for unknown IDs or a selection over the cap.
+    Raises ExportRejected for unknown IDs, or when a tab would exceed Excel's
+    sheet row limit.
     """
     members = resolve_selection(db, experiment_ids, include_series)
     now = lab_now()
@@ -692,6 +720,7 @@ def build_selection_workbook(db: Session, experiment_ids: list[str],
         for m in members]
     tabs = [("Experiments", EXPERIMENT_COLUMNS, experiments)
             ] + _data_tabs(db, members)
+    _check_sheet_limits(tabs)
 
     wb = Workbook()
     wb.remove(wb.active)

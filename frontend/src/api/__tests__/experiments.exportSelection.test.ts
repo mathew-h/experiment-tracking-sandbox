@@ -8,7 +8,7 @@ vi.mock('@/utils/download', async (importOriginal) => ({
   saveBlob: vi.fn(),
 }))
 
-import { experimentsApi } from '../experiments'
+import { experimentsApi, EXPORT_TIMEOUT_MS } from '../experiments'
 import { apiClient } from '../client'
 import { saveBlob } from '@/utils/download'
 
@@ -27,7 +27,7 @@ describe('experimentsApi.exportSelection', () => {
     expect(apiClient.post).toHaveBeenCalledWith(
       '/experiments/export',
       { experiment_ids: ['CF_027', 'HPHT_001'], include_series: false },
-      { responseType: 'blob' },
+      { responseType: 'blob', timeout: EXPORT_TIMEOUT_MS },
     )
     expect(saveBlob).toHaveBeenCalledWith(blob, 'data_export_2026-11-06.xlsx')
     expect(name).toBe('data_export_2026-11-06.xlsx')
@@ -47,5 +47,19 @@ describe('experimentsApi.exportSelection', () => {
       'Unknown experiment IDs: NOPE',
     )
     expect(saveBlob).not.toHaveBeenCalled()
+  })
+
+  it('overrides the shared 30 s client timeout (issue #168)', () => {
+    expect(EXPORT_TIMEOUT_MS).toBe(120_000)
+  })
+
+  it('surfaces a client-side timeout as an error', async () => {
+    vi.mocked(apiClient.post).mockRejectedValue({
+      message: 'timeout of 120000ms exceeded',
+      code: 'ECONNABORTED',
+    })
+    await expect(experimentsApi.exportSelection(['A'], true)).rejects.toThrow(
+      'timeout of 120000ms exceeded',
+    )
   })
 })

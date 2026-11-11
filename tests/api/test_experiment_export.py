@@ -492,15 +492,53 @@ def test_selection_unknown_ids_422(client, db_session, reporting_views):
     assert resp.json()["detail"] == "Unknown experiment IDs: NOPE_1, NOPE_2"
 
 
-def test_selection_cap_422(client, db_session, reporting_views, monkeypatch):
-    monkeypatch.setattr(experiment_export, "EXPORT_MAX_EXPERIMENTS", 2)
+def test_selection_over_500_after_expansion_exports(
+        client, db_session, reporting_views):
+    """#168: the old 500-experiment cap is gone; one pick expands to 501 vials."""
+    db_session.add_all([
+        Experiment(experiment_id=f"SERUM_BIG_001-t{i}", experiment_number=90000 + i,
+                   status=ExperimentStatus.COMPLETED)
+        for i in range(1, 502)])
+    db_session.flush()
+    _resp, wb = _post(client, ["SERUM_BIG_001-t1"], include_series=False)
+    _h, exps = _table(wb["Experiments"])
+    assert len(exps) == 501
+    summary = _summary(wb)
+    assert summary["Experiment count"] == 501
+    for ws in wb.worksheets:
+        if ws.title != "Summary":
+            assert summary[f"Rows: {ws.title}"] == ws.max_row - 1
+
+
+def test_selection_tab_over_sheet_row_limit_422(
+        client, db_session, reporting_views, monkeypatch):
+    # Header + 2 data rows; _seed_run gives Results 4 rows (Experiments only 3).
+    monkeypatch.setattr(experiment_export, "EXCEL_MAX_ROWS", 3)
     _seed_run(db_session)
     resp = client.post("/api/experiments/export", json={
         "experiment_ids": ["CFE_001"]})
     assert resp.status_code == 422
     assert resp.json()["detail"] == (
-        "Export too large: 3 experiments after expansion (limit 2). "
-        "Narrow the selection or turn off Include whole series.")
+        "Export too large: the Experiments tab has 3 rows and an Excel sheet "
+        "holds at most 2. Narrow the selection.")
+
+
+def test_lineage_tab_over_sheet_row_limit_422(
+        client, db_session, reporting_views, monkeypatch):
+    monkeypatch.setattr(experiment_export, "EXCEL_MAX_ROWS", 4)
+    _seed_run(db_session)
+    resp = client.get("/api/experiments/CFE_001/export")
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "Export too large: the Results tab has 4 rows and an Excel sheet "
+        "holds at most 3. Narrow the selection.")
+
+
+def test_tab_at_sheet_row_limit_exports(
+        client, db_session, reporting_views, monkeypatch):
+    monkeypatch.setattr(experiment_export, "EXCEL_MAX_ROWS", 5)  # header + 4
+    _seed_run(db_session)
+    _get(client, "CFE_001")
 
 
 def test_selection_empty_list_422(client, db_session, reporting_views):
@@ -678,3 +716,55 @@ def test_selection_includes_xrd_tabs(client, db_session, reporting_views):
         ("CFE_ROCK_1", "CFE_001, CFE_001-2"), ("HPE_ROCK_1", "HPE_010")]
     assert rock[0]["Quartz (%)"] is None
     assert rock[1]["Quartz (%)"] == 90.0
+
+
+# ---------------------------------------------------------------------------
+# Issue #168 Part 1 audit: the confirmed defects B5 (Core Flood row order)
+# and B6 (text written as a formula).
+# ---------------------------------------------------------------------------
+
+
+def test_selection_core_flood_rows_grouped_by_series(
+        client, db_session, reporting_views):
+    _seed_run(db_session)  # CFE_001 samples at days 1 and 4, CFE_001-2 at 10
+    other = _experiment(db_session, "CFF_001", date_=_lab(2026, 9, 1, 9))
+    _sample(db_session, other, 2.0, measured=_lab(2026, 9, 3))
+    _sample(db_session, other, 5.0, measured=_lab(2026, 9, 6))
+    _resp, wb = _post(client, ["CFE_001", "CFF_001"])
+    _h, cf = _table(wb["Core Flood"])
+    series = [r["Experiment ID"].split("-")[0].split("_Bypass")[0] for r in cf]
+    # Each series' rows are contiguous, in the Experiments tab's series order.
+    assert series == sorted(series, key=["CFE_001", "CFF_001"].index)
+
+
+@pytest.mark.parametrize("text_", ["=see above", "+10 mL pH4", "-2 mL", "@lab"])
+def test_note_starting_with_formula_char_is_text(
+        client, db_session, reporting_views, text_):
+    root, _seg2, _bypass = _seed_run(db_session)
+    db_session.add(ExperimentNotes(experiment_fk=root.id,
+                                   experiment_id=root.experiment_id,
+                                   note_type=NoteType.modification,
+                                   event_date=date(2026, 10, 3),
+                                   note_text=text_))
+    db_session.flush()
+    _resp, wb = _get(client, "CFE_001")
+    ws = wb["Notes"]
+    headers = [c.value for c in ws[1]]
+    col = headers.index("Text")
+    cells = [row[col] for row in ws.iter_rows(min_row=2) if row[col].value == text_]
+    assert len(cells) == 1
+    assert cells[0].data_type == "s"
+    # quotePrefix keeps Excel from re-reading it as a formula when edited.
+    assert cells[0].quotePrefix is True
+
+
+def test_formula_guard_leaves_numbers_and_plain_text(
+        client, db_session, reporting_views):
+    _seed_run(db_session)
+    _resp, wb = _get(client, "CFE_001")
+    _h, notes = _table(wb["Notes"])
+    assert {r["Text"] for r in notes} >= {"cloudy", "swapped pump"}
+    ws = wb["Notes"]
+    assert not any(c.quotePrefix for row in ws.iter_rows(min_row=2) for c in row)
+    _h, res = _table(wb["Results"])
+    assert all(isinstance(r["pH"], (int, float)) for r in res)

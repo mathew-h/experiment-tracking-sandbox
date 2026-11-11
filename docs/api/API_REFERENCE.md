@@ -404,12 +404,12 @@ Read-only, no new formulas: every value comes from the reporting views Power BI
 reads. Service: `backend/services/experiment_export.py`.
 
 - **Filename:** `Content-Disposition: attachment; filename="<base_id>_export_<YYYY-MM-DD>.xlsx"`, lab-local (America/New_York) date.
-- **Errors:** `404` if the experiment does not exist.
+- **Errors:** `404` if the experiment does not exist. `422` (`detail` is the message) if a tab would exceed Excel's sheet limit (see the size limit under `POST /api/experiments/export`).
 
 | Tab | Rows | Source |
 |-----|------|--------|
 | Results | one per primary timepoint, all lineage members | `v_results_scalar` left-joined on `result_id` to `v_results_h2`, `v_results_icp` and `v_dim_timepoints` (tube number, modification note). Adds `is_variant` (same rule as `v_core_flood_samples`). Ordered by member, then cumulative day. |
-| Core Flood | one per sample; **only when a member is a Core Flood experiment** | `v_core_flood_samples` (flow, hold flag, permeability test flow, pressures, interval, cumulative liquid volume / pore volumes / H₂, H₂ rate) |
+| Core Flood | one per sample; **only when a member is a Core Flood experiment** | `v_core_flood_samples` (flow, hold flag, permeability test flow, pressures, interval, cumulative liquid volume / pore volumes / H₂, H₂ rate). Ordered by series (member order), then segments before side samples, then cumulative day (issue #168; before, a multi-series selection interleaved its series). |
 | XRD | one per member × post-reaction day; **only when a member has experiment-linked XRD** | `v_experiment_xrd`, pivoted wide: Experiment ID, `is_variant`, Day, Measurement date, Rwp, then one `<mineral> (%)` column per mineral in the export (alphabetical, case-insensitive; names kept exactly as stored, so `Ilmenite` and `ilmenite` are two columns). A mineral not measured at that day is blank. Ordered by member, then day. |
 | Rock XRD | one per XRD analysis of a member's starting-rock sample; **only when one exists** | `v_sample_xrd` for the members' `sample_id` (from `v_experiments`), pivoted wide: Sample ID, Used by (the exported members with that sample, member order), Analysis date, Laboratory, Analyst, then `<mineral> (%)` columns as on XRD. Ordered by the sample's first user, then analysis date. |
 | Conditions | one per member | `v_experiment_conditions` |
@@ -424,6 +424,9 @@ time (a column whose every value is lab midnight is formatted `yyyy-mm-dd`, othe
 reading in the export, in `ICP_ELEMENTS` order. **S is never exported**:
 `v_results_icp` has no `s_ppm` column (known view gap, noted 2026-08-13).
 An experiment with no results still exports; its Results tab keeps the header row.
+Text starting with `=`, `+`, `-` or `@` (a note such as "+10 mL pH4") is written as a
+text cell with Excel's quote prefix, never as a formula (issue #168), so the workbook
+opens without a repair prompt and editing the cell does not turn it into one.
 
 ### POST /api/experiments/export
 
@@ -437,18 +440,28 @@ Declared before `/{experiment_id}/export`, so `export` is never read as an exper
 { "experiment_ids": ["CF_027", "SERUM_X_001-t1"], "include_series": true }
 ```
 
-`experiment_ids`: at least 1 string (duplicates are ignored; the only size limit is the 500-experiment cap below). `include_series`: boolean, default `true`.
+`experiment_ids`: at least 1 string (duplicates are ignored; no count limit). `include_series`: boolean, default `true`.
 
 **Expansion rules** (`resolve_selection`):
 - A picked ID always brings every vial of its timepoint stem (`SERUM_X_001-t1` also brings `-t3`, `-t7`).
 - With `include_series` true, it also brings every experiment sharing the `base_experiment_id` of any of those (the whole lineage, replicate set and side samples).
 - Members are ordered series by series (`_series_order`): series by base ID; within a series by experiment date (undated last), then timepoint stem, then `-t` day ascending (numeric, so `-t3` precedes `-t20`). Every tab follows this member order. Side samples are flagged `is_variant`.
-- At most **500** experiments after expansion (`EXPORT_MAX_EXPERIMENTS`).
+
+**Size limit (issue #168).** There is no experiment cap; the 500-experiment cap after
+expansion (`EXPORT_MAX_EXPERIMENTS`) was removed, since a full Data Export page with
+Include whole series on routinely expanded past it. The only limit is the file
+format's: a tab may hold at most 1,048,575 data rows (`EXCEL_MAX_ROWS` = 1,048,576
+including the header), checked on every tab of both exports before anything is
+written. Measured on the 2026-11-06 production dump (dev PC): 500 newest picks
+→ 527 experiments (series off) / 534 (series on), ~0.6 s, 0.2 MB; every experiment
+(2,262) → ~3 s, 1.05 MB, 241 MB peak process memory, largest tab Notes at 5,723 rows.
+The frontend gives both export requests a 120 s timeout (`EXPORT_TIMEOUT_MS`) instead
+of the shared client's 30 s.
 
 - **Filename:** `Content-Disposition: attachment; filename="data_export_<YYYY-MM-DD>.xlsx"`, lab-local (America/New_York) date.
 - **Errors (`422`, `detail` is the message shown to the user):**
   - `Unknown experiment IDs: <id>, <id>` when any picked ID does not exist.
-  - `Export too large: <n> experiments after expansion (limit 500). Narrow the selection or turn off Include whole series.`
+  - `Export too large: the <tab> tab has <n> rows and an Excel sheet holds at most 1,048,575. Narrow the selection.` (the first tab over the limit; also returned by Export all).
 
 Tabs: **Experiments** first, then the same data tabs as the single-lineage export
 (Results, Core Flood when a member is a Core Flood, XRD and Rock XRD when there is XRD of
