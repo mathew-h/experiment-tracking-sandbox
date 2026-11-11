@@ -3089,3 +3089,12 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Verification:** red check: the new assertion failed against the original component ("Unable to find … link … HPHT_297-2") and passed with the change. vitest 71 files / 699 passed; lint and type-check exit 0. Chrome: `/hpht/HPHT_297` heading link → `/experiments/HPHT_297-2`, no routable ID left as plain text, console clean.
 - **Deploy:** frontend only, no migration, no package change.
 - **Tests added:** yes — vitest: the Conditions heading contains a link to the segment's detail page. **Docs updated:** no (no doc describes the caption). **Decision logged:** no.
+
+## 2026-11-11 | issue #167 Phase 1 — Backend sweep findings (`chore/issue-167-backend-sweep-findings`)
+- **Files changed:** `docs/issues/sweep-2026-11-backend-findings.md` (+ `project_context` copy). No code.
+- **What:** read-only sweep of `backend/` (84 files, 21,084 lines) by four read-only auditors (API, calc engine, bulk uploads, other services); the controller re-checked the highest-risk claims. Run on Opus 5.5 at Mat's direction, not Fable as the issue suggests. Findings doc: S-01–S-11, D-01–D-19, E-01–E-15; 23 locked items (L-S/L-D/L-E, per-item sign-off); Needs human call H-01–H-13; defects X-01–X-14 to file as separate issues; out-of-scope grouped by the three follow-up areas. Staleness rule applied at block level (`git blame`), cutoff 2026-09-12; the doc states this so Mat can overrule it.
+- **Seed items:** the empty `routes.py` and `services/database/` were confirmed dead; `reactor-status` was confirmed dead, and so was `timeline`; `experiment_additives.py` is legacy- and test-only. The registry has 30 LIVE call sites in 16 files, not 72/14. One live double recalculation (PATCH sample change, E-08); the additive triple compute is load-bearing (H-06). The parsing duplication is real but must not be unified (L-D2).
+- **Notable defects (verified by reading, no repro test yet):** X-01–X-03 blank cells become NaN or `'nan'` in the additive, compound and chemical-inventory parsers; X-04 conditions PATCH never recalculates additives; X-08 the Serum KPI literal from the 2026-07-28 audit is still on develop.
+- **Verification:** Notion residue grep clean; `tests/api/test_notion_removed.py` 5 passed. The scoped pytest run was not executed (no code changed).
+- **Next:** Mat reviews and ticks boxes → Phase 2 PRs (stale → dedupe → efficiency). File the three follow-up issues and the X-defect issues. #167 stays open.
+- **Tests added:** no. **Docs updated:** yes. **Decision logged:** no.
