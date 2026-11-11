@@ -8,7 +8,7 @@ vi.mock('@/utils/download', async (importOriginal) => ({
   saveBlob: vi.fn(),
 }))
 
-import { experimentsApi } from '../experiments'
+import { experimentsApi, EXPORT_TIMEOUT_MS } from '../experiments'
 import { apiClient } from '../client'
 import { saveBlob } from '@/utils/download'
 
@@ -26,6 +26,7 @@ describe('experimentsApi.exportAll', () => {
     const name = await experimentsApi.exportAll('CF_027-2')
     expect(apiClient.get).toHaveBeenCalledWith('/experiments/CF_027-2/export', {
       responseType: 'blob',
+      timeout: EXPORT_TIMEOUT_MS,
     })
     expect(saveBlob).toHaveBeenCalledWith(blob, 'CF_027_export_2026-11-06.xlsx')
     expect(name).toBe('CF_027_export_2026-11-06.xlsx')
@@ -41,12 +42,24 @@ describe('experimentsApi.exportAll', () => {
     await experimentsApi.exportAll('X Cation/001')
     expect(apiClient.get).toHaveBeenCalledWith('/experiments/X%20Cation%2F001/export', {
       responseType: 'blob',
+      timeout: EXPORT_TIMEOUT_MS,
     })
   })
 
   it('propagates a failed request and saves nothing', async () => {
     vi.mocked(apiClient.get).mockRejectedValue(new Error('Request failed with status code 404'))
     await expect(experimentsApi.exportAll('NOPE')).rejects.toThrow('404')
+    expect(saveBlob).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the server detail from a blob error (issue #168 row limit)', async () => {
+    const detail =
+      'Export too large: the Results tab has 1,048,576 rows and an Excel sheet holds at most 1,048,575. Narrow the selection.'
+    vi.mocked(apiClient.get).mockRejectedValue({
+      message: 'Request failed with status code 422',
+      response: { data: new Blob([JSON.stringify({ detail })]) },
+    })
+    await expect(experimentsApi.exportAll('CF_027')).rejects.toThrow(detail)
     expect(saveBlob).not.toHaveBeenCalled()
   })
 })

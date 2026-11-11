@@ -1359,6 +1359,8 @@ def export_experiment(
             db, experiment_id, exported_by=current_user.email)
     except experiment_export.ExportNotFound:
         raise HTTPException(status_code=404, detail="Experiment not found")
+    except experiment_export.ExportRejected as exc:
+        raise HTTPException(status_code=422, detail=exc.detail)
     return StreamingResponse(
         io.BytesIO(payload),
         media_type=experiment_export.XLSX_MIME,

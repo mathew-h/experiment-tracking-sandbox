@@ -409,6 +409,14 @@ export interface CreateReplicatesResponse {
   skipped: string[]
 }
 
+/**
+ * Per-request timeout for the Excel exports, overriding the shared client's 30 s
+ * (issue #168). Building a workbook of every experiment measured ~3 s on the
+ * 2026-11-06 dump, so this leaves wide headroom for the lab PC and data growth
+ * while a stuck request still fails.
+ */
+export const EXPORT_TIMEOUT_MS = 120_000
+
 export const experimentsApi = {
   list: (params?: ExperimentListParams) =>
     apiClient.get<ExperimentListResponse>('/experiments', { params }).then((r) => r.data),
@@ -556,19 +564,23 @@ export const experimentsApi = {
   /**
    * Download the Export all workbook for an experiment's whole lineage (issue #141).
    * Fetched as a blob through apiClient so the Firebase token is attached.
-   * Resolves to the saved filename.
+   * Resolves to the saved filename; rejects with the server's `detail` text on failure.
    */
   exportAll: async (experimentId: string): Promise<string> => {
-    const response = await apiClient.get<Blob>(
-      `/experiments/${encodeURIComponent(experimentId)}/export`,
-      { responseType: 'blob' },
-    )
-    const filename = filenameFromDisposition(
-      response.headers['content-disposition'],
-      `${experimentId}_export.xlsx`,
-    )
-    saveBlob(response.data, filename)
-    return filename
+    try {
+      const response = await apiClient.get<Blob>(
+        `/experiments/${encodeURIComponent(experimentId)}/export`,
+        { responseType: 'blob', timeout: EXPORT_TIMEOUT_MS },
+      )
+      const filename = filenameFromDisposition(
+        response.headers['content-disposition'],
+        `${experimentId}_export.xlsx`,
+      )
+      saveBlob(response.data, filename)
+      return filename
+    } catch (err) {
+      throw new Error(await blobErrorMessage(err))
+    }
   },
 
   /**
@@ -580,7 +592,7 @@ export const experimentsApi = {
       const response = await apiClient.post<Blob>(
         '/experiments/export',
         { experiment_ids: experimentIds, include_series: includeSeries },
-        { responseType: 'blob' },
+        { responseType: 'blob', timeout: EXPORT_TIMEOUT_MS },
       )
       const filename = filenameFromDisposition(
         response.headers['content-disposition'],
