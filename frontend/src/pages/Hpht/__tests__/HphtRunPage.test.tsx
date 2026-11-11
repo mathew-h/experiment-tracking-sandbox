@@ -118,6 +118,11 @@ describe('HphtRunPage (issue #150)', () => {
     expect(screen.getByRole('link', { name: 'Edit on Conditions tab' })).toHaveAttribute(
       'href', '/experiments/HPHT_297-2?tab=conditions',
     )
+    // The segment the card describes is a link too, not caption text (epic #154).
+    const heading = screen.getByRole('heading', { name: /^Conditions/, level: 2 })
+    expect(within(heading).getByRole('link', { name: 'HPHT_297-2' })).toHaveAttribute(
+      'href', '/experiments/HPHT_297-2',
+    )
   })
 
   it('lists samples newest first with Tube and the result note, and a MOD badge', async () => {

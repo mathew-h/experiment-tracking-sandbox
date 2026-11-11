@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { HphtConditionsSummary } from '@/api/hpht'
 import { chemicalsApi } from '@/api/chemicals'
 import { Card, CardHeader } from '@/components/ui'
+import { SegmentLink } from '@/components/runs/SegmentLink'
 import { fmt } from '@/components/results/sampleFields'
 import { labDateOf } from '@/utils/labDate'
 
@@ -39,9 +40,7 @@ export function ConditionsSummaryCard({ conditions }: { conditions: HphtConditio
             <h2 id="conditions-heading" className={HEADING}>
               Conditions
               {experimentId && (
-                <span className="ml-2 normal-case tracking-normal font-normal text-ink-muted font-mono-data">
-                  {experimentId}
-                </span>
+                <SegmentLink id={experimentId} className="ml-2 normal-case tracking-normal font-normal" />
               )}
             </h2>
             {experimentId && (
