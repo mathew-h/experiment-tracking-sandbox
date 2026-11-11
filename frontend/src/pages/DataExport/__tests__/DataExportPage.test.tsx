@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -174,10 +174,10 @@ describe('DataExportPage', () => {
   it('passes both date pairs to the list', async () => {
     renderPage()
     await screen.findByText('CF_027')
-    await userEvent.type(screen.getByLabelText('Started from'), '2026-07-01')
-    await userEvent.type(screen.getByLabelText('Started to'), '2026-07-31')
-    await userEvent.type(screen.getByLabelText('Last result from'), '2026-10-01')
-    await userEvent.type(screen.getByLabelText('Last result to'), '2026-10-31')
+    await userEvent.type(screen.getByLabelText('Experiment start date begin'), '2026-07-01')
+    await userEvent.type(screen.getByLabelText('Experiment start date end'), '2026-07-31')
+    await userEvent.type(screen.getByLabelText('Last sample date begin'), '2026-10-01')
+    await userEvent.type(screen.getByLabelText('Last sample date end'), '2026-10-31')
     await waitFor(() =>
       expect(experimentsApi.list).toHaveBeenLastCalledWith(
         expect.objectContaining({
@@ -209,7 +209,7 @@ describe('DataExportPage', () => {
     await screen.findByText('CF_027')
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent)
     expect(headers).toEqual(
-      ['', 'ID', 'Type', 'Status', 'Start date', 'Last result', 'Description', 'Additives'],
+      ['', 'ID', 'Type', 'Status', 'Start date', 'Last sample', 'Description', 'Additives'],
     )
     const cf = screen.getByText('CF_027').closest('tr')!
     expect(within(cf).getByText('2026-10-01')).toBeInTheDocument()
@@ -223,5 +223,69 @@ describe('DataExportPage', () => {
     renderPage()
     const cell = await screen.findByText('No experiments found')
     expect(cell.closest('td')).toHaveAttribute('colspan', '8')
+  })
+
+  describe('date range cards', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('groups each range under its heading with Begin and End', async () => {
+      renderPage()
+      await screen.findByText('CF_027')
+      for (const name of ['Experiment start date', 'Last sample date']) {
+        const group = screen.getByRole('group', { name })
+        expect(within(group).getByText('Begin')).toBeInTheDocument()
+        expect(within(group).getByText('End')).toBeInTheDocument()
+      }
+      // Presets belong to the sample date only.
+      const start = screen.getByRole('group', { name: 'Experiment start date' })
+      expect(within(start).queryByRole('button', { name: 'Last month' })).toBeNull()
+    })
+
+    it('a preset fills the last sample range in lab time and shows as pressed', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      // 01:00 UTC on 11-01 is still 10-31 in the lab.
+      vi.setSystemTime(new Date('2026-11-01T01:00:00Z'))
+      renderPage()
+      await screen.findByText('CF_027')
+      const chip = screen.getByRole('button', { name: 'Last month' })
+      expect(chip).toHaveAttribute('aria-pressed', 'false')
+      await userEvent.click(chip)
+      await waitFor(() =>
+        expect(experimentsApi.list).toHaveBeenLastCalledWith(
+          expect.objectContaining({ last_result_from: '2026-09-01', last_result_to: '2026-09-30' }),
+        ),
+      )
+      expect(screen.getByLabelText('Last sample date begin')).toHaveValue('2026-09-01')
+      expect(chip).toHaveAttribute('aria-pressed', 'true')
+      // Editing a bound by hand releases the preset.
+      await userEvent.clear(screen.getByLabelText('Last sample date end'))
+      expect(chip).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('Clear appears once a bound is set and resets both bounds', async () => {
+      renderPage()
+      await screen.findByText('CF_027')
+      expect(screen.queryByRole('button', { name: 'Clear Experiment start date' })).toBeNull()
+      await userEvent.type(screen.getByLabelText('Experiment start date begin'), '2026-07-01')
+      await userEvent.type(screen.getByLabelText('Experiment start date end'), '2026-07-31')
+      await userEvent.click(screen.getByRole('button', { name: 'Clear Experiment start date' }))
+      expect(screen.getByLabelText('Experiment start date begin')).toHaveValue('')
+      expect(screen.getByLabelText('Experiment start date end')).toHaveValue('')
+      await waitFor(() => {
+        const params = vi.mocked(experimentsApi.list).mock.lastCall?.[0]
+        expect(params?.date_from).toBeUndefined()
+        expect(params?.date_to).toBeUndefined()
+      })
+    })
+
+    it('warns when End is before Begin', async () => {
+      renderPage()
+      await screen.findByText('CF_027')
+      await userEvent.type(screen.getByLabelText('Last sample date begin'), '2026-10-31')
+      await userEvent.type(screen.getByLabelText('Last sample date end'), '2026-10-01')
+      expect(screen.getByText('End is before Begin')).toBeInTheDocument()
+    })
   })
 })

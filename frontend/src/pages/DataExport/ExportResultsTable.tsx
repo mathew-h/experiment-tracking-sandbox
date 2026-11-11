@@ -35,7 +35,7 @@ export function ExportResultsTable({ rows, selected, onToggle, onToggleAll }: Ex
           <Th>Type</Th>
           <Th>Status</Th>
           <Th>Start date</Th>
-          <Th>Last result</Th>
+          <Th>Last sample</Th>
           <Th>Description</Th>
           <Th>Additives</Th>
         </tr>
