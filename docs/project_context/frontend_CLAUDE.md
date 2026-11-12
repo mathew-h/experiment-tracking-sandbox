@@ -40,7 +40,7 @@ Copy `frontend/.env.example` to `frontend/.env.local` and fill in Firebase crede
 Without this, the app starts but shows a "Firebase not configured" warning and auth is bypassed
 (useful for UI-only dev work without Firebase credentials).
 
-Test account: `labpc@addisenergy.com` (password matches email — dev only).
+Test account: `labpc@addisenergy.com`. Get the password from Mat; never write it in the repo.
 
 ## Adding Fields to the Results Endpoint
 Requires changes in exactly 3 places — missing any one silently omits the field from the UI:
