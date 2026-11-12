@@ -39,7 +39,7 @@ This document describes the Firebase authentication setup used by the Experiment
 
 | File | Responsibility |
 |------|----------------|
-| **`backend/auth/firebase_auth.py`** | Initializes Firebase Admin SDK from `backend/config/settings.py` (guarded by `firebase_admin._apps`, safe to call repeatedly). Exposes `verify_firebase_token` — the FastAPI dependency used on every protected route — which extracts the Bearer token, verifies it (`check_revoked=False`), and returns a `FirebaseUser(uid, email, display_name)`. **Does not currently surface `role`/`approved` custom claims** to route handlers — only the three fields above. |
+| **`backend/auth/firebase_auth.py`** | Initializes Firebase Admin SDK from `backend/config/settings.py` (guarded by `firebase_admin._apps`, safe to call repeatedly). Exposes `verify_firebase_token` — the FastAPI dependency used on every protected route — which extracts the Bearer token, verifies it (`check_revoked=False`), **rejects it with 403 unless the `approved` custom claim is exactly `True`**, and returns a `FirebaseUser(uid, email, display_name)`. Does not surface `role` to route handlers — only the three fields above. |
 | **`backend/api/routers/auth.py`** | `POST /api/auth/register` — the only auth endpoint. Validates the payload via `backend/api/schemas/auth.py` (email must end `@addisenergy.com`, role in `{researcher, admin}`, password ≥ 8 chars), then delegates to `auth.user_management.create_pending_user_request()`. |
 | **`auth/user_management.py`** (root, **shared** — not backend-scoped) | Firebase Auth user CRUD (`create_user`, `list_users`, `delete_user`, `update_user`, all with `@addisenergy.com` checks) and the Firestore pending-user flow (`create_pending_user_request`, `list_pending_users`, `approve_user`, `reject_user`, `delete_request_by_email`). `approve_user` creates the Auth user and sets custom claims `{approved: True, role}`. Imported by `backend/api/routers/auth.py`, `scripts/manage_users.py`, and legacy `legacy/streamlit_frontend/auth_components.py`. Assumes Firebase Admin is already initialized by its caller — it does not initialize it itself. |
 | **`auth/firebase_config.py`** (root) | **Legacy-only.** Streamlit-secrets-or-env Admin SDK init (imports `streamlit`), plus `get_firebase_config()`/`verify_token()` for the old Streamlit app. Only imported by `legacy/streamlit_frontend/auth_components.py`. The current FastAPI backend and CLI do **not** use this module — each initializes Firebase Admin independently (see below). |
@@ -82,9 +82,9 @@ New backend code should initialize via `backend/auth/firebase_auth.py`, not the 
 3. On success, Firebase's `onAuthStateChanged` listener in `AuthContext` fires: it fetches the ID token (`getIdToken()`), stores `user`/`token` in React state, and sets `apiClient.defaults.headers.common['Authorization'] = 'Bearer <token>'` for all subsequent API calls.
 4. `ProtectedRoute` renders the app if `user` is set; otherwise redirects to `/login`.
 5. The token is refreshed proactively every 55 minutes (tokens expire at 60) via `user.getIdToken(true)`.
-6. **Protected API calls:** Every protected FastAPI route depends on `verify_firebase_token` (`backend/auth/firebase_auth.py`), which verifies the Bearer token via the Admin SDK and raises `401` on failure or a missing header.
+6. **Protected API calls:** Every protected FastAPI route depends on `verify_firebase_token` (`backend/auth/firebase_auth.py`), which verifies the Bearer token via the Admin SDK and raises `401` on failure or a missing header, and `403` ("Account not approved") when the token's `approved` claim is not exactly `True`.
 
-There is no explicit "is this user approved" check at login time in the current code — see Registration and Approval Flow below for why that's still safe.
+The approval gate is therefore enforced twice: no Auth account exists before approval, and the backend refuses tokens without the `approved` claim (which also blocks any account created outside `approve_user`, e.g. via Firebase client sign-up).
 
 ## Registration and Approval Flow
 
@@ -92,14 +92,15 @@ There is no explicit "is this user approved" check at login time in the current 
 2. `backend/api/routers/auth.py::register` validates the payload again server-side (Pydantic: domain, role, password length) and calls `auth.user_management.create_pending_user_request()`, which writes a document to Firestore `pending_users` (email, password, display_name, role, status=`pending`). **No Firebase Auth user exists yet.**
 3. **Admin:** Uses `scripts/manage_users.py` (`pending` to list, `approve <request_id>` to approve). `approve_user(request_id)` reads the pending document, calls `create_user(email, password, display_name)` (creates the real Firebase Auth account, enforcing `@addisenergy.com` again), then `auth.set_custom_user_claims(uid, {approved: True, role})`, and marks the request `approved`.
 4. After approval, the user signs in normally via the React login form (step 2 of Login Flow above). Before approval, sign-in fails with Firebase's own "user not found" error, because the Auth account doesn't exist yet — this is what actually enforces the approval gate now, not a post-login claims check.
-5. `role`/`approved` custom claims are set on the Firebase user at approval time but are **not currently read** by `verify_firebase_token` or by any frontend code — they exist for future use (e.g. role-based authorization) but aren't wired into any access-control decision today.
+5. `role`/`approved` custom claims are set on the Firebase user at approval time. `approved` is enforced by `verify_firebase_token` (403 without it); `role` is not yet wired into any access-control decision.
 
 **Security note:** Pending requests store the password in Firestore only until approval. In production, consider a secure alternative (e.g. one-time link to set password) instead of storing the password in a document.
 
 ## Token Verification
 
 - **Where:** `backend/auth/firebase_auth.py::verify_firebase_token` (FastAPI dependency, `Depends(verify_firebase_token)` on protected routes).
-- **Behavior:** Extracts the `Authorization: Bearer` header, verifies the ID token via the Admin SDK (`check_revoked=False`), and returns a `FirebaseUser(uid, email, display_name)`. Raises `401` if the header is missing or verification fails.
+- **Behavior:** Extracts the `Authorization: Bearer` header, verifies the ID token via the Admin SDK (`check_revoked=False`), and returns a `FirebaseUser(uid, email, display_name)`. Raises `401` if the header is missing or verification fails; raises `403` with detail `"Account not approved"` if `decoded["approved"] is not True` (strict — `"true"` or `1` are rejected).
+- **Claim freshness:** custom claims only appear in tokens minted after they were set. A user whose claims were just set needs a token refresh (the frontend forces one on load).
 - **Legacy:** `auth/firebase_config.py::verify_token()` still exists for the old Streamlit session-based flow but is not used by the FastAPI backend.
 
 ## User Management CLI
@@ -123,7 +124,7 @@ When editing auth-related code, avoid breaking the following:
 5. **Token handling** — React holds the ID token in memory (`AuthContext` state) and refreshes it every 55 minutes; it is attached to every API request via the Axios default header. Do not switch to a different token type without updating both `AuthContext.tsx` and `verify_firebase_token`.
 6. **Pending users** — Approval must create the user in Firebase Auth and set custom claims; reject/delete should only remove or update the Firestore document, not create Auth users.
 7. **Firestore collection** — The pending-users flow depends on the `pending_users` collection and its fields (`email`, `password`, `display_name`, `role`, `status`, `created_at`, `updated_at`, `approved_at`). Changing the schema or collection name should be reflected here and in `auth/user_management.py`.
-8. **`role`/`approved` claims are currently informational only** — if you wire them into an access-control decision (e.g. an admin-only endpoint), update this file to describe where that check lives.
+8. **`approved` is enforced; `role` is informational** — `_decode_token` in `backend/auth/firebase_auth.py` rejects tokens without `approved: True` (403). Every user who should have access must carry the claim (`manage_users.py set-claims`). `role` is not used in any access-control decision yet; if you wire it in (e.g. an admin-only endpoint), document where that check lives here.
 
 ## References
 
