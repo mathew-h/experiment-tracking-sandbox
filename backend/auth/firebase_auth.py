@@ -42,7 +42,11 @@ class FirebaseUser(BaseModel):
 
 
 def _decode_token(token: str) -> FirebaseUser:
-    """Verify token and return FirebaseUser. Raises HTTP 401 on failure."""
+    """Verify token and return FirebaseUser.
+
+    Raises HTTP 401 if the token fails verification, HTTP 403 if the account
+    lacks the ``approved: True`` custom claim.
+    """
     try:
         decoded = _verify_id_token(token)
     except Exception as exc:
@@ -51,6 +55,15 @@ def _decode_token(token: str) -> FirebaseUser:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         ) from exc
+    # Only an admin-approved account (custom claim set by approve_user / set-claims)
+    # may use the API. Strict identity check: "true" or 1 do not count.
+    if decoded.get("approved") is not True:
+        uid = decoded.get("uid", decoded.get("user_id", ""))
+        log.warning("token_not_approved", uid=uid)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not approved",
+        )
     return FirebaseUser(
         uid=decoded.get("uid", decoded.get("user_id", "")),
         email=decoded.get("email", ""),

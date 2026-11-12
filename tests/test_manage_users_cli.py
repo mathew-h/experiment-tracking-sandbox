@@ -116,23 +116,97 @@ def test_list_users_empty():
     assert "No users" in result.output
 
 
-def test_create_user():
+def test_create_sets_claims_and_prints_link():
     cli = _import_cli()
     runner = CliRunner()
     new_user = {"uid": "uid_new", "email": "carol@addisenergy.com"}
-    with patch("scripts.manage_users.create_user", return_value=new_user):
-        result = runner.invoke(cli, ["create", "carol@addisenergy.com", "pass123", "Carol"])
-    assert result.exit_code == 0
+    with patch("scripts.manage_users.create_user", return_value=new_user) as cu, \
+         patch("scripts.manage_users.set_user_claims", return_value={"uid": "uid_new"}) as sc, \
+         patch("scripts.manage_users.reset_user_password", return_value="https://reset/carol"):
+        result = runner.invoke(cli, ["create", "carol@addisenergy.com", "Carol"])
+    assert result.exit_code == 0, result.output
     assert "carol@addisenergy.com" in result.output
+    assert "https://reset/carol" in result.output
+    sc.assert_called_once_with("uid_new", role="researcher")
+    email, password, name = cu.call_args.args
+    assert (email, name) == ("carol@addisenergy.com", "Carol")
+    assert len(password) >= 32
+
+
+def test_create_rejects_unknown_role():
+    cli = _import_cli()
+    runner = CliRunner(mix_stderr=True)
+    with patch("scripts.manage_users.create_user") as cu:
+        result = runner.invoke(cli, ["create", "carol@addisenergy.com", "Carol", "--role", "owner"])
+    assert result.exit_code != 0
+    cu.assert_not_called()
 
 
 def test_create_user_domain_error():
     cli = _import_cli()
     runner = CliRunner(mix_stderr=True)
     with patch("scripts.manage_users.create_user", side_effect=ValueError("Email must end with @addisenergy.com")):
-        result = runner.invoke(cli, ["create", "carol@gmail.com", "pass123", "Carol"])
+        result = runner.invoke(cli, ["create", "carol@gmail.com", "Carol"])
     assert result.exit_code != 0
     assert "addisenergy.com" in result.output
+
+
+def test_approve_prints_setup_link():
+    cli = _import_cli()
+    runner = CliRunner()
+    approved = {"uid": "u9", "email": "bob@addisenergy.com", "password_setup_link": "https://reset/bob"}
+    with patch("scripts.manage_users.approve_user", return_value=approved):
+        result = runner.invoke(cli, ["approve", "req_abc"])
+    assert result.exit_code == 0
+    assert "Password setup link (send to user): https://reset/bob" in result.output
+    assert (
+        "Link expires after about 1 hour; if it has expired, run: "
+        "manage_users.py reset-password bob@addisenergy.com"
+    ) in result.output
+
+
+def test_approve_without_link_prints_fallback():
+    cli = _import_cli()
+    runner = CliRunner()
+    approved = {"uid": "u9", "email": "bob@addisenergy.com", "password_setup_link": None}
+    with patch("scripts.manage_users.approve_user", return_value=approved):
+        result = runner.invoke(cli, ["approve", "req_abc"])
+    assert result.exit_code == 0
+    assert "reset-password bob@addisenergy.com" in result.output
+
+
+def test_audit_claims_flags_missing():
+    cli = _import_cli()
+    runner = CliRunner()
+    users = [
+        {"uid": "u1", "email": "ok@addisenergy.com", "custom_claims": {"approved": True}},
+        {"uid": "u2", "email": "nope@addisenergy.com", "custom_claims": {}},
+    ]
+    with patch("scripts.manage_users.list_users", return_value=users):
+        result = runner.invoke(cli, ["audit-claims"])
+    assert result.exit_code == 1
+    assert "MISSING u2  nope@addisenergy.com" in result.output
+    assert "OK      u1  ok@addisenergy.com" in result.output
+    assert "1 user(s) missing approved claim" in result.output
+
+
+def test_audit_claims_all_ok():
+    cli = _import_cli()
+    runner = CliRunner()
+    users = [{"uid": "u1", "email": "ok@addisenergy.com", "custom_claims": {"approved": True}}]
+    with patch("scripts.manage_users.list_users", return_value=users):
+        result = runner.invoke(cli, ["audit-claims"])
+    assert result.exit_code == 0
+    assert "0 user(s) missing approved claim" in result.output
+
+
+def test_purge_passwords_reports_count():
+    cli = _import_cli()
+    runner = CliRunner()
+    with patch("scripts.manage_users.purge_pending_passwords", return_value=3):
+        result = runner.invoke(cli, ["purge-passwords"])
+    assert result.exit_code == 0
+    assert "Removed password from 3 pending request(s)." in result.output
 
 
 def test_delete_user():

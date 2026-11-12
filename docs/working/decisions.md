@@ -851,6 +851,22 @@ Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
 
 **Related:** `backend/api/routers/experiments.py` (`_last_result_date_expr`, `_latest_last_result_date`); `docs/api/API_REFERENCE.md`.
 
+## 2026-11-12 — API requires the `approved` claim; no passwords at registration (issue #170)
+
+**Decision (Mat):** prod is moving to a public cloud host (Tailscale access is ending), so auth must stand on its own without the LAN.
+- `verify_firebase_token` returns 403 "Account not approved" unless the ID token's `approved` custom claim is exactly `True`; invalid or missing tokens stay 401.
+- Access requests collect no password. Approval creates the Firebase user with a random password and returns a password-reset link that the admin sends (it expires after about 1 hour; `reset-password` reissues it).
+- Firestore `pending_users` must never hold a password.
+- Firebase self sign-up is disabled in the console as a second layer.
+
+**Consequences:**
+- Every account needs `approved: True`. Users created outside `approve_user` must get `set-claims`, and `manage_users.py audit-claims` checks this before deploys.
+- The frontend force-refreshes the token on load and signs out unapproved users.
+- `role` is still informational (users pick it themselves).
+- Out of scope, by decision: `check_revoked=True`, role-based authorization, and IP/device allowlisting (deferred).
+
+**Related:** `.claude/rules/AUTH.md`; `docs/superpowers/plans/2026-11-12-auth-hardening.md`; issue-log entry for #170 (rollout runbook).
+
 ## 2026-11-12 — One display precision for numbers (issue #169)
 
 **Decision (Mat):** displayed numbers use one shared formatter: 1 dp with the trailing zero trimmed, and a nonzero value that would round to 0 shows as `<0.1` (`>-0.1`), never `0`. Hovering a rounded value shows the stored number. Up to 3 dp (no `<0.1` rule) is kept where 1 dp loses real information: day / T+ / tube labels, core flood flow rates, catalyst ppm, additive amounts and chemical densities (Mat chose all three of the last), plus CO₂ partial pressure and the Replicate Group divergence columns (both added during implementation).

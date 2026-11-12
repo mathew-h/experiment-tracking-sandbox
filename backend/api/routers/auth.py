@@ -24,7 +24,6 @@ async def register(payload: RegisterRequest) -> RegisterResponse:
     try:
         create_pending_user_request(
             email=payload.email,
-            password=payload.password,
             display_name=payload.display_name,
             role=payload.role,
         )
@@ -39,5 +38,5 @@ async def register(payload: RegisterRequest) -> RegisterResponse:
 
     log.info("register_request_submitted", email=payload.email, role=payload.role)
     return RegisterResponse(
-        message="Request submitted — your lab admin will approve your account before you can sign in."
+        message="Request submitted — once your lab admin approves it, you'll receive a link to set your password."
     )
