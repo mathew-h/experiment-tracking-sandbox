@@ -3,6 +3,7 @@ from firebase_admin import auth
 from typing import Optional, Dict
 from firebase_admin import firestore
 import datetime
+import secrets
 
 def create_user(email: str, password: str, display_name: Optional[str] = None) -> Dict:
     """
@@ -52,7 +53,8 @@ def list_users() -> list:
             'email': user.email,
             'display_name': user.display_name,
             'created_at': user.user_metadata.creation_timestamp,
-            'disabled': user.disabled
+            'disabled': user.disabled,
+            'custom_claims': user.custom_claims or {}
         } for user in users.users]
     except Exception as e:
         raise Exception(f"Failed to list users: {str(e)}")
@@ -112,19 +114,22 @@ def update_user(uid: str, display_name: Optional[str] = None, email: Optional[st
     except Exception as e:
         raise Exception(f"Failed to update user: {str(e)}")
 
-def create_pending_user_request(email: str, password: str, display_name: str, role: str) -> Dict:
-    """Create a pending user request in Firestore."""
+def create_pending_user_request(email: str, display_name: str, role: str) -> Dict:
+    """Create a pending user request in Firestore.
+
+    No password is collected or stored: the user sets one via the setup link
+    generated at approval time (see approve_user).
+    """
     db = firestore.client()
-    
+
     # Check if request already exists
     existing_request = db.collection('pending_users').where('email', '==', email).get()
     if existing_request:
         raise ValueError("A request for this email already exists.")
-    
+
     # Create pending user document
     pending_user = {
         'email': email,
-        'password': password,  # In production, use proper password hashing
         'display_name': display_name,
         'role': role,
         'status': 'pending',
@@ -142,39 +147,65 @@ def list_pending_users() -> list:
     return [{**doc.to_dict(), 'id': doc.id} for doc in pending_users]
 
 def approve_user(request_id: str) -> Dict:
-    """Approve a pending user request."""
+    """Approve a pending user request.
+
+    Creates the Firebase Auth user with a random throwaway password (any password
+    stored on a legacy request is ignored), sets the ``approved``/``role`` claims,
+    deletes the request's ``password`` field, and returns the user dict plus
+    ``role`` and ``password_setup_link`` (a password-reset link the admin sends to
+    the user; ``None`` if link generation failed).
+    """
     db = firestore.client()
-    
+
     # Get the pending request
     request_ref = db.collection('pending_users').document(request_id)
     request = request_ref.get()
-    
+
     if not request.exists:
         raise ValueError("Request not found.")
-        
+
     request_data = request.to_dict()
-    
+
     # Create the user in Firebase Auth
     user = create_user(
         email=request_data['email'],
-        password=request_data['password'],
+        password=secrets.token_urlsafe(32),
         display_name=request_data['display_name']
     )
-    
+
     # Set custom claims for the user
     auth.set_custom_user_claims(user['uid'], {
         'approved': True,
         'role': request_data['role']
     })
-    
-    # Update request status
+
+    # Update request status; drop any plaintext password left by the old flow
     request_ref.update({
         'status': 'approved',
+        'password': firestore.DELETE_FIELD,
         'updated_at': datetime.datetime.now(),
         'approved_at': datetime.datetime.now()
     })
-    
-    return user
+
+    try:
+        setup_link: Optional[str] = auth.generate_password_reset_link(request_data['email'])
+    except Exception:
+        setup_link = None  # caller (CLI) tells the admin to run reset-password
+
+    return {**user, 'role': request_data['role'], 'password_setup_link': setup_link}
+
+def purge_pending_passwords() -> int:
+    """Delete the ``password`` field from every pending_users document.
+
+    Returns the number of documents changed.
+    """
+    db = firestore.client()
+    changed = 0
+    for doc in db.collection('pending_users').stream():
+        if 'password' in (doc.to_dict() or {}):
+            doc.reference.update({'password': firestore.DELETE_FIELD})
+            changed += 1
+    return changed
 
 def reject_user(request_id: str, reason: str = None) -> bool:
     """Reject a pending user request."""
