@@ -216,11 +216,11 @@ describe('CoreFloodRunPage', () => {
   it('run totals collapsed by default and show cumulative H₂ when opened', async () => {
     renderPage()
     const toggle = await screen.findByRole('button', { name: /^Run totals/ })
-    expect(toggle).toHaveTextContent('Cum. H₂ 42.123 g/t · Pore volumes 1.235')
+    expect(toggle).toHaveTextContent('Cum. H₂ 42.1 g/t · Pore volumes 1.2')
     await userEvent.click(toggle)
     const label = screen.getByText('Cumulative H₂ to date')
-    expect(label.parentElement).toHaveTextContent('42.123')
-    expect(screen.getByText('Pore volumes to date').parentElement).toHaveTextContent('1.235')
+    expect(label.parentElement).toHaveTextContent('42.1')
+    expect(screen.getByText('Pore volumes to date').parentElement).toHaveTextContent('1.2')
   })
 
   it('segments summary links every segment; rename from data checks reopens a closed table', async () => {

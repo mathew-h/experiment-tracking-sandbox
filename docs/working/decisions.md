@@ -850,3 +850,13 @@ Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
 - The 500-experiment export cap is gone; the only export limit is Excel's sheet row limit.
 
 **Related:** `backend/api/routers/experiments.py` (`_last_result_date_expr`, `_latest_last_result_date`); `docs/api/API_REFERENCE.md`.
+
+## 2026-11-12 — One display precision for numbers (issue #169)
+
+**Decision (Mat):** displayed numbers use one shared formatter: 1 dp with the trailing zero trimmed, and a nonzero value that would round to 0 shows as `<0.1` (`>-0.1`), never `0`. Hovering a rounded value shows the stored number. Up to 3 dp (no `<0.1` rule) is kept where 1 dp loses real information: day / T+ / tube labels, core flood flow rates, catalyst ppm, additive amounts and chemical densities (Mat chose all three of the last), plus CO₂ partial pressure and the Replicate Group divergence columns (both added during implementation).
+
+**Consequences:**
+- Display only. Stored values, API payloads, exports and views keep full precision; form prefills are never rounded.
+- Not covered: the backend-built `additives_summary` string (Experiments, Data Export, Replicate Group), sample latitude/longitude (identifiers, kept raw), Recharts axis ticks, and free text.
+
+**Related:** `frontend/src/utils/numberFormat.ts`, `frontend/src/components/ui/Num.tsx`; `docs/CODE_STANDARDS.md`.

@@ -48,6 +48,11 @@ async def create_conditions(
 - React Router v6 for navigation; Tailwind utility classes only — no inline styles
 - Never hardcode hex values in components — always reference brand tokens from `brand.ts`
 - ESLint + Prettier zero warnings; no `console.log` in committed code
+- Display numbers through `@/utils/numberFormat` (issue #169), never `toFixed` or a raw `{value}`:
+  - `formatNumber` (1 dp, trailing zero trimmed, small nonzero values as `<0.1`) is the default
+  - `formatPrecise` (up to 3 dp) is only for day / T+ / tube labels, core flood flow rates, catalyst ppm, additive amounts, CO₂ partial pressure, chemical density and replicate-divergence columns
+  - Wrap a value that is its own element in `<Num value={v} />` (or put `title={fullValueTitle(v)}` on its span) so hovering shows the stored number
+  - Never format form prefills or edit round-trips; rounding them truncates data on the next save
 
 ```typescript
 interface ReactorCardProps {

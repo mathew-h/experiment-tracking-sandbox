@@ -199,6 +199,29 @@ describe('RunSamplesTable — cells', () => {
     expect(screen.getAllByText('PERM')).toHaveLength(1)
   })
 
+  it('keeps up to 3 dp on flow rates and day labels (issue #169)', () => {
+    const rows = [
+      cf({ result_id: 1, flow_rate_mL_min: 0.05, permeability_flow_rate_mL_min: 0.125, cumulative_time_post_reaction_days: 7.55 }),
+      cf({ result_id: 2, flow_rate_mL_min: 0.125 }),
+    ]
+    render(<RunSamplesTable rows={rows.map(fromCoreFlood)} scope="run" kind="core-flood" icpByResult={noIcp} />)
+    expect(screen.getByText('0.05')).toBeInTheDocument()
+    expect(screen.getAllByText('0.125')).toHaveLength(2)
+    expect(screen.getByText('7.55')).toBeInTheDocument()
+    expect(screen.queryByText('HOLD')).toBeNull()
+  })
+
+  it('rounds measured values to 1 dp and shows the full value on hover (issue #169)', () => {
+    render(
+      <RunSamplesTable
+        rows={[fromCoreFlood(cf({ h2_micromoles: 1.23456, final_ph: 0.04 }))]}
+        scope="run" kind="core-flood" icpByResult={noIcp}
+      />,
+    )
+    expect(screen.getByTitle('1.23456')).toHaveTextContent(/^1\.2$/)
+    expect(screen.getByTitle('0.04')).toHaveTextContent('<0.1')
+  })
+
   it('the result note joins result notes and observations and shows MOD', () => {
     const notes = [
       { id: 1, note_type: 'result_note' as const, note_text: 'clear', created_by: null },

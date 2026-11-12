@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { samplesApi, type SampleDetail } from '@/api/samples'
+import { Num } from '@/components/ui'
 
 interface Props { sample: SampleDetail }
 
@@ -140,7 +141,7 @@ export function OverviewTab({ sample }: Props) {
                 <tr key={r.analyte_symbol} className="border-b border-surface-border/50">
                   <td className="py-2 pr-4 font-mono-data text-ink-primary">{r.analyte_symbol}</td>
                   <td className="py-2 pr-4 font-mono-data text-ink-secondary">
-                    {r.analyte_composition != null ? r.analyte_composition.toFixed(4) : '—'}
+                    <Num value={r.analyte_composition} />
                   </td>
                   <td className="py-2 text-ink-muted">{r.unit}</td>
                 </tr>

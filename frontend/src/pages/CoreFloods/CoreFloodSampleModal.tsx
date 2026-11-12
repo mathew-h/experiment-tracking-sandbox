@@ -16,7 +16,6 @@ import {
   buildPatchBody,
   emptyForm,
   formFromSample,
-  fmt,
   prefillFromPrevious,
   resultNoteOf,
   validateForm,
@@ -27,6 +26,7 @@ import {
   type SampleForm,
 } from './fields'
 import { invalidateCoreFloodWrites } from './useCoreFloodWrites'
+import { formatPrecise } from '@/utils/numberFormat'
 
 interface Props {
   open: boolean
@@ -235,7 +235,7 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
 
   const dayHint = editing
     ? form.measurement_date !== initial.measurement_date
-      ? `Day stays ${fmt(editing.time_post_reaction_days)} — the day can't be changed after a sample is created.`
+      ? `Day stays ${formatPrecise(editing.time_post_reaction_days)} — the day can't be changed after a sample is created.`
       : "Day can't be edited here"
     : segment?.date
       ? `Days since ${segment.experiment_id} started (${labDateOf(segment.date)})`
@@ -286,9 +286,9 @@ function ModalBody({ onClose, baseId, segments, samples, editing }: Props) {
         )}
         {clash && (
           <div role="alert" className="rounded border border-status-warning/30 bg-status-warning/5 px-3 py-2 text-xs text-status-warning">
-            {`${clash.experiment_id} already has a sample on day ${fmt(clash.time_post_reaction_days)} (${
+            {`${clash.experiment_id} already has a sample on day ${formatPrecise(clash.time_post_reaction_days)} (${
               clash.sample_date ? labDateOf(clash.sample_date) : 'no date'
-            }). Saving replaces it in the run. Enter a fractional day (e.g. ${fmt(clash.time_post_reaction_days)}${Number.isInteger(clash.time_post_reaction_days) ? '.5' : '5'}) to keep both.`}
+            }). Saving replaces it in the run. Enter a fractional day (e.g. ${formatPrecise(clash.time_post_reaction_days)}${Number.isInteger(clash.time_post_reaction_days) ? '.5' : '5'}) to keep both.`}
           </div>
         )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">

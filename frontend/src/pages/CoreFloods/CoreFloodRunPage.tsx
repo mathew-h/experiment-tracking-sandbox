@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { coreFloodsApi, type CoreFloodSample } from '@/api/coreFloods'
 import { Badge, Breadcrumb, Button, Card, CardHeader, MetricCard, PageSpinner } from '@/components/ui'
+import { fullValueTitle } from '@/utils/numberFormat'
 import { ExportAllButton } from '@/components/experiments/ExportAllButton'
 import { CleanupPanel } from './CleanupPanel'
 import { Collapsible } from '@/components/runs/Collapsible'
@@ -184,9 +185,14 @@ export function CoreFloodRunPage() {
           <MetricCard
             label="Cumulative H₂ to date"
             value={fmt(last?.cumulative_h2_grams_per_ton)}
+            title={fullValueTitle(last?.cumulative_h2_grams_per_ton)}
             unit="g/t"
           />
-          <MetricCard label="Pore volumes to date" value={fmt(last?.cumulative_pore_volumes)} />
+          <MetricCard
+            label="Pore volumes to date"
+            value={fmt(last?.cumulative_pore_volumes)}
+            title={fullValueTitle(last?.cumulative_pore_volumes)}
+          />
         </div>
       </Collapsible>
 

@@ -3,10 +3,9 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { experimentsApi, type ResultWithFlags } from '@/api/experiments'
 import { resultsApi } from '@/api/results'
-import { Button, PageSpinner, Spinner } from '@/components/ui'
+import { Button, Num, PageSpinner, Spinner } from '@/components/ui'
 import { RunSamplesTable, type SampleKind } from '@/components/results/RunSamplesTable'
 import { fromResult, type SampleRow } from '@/components/results/sampleRows'
-import { fmt } from '@/components/results/sampleFields'
 import { ResultEntryModal } from './ResultEntryModal'
 import { isCoreFloodType, isHphtType, runPathFor } from '@/utils/experimentId'
 import { GroupedResultsView } from './GroupedResultsView'
@@ -33,7 +32,7 @@ function ScalarExtras({ resultId }: { resultId: number }) {
         {values.map(([label, v, unit]) => (
           <div key={label} className="text-xs">
             <span className="text-ink-muted">{label}: </span>
-            <span className="font-mono-data text-ink-primary">{fmt(v)}{unit ? ` ${unit}` : ''}</span>
+            <span className="font-mono-data text-ink-primary"><Num value={v} />{unit ? ` ${unit}` : ''}</span>
           </div>
         ))}
       </div>

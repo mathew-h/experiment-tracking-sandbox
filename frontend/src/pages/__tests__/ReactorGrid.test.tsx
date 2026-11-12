@@ -422,7 +422,7 @@ describe('ReactorCard — experiment-first layout (issue #165)', () => {
     const metrics = within(cardOf(container, 'R05')).getByTestId('reactor-card-metrics')
     expect(metrics).toHaveTextContent('200 °C')
     expect(metrics).toHaveTextContent('Day 3')
-    expect(metrics).toHaveTextContent('H₂ 1.235 g/t')
+    expect(metrics).toHaveTextContent('H₂ 1.2 g/t')
   })
 
   it('shows placeholders when values are missing', () => {

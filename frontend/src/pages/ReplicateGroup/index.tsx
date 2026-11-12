@@ -26,6 +26,7 @@ import { SegmentLink } from '@/components/runs/SegmentLink'
 import { GroupedResultsView } from '@/pages/ExperimentDetail/GroupedResultsView'
 import { H2BackgroundRow } from './H2BackgroundRow'
 import { isSerumType } from '@/utils/experimentId'
+import { formatNumber, formatPrecise } from '@/utils/numberFormat'
 
 const READ_ONLY_NOTICE =
   'Replicates are edited individually; only the H₂ background is set here.'
@@ -37,18 +38,17 @@ function formatFieldName(field: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-function formatValue(value: unknown): string {
+/** Shared-condition fields shown up to 3 dp (Mat, 2026-11-12: small set points). */
+const PRECISE_FIELDS = new Set(['catalyst_ppm'])
+
+/** Display text for a condition value. `precise` keeps up to 3 dp: the divergent
+ *  columns exist to show how replicates differ, and 1 dp could hide that. */
+function formatValue(value: unknown, precise = false): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  if (typeof value === 'number') return formatNumber(value)
+  if (typeof value === 'number') return precise ? formatPrecise(value) : formatNumber(value)
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
-}
-
-/** Rounds to 3 decimal places and trims trailing zeros (0.40888731418072486 -> "0.409", 90 -> "90"). */
-function formatNumber(value: number): string {
-  if (!Number.isFinite(value)) return String(value)
-  return parseFloat(value.toFixed(3)).toString()
 }
 
 function hasValue(value: unknown): boolean {
@@ -145,7 +145,7 @@ function MemberRow({ member, isParent, divergentFields, child }: MemberRowProps)
       </Td>
       {divergentFields.map((field) => (
         <Td key={field} className="font-mono-data">
-          {formatValue(member.conditions[field])}
+          {formatValue(member.conditions[field], true)}
         </Td>
       ))}
     </TableRow>
@@ -271,7 +271,7 @@ function ReplicateGroupContent({ group, baseId }: ReplicateGroupContentProps) {
               .map(([field, value]) => (
                 <div key={field} className="text-xs">
                   <span className="text-ink-muted">{formatFieldName(field)}: </span>
-                  <span className="font-mono-data text-ink-primary">{formatValue(value)}</span>
+                  <span className="font-mono-data text-ink-primary">{formatValue(value, PRECISE_FIELDS.has(field))}</span>
                 </div>
               ))}
             {group.divergent_fields.map((field) => (

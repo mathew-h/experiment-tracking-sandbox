@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, useToast } from '@/components/ui'
+import { Button, Card, Num, useToast } from '@/components/ui'
 import type { ReactorCardData, ReactorSpec } from '@/api/dashboard'
 import { experimentsApi, type ExperimentStatus } from '@/api/experiments'
 import { labTodayISO } from '@/utils/labDate'
 import { runPathFor } from '@/utils/experimentId'
-import { fmt } from '@/components/results/sampleFields'
 
 const STATUS_OPTIONS = ['ONGOING', 'COMPLETED', 'CANCELLED', 'QUEUED'] as const
 type _ExperimentStatus = typeof STATUS_OPTIONS[number]
@@ -267,7 +266,7 @@ function ReactorCard({
         <span className="text-xs text-ink-muted" title="Run H₂ to date, all segments">
           H₂{' '}
           <span className="font-mono-data text-ink-secondary">
-            {fmt(card?.cumulative_h2_grams_per_ton)}
+            <Num value={card?.cumulative_h2_grams_per_ton} />
           </span>{' '}
           g/t
         </span>

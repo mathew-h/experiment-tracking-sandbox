@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { chemicalsApi, type Compound } from '@/api/chemicals'
-import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Input, PageSpinner, Button } from '@/components/ui'
+import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Input, PageSpinner, Button, Num } from '@/components/ui'
 import { CompoundFormModal } from '@/components/CompoundFormModal'
 
 /** Chemical inventory page: searchable compound table with add and edit actions. */
@@ -72,8 +72,8 @@ export function ChemicalsPage() {
                   <Td className="font-medium text-ink-primary">{c.name}</Td>
                   <Td className="font-mono-data">{c.formula ?? '—'}</Td>
                   <Td className="font-mono-data text-ink-muted">{c.cas_number ?? '—'}</Td>
-                  <TdValue>{c.molecular_weight_g_mol?.toFixed(2) ?? '—'}</TdValue>
-                  <TdValue>{c.density_g_cm3?.toFixed(3) ?? '—'}</TdValue>
+                  <TdValue><Num value={c.molecular_weight_g_mol} /></TdValue>
+                  <TdValue><Num value={c.density_g_cm3} precise /></TdValue>
                   <Td className="font-mono-data text-ink-muted">{c.preferred_unit ?? '—'}</Td>
                   <Td className="text-ink-muted">{c.supplier ?? '—'}</Td>
                   <Td>

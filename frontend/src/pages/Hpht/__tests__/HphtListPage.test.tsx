@@ -56,7 +56,7 @@ describe('HphtListPage (issue #150)', () => {
       expect(screen.getByRole('columnheader', { name: head })).toBeInTheDocument()
     }
     expect(screen.getByText('R07')).toBeInTheDocument()
-    expect(screen.getByText('0.712')).toBeInTheDocument()
+    expect(screen.getByText('0.7')).toBeInTheDocument()
     expect(screen.getAllByText('Ongoing')).toHaveLength(2)
   })
 

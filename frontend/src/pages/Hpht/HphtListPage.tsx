@@ -6,7 +6,7 @@ import {
   Table, TableHead, TableBody, TableRow, Th, Td,
   Badge, Input, PageSpinner,
 } from '@/components/ui'
-import { fmt } from '@/components/results/sampleFields'
+import { Num } from '@/components/ui'
 import { labDateOf } from '@/utils/labDate'
 import { hphtRunPath } from './hphtWrites'
 
@@ -126,7 +126,7 @@ export function HphtListPage() {
                     <Td className="font-mono-data text-xs text-ink-muted">
                       {run.last_sample_date ? labDateOf(run.last_sample_date) : '—'}
                     </Td>
-                    <Td className="font-mono-data text-xs">{fmt(run.latest_cumulative_h2_grams_per_ton)}</Td>
+                    <Td className="font-mono-data text-xs"><Num value={run.latest_cumulative_h2_grams_per_ton} /></Td>
                     <Td>
                       {run.ongoing_experiment_ids.length > 0 ? (
                         <Badge variant="ongoing">Ongoing</Badge>

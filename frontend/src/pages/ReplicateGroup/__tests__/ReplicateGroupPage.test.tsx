@@ -207,7 +207,7 @@ describe('ReplicateGroupPage', () => {
     expect(screen.queryByText('Confining Pressure:')).not.toBeInTheDocument()
   })
 
-  it('rounds a long float to 3 decimal places', async () => {
+  it('rounds a long float to 1 decimal place (issue #169)', async () => {
     vi.mocked(experimentsApi.getGroup).mockResolvedValue({
       ...ORPHAN_GROUP,
       shared_conditions: {
@@ -217,7 +217,7 @@ describe('ReplicateGroupPage', () => {
     })
     renderAtBase('SERUM_001')
 
-    await waitFor(() => expect(screen.getByText('0.409')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('0.4')).toBeInTheDocument())
   })
 
   it('renders an integer-valued condition without a trailing decimal', async () => {

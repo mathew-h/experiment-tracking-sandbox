@@ -109,7 +109,7 @@ describe('GroupedResultsView', () => {
   it('renders mean_h2_ppm as mean ± sd with n', async () => {
     render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
-    expect(screen.getByText('500.0 ± 25.0')).toBeInTheDocument()
+    expect(screen.getByText('500 ± 25')).toBeInTheDocument()
   })
 
   it('renders — when mean_h2_ppm is null', async () => {
@@ -183,7 +183,7 @@ describe('GroupedResultsView', () => {
     render(<GroupedResultsView baseExperimentId="SERUM_001" />, { wrapper })
     await waitFor(() => expect(screen.getByText(/n = 3/)).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/metric/i), 'ph')
-    expect(screen.getByText('8.10')).toBeInTheDocument()
+    expect(screen.getByText('8.1')).toBeInTheDocument()
   })
 
   it('annotates outlier members in drill-in links', async () => {
@@ -199,7 +199,7 @@ describe('GroupedResultsView', () => {
     expect(screen.getByRole('columnheader', { name: 'H₂ (g/t)' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Fe²⁺ → H₂ (%)' })).toBeInTheDocument()
     expect(screen.getByText('12.3 ± 2.5')).toBeInTheDocument()
-    expect(screen.getByText('1.23 ± 0.45')).toBeInTheDocument()
+    expect(screen.getByText('1.2 ± 0.5')).toBeInTheDocument()
   })
 })
 
@@ -307,8 +307,8 @@ describe('GroupedResultsView — issue #101: letterless timepoint vial set', () 
   it('renders a row per timepoint for a set with no replicate letters', async () => {
     render(<GroupedResultsView baseExperimentId="SERUM_pH_002" />, { wrapper })
     await waitFor(() => expect(screen.getAllByText(/n = 1/)).toHaveLength(3))
-    expect(screen.getByText('10.0')).toBeInTheDocument()
-    expect(screen.getByText('30.0')).toBeInTheDocument()
+    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(screen.getByText('30')).toBeInTheDocument()
   })
 
   it('keeps every vial reachable by a drill-in link', async () => {

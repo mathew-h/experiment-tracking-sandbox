@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { analysisApi } from '@/api/analysis'
-import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Card, CardHeader, CardBody, PageSpinner } from '@/components/ui'
+import { Table, TableHead, TableBody, TableRow, Th, Td, TdValue, Card, CardHeader, CardBody, PageSpinner, Num } from '@/components/ui'
 
 /** Analysis page: pXRF readings table and XRD phase viewer. */
 export function AnalysisPage() {
@@ -47,7 +47,7 @@ export function AnalysisPage() {
                       <Td className="font-mono-data text-ink-primary">{r.reading_no}</Td>
                       {elements.map((el) => (
                         <TdValue key={el}>
-                          {r[el] != null ? r[el]!.toFixed(1) : <span className="text-ink-muted">—</span>}
+                          {r[el] != null ? <Num value={r[el]} /> : <span className="text-ink-muted">—</span>}
                         </TdValue>
                       ))}
                       <Td className="font-mono-data text-ink-muted">

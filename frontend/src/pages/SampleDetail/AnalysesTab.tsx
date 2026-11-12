@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { samplesApi, type SampleDetail, type ExternalAnalysisCreate, type ExternalAnalysis } from '@/api/samples'
+import { Num } from '@/components/ui'
 
 const PXRF_ELEMENT_LABELS: Record<string, string> = {
   fe: 'Fe', mg: 'Mg', si: 'Si', ca: 'Ca', al: 'Al',
@@ -25,7 +26,7 @@ function PXRFDataTable({ a }: { a: ExternalAnalysis }) {
           <div key={key} className="flex justify-between gap-2">
             <span className="text-ink-muted font-mono-data">{label}</span>
             <span className="text-ink-secondary font-mono-data">
-              {(d[key as keyof typeof d] as number).toFixed(1)}
+              <Num value={d[key as keyof typeof d] as number} />
             </span>
           </div>
         ))}
@@ -44,7 +45,7 @@ function XRDPhaseTable({ a }: { a: ExternalAnalysis }) {
         {phases.map(([mineral, amount]) => (
           <div key={mineral} className="flex justify-between gap-2">
             <span className="text-ink-secondary capitalize">{mineral}</span>
-            <span className="text-ink-muted font-mono-data">{amount.toFixed(1)}%</span>
+            <span className="text-ink-muted font-mono-data"><Num value={amount} />%</span>
           </div>
         ))}
       </div>
