@@ -1,8 +1,8 @@
 import { Fragment, type ReactNode } from 'react'
-import { Badge, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
+import { Badge, Num, Table, TableBody, TableHead, TableRow, Td, Th } from '@/components/ui'
 import { SegmentLink } from '@/components/runs/SegmentLink'
 import { SampleFlagButtons, SampleFlagDetail, useSampleFlags } from '@/components/runs/SampleFlags'
-import { fmt } from '@/components/results/sampleFields'
+import { formatPrecise } from '@/utils/numberFormat'
 import { labDateOf } from '@/utils/labDate'
 import { SampleDetails, hasDetails } from './SampleDetails'
 import type { SampleRow } from './sampleRows'
@@ -43,15 +43,15 @@ const STICKY_ROW_BG = 'bg-surface-raised group-hover:bg-surface-overlay'
  *  as millimoles), so the µ prefix is kept lower case. */
 const umol = <>H₂ <span className="normal-case">µ</span>mol</>
 
-const num = (v: (r: SampleRow) => number | null) => (r: SampleRow) => fmt(v(r))
+const num = (v: (r: SampleRow) => number | null) => (r: SampleRow) => <Num value={v(r)} />
 
 /** Every column in display order. The lead columns (no group) come first, then
  *  GC, Solution and Core flood. Issue #163: one spec for all three tables. */
 export const SAMPLE_COLUMNS: readonly SampleColumn[] = [
   { key: 'segment', head: 'Segment', scope: 'run', cell: (r) => <SegmentLink id={r.experimentId} /> },
   { key: 'date', head: 'Date', scope: 'both', cell: (r) => (r.date ? labDateOf(r.date) : '—') },
-  { key: 'day', head: 'Day', scope: 'both', cell: (r) => fmt(r.day) },
-  { key: 'tube', head: 'Tube', scope: 'both', cell: (r) => fmt(r.tube) },
+  { key: 'day', head: 'Day', scope: 'both', cell: (r) => formatPrecise(r.day) },
+  { key: 'tube', head: 'Tube', scope: 'both', cell: (r) => formatPrecise(r.tube) },
   { key: 'note', head: 'Result note', scope: 'both', cell: () => null }, // rendered with the flags
   { key: 'h2Ppm', head: 'H₂ ppm', group: 'GC', scope: 'both', cell: num((r) => r.h2Ppm) },
   { key: 'h2Umol', head: umol, label: 'H₂ µmol', group: 'GC', scope: 'both', cell: num((r) => r.h2Umol) },
@@ -71,7 +71,7 @@ export const SAMPLE_COLUMNS: readonly SampleColumn[] = [
     key: 'flow', head: 'Flow', group: 'Core flood', scope: 'run', kinds: ['core-flood'],
     cell: (r) => (
       <>
-        {fmt(r.flow)}
+        <Num value={r.flow} precise />
         {r.flow === 0 && <Badge variant="warning" className="ml-2">HOLD</Badge>}
       </>
     ),
@@ -80,7 +80,7 @@ export const SAMPLE_COLUMNS: readonly SampleColumn[] = [
     key: 'permFlow', head: 'Perm. flow', group: 'Core flood', scope: 'run', kinds: ['core-flood'],
     cell: (r) => (
       <>
-        {fmt(r.permFlow)}
+        <Num value={r.permFlow} precise />
         {r.permFlow != null && <Badge variant="info" className="ml-2">PERM</Badge>}
       </>
     ),

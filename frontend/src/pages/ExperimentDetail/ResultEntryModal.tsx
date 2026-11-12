@@ -14,7 +14,6 @@ import {
   createBodyFrom,
   dateField,
   emptyFormFor,
-  fmt,
   numberField,
   psiAsMpaField,
   validateFields,
@@ -24,6 +23,7 @@ import {
 } from '@/components/results/sampleFields'
 import { labDateOf, labTodayISO } from '@/utils/labDate'
 import { isHphtType } from '@/utils/experimentId'
+import { formatPrecise } from '@/utils/numberFormat'
 
 interface Props {
   open: boolean
@@ -332,7 +332,7 @@ function ModalBody({
   }
 
   const title = editing
-    ? `Edit ${noun ?? 'result'} — T+${fmt(editing.time_post_reaction_days)}`
+    ? `Edit ${noun ?? 'result'} — T+${formatPrecise(editing.time_post_reaction_days)}`
     : noun ? `Add ${noun}` : 'Add Results'
   const saveLabel = noun ? `Save ${noun}` : editing ? 'Save' : 'Save Results'
 
@@ -368,7 +368,7 @@ function ModalBody({
             role="alert"
             className="rounded border border-status-warning/30 bg-status-warning/5 px-3 py-2 text-xs text-status-warning"
           >
-            {`Day ${fmt(dayNum)} already has a result (${
+            {`Day ${formatPrecise(dayNum)} already has a result (${
               clash.scalar_measurement_date ? labDateOf(clash.scalar_measurement_date) : 'no date'
             }). Saving replaces it as the primary result for that day.`}
           </div>

@@ -1,6 +1,7 @@
 import type { IcpRow } from '@/api/icp'
 import { chartColors } from '@/assets/brand'
 import { ICP_ELEMENTS } from './icpElements'
+import { formatNumber } from '@/utils/numberFormat'
 
 // Issue #143: Cu is off by default; Mg, Mn and Al are on.
 const PREFERRED = ['ca', 'si', 'fe', 'ni', 'mg', 'mn', 'al']
@@ -79,10 +80,9 @@ export function lineStyles(
   )
 }
 
-/** Tooltip value: up to 3 decimals, trailing zeros dropped; em dash when missing. */
+/** Tooltip value: the shared 1-dp format (issue #169); em dash when missing. */
 export function fmtPpm(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return '—'
-  return parseFloat(v.toFixed(3)).toString()
+  return formatNumber(v)
 }
 
 export type MarkerLabel = { position: 'insideTopLeft' | 'insideTopRight'; dy: number }

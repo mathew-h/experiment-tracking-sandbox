@@ -1,4 +1,5 @@
 import { Input, Select, Button } from '@/components/ui'
+import { formatNumber } from '@/utils/numberFormat'
 import { isVisible } from './fieldVisibility'
 import type { ExperimentType } from './fieldVisibility'
 import { parseVialSize, VIAL_SIZE_MAX_ML } from './vialSize'
@@ -67,7 +68,7 @@ export function Step2Conditions({ data, experimentType, onChange, onBack, onNext
   const rockMass = parseFloat(data.rock_mass_g)
   const waterVol = parseFloat(data.water_volume_mL)
   const wtr = (!isNaN(rockMass) && !isNaN(waterVol) && rockMass > 0)
-    ? (waterVol / rockMass).toFixed(2)
+    ? formatNumber(waterVol / rockMass)
     : null
   // The field() helper can't carry step/min/error, so this input is rendered directly.
   const vialVisible = isVisible('serum_vial_size_mL', experimentType)

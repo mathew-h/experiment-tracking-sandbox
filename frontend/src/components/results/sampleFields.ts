@@ -3,6 +3,7 @@
  *  Each form keeps its own field list; everything here takes that list. */
 import { labCalendarDays, labDateOf } from '@/utils/labDate'
 import { PSI_TO_MPA } from '@/utils/units'
+import { formatNumber } from '@/utils/numberFormat'
 
 export interface FieldDef<K extends string = string> {
   key: K
@@ -153,8 +154,8 @@ export function changedFields<K extends string>(
   return body
 }
 
-/** Number for display; a dash for missing values, never 0 or NaN. */
-export function fmt(v: number | null | undefined, digits = 3): string {
-  if (v == null || !Number.isFinite(v)) return '—'
-  return parseFloat(v.toFixed(digits)).toString()
+/** Number for display: the shared 1-dp format, a dash for missing values (issue #169).
+ *  Day / tube labels and flow rates use `formatPrecise` instead. */
+export function fmt(v: number | null | undefined): string {
+  return formatNumber(v)
 }

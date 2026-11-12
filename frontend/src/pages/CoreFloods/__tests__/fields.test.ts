@@ -211,7 +211,11 @@ describe('fmt', () => {
     expect(fmt(undefined)).toBe('—')
     expect(fmt(NaN)).toBe('—')
     expect(fmt(0)).toBe('0')
-    expect(fmt(1.23456)).toBe('1.235')
+  })
+
+  it('uses the shared 1-dp format (issue #169)', () => {
+    expect(fmt(1.23456)).toBe('1.2')
+    expect(fmt(0.04)).toBe('<0.1')
   })
 })
 

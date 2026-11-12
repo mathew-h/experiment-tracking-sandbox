@@ -6,6 +6,7 @@ import { chemicalsApi } from '@/api/chemicals'
 import { Card, CardHeader } from '@/components/ui'
 import { SegmentLink } from '@/components/runs/SegmentLink'
 import { fmt } from '@/components/results/sampleFields'
+import { formatPrecise } from '@/utils/numberFormat'
 import { labDateOf } from '@/utils/labDate'
 
 const HEADING = 'text-xs font-semibold text-ink-secondary uppercase tracking-wider'
@@ -66,7 +67,7 @@ export function ConditionsSummaryCard({ conditions }: { conditions: HphtConditio
               <Item label="W:R">{fmt(conditions.water_to_rock_ratio)}</Item>
               <Item label="Catalyst">
                 {conditions.catalyst
-                  ? `${conditions.catalyst}${conditions.catalyst_ppm != null ? ` (${fmt(conditions.catalyst_ppm)} ppm)` : ''}`
+                  ? `${conditions.catalyst}${conditions.catalyst_ppm != null ? ` (${formatPrecise(conditions.catalyst_ppm)} ppm)` : ''}`
                   : '—'}
               </Item>
               <Item label="Feedstock">{conditions.feedstock ?? '—'}</Item>
@@ -77,7 +78,7 @@ export function ConditionsSummaryCard({ conditions }: { conditions: HphtConditio
                   <ul className="space-y-0.5">
                     {additives.map((a) => (
                       <li key={a.id}>
-                        {a.compound?.name ?? `Compound #${a.compound_id}`} {fmt(a.amount)} {a.unit}
+                        {a.compound?.name ?? `Compound #${a.compound_id}`} {formatPrecise(a.amount)} {a.unit}
                       </li>
                     ))}
                   </ul>

@@ -5,8 +5,9 @@ import { slotOptionsFor, slotToConditions } from '@/utils/reactorSlots'
 import { isCoreFloodType, isHphtType } from '@/utils/experimentId'
 import { conditionsApi, type ConditionsResponse, type ConditionsPayload } from '@/api/conditions'
 import { chemicalsApi, type Compound, type ChemicalAdditive, type AdditiveUpdatePayload } from '@/api/chemicals'
-import { Button, Input, Select, Modal, ConfirmModal, useToast } from '@/components/ui'
+import { Button, Input, Select, Modal, ConfirmModal, Num, useToast } from '@/components/ui'
 import { CompoundFormModal } from '@/components/CompoundFormModal'
+import { formatNumber, formatPrecise, fullValueTitle } from '@/utils/numberFormat'
 
 const FEEDSTOCK_OPTIONS = [
   { value: 'Nitrogen', label: 'Nitrogen' },
@@ -36,13 +37,23 @@ interface Props {
   experimentFk: number
 }
 
-function Row({ label, value, unit }: { label: string; value: unknown; unit?: string }) {
+interface RowProps {
+  label: string
+  value: unknown
+  unit?: string
+  /** Up to 3 dp for small set points (issue #169). */
+  precise?: boolean
+}
+
+function Row({ label, value, unit, precise = false }: RowProps) {
   if (value == null || value === '') return null
+  const isNum = typeof value === 'number'
+  const text = !isNum ? String(value) : precise ? formatPrecise(value) : formatNumber(value)
   return (
     <div className="flex items-baseline gap-4 py-1 border-b border-surface-border/50">
       <span className="text-xs text-ink-secondary w-44 shrink-0">{label}</span>
-      <span className="text-xs font-mono-data text-ink-primary">
-        {String(value)}{unit ? ` ${unit}` : ''}
+      <span className="text-xs font-mono-data text-ink-primary" title={isNum ? fullValueTitle(value) : undefined}>
+        {text}{unit ? ` ${unit}` : ''}
       </span>
     </div>
   )
@@ -277,7 +288,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
         {conditions.water_to_rock_ratio != null && (
           <div className="flex items-baseline gap-4 py-1 border-b border-surface-border/50">
             <span className="text-xs text-ink-secondary font-semibold w-44 shrink-0">Water : Rock Ratio</span>
-            <span className="text-xs font-mono-data text-brand-red font-semibold">{conditions.water_to_rock_ratio.toFixed(2)}</span>
+            <span className="text-xs font-mono-data text-brand-red font-semibold"><Num value={conditions.water_to_rock_ratio} /></span>
           </div>
         )}
         <Row label="Particle Size" value={conditions.particle_size} />
@@ -287,7 +298,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
         <Row label="Initial Conductivity" value={conditions.initial_conductivity_mS_cm} unit="mS/cm" />
         <Row label="Room Temp Pressure" value={conditions.room_temp_pressure_psi} unit="psi" />
         <Row label="Rxn Temp Pressure" value={conditions.rxn_temp_pressure_psi} unit="psi" />
-        <Row label="CO₂ Partial Pressure" value={conditions.co2_partial_pressure_MPa} unit="MPa" />
+        <Row label="CO₂ Partial Pressure" value={conditions.co2_partial_pressure_MPa} unit="MPa" precise />
         <Row label="Core Height" value={conditions.core_height_cm} unit="cm" />
         <Row label="Core Width" value={conditions.core_width_cm} unit="cm" />
         <Row label="Pore Volume" value={conditions.pore_volume_mL} unit="mL" />
@@ -308,7 +319,7 @@ export function ConditionsTab({ conditions, experimentId, experimentFk }: Props)
             {additives.map((a) => (
               <div key={a.id} className="flex items-baseline gap-4 py-1 border-b border-surface-border/50 group">
                 <span className="text-xs text-ink-secondary w-44 shrink-0">{a.compound?.name ?? `Compound #${a.compound_id}`}</span>
-                <span className="text-xs font-mono-data text-ink-primary">{a.amount} {a.unit}</span>
+                <span className="text-xs font-mono-data text-ink-primary"><Num value={a.amount} precise /> {a.unit}</span>
                 {/* Action group — right-aligned, hover reveal on desktop, always visible on mobile */}
                 <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100 transition-opacity">
                   {/* Edit */}
