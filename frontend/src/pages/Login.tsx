@@ -32,7 +32,7 @@ function ErrorBanner({ message }: { message: string }) {
 }
 
 function LoginForm() {
-  const { signIn } = useAuth()
+  const { signIn, authError } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/'
@@ -88,7 +88,7 @@ function LoginForm() {
         disabled={loading}
       />
 
-      {error && <ErrorBanner message={error} />}
+      {(error ?? authError) && <ErrorBanner message={(error ?? authError) as string} />}
 
       <Button type="submit" variant="primary" size="md" loading={loading} className="w-full mt-1">
         {loading ? 'Signing in…' : 'Sign in'}
@@ -101,7 +101,6 @@ function RegisterForm() {
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [role, setRole] = useState('researcher')
-  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -120,7 +119,6 @@ function RegisterForm() {
     try {
       const res = await apiClient.post<{ message: string }>('/auth/register', {
         email,
-        password,
         display_name: displayName,
         role,
       })
@@ -184,17 +182,6 @@ function RegisterForm() {
           <option value="admin">Admin</option>
         </select>
       </div>
-      <Input
-        label="Password"
-        type="password"
-        placeholder="Min. 8 characters"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        autoComplete="new-password"
-        required
-        disabled={loading}
-      />
-
       {error && <ErrorBanner message={error} />}
 
       <Button type="submit" variant="primary" size="md" loading={loading} className="w-full mt-1">
@@ -249,7 +236,7 @@ export function LoginPage() {
       {activeTab === 'register' && (
         <>
           <p className="text-xs text-ink-muted mb-4">
-            Submit a request — your lab admin will approve your account.
+            Submit a request — once your lab admin approves it, you&apos;ll get a link to set your password.
           </p>
           <RegisterForm />
         </>
