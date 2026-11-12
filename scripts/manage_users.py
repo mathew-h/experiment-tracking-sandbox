@@ -6,15 +6,19 @@ Usage (run from project root):
   python scripts/manage_users.py approve <request_id>
   python scripts/manage_users.py reject <request_id>
   python scripts/manage_users.py list
-  python scripts/manage_users.py create <email> <password> <display_name>
+  python scripts/manage_users.py create <email> <display_name> [--role researcher|admin]
   python scripts/manage_users.py delete <uid>
   python scripts/manage_users.py update <uid> [--name NAME] [--email EMAIL]
   python scripts/manage_users.py set-claims <uid> <role>
   python scripts/manage_users.py reset-password <email>
   python scripts/manage_users.py delete-request <email>
+  python scripts/manage_users.py audit-claims
+  python scripts/manage_users.py purge-passwords
 """
 import sys
 import os
+import secrets
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -34,6 +38,7 @@ from auth.user_management import (
     set_user_claims,
     reset_user_password,
     delete_request_by_email,
+    purge_pending_passwords,
 )
 
 
@@ -76,6 +81,17 @@ def pending() -> None:
         )
 
 
+def _echo_setup_link(email: str, link: Optional[str]) -> None:
+    """Print the password-setup link, or the fallback command if none was generated."""
+    if link:
+        click.echo(f"Password setup link (send to user): {link}")
+    else:
+        click.echo(
+            "Could not generate setup link — run: "
+            f"manage_users.py reset-password {email}"
+        )
+
+
 @cli.command()
 @click.argument("request_id")
 def approve(request_id: str) -> None:
@@ -86,6 +102,7 @@ def approve(request_id: str) -> None:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
     click.echo(f"Approved: {user['email']} (uid: {user['uid']})")
+    _echo_setup_link(user["email"], user.get("password_setup_link"))
 
 
 @cli.command()
@@ -114,16 +131,58 @@ def list_cmd() -> None:
 
 @cli.command()
 @click.argument("email")
-@click.argument("password")
 @click.argument("display_name")
-def create(email: str, password: str, display_name: str) -> None:
-    """Create a new Firebase Auth user directly (bypasses approval flow)."""
+@click.option(
+    "--role",
+    type=click.Choice(["researcher", "admin"]),
+    default="researcher",
+    show_default=True,
+    help="Role claim to set",
+)
+def create(email: str, display_name: str, role: str) -> None:
+    """Create an approved Firebase Auth user directly (bypasses the request queue).
+
+    The account gets a random password plus approved/role claims; the printed
+    setup link lets the user choose their own password.
+    """
     try:
-        user = create_user(email, password, display_name)
+        user = create_user(email, secrets.token_urlsafe(32), display_name)
+        set_user_claims(user["uid"], role=role)
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
-    click.echo(f"Created: {user['email']} (uid: {user['uid']})")
+    click.echo(f"Created: {user['email']} (uid: {user['uid']}, role: {role})")
+    try:
+        link: Optional[str] = reset_user_password(user["email"])
+    except Exception:
+        link = None
+    _echo_setup_link(user["email"], link)
+
+
+@cli.command("audit-claims")
+def audit_claims() -> None:
+    """List users and flag any without the approved claim (exit 1 if any)."""
+    missing = 0
+    for u in list_users():
+        approved = (u.get("custom_claims") or {}).get("approved") is True
+        if not approved:
+            missing += 1
+        label = "OK     " if approved else "MISSING"
+        click.echo(f"{label} {u['uid']}  {u['email']}")
+    click.echo(f"{missing} user(s) missing approved claim")
+    if missing:
+        sys.exit(1)
+
+
+@cli.command("purge-passwords")
+def purge_passwords() -> None:
+    """Delete stored plaintext passwords from all pending_users documents."""
+    try:
+        count = purge_pending_passwords()
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Removed password from {count} pending request(s).")
 
 
 @cli.command()

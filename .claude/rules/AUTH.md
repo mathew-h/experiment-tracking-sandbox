@@ -108,7 +108,12 @@ Run from project root (or ensure project root is on `PYTHONPATH`):
 python scripts/manage_users.py <command> [args]
 ```
 
-Commands: `create`, `list`, `delete`, `update`, `pending`, `approve`, `reject`, `delete-request`, `set-claims`, `reset-password`. See `scripts/manage_users.py` for exact arguments. This script initializes Firebase Admin itself from `backend/config/settings.py` — it does not depend on `auth/firebase_config.py`.
+Commands: `create`, `list`, `delete`, `update`, `pending`, `approve`, `reject`, `delete-request`, `set-claims`, `reset-password`, `audit-claims`, `purge-passwords`. See `scripts/manage_users.py` for exact arguments. Notable behaviour:
+
+- `approve <request_id>` prints the password-setup link to send to the user (or the `reset-password <email>` fallback if link generation failed).
+- `create <email> <display_name> [--role researcher|admin]` takes **no password**: it creates the user with a random one, sets `approved`/`role` claims, and prints a setup link.
+- `audit-claims` lists every Auth user as `OK` or `MISSING` (no `approved: True` claim) and exits 1 if any are missing. Run it before any deploy that relies on the claim; fix with `set-claims <uid> <role>`.
+- `purge-passwords` deletes the `password` field from all `pending_users` docs (pre-#170 leftovers); safe to re-run. This script initializes Firebase Admin itself from `backend/config/settings.py` — it does not depend on `auth/firebase_config.py`.
 
 ## Rules for AI / Maintainers
 

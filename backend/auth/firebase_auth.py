@@ -58,7 +58,8 @@ def _decode_token(token: str) -> FirebaseUser:
     # Only an admin-approved account (custom claim set by approve_user / set-claims)
     # may use the API. Strict identity check: "true" or 1 do not count.
     if decoded.get("approved") is not True:
-        log.warning("token_not_approved", uid=decoded.get("uid", decoded.get("user_id", "")))
+        uid = decoded.get("uid", decoded.get("user_id", ""))
+        log.warning("token_not_approved", uid=uid)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account not approved",

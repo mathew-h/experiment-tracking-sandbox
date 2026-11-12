@@ -188,7 +188,9 @@ def approve_user(request_id: str) -> Dict:
     })
 
     try:
-        setup_link: Optional[str] = auth.generate_password_reset_link(request_data['email'])
+        setup_link: Optional[str] = auth.generate_password_reset_link(
+            request_data['email']
+        )
     except Exception:
         setup_link = None  # caller (CLI) tells the admin to run reset-password
 
