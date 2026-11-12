@@ -159,6 +159,10 @@ def test_approve_prints_setup_link():
         result = runner.invoke(cli, ["approve", "req_abc"])
     assert result.exit_code == 0
     assert "Password setup link (send to user): https://reset/bob" in result.output
+    assert (
+        "Link expires after about 1 hour; if it has expired, run: "
+        "manage_users.py reset-password bob@addisenergy.com"
+    ) in result.output
 
 
 def test_approve_without_link_prints_fallback():

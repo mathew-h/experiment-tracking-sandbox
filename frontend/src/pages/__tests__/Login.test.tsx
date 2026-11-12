@@ -4,15 +4,36 @@ import { MemoryRouter } from 'react-router-dom'
 
 const h = vi.hoisted(() => ({
   post: vi.fn(),
+  signIn: vi.fn(),
   authError: null as string | null,
+  user: null as unknown,
 }))
 
 vi.mock('@/auth/AuthContext', () => ({
-  useAuth: () => ({ configured: true, signIn: vi.fn(), authError: h.authError }),
+  useAuth: () => ({
+    configured: true,
+    signIn: h.signIn,
+    authError: h.authError,
+    user: h.user,
+  }),
 }))
 vi.mock('@/api/client', () => ({ apiClient: { post: h.post } }))
 
+import { Routes, Route } from 'react-router-dom'
 import { LoginPage } from '../Login'
+
+function renderLoginFrom(target: string) {
+  return render(
+    <MemoryRouter
+      initialEntries={[{ pathname: '/login', state: { from: { pathname: target } } }]}
+    >
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path={target} element={<p>TARGET PAGE</p>} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
 
 function renderPage() {
   return render(
@@ -25,7 +46,29 @@ function renderPage() {
 describe('LoginPage', () => {
   beforeEach(() => {
     h.post.mockReset()
+    h.signIn.mockReset()
     h.authError = null
+    h.user = null
+  })
+
+  it('does not navigate when signIn resolves before the user is approved/set', async () => {
+    h.signIn.mockResolvedValue(undefined)
+    const { container } = renderLoginFrom('/target')
+    fireEvent.change(screen.getByPlaceholderText('you@addisenergy.com'), {
+      target: { value: 'a@addisenergy.com' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'pw' } })
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    await waitFor(() => expect(h.signIn).toHaveBeenCalledTimes(1))
+    // Submit button text returns from "Signing in…" to "Sign in" (tab + submit = 2)
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(2))
+    expect(screen.queryByText('TARGET PAGE')).toBeNull()
+  })
+
+  it('redirects to the original page once the user is set', () => {
+    h.user = { uid: 'u1' }
+    renderLoginFrom('/target')
+    expect(screen.getByText('TARGET PAGE')).toBeTruthy()
   })
 
   it('register form has no password field', () => {

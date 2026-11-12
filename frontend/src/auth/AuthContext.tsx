@@ -20,6 +20,7 @@ interface AuthContextValue {
 }
 
 const NOT_APPROVED_MESSAGE = 'Your account has not been approved yet. Contact your lab admin.'
+const VERIFY_FAILED_MESSAGE = "Couldn't verify your account — check your connection and reload."
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
@@ -32,24 +33,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!firebaseConfigured) return
+    const clearSession = () => {
+      setUser(null)
+      setToken(null)
+      delete apiClient.defaults.headers.common['Authorization']
+    }
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      // Force-refresh so claims set after the cached token was minted (e.g. approval) are seen.
-      const result = firebaseUser ? await firebaseUser.getIdTokenResult(true) : null
-      if (firebaseUser && result && result.claims.approved === true) {
-        setUser(firebaseUser)
-        setToken(result.token)
-        apiClient.defaults.headers.common['Authorization'] = `Bearer ${result.token}`
-      } else {
-        if (firebaseUser) {
+      try {
+        if (!firebaseUser) {
+          clearSession()
+          return
+        }
+        // Force-refresh so claims set after the cached token was minted (e.g. approval) are seen.
+        const result = await firebaseUser.getIdTokenResult(true)
+        if (result.claims.approved === true) {
+          setUser(firebaseUser)
+          setToken(result.token)
+          apiClient.defaults.headers.common['Authorization'] = `Bearer ${result.token}`
+        } else {
           // Backend would 403 every call; sign out instead of showing a broken app.
           setAuthError(NOT_APPROVED_MESSAGE)
+          clearSession()
           await firebaseSignOut(auth)
         }
-        setUser(null)
-        setToken(null)
-        delete apiClient.defaults.headers.common['Authorization']
+      } catch {
+        // Transient failure (network, quota): don't sign out, but never leave the app spinning.
+        setAuthError(VERIFY_FAILED_MESSAGE)
+        clearSession()
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     })
     return unsubscribe
   }, [])

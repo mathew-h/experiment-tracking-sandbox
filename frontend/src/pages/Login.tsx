@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react'
+import { useEffect, useState, FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { Button, Input } from '@/components/ui'
@@ -32,7 +32,7 @@ function ErrorBanner({ message }: { message: string }) {
 }
 
 function LoginForm() {
-  const { signIn, authError } = useAuth()
+  const { signIn, authError, user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/'
@@ -42,13 +42,19 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Navigate only once AuthContext has verified the approved claim and set `user`.
+  // signIn() resolves before that check finishes, so navigating there would bounce
+  // off ProtectedRoute back to /login.
+  useEffect(() => {
+    if (user) navigate(from, { replace: true })
+  }, [user, from, navigate])
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
       await signIn(email, password)
-      navigate(from, { replace: true })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Sign in failed'
       if (msg.includes('user-not-found') || msg.includes('wrong-password') || msg.includes('invalid-credential')) {

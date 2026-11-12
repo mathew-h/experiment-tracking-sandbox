@@ -85,6 +85,10 @@ def _echo_setup_link(email: str, link: Optional[str]) -> None:
     """Print the password-setup link, or the fallback command if none was generated."""
     if link:
         click.echo(f"Password setup link (send to user): {link}")
+        click.echo(
+            "Link expires after about 1 hour; if it has expired, run: "
+            f"manage_users.py reset-password {email}"
+        )
     else:
         click.echo(
             "Could not generate setup link — run: "

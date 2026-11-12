@@ -25,9 +25,10 @@ vi.mock('@/api/client', () => ({
 import { AuthProvider, useAuth } from '../AuthContext'
 
 function Probe() {
-  const { user, authError } = useAuth()
+  const { user, authError, loading } = useAuth()
   return (
     <div>
+      <span data-testid="loading">{loading ? 'loading' : 'ready'}</span>
       <span data-testid="user">{user ? 'signed-in' : 'signed-out'}</span>
       <span data-testid="error">{authError ?? ''}</span>
     </div>
@@ -74,6 +75,21 @@ describe('AuthProvider approved-claim gate', () => {
     )
     expect(screen.getByTestId('user').textContent).toBe('signed-out')
     expect(h.headers['Authorization']).toBeUndefined()
+  })
+
+  it('stops loading and reports an error when the token check fails', async () => {
+    const user = {
+      getIdToken: vi.fn(),
+      getIdTokenResult: vi.fn().mockRejectedValue(new Error('auth/network-request-failed')),
+    }
+    await emit(user)
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('ready'))
+    expect(screen.getByTestId('user').textContent).toBe('signed-out')
+    expect(screen.getByTestId('error').textContent).toBe(
+      "Couldn't verify your account — check your connection and reload.",
+    )
+    expect(h.headers['Authorization']).toBeUndefined()
+    expect(h.signOut).not.toHaveBeenCalled()
   })
 
   it('sets Authorization header when approved', async () => {

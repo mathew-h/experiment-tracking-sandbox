@@ -3118,10 +3118,24 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
   - CLI: `create` takes no password and sets claims; new `audit-claims` and `purge-passwords` commands.
   - Frontend force-refreshes the token on load and signs out unapproved users with a message.
   - Existing users keep their passwords.
-- **Verification:** pytest six-dir scope + auth CLI/user-management files **1841 passed**; vitest **74 files / 727 passed**; lint and type-check exit 0. Not checked against live Firebase (all Firebase calls are mocked); that is covered by rollout step 5.
+- **Verification:** pytest six-dir scope + auth CLI/user-management files **1841 passed**; vitest **74 files / 730 passed** after the review fixes; lint and type-check exit 0. Not checked against live Firebase (all Firebase calls are mocked); that is covered by rollout step 5.
+- **Final review fixes (Opus reviewer):**
+  - C1: login no longer navigates when `signIn()` resolves. It navigated before the forced-refresh claim check finished and bounced off `ProtectedRoute`. It now navigates in an effect once `user` is set.
+  - I1: a failing `getIdTokenResult` no longer leaves the app on a spinner forever. It clears `loading` and shows "Couldn't verify your account".
+  - I3: the CLI prints that the setup link expires after about 1 hour, with the `reset-password` command to reissue it.
+  - I2: the `labpc` credential is now runbook step 0.
+- **Follow-ups (not in #170):**
+  - For the cloud move: `GET /api/experiments/next-ids` is unauthenticated, and `/docs`, `/redoc` and `/openapi.json` are public.
+  - Reviewer minors:
+    - `approve_user`/`create` partial failures give no recovery hint.
+    - Overlapping auth callbacks can restore a signed-out session.
+    - The 55-minute refresh doesn't re-check the claim.
+    - Step 3's verification POST creates a real user if sign-up is still on; delete it with `manage_users.py delete <uid>`.
+    - The forced-refresh test asserts the call shape, not the outcome.
 - **Legacy:** `legacy/streamlit_frontend/auth_components.py` still passes `password=` to `create_pending_user_request` and will show "Registration failed" if ever run. Left as is (superseded, not deployed).
 - **Rollout (Mat; order matters):**
-  - [ ] 1. **Before deploy**, from this branch: `.venv/Scripts/python scripts/manage_users.py audit-claims`. For every `MISSING` user who should keep access (including `labpc@addisenergy.com`): `set-claims <uid> researcher` (or `admin`). Re-run until it exits 0. Skipping this locks those users out (403 on every call).
+  - [ ] 0. **Decide on `labpc@addisenergy.com`** first. `frontend/CLAUDE.md` documents its password as equal to its email. Once the app is public, approving it as-is hands anyone who has read the repo full API access. Either rotate its password (`reset-password labpc@addisenergy.com`, then update wherever the lab PC or e2e config signs in with it) or leave it unapproved in prod. Separately, remove the password hint from `frontend/CLAUDE.md`.
+  - [ ] 1. **Before deploy**, from this branch: `.venv/Scripts/python scripts/manage_users.py audit-claims`. For every `MISSING` user who should keep access: `set-claims <uid> researcher` (or `admin`). This includes `labpc` only if step 0 rotated its password. Re-run until the only `MISSING` users are ones you chose to leave out. Skipping this locks those users out (403 on every call).
   - [ ] 2. Merge and deploy (backend + frontend; no migration, no package change). Users with a tab already open may see 403s until they reload.
   - [ ] 3. Firebase console → Authentication → Settings → User actions → untick "Enable create (sign-up)". Verify: `POST https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=<VITE_FIREBASE_API_KEY>` with a test email returns `ADMIN_ONLY_OPERATION`.
   - [ ] 4. `manage_users.py purge-passwords`, then re-run. Expected the second time: `Removed password from 0 pending request(s).`
