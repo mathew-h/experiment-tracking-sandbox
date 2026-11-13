@@ -5,7 +5,7 @@ from typing import Callable, Literal, TypeVar
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import ColumnElement, Date, cast, select, func, text, case, or_, exists
+from sqlalchemy import ColumnElement, Date, Numeric, cast, select, func, text, case, or_, exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -60,13 +60,40 @@ router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
 T = TypeVar("T")
 
-# Prefix mapping for next-id endpoint
+# Experiment type -> ID prefix, for /next-id and /next-ids. One table for both
+# (issue #190, D-03): they used to disagree on Autoclave, and LIKE is
+# case-sensitive on PostgreSQL. AUTOCLAVE is the canonical prefix (Mat, 2026-11-13).
 _TYPE_PREFIX: dict[str, str] = {
     "HPHT": "HPHT",
     "Serum": "SERUM",
     "Autoclave": "AUTOCLAVE",
     "Core Flood": "CF",
 }
+
+# /next-ids response key -> experiment type. The keys are part of the response
+# contract the bulk-upload page reads, so "CF" stays "CF".
+_NEXT_IDS_LABELS: dict[str, str] = {
+    "HPHT": "HPHT",
+    "Serum": "Serum",
+    "CF": "Core Flood",
+    "Autoclave": "Autoclave",
+}
+
+
+def _max_id_number(db: Session, prefix: str) -> int:
+    """Highest all-digit suffix among IDs shaped ``<prefix>_<digits>``; 0 if none.
+
+    Computed in SQL (one aggregate) rather than by loading every matching ID.
+    The LIKE pattern is deliberately the one the Python loop used, unescaped
+    underscore included; the regex then keeps only all-digit suffixes.
+    """
+    suffix = func.substr(Experiment.experiment_id, len(prefix) + 2)
+    highest = db.execute(
+        select(func.max(cast(suffix, Numeric)))
+        .where(Experiment.experiment_id.like(f"{prefix}_%"))
+        .where(suffix.op("~")("^[0-9]+$"))
+    ).scalar_one_or_none()
+    return int(highest) if highest is not None else 0
 
 
 def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
@@ -455,16 +482,7 @@ def get_next_experiment_id(
 ) -> NextIdResponse:
     """Return the next auto-incremented experiment ID for the given type."""
     prefix = _TYPE_PREFIX.get(type, type.upper().replace(" ", "_"))
-    pattern = f"{prefix}_%"
-    rows = db.execute(
-        select(Experiment.experiment_id).where(Experiment.experiment_id.like(pattern))
-    ).scalars().all()
-    max_num = 0
-    for eid in rows:
-        suffix = eid[len(prefix) + 1:]
-        if suffix.isdigit():
-            max_num = max(max_num, int(suffix))
-    next_num = str(max_num + 1).zfill(3)
+    next_num = str(_max_id_number(db, prefix) + 1).zfill(3)
     return NextIdResponse(next_id=f"{prefix}_{next_num}")
 
 
@@ -474,25 +492,15 @@ def get_next_experiment_ids(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> dict:
     """
-    Return the next sequence number for each experiment type, derived by
-    parsing the numeric suffix from experiment_id (same logic as /next-id).
+    Return the next sequence number for each experiment type, from the same
+    prefix table and suffix rule as /next-id.
 
     Response: ``{"HPHT": 107, "Serum": 165, "CF": 15, "Autoclave": 8}``
     """
-    label_prefix = {"HPHT": "HPHT", "Serum": "SERUM", "CF": "CF", "Autoclave": "Autoclave"}
-    result: dict[str, int] = {}
-    for label, prefix in label_prefix.items():
-        rows = db.execute(
-            select(Experiment.experiment_id)
-            .where(Experiment.experiment_id.like(f"{prefix}_%"))
-        ).scalars().all()
-        max_num = 0
-        for eid in rows:
-            suffix = eid[len(prefix) + 1:]
-            if suffix.isdigit():
-                max_num = max(max_num, int(suffix))
-        result[label] = max_num + 1
-    return result
+    return {
+        label: _max_id_number(db, _TYPE_PREFIX[experiment_type]) + 1
+        for label, experiment_type in _NEXT_IDS_LABELS.items()
+    }
 
 
 def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
