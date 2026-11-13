@@ -1,13 +1,14 @@
 from __future__ import annotations
 import io
 from datetime import date
+from dataclasses import dataclass
 from typing import Callable, Literal, TypeVar
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import ColumnElement, Date, Numeric, cast, select, func, text, case, or_, exists
+from sqlalchemy import ColumnElement, Date, Numeric, bindparam, cast, select, func, text, case, or_, exists
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.enums import ExperimentStatus, NoteType
 from database.reactor_slot import derive_reactor_slot
@@ -16,7 +17,7 @@ from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem
 from backend.api.dependencies.db import get_db
 from backend.api.routers._helpers import call_or_http, get_experiment_or_404
 from backend.services.experiment_lookup import (
-    find_experiment, lowest_conditions, scalars_for_experiment, series_key,
+    find_experiment, lowest_conditions, lowest_conditions_map, scalars_for_experiment, series_key,
 )
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
@@ -135,37 +136,78 @@ def _last_result_date_expr(experiment_pk: ColumnElement[int] | int) -> ColumnEle
     return _lab_date(latest)
 
 
-def _latest_last_result_date(db: Session, experiment_pks: list[int]) -> date | None:
+def _last_result_dates(db: Session, experiment_pks: list[int]) -> dict[int, date | None]:
+    """Each experiment's last result date, in one query (issue #168 column)."""
+    if not experiment_pks:
+        return {}
+    return {
+        pk: last for pk, last in db.execute(
+            select(Experiment.id, _last_result_date_expr(Experiment.id))
+            .where(Experiment.id.in_(experiment_pks))
+        )
+    }
+
+
+def _latest(dates: dict[int, date | None], experiment_pks: list[int]) -> date | None:
     """The latest last result date among `experiment_pks` (None if none dated):
     what a list row standing for several experiments shows (issue #168)."""
+    known = [dates[pk] for pk in experiment_pks if dates.get(pk) is not None]
+    return max(known) if known else None
+
+
+def _additive_summaries(db: Session, experiment_pks: list[int]) -> dict[int, str]:
+    """`<compound> <amount> <unit>; ...` per experiment, in one query.
+
+    Ordered by compound id. That is the order the old one-query-per-row version
+    produced on the dev database (checked against 596 list rows, issue #191);
+    stating it keeps the text stable. v_experiment_additives_summary builds the
+    same text without an ORDER BY and disagrees with this order for about a
+    third of experiments, so the list does not read the view (sweep D-04).
+    """
     if not experiment_pks:
-        return None
-    return db.execute(
-        select(func.max(_last_result_date_expr(Experiment.id)))
-        .where(Experiment.id.in_(experiment_pks))
-    ).scalar_one()
-
-
-def _build_list_item(db: Session, exp: Experiment) -> dict:
-    """Build the ExperimentListItem payload dict for one experiment row."""
-    item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
-    # .first() with an explicit order, not scalar_one_or_none(): UNIQUE
-    # (experiment_fk) forbids a second row going forward, but one duplicate on a
-    # pre-constraint database used to 500 this entire endpoint (issue #109).
-    cond = lowest_conditions(db, exp.id)
-    item_data["experiment_type"] = cond.experiment_type if cond else None
-    item_data["reactor_number"] = cond.reactor_number if cond else None
-    additive_row = db.execute(
+        return {}
+    rows = db.execute(
         text("""
-            SELECT string_agg(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; ')
+            SELECT ec.experiment_fk,
+                   string_agg(c.name || ' ' || CAST(a.amount AS TEXT) || ' ' || a.unit, '; '
+                              ORDER BY c.id, a.id)
             FROM chemical_additives a
             JOIN experimental_conditions ec ON ec.id = a.experiment_id
             JOIN compounds c ON c.id = a.compound_id
-            WHERE ec.experiment_fk = :exp_fk
-        """),
-        {"exp_fk": exp.id},
-    ).fetchone()
-    item_data["additives_summary"] = additive_row[0] if additive_row else None
+            WHERE ec.experiment_fk IN :exp_fks
+            GROUP BY ec.experiment_fk
+        """).bindparams(bindparam("exp_fks", expanding=True)),
+        {"exp_fks": list(experiment_pks)},
+    )
+    return {experiment_fk: summary for experiment_fk, summary in rows}
+
+
+@dataclass(frozen=True)
+class _ListLookups:
+    """What a page of list rows needs beyond its Experiment rows, fetched in two
+    queries for the whole page instead of two per row (issue #191, E-01)."""
+
+    conditions: dict[int, ExperimentalConditions]
+    additives: dict[int, str]
+
+    @classmethod
+    def load(cls, db: Session, exps: list[Experiment]) -> "_ListLookups":
+        pks = [e.id for e in exps]
+        return cls(
+            # Lowest id wins and a duplicate row never raises (issue #109).
+            conditions=lowest_conditions_map(db, pks),
+            additives=_additive_summaries(db, pks),
+        )
+
+
+def _build_list_item(exp: Experiment, lookups: _ListLookups) -> dict:
+    """Build the ExperimentListItem payload dict for one experiment row. No query:
+    `exp.description` needs `description_note` loaded with the row."""
+    item_data = {c.key: getattr(exp, c.key) for c in Experiment.__table__.columns}
+    cond = lookups.conditions.get(exp.id)
+    item_data["experiment_type"] = cond.experiment_type if cond else None
+    item_data["reactor_number"] = cond.reactor_number if cond else None
+    item_data["additives_summary"] = lookups.additives.get(exp.id)
     # Issue #118 PR3: the description is the note typed 'description'
     # (Experiment.description hybrid), no longer the lowest-id note.
     # Issue #122 PR-C: the list item field is `description`.
@@ -337,6 +379,7 @@ def list_experiments(
         total = db.execute(select(func.count()).select_from(reps_sq)).scalar_one()
         page_stmt = (
             select(Experiment)
+            .options(selectinload(Experiment.description_note))
             .where(Experiment.id.in_(select(reps_sq.c.id)))
             .order_by(Experiment.experiment_number.desc())
         )
@@ -382,6 +425,7 @@ def list_experiments(
         rep_rows = db.execute(
             select(Experiment, reps_sq.c.stem, reps_sq.c.vial_count,
                    reps_sq.c.last_result_date)
+            .options(selectinload(Experiment.description_note))
             .join(reps_sq, reps_sq.c.id == Experiment.id)
             .order_by(Experiment.experiment_number.desc())
             .offset(skip)
@@ -390,9 +434,58 @@ def list_experiments(
         rows = [row[0] for row in rep_rows]
         flat_collapse = {row[0].id: (row[1], row[2], row[3]) for row in rep_rows}
 
+    # Issue #191 (E-01): no query inside the loop below. Grouped mode resolves
+    # every page row's bucket, and every bucket row's last result date, here.
+    buckets: dict[str, list[Experiment]] = {}
+    bucket_keys: dict[int, str] = {}
+    last_result_dates: dict[int, date | None] = {}
+    if group_replicates:
+        for exp in rows:
+            # Bucket key for this representative -- mirrors Block A: a
+            # lettered representative (orphan-set case) buckets on its own
+            # base_experiment_id; an explicit "-0"/"-1" parent spelling also
+            # buckets on base_experiment_id (the stem) to join its lettered
+            # members; a bare-stem/standalone representative buckets on its
+            # own experiment_id.
+            if exp.replicate_label is not None:
+                bucket_keys[exp.id] = series_key(exp)
+            elif exp.base_experiment_id and exp.experiment_id in (
+                f"{exp.base_experiment_id}-0", f"{exp.base_experiment_id}-1",
+            ):
+                bucket_keys[exp.id] = exp.base_experiment_id
+            else:
+                # Must mirror _bucket_key_expr's else_ branch, which strips the
+                # '-t<days>' token (issue #98) -- otherwise a letterless '-t'
+                # vial's bucket key does not round-trip and the membership
+                # query below matches nothing.
+                bucket_keys[exp.id] = split_timepoint_token(exp.experiment_id)[0]
+        if bucket_keys:
+            # Every row of every page bucket, resolved from the UNFILTERED
+            # table so a filtered query still describes the whole group
+            # (members are attached in full whether or not they matched the
+            # filters). Matching on the bucket-key expression (rather than
+            # base_experiment_id) is what picks up letterless '-t' vials. One
+            # query for the page; the ORDER BY gives each bucket its row order.
+            key_expr = _bucket_key_expr(Experiment)
+            for member, key in db.execute(
+                select(Experiment, key_expr)
+                .options(selectinload(Experiment.description_note))
+                .where(key_expr.in_(sorted(set(bucket_keys.values()))))
+                .order_by(
+                    Experiment.replicate_label.asc().nulls_first(),
+                    Experiment.id_timepoint_days.asc().nulls_first(),
+                    Experiment.experiment_number.asc(),
+                )
+            ):
+                buckets.setdefault(key, []).append(member)
+        last_result_dates = _last_result_dates(
+            db, [m.id for members in buckets.values() for m in members])
+    lookups = _ListLookups.load(
+        db, list(rows) + [m for members in buckets.values() for m in members])
+
     items = []
     for exp in rows:
-        item_data = _build_list_item(db, exp)
+        item_data = _build_list_item(exp, lookups)
         if not group_replicates:
             # Issue #98: label the row by its timepoint stem so the internal
             # '-t<days>' token never reaches the UI.
@@ -401,48 +494,16 @@ def list_experiments(
             item_data["vial_count"] = vial_count
             item_data["last_result_date"] = last_result_date
         if group_replicates:
-            # Bucket key for this representative -- mirrors Block A: a
-            # lettered representative (orphan-set case) buckets on its own
-            # base_experiment_id; an explicit "-0"/"-1" parent spelling also
-            # buckets on base_experiment_id (the stem) to join its lettered
-            # members; a bare-stem/standalone representative buckets on its
-            # own experiment_id. Members are fetched from the UNFILTERED
-            # table (attached in full regardless of whether they matched the
-            # query filters) and identified by id, never by replicate_label
-            # (a '-t<days>' vial shares its letter with its parent vial).
-            if exp.replicate_label is not None:
-                bucket_key = series_key(exp)
-            elif exp.base_experiment_id and exp.experiment_id in (
-                f"{exp.base_experiment_id}-0", f"{exp.base_experiment_id}-1",
-            ):
-                bucket_key = exp.base_experiment_id
-            else:
-                # Must mirror _bucket_key_expr's else_ branch, which strips the
-                # '-t<days>' token (issue #98) -- otherwise a letterless '-t'
-                # vial's bucket key does not round-trip and the membership
-                # query below matches nothing.
-                bucket_key = split_timepoint_token(exp.experiment_id)[0]
-            # Every row in this bucket, resolved from the UNFILTERED table so a
-            # filtered query still describes the whole group. Matching on the
-            # bucket-key expression (rather than base_experiment_id) is what
-            # picks up letterless '-t' vials; it costs a scan per page row,
-            # which is fine at this table's size and matches the existing
-            # per-row queries in _build_list_item.
-            bucket_rows = db.execute(
-                select(Experiment)
-                .where(_bucket_key_expr(Experiment) == bucket_key)
-                .order_by(
-                    Experiment.replicate_label.asc().nulls_first(),
-                    Experiment.id_timepoint_days.asc().nulls_first(),
-                    Experiment.experiment_number.asc(),
-                )
-            ).scalars().all()
+            # Members are identified by id, never by replicate_label (a
+            # '-t<days>' vial shares its letter with its parent vial).
+            bucket_key = bucket_keys[exp.id]
+            bucket_rows = buckets.get(bucket_key, [])
             members = [m for m in bucket_rows if m.replicate_label is not None]
             item_data["vial_count"] = len(bucket_rows)
             # Issue #168: like vial_count, the latest across the whole
             # (unfiltered) bucket, as the flat row does across its vials.
-            item_data["last_result_date"] = _latest_last_result_date(
-                db, [r.id for r in bucket_rows])
+            item_data["last_result_date"] = _latest(
+                last_result_dates, [r.id for r in bucket_rows])
 
             if len(bucket_rows) > 1 and members:
                 # A real group: label the row by the group stem (issue #98 D2).
@@ -456,10 +517,10 @@ def list_experiments(
                 # letter (D8), unlike the pre-#98 siblings-only list.
                 item_data["replicates"] = []
                 for group in collapse_by_stem(members):
-                    child = _build_list_item(db, group.representative)
+                    child = _build_list_item(group.representative, lookups)
                     child["group_display_id"] = group.stem
                     child["vial_count"] = group.vial_count
-                    child["last_result_date"] = _latest_last_result_date(db, [
+                    child["last_result_date"] = _latest(last_result_dates, [
                         m.id for m in members
                         if split_timepoint_token(m.experiment_id)[0] == group.stem])
                     item_data["replicates"].append(
