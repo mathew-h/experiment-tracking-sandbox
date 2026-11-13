@@ -219,3 +219,87 @@ def test_wide_format_import_recalculates_linked_experiments(db_session):
     db_session.refresh(conditions)
     expected = (9.0 / 100.0) * FE_IN_FEO_FRACTION * 80.0
     assert conditions.total_ferrous_iron_g == pytest.approx(expected, rel=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Issue #191 (E-06): one conditions query, FeO read once per sample, SAVEPOINT per row
+# ---------------------------------------------------------------------------
+
+def _seed_experiments_on_sample(db, sample_id: str, prefix: str, start: int, count: int, rock_mass_g=10.0):
+    conditions = []
+    for i in range(count):
+        exp = Experiment(experiment_id=f"{prefix}_{i + 1:03d}", experiment_number=start + i, sample_id=sample_id)
+        db.add(exp)
+        db.flush()
+        cond = ExperimentalConditions(experiment_fk=exp.id, experiment_id=exp.experiment_id,
+                                      rock_mass_g=rock_mass_g, water_volume_mL=50.0)
+        db.add(cond)
+        conditions.append(cond)
+    db.flush()
+    return conditions
+
+
+def _feo_lookups(statements: list[str]) -> int:
+    return sum(1 for s in statements if "elemental_analysis" in s and "analyte_composition" in s)
+
+
+def test_feo_is_read_once_per_sample_not_once_per_experiment(db_session):
+    from tests.api.test_query_counts import count_queries
+
+    _seed_sample_with_feo(db_session, "E06_ROCK_A", 8.0)
+    _seed_sample_with_feo(db_session, "E06_ROCK_B", 4.0)
+    on_a = _seed_experiments_on_sample(db_session, "E06_ROCK_A", "E06A", 9196000, 6)
+    on_b = _seed_experiments_on_sample(db_session, "E06_ROCK_B", "E06B", 9196100, 2)
+
+    with count_queries() as statements:
+        processed = recalculate_conditions_for_samples(db_session, {"E06_ROCK_A", "E06_ROCK_B"})
+
+    assert processed == 8
+    assert _feo_lookups(statements) == 2  # one per sample, not one per experiment
+    for cond in on_a:
+        assert cond.total_ferrous_iron_g == pytest.approx(0.08 * FE_IN_FEO_FRACTION * 10.0)
+    for cond in on_b:
+        assert cond.total_ferrous_iron_g == pytest.approx(0.04 * FE_IN_FEO_FRACTION * 10.0)
+
+
+def test_the_feo_cache_does_not_outlive_the_call(db_session):
+    """A later upload changes FeO; the next call must read the new value."""
+    from backend.services import elemental_composition_service as service
+
+    _seed_sample_with_feo(db_session, "E06_ROCK_C", 8.0)
+    (cond,) = _seed_experiments_on_sample(db_session, "E06_ROCK_C", "E06C", 9196200, 1)
+    recalculate_conditions_for_samples(db_session, {"E06_ROCK_C"})
+    assert cond.total_ferrous_iron_g == pytest.approx(0.08 * FE_IN_FEO_FRACTION * 10.0)
+    assert service._WT_PCT_CACHE.get() is None
+
+    row = db_session.query(ElementalAnalysis).filter_by(sample_id="E06_ROCK_C").one()
+    row.analyte_composition = 2.0
+    db_session.flush()
+    recalculate_conditions_for_samples(db_session, {"E06_ROCK_C"})
+    assert cond.total_ferrous_iron_g == pytest.approx(0.02 * FE_IN_FEO_FRACTION * 10.0)
+
+
+def test_one_failing_experiment_does_not_stop_or_poison_the_rest(db_session, monkeypatch):
+    """A database error on one row is rolled back to its SAVEPOINT; the other
+    rows are still recalculated and the session stays usable."""
+    from sqlalchemy import text
+
+    import backend.services.calculations.registry as registry
+
+    _seed_sample_with_feo(db_session, "E06_ROCK_D", 8.0)
+    first, bad, last = _seed_experiments_on_sample(db_session, "E06_ROCK_D", "E06D", 9196300, 3)
+    real = registry.recalculate
+
+    def flaky(instance, session):
+        if instance is bad:
+            session.execute(text("SELECT 1 / 0"))  # a real DBAPI error inside the row
+        real(instance, session)
+
+    monkeypatch.setattr(registry, "recalculate", flaky)
+    processed = recalculate_conditions_for_samples(db_session, {"E06_ROCK_D"})
+
+    assert processed == 2
+    expected = pytest.approx(0.08 * FE_IN_FEO_FRACTION * 10.0)
+    assert first.total_ferrous_iron_g == expected and last.total_ferrous_iron_g == expected
+    assert bad.total_ferrous_iron_g is None
+    assert db_session.execute(text("SELECT 1")).scalar() == 1  # not in a failed transaction

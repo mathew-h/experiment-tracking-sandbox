@@ -1,6 +1,8 @@
 # backend/services/elemental_composition_service.py
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,6 +10,12 @@ from sqlalchemy.orm import Session
 from backend.services.physical_constants import FE_MOLAR_MASS, FEO_MOLAR_MASS
 
 log = structlog.get_logger(__name__)
+
+# Set only while recalculate_conditions_for_samples runs: (sample_id, analyte
+# symbol) -> wt%. None everywhere else, so every other caller of
+# get_analyte_wt_pct always reads the database.
+_WT_PCT_CACHE: ContextVar[dict[tuple[str, str], float | None] | None] = ContextVar(
+    "elemental_wt_pct_cache", default=None)
 
 # Fe atomic mass (55.845) / FeO molar mass (71.844)
 FE_IN_FEO_FRACTION: float = FE_MOLAR_MASS / FEO_MOLAR_MASS
@@ -46,33 +54,43 @@ def recalculate_conditions_for_samples(db: Session, sample_ids: set[str]) -> int
         return 0
 
     from database.models.experiments import Experiment
-    from database.models.conditions import ExperimentalConditions
     from backend.services.calculations.registry import recalculate
+    from backend.services.experiment_lookup import lowest_conditions_map
 
     experiments = (
         db.query(Experiment)
         .filter(Experiment.sample_id.in_(sample_ids))
+        .order_by(Experiment.id)
         .all()
     )
+    # One query for every conditions row; the lowest id wins should a database
+    # that predates uq_conditions_experiment_fk hold a duplicate (issue #109).
+    conditions_by_experiment = lowest_conditions_map(db, [e.id for e in experiments])
 
     count = 0
-    for experiment in experiments:
-        conditions = (
-            db.query(ExperimentalConditions)
-            .filter_by(experiment_fk=experiment.id)
-            .first()
-        )
-        if conditions is None:
-            continue
-        try:
-            recalculate(conditions, db)
-            count += 1
-        except Exception:
-            log.warning(
-                "recalculate_conditions_for_samples_failed",
-                experiment_id=experiment.experiment_id,
-                exc_info=True,
-            )
+    # Many experiments share one rock. Its FeO value cannot change inside this
+    # call (the upload that triggered it has already written), so each sample's
+    # lookup runs once instead of once per experiment (issue #191, E-06).
+    token = _WT_PCT_CACHE.set({})
+    try:
+        for experiment in experiments:
+            conditions = conditions_by_experiment.get(experiment.id)
+            if conditions is None:
+                continue
+            try:
+                # SAVEPOINT per row: a database error on one experiment rolls
+                # back that row only and leaves the session usable for the rest.
+                with db.begin_nested():
+                    recalculate(conditions, db)
+                count += 1
+            except Exception:
+                log.warning(
+                    "recalculate_conditions_for_samples_failed",
+                    experiment_id=experiment.experiment_id,
+                    exc_info=True,
+                )
+    finally:
+        _WT_PCT_CACHE.reset(token)
 
     return count
 
@@ -100,6 +118,17 @@ def get_analyte_wt_pct(
     if sample_id is None:
         return None
 
+    cache = _WT_PCT_CACHE.get()
+    if cache is not None and (sample_id, analyte_symbol) in cache:
+        return cache[(sample_id, analyte_symbol)]
+    value = _query_analyte_wt_pct(sample_id, db, analyte_symbol)
+    if cache is not None:
+        cache[(sample_id, analyte_symbol)] = value
+    return value
+
+
+def _query_analyte_wt_pct(sample_id: str, db: Session, analyte_symbol: str) -> float | None:
+    """The database lookup behind ``get_analyte_wt_pct``."""
     # Local imports to avoid circular import: this service is imported by
     # conditions_calcs.py, which is imported by the model layer event listeners.
     from database.models.analysis import ExternalAnalysis
