@@ -44,3 +44,46 @@ def test_call_or_http_uses_the_detail_builder():
         call_or_http(lambda: _raise(_Missing("HPHT_1")), ((_Missing, 404),),
                      detail=lambda e: f"No run {e}")
     assert exc.value.detail == "No run HPHT_1"
+
+
+# ── experiment lookups (D-01) ────────────────────────────────────────────────
+
+def _exp(db_session, experiment_id: str, number: int, base: str | None = None):
+    from database.models.enums import ExperimentStatus
+    from database.models.experiments import Experiment
+
+    exp = Experiment(experiment_id=experiment_id, experiment_number=number,
+                     base_experiment_id=base, status=ExperimentStatus.ONGOING)
+    db_session.add(exp)
+    db_session.flush()
+    return exp
+
+
+def test_find_experiment_matches_the_exact_id_only(db_session):
+    from backend.services.experiment_lookup import find_experiment
+
+    exp = _exp(db_session, "LOOKUP190_001", 9190001)
+    assert find_experiment(db_session, "LOOKUP190_001") is exp
+    # Exact match: no case folding or zero stripping (that is _id_match's job).
+    assert find_experiment(db_session, "lookup190_001") is None
+    assert find_experiment(db_session, "LOOKUP190_1") is None
+
+
+def test_get_experiment_or_404_returns_the_row_or_raises(db_session):
+    from backend.api.routers._helpers import get_experiment_or_404
+
+    exp = _exp(db_session, "LOOKUP190_002", 9190002)
+    assert get_experiment_or_404(db_session, "LOOKUP190_002") is exp
+    with pytest.raises(HTTPException) as default:
+        get_experiment_or_404(db_session, "LOOKUP190_NOPE")
+    assert (default.value.status_code, default.value.detail) == (404, "Experiment not found")
+    with pytest.raises(HTTPException) as custom:
+        get_experiment_or_404(db_session, "LOOKUP190_NOPE", detail="Experiment conditions not found")
+    assert custom.value.detail == "Experiment conditions not found"
+
+
+def test_series_key_is_the_base_id_else_the_own_id(db_session):
+    from backend.services.experiment_lookup import series_key
+
+    assert series_key(_exp(db_session, "LOOKUP190_003-2", 9190003, base="LOOKUP190_003")) == "LOOKUP190_003"
+    assert series_key(_exp(db_session, "LOOKUP190_004", 9190004)) == "LOOKUP190_004"

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.services import notes as notes_service
 from backend.services.calculations.registry import recalculate
+from backend.services.experiment_lookup import find_experiment
 from backend.services.result_merge_utils import (
     resolve_primary_timepoint, update_cumulative_times_for_chain,
 )
@@ -237,9 +238,7 @@ def create_result(
     use `{experiment_id}`. All validation runs before resolve_primary_timepoint,
     which demotes the existing primary row eagerly.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    exp = find_experiment(db, experiment_id)
     if exp is None:
         raise ResultEntryNotFound(f"Experiment {experiment_id} not found")
     _check_allowed(conditions_for(db, exp), exp, allow, rejection)

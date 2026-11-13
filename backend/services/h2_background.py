@@ -16,14 +16,15 @@ from database.experiment_id_parser import split_timepoint_token
 from database.models import H2BackgroundLink
 from database.models.experiments import Experiment, ModificationsLog
 from database.models.results import ExperimentalResults, ScalarResults
+from backend.services.experiment_lookup import find_experiment, series_key
 from backend.services.replicate_collapse import timepoint_stem_expr
 
 LinkMode = Literal["group", "vial"]
 _TABLE = "h2_background_links"
 
 
-def group_key(exp: Experiment) -> str:
-    return exp.base_experiment_id or exp.experiment_id
+# Kept under its original name for this module's callers.
+group_key = series_key
 
 
 def get_link(db: Session, base_id: str) -> H2BackgroundLink | None:
@@ -75,9 +76,7 @@ def _has_usable_background(db: Session, mode: LinkMode, ref: str) -> bool:
 
 def set_link(db: Session, base_id: str, experiment_id: str, mode: LinkMode,
              user_email: str) -> H2BackgroundLink:
-    bg_exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    bg_exp = find_experiment(db, experiment_id)
     if bg_exp is None:
         raise LookupError(f"Experiment '{experiment_id}' not found")
     if group_key(bg_exp) == base_id:

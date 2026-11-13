@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.results import ICP_ELEMENTS
 from backend.services.core_flood_service import is_core_flood
+from backend.services.experiment_lookup import find_experiment, series_key
 from backend.services.replicate_collapse import timepoint_stem_expr
 from backend.services.workdays import LAB_TZ
 from database.models.conditions import ExperimentalConditions
@@ -276,7 +277,7 @@ def _load_members(db: Session, exps: list[Experiment]) -> list[Member]:
         members.append(Member(
             id=e.id,
             experiment_id=e.experiment_id,
-            base_id=e.base_experiment_id or e.experiment_id,
+            base_id=series_key(e),
             experiment_type=cond.experiment_type if cond is not None else None,
             is_variant=parent is not None
             and e.experiment_id.startswith(parent.experiment_id + "_"),
@@ -314,9 +315,7 @@ def _load_experiments(db: Session, clause) -> list[Experiment]:
 
 def resolve_lineage(db: Session, experiment_id: str) -> Lineage:
     """The requested experiment's lineage, ordered as segments."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    exp = find_experiment(db, experiment_id)
     if exp is None:
         raise ExportNotFound(experiment_id)
 
@@ -327,7 +326,7 @@ def resolve_lineage(db: Session, experiment_id: str) -> Lineage:
     else:
         exps = _load_experiments(db, Experiment.id == exp.id)
     members = _series_order(_load_members(db, exps))
-    return Lineage(base_id=exp.base_experiment_id or exp.experiment_id,
+    return Lineage(base_id=series_key(exp),
                    members=members)
 
 

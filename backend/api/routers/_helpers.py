@@ -7,8 +7,22 @@ from __future__ import annotations
 from typing import Callable, Sequence, TypeVar
 
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from backend.services.experiment_lookup import find_experiment
+from database.models.experiments import Experiment
 
 T = TypeVar("T")
+
+
+def get_experiment_or_404(
+    db: Session, experiment_id: str, detail: str = "Experiment not found",
+) -> Experiment:
+    """The experiment with exactly this ID, or a 404 carrying ``detail``."""
+    exp = find_experiment(db, experiment_id)
+    if exp is None:
+        raise HTTPException(status_code=404, detail=detail)
+    return exp
 
 
 def call_or_http(

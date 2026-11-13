@@ -14,7 +14,8 @@ from database.reactor_slot import derive_reactor_slot
 from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
-from backend.api.routers._helpers import call_or_http
+from backend.api.routers._helpers import call_or_http, get_experiment_or_404
+from backend.services.experiment_lookup import find_experiment, series_key
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
@@ -383,7 +384,7 @@ def list_experiments(
             # query filters) and identified by id, never by replicate_label
             # (a '-t<days>' vial shares its letter with its parent vial).
             if exp.replicate_label is not None:
-                bucket_key = exp.base_experiment_id or exp.experiment_id
+                bucket_key = series_key(exp)
             elif exp.base_experiment_id and exp.experiment_id in (
                 f"{exp.base_experiment_id}-0", f"{exp.base_experiment_id}-1",
             ):
@@ -882,11 +883,7 @@ def get_experiment_results(
 ) -> list[ResultWithFlagsResponse]:
     """Return all result timepoints for an experiment, with scalar and ICP existence flags."""
 
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     results = db.execute(
         select(ExperimentalResults)
@@ -1049,12 +1046,8 @@ def get_experiment_rollup(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[RollupTimepointResponse]:
     """Cross-replicate mean/median/std per timepoint from v_results_scalar_rollup."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-    base = exp.base_experiment_id or exp.experiment_id
+    exp = get_experiment_or_404(db, experiment_id)
+    base = series_key(exp)
     rows = resolve_rollup_rows(db, base)
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
@@ -1078,12 +1071,8 @@ def get_replicate_group(
     tests/api/test_experiment_rollup.py::TestReplicateGroupWrapperShapes for
     the locked-in regression coverage.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-    base = exp.base_experiment_id or exp.experiment_id
+    exp = get_experiment_or_404(db, experiment_id)
+    base = series_key(exp)
     parent = exp if exp.replicate_label is None else exp.parent
     if parent is not None:
         members = db.execute(
@@ -1146,11 +1135,7 @@ def update_experiment_status(
     the caller can complete it and retry. A confirm-and-supersede dialog is a
     deferred follow-up; the backend contract is the same with or without it.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     if payload.status == ExperimentStatus.ONGOING:
         conditions = exp.conditions
@@ -1202,9 +1187,7 @@ def list_experiment_additives(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[AdditiveResponse]:
     """List chemical additives for an experiment by its string ID. Returns [] if no conditions exist."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    exp = find_experiment(db, experiment_id)
     if exp is None:
         return []
     # Resolve via experiment_fk, not the denormalized string (issue #109): both
@@ -1241,11 +1224,7 @@ def upsert_experiment_additive(
     Accepts experiment string ID and resolves conditions row internally.
     ChemicalAdditive.experiment_id is a FK to experimental_conditions.id (not experiments.id).
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment conditions not found")
+    exp = get_experiment_or_404(db, experiment_id, detail="Experiment conditions not found")
     # Resolve via experiment_fk, not the denormalized string (issue #109):
     # a stale string could otherwise write this additive onto another
     # experiment's conditions row.
@@ -1305,11 +1284,7 @@ def delete_experiment_additive(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> Response:
     """Remove a chemical additive from an experiment."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     # Resolve via experiment_fk, not the denormalized string (issue #109) —
     # see the GET/PUT variants above for the failure modes a string match hits.
     conditions = db.execute(
@@ -1360,11 +1335,7 @@ def set_experiment_background_ammonium(
     Updates background_ammonium_concentration_mM on all ScalarResults rows for the
     experiment and triggers recalculation of derived yield fields on each row.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     result_ids = db.execute(
         select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
@@ -1459,11 +1430,7 @@ def get_experiment(
     from database.models.experiments import ModificationsLog
     from backend.api.schemas.conditions import ConditionsResponse
 
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
     cond = db.execute(
@@ -1581,11 +1548,7 @@ def update_experiment(
     """Update mutable fields on an experiment. If experiment_id is provided and differs
     from the path param, treats it as a rename: checks uniqueness, updates
     ExperimentalConditions.experiment_id, and writes a ModificationsLog entry."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     data = payload.model_dump(exclude_unset=True)
     new_id = data.pop("experiment_id", None)
@@ -1814,11 +1777,7 @@ def get_experiment_delete_impact(
     Read-only; powers the confirmation dialog so it can show consequences
     instead of a generic warning. 404 if the experiment does not exist.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     return _impact_to_response(collect_delete_impact(db, exp))
 
 
@@ -1837,11 +1796,7 @@ def delete_experiment(
     backend/services/experiment_deletion.py for why a bare db.delete() is not
     sufficient.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     impact = delete_experiment_cascade(db, exp, modified_by=current_user.email)
     return ExperimentDeletedResponse(
@@ -1866,11 +1821,7 @@ def add_note(
     result ownership; the checks here only translate those into 422/409 with a
     readable message instead of a 500.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     # Mirror of ck_note_scope, for the message.
     if payload.note_type is NoteType.description and payload.result_id is not None:
@@ -1937,11 +1888,7 @@ def patch_note(
     that changed. Retyping obeys the DB scope rules (mirrored here as 422) and
     the one-description index (409).
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     note = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.id == note_id)
@@ -2029,11 +1976,7 @@ def delete_note(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> Response:
     """Delete a note. Writes a ModificationsLog entry then removes the row."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     note = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.id == note_id)

@@ -6,6 +6,7 @@ from sqlalchemy import and_, or_, func as sa_func, update
 from sqlalchemy.orm import Session, joinedload
 
 from database import ExperimentalResults, Experiment
+from backend.services.experiment_lookup import series_key
 
 TIMEPOINT_TOLERANCE_DAYS = 0.0001
 TIMEPOINT_BUCKET_DECIMALS = 4
@@ -276,7 +277,7 @@ def update_cumulative_times_for_chain(db: Session, experiment_fk: int) -> None:
     if experiment is None:
         return
 
-    base_id = experiment.base_experiment_id or experiment.experiment_id
+    base_id = series_key(experiment)
 
     # Gather every experiment in the chain
     chain_experiments = (
