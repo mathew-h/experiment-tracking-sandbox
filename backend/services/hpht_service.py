@@ -9,7 +9,6 @@ endpoints (#146), so there is no write path here.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from typing import Literal
 
 from sqlalchemy import select
@@ -21,7 +20,6 @@ from backend.api.schemas.hpht import (
 from backend.api.schemas.results import IcpRow
 from backend.api.schemas.runs import RunSegment
 from backend.services import run_service as runs
-from backend.services.result_entry_service import _aware
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
 from database.reactor_slot import series_prefix
@@ -110,23 +108,13 @@ def _conditions_summary(db: Session, segments: list[RunSegment]) -> HphtConditio
     )
 
 
-def _segments(db: Session, base_id: str) -> list[RunSegment]:
-    """The run's segments by date; `base_id` must already be resolved."""
-    segments = runs.load_segments(db, include=is_hpht, base_id=base_id).get(base_id)
-    if not segments:
-        raise HphtRunNotFound(base_id)
-    return runs.by_date(segments)
-
-
 def _resolve(db: Session, requested_id: str) -> tuple[str, list[RunSegment]]:
-    """Base ID and segments of the HPHT run `requested_id` names: a
+    """Base ID and segments (by date) of the HPHT run `requested_id` names: a
     base, segment or variant ID (issue #158). Not-found reports the ID
     the caller sent."""
-    base_id = runs.resolve_base_id(db, requested_id)
-    try:
-        return base_id, _segments(db, base_id)
-    except HphtRunNotFound:
-        raise HphtRunNotFound(requested_id) from None
+    base_id, segments = runs.resolve_run(
+        db, requested_id, include=is_hpht, not_found=HphtRunNotFound)
+    return base_id, runs.by_date(segments)
 
 
 def get_run(db: Session, base_id: str) -> HphtRun:
@@ -150,32 +138,18 @@ def get_run_icp(db: Session, base_id: str) -> list[IcpRow]:
 def list_runs(
     db: Session, scope: Literal["active", "all"] = "active", q: str | None = None,
 ) -> list[HphtRunListItem]:
-    by_base = runs.load_segments(db, include=is_hpht)
-    samples_by_base: dict[str, list[dict]] = defaultdict(list)
-    for row in runs.fetch_samples(db, _VIEW, base_ids=list(by_base)):
-        samples_by_base[row["run_base_id"]].append(row)
-
-    needle = runs.normalize_query(q)
-    items: list[HphtRunListItem] = []
-    for base_id, segments in by_base.items():
-        description = runs.run_description(segments)
-        if not runs.matches(needle, base_id, segments, description):
-            continue
-        ongoing = runs.ongoing_ids(segments)
-        if scope == "active" and not ongoing:
-            continue
-        real = [r for r in samples_by_base.get(base_id, []) if not r["is_variant"]]
-        dates = [_aware(r["sample_date"]) for r in real if r["sample_date"] is not None]
-        items.append(HphtRunListItem(
-            base_id=base_id,
-            description=description,
-            segment_count=len(segments),
-            ongoing_experiment_ids=ongoing,
-            reactor_slot=runs.latest_segment(segments).reactor_slot,
-            sample_count=len(real),
-            last_sample_date=max(dates) if dates else None,
-            latest_cumulative_h2_grams_per_ton=(
-                real[-1]["cumulative_h2_grams_per_ton"] if real else None),
-            warning_count=len(compute_warnings(base_id, segments)),
-        ))
+    items = [
+        HphtRunListItem(
+            base_id=run.base_id,
+            description=run.description,
+            segment_count=len(run.segments),
+            ongoing_experiment_ids=run.ongoing_experiment_ids,
+            reactor_slot=runs.latest_segment(run.segments).reactor_slot,
+            sample_count=len(run.real_samples),
+            last_sample_date=run.last_sample_date,
+            latest_cumulative_h2_grams_per_ton=run.latest_cumulative_h2_grams_per_ton,
+            warning_count=len(compute_warnings(run.base_id, run.segments)),
+        )
+        for run in runs.summarize_runs(db, include=is_hpht, view=_VIEW, scope=scope, q=q)
+    ]
     return _sort_by_reactor(items)
