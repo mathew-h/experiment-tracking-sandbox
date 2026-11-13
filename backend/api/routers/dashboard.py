@@ -1,17 +1,16 @@
 from __future__ import annotations
 from datetime import date, datetime, timezone
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select, func, case, distinct
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
 from database.models.conditions import ExperimentalConditions
-from database.models.results import ExperimentalResults, ScalarResults, ICPResults
+from database.models.results import ExperimentalResults, ScalarResults
 from database.models.enums import ExperimentStatus, NoteType
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.dashboard import (
-    ReactorStatusResponse, ExperimentTimelineResponse, TimelinePoint,
     DashboardResponse, DashboardSummary, SlotOccupancy, ReactorCardData, GanttEntry, ActivityEntry,
     LatestModification, ReactorSpec,
 )
@@ -367,108 +366,4 @@ def get_dashboard(
         reactor_specs={label: ReactorSpec(**spec) for label, spec in REACTOR_SPECS.items()},
         timeline=timeline,
         recent_activity=recent_activity,
-    )
-
-
-@router.get("/reactor-status", response_model=list[ReactorStatusResponse])
-def get_reactor_status(
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> list[ReactorStatusResponse]:
-    """Single query: all reactors with their current ONGOING experiment. No N+1."""
-    rows = db.execute(
-        select(
-            ExperimentalConditions.reactor_number,
-            ExperimentalConditions.reactor_slot,
-            Experiment.id,
-            Experiment.experiment_id,
-            Experiment.status,
-            Experiment.created_at,
-            Experiment.date,                          # ← use date (with created_at fallback) for started_at
-            ExperimentalConditions.temperature_c,
-            ExperimentalConditions.experiment_type,
-        )
-        .join(Experiment, Experiment.id == ExperimentalConditions.experiment_fk)
-        # Legacy endpoint: intentionally filters ONGOING only.
-        # The reactor cards query (/api/dashboard/reactor-cards) includes QUEUED.
-        # Do not change this filter without verifying no downstream callers depend on ONGOING-only behavior.
-        .where(Experiment.status == ExperimentStatus.ONGOING)
-        # reactor_slot is NULL for anything that holds no physical vessel — a
-        # non-occupancy type, a missing reactor_number, or reactor_number <= 0
-        # (issue #97).
-        .where(ExperimentalConditions.reactor_slot.isnot(None))
-        .order_by(ExperimentalConditions.reactor_number, Experiment.created_at.desc())
-    ).all()
-
-    # Deduplicate: keep first (most-recent) per label (CF01/R01 are separate slots)
-    seen: set[str] = set()
-    result: list[ReactorStatusResponse] = []
-    for row in rows:
-        rn = row.reactor_number
-        # No exp_type/is_cf derivation needed here (issue #97): label is read
-        # straight from the stored slot, and ReactorStatusResponse.experiment_type
-        # is populated from row.experiment_type directly, below.
-        label = row.reactor_slot
-        if label in seen:
-            continue
-        seen.add(label)
-        start = row.date or row.created_at
-        result.append(ReactorStatusResponse(
-            reactor_number=rn,
-            experiment_id=row.experiment_id,
-            status=row.status,
-            experiment_db_id=row.id,
-            started_at=start,
-            temperature_c=row.temperature_c,
-            experiment_type=row.experiment_type,
-        ))
-    return result
-
-
-@router.get("/timeline/{experiment_id}", response_model=ExperimentTimelineResponse)
-def get_experiment_timeline(
-    experiment_id: str,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> ExperimentTimelineResponse:
-    """Return all result timepoints for an experiment with data-presence flags."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-
-    results = db.execute(
-        select(ExperimentalResults)
-        .where(ExperimentalResults.experiment_fk == exp.id)
-        .order_by(ExperimentalResults.time_post_reaction_days)
-    ).scalars().all()
-
-    # Check scalar/ICP presence in bulk (avoid N+1)
-    result_ids = [r.id for r in results]
-    scalar_ids = set(
-        db.execute(select(ScalarResults.result_id).where(ScalarResults.result_id.in_(result_ids)))
-        .scalars().all()
-    )
-    icp_ids = set(
-        db.execute(select(ICPResults.result_id).where(ICPResults.result_id.in_(result_ids)))
-        .scalars().all()
-    )
-
-    timepoints = [
-        TimelinePoint(
-            result_id=r.id,
-            time_post_reaction_days=r.time_post_reaction_days,
-            time_post_reaction_bucket_days=r.time_post_reaction_bucket_days,
-            is_primary=r.is_primary_timepoint_result,
-            has_scalar=r.id in scalar_ids,
-            has_icp=r.id in icp_ids,
-        )
-        for r in results
-    ]
-
-    return ExperimentTimelineResponse(
-        experiment_id=experiment_id,
-        status=exp.status,
-        timepoints=timepoints,
     )
