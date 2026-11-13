@@ -100,16 +100,12 @@ def log_sample_modification(
     old_values: dict | None = None,
     new_values: dict | None = None,
 ) -> None:
-    """Write a ModificationsLog entry for a sample-related change.
-
-    NOTE: Requires ModificationsLog.sample_id column (added by Task 3 migration).
-    Will fail if called before that migration is applied.
-    """
+    """Write a ModificationsLog entry for a sample-related change."""
     # lazy import to avoid circular dependency
     from database.models.experiments import ModificationsLog
 
     db.add(ModificationsLog(
-        sample_id=sample_id,  # sample_id column added in Task 3 migration
+        sample_id=sample_id,
         modified_by=modified_by,
         modification_type=modification_type,
         modified_table=modified_table,

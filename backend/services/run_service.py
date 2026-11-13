@@ -67,7 +67,8 @@ def load_segments(
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
         .where(Experiment.base_experiment_id.is_not(None))
         .options(selectinload(Experiment.parent), selectinload(Experiment.description_note))
-        # Lowest conditions id first, so the `seen` guard matches _conditions_for.
+        # Lowest conditions id first, so the `seen` guard matches
+        # result_entry_service.conditions_for.
         .order_by(Experiment.id, ExperimentalConditions.id)
     )
     if base_id is not None:
