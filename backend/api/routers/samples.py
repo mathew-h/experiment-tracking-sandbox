@@ -508,13 +508,6 @@ def create_analysis(
     db.add(ea)
     db.flush()
 
-    # Reload with files relationship to satisfy _to_analysis_response
-    db.execute(
-        select(ExternalAnalysis)
-        .where(ExternalAnalysis.id == ea.id)
-        .options(selectinload(ExternalAnalysis.analysis_files))
-    ).scalar_one()
-
     sample = db.get(SampleInfo, sample_id)
     sample.characterized = evaluate_characterized(db, sample_id)
 
