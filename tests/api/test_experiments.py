@@ -195,8 +195,8 @@ def test_get_experiment_results_with_flags(client, db_session):
     assert data[0]["grams_per_ton_yield"] == 55.0
 
 
-def test_next_ids_no_auth_required(client):
-    """next-ids must be accessible without authentication."""
+def test_next_ids_requires_auth(client):
+    """next-ids reveals experiment counts, so it needs a signed-in user."""
     from fastapi.testclient import TestClient
     from backend.api.main import app
     from backend.auth.firebase_auth import verify_firebase_token
@@ -208,7 +208,7 @@ def test_next_ids_no_auth_required(client):
     try:
         with TestClient(app) as c:
             r = c.get('/api/experiments/next-ids')
-            assert r.status_code == 200
+            assert r.status_code == 401
     finally:
         app.dependency_overrides.update(original)
 

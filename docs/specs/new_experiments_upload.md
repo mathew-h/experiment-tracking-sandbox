@@ -135,5 +135,5 @@ POST /api/bulk-uploads/new-experiments
 GET /api/experiments/next-ids
 ```
 
-- No auth required (read-only, non-sensitive)
+- Requires Firebase auth (since 2026-11-13; it was public before the cloud move)
 - Returns `dict[str, int]`
