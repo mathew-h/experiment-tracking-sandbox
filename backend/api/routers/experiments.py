@@ -976,21 +976,37 @@ def get_experiment_results(
     ).scalars():
         notes_by_result.setdefault(n.result_id, []).append(n)
 
-    return [_result_with_flags(db, r, notes_by_result.get(r.id, [])) for r in results]
+    # Issue #191 (E-02): scalar rows and ICP presence for the whole tab in two
+    # queries, not two per result.
+    scalars, with_icp = _scalars_and_icp(db, [r.id for r in results])
+    return [
+        _result_with_flags(r, notes_by_result.get(r.id, []), scalars.get(r.id), r.id in with_icp)
+        for r in results
+    ]
+
+
+def _scalars_and_icp(db: Session, result_ids: list[int]) -> tuple[dict[int, ScalarResults], set[int]]:
+    """Scalar row by result id, and the ids of results that have an ICP row."""
+    from database.models.results import ICPResults
+
+    if not result_ids:
+        return {}, set()
+    scalars = {
+        s.result_id: s for s in db.execute(
+            select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
+        ).scalars()
+    }
+    with_icp = set(db.execute(
+        select(ICPResults.result_id).where(ICPResults.result_id.in_(result_ids))
+    ).scalars())
+    return scalars, with_icp
 
 
 def _result_with_flags(
-    db: Session, r: ExperimentalResults, r_notes: list[ExperimentNotes],
+    r: ExperimentalResults, r_notes: list[ExperimentNotes],
+    scalar: ScalarResults | None, has_icp: bool,
 ) -> ResultWithFlagsResponse:
     """One Results-tab row: the result, its scalar values, flags and notes."""
-    from database.models.results import ICPResults
-
-    scalar = db.execute(
-        select(ScalarResults).where(ScalarResults.result_id == r.id)
-    ).scalar_one_or_none()
-    icp = db.execute(
-        select(ICPResults).where(ICPResults.result_id == r.id)
-    ).scalar_one_or_none()
     return ResultWithFlagsResponse(
         id=r.id,
         experiment_fk=r.experiment_fk,
@@ -1001,7 +1017,7 @@ def _result_with_flags(
         created_at=r.created_at,
         sample_tube_number=r.sample_tube_number,
         has_scalar=scalar is not None,
-        has_icp=icp is not None,
+        has_icp=has_icp,
         has_modification_note=any(n.note_type is NoteType.modification for n in r_notes),
         notes=[NoteResponse.model_validate(n) for n in r_notes],
         grams_per_ton_yield=scalar.grams_per_ton_yield if scalar else None,
@@ -1037,7 +1053,8 @@ def _result_entry_response(db: Session, result_id: int) -> ResultWithFlagsRespon
         select(ExperimentNotes).where(ExperimentNotes.result_id == r.id)
         .order_by(ExperimentNotes.id)
     ).scalars().all()
-    return _result_with_flags(db, r, list(notes))
+    scalars, with_icp = _scalars_and_icp(db, [r.id])
+    return _result_with_flags(r, list(notes), scalars.get(r.id), r.id in with_icp)
 
 
 def _run_result_entry(fn: Callable[[], T]) -> T:

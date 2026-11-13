@@ -182,7 +182,6 @@ def test_additives_summary_is_ordered_by_compound(client, db_session):
 RESULTS_CEILING = 5
 
 
-@pytest.mark.xfail(strict=True, reason="E-02 lands in the next commit")
 def test_results_tab_query_count_does_not_grow_with_results(client, db_session):
     compounds = _compounds(db_session, "QCRES")
     _experiment(db_session, "QCRES_001", 9194000, compounds, results=2, with_icp=True)
