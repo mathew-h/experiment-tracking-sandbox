@@ -110,6 +110,21 @@ def _plan_gate_errors(plan: UploadPlanSchema, expected_plan_hash: Optional[str])
 # Existing endpoints (preserved exactly)
 # ---------------------------------------------------------------------------
 
+def _upload_failed(
+    db: Session, event: str, exc: Exception, *, message: str = "Upload failed", **log_fields: object,
+) -> UploadResponse:
+    """Roll back, log ``event``, and build the all-zero response for a failed upload.
+
+    Every upload endpoint answers an unexpected exception this way (issue #190,
+    D-12). Early returns that carry extra fields (the plan gate, the
+    experiment-status validation failure, the ICP parse failure with its
+    ``warnings``) build their own response and do not use this.
+    """
+    db.rollback()
+    log.error(event, error=str(exc), **log_fields)
+    return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message=message)
+
+
 @router.post("/scalar-results", response_model=UploadResponse)
 async def upload_scalar_results(
     file: UploadFile = File(...),
@@ -157,10 +172,7 @@ async def upload_scalar_results(
         )
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("scalar_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "scalar_upload_failed", exc)
     log.info("scalar_upload", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
@@ -195,10 +207,7 @@ async def upload_new_experiments(
         gate_errors = _plan_gate_errors(plan, plan_hash)
         _finalize_write(db, dry_run, had_errors=bool(gate_errors))
     except Exception as exc:
-        db.rollback()
-        log.error("new_experiments_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "new_experiments_upload_failed", exc)
 
     if gate_errors:
         # Nothing was persisted, so the parser's own counts would be a lie — report
@@ -342,10 +351,7 @@ async def upload_pxrf(
 
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("pxrf_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "pxrf_upload_failed", exc)
 
     base_msg = f"pXRF: {created} created, {updated} updated"
     message = (
@@ -373,10 +379,7 @@ async def upload_aeris_xrd(
         created, updated, skipped, errors = AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("aeris_xrd_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "aeris_xrd_upload_failed", exc)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
                           message=_finalize_message(f"XRD: {created} created, {updated} updated", dry_run),
                           dry_run=dry_run)
@@ -406,10 +409,7 @@ async def upload_master_results(
         created, updated, skipped = outcome.created, outcome.updated, outcome.skipped
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("master_results_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "master_results_upload_failed", exc)
     log.info("master_results", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped,
@@ -474,10 +474,7 @@ async def upload_icp_oes(
         touched = _touched(created_rows)
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("icp_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "icp_upload_failed", exc)
     new_count = len(created_rows) - updated_count
     log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email,
              dry_run=dry_run, touched=len(touched))
@@ -510,10 +507,7 @@ async def upload_xrd_mineralogy(
         )
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("xrd_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "xrd_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"XRD: {created} created, {updated} updated", dry_run),
@@ -540,10 +534,7 @@ async def upload_timepoint_modifications(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("timepoint_mod_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "timepoint_mod_upload_failed", exc)
     return UploadResponse(
         created=0, updated=updated, skipped=skipped, errors=errors,
         feedbacks=feedbacks,
@@ -568,10 +559,7 @@ async def upload_rock_inventory(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("rock_inventory_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "rock_inventory_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         warnings=warnings,
@@ -596,10 +584,7 @@ async def upload_chemical_inventory(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("chemical_inventory_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "chemical_inventory_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"Chemical Inventory: {created} created, {updated} updated", dry_run),
@@ -629,10 +614,7 @@ async def upload_elemental_composition(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("elemental_composition_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "elemental_composition_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"Elemental Composition: {created} created, {updated} updated", dry_run),
@@ -674,9 +656,7 @@ async def upload_actlabs_rock(
             )
             _finalize_write(db, dry_run)
         except Exception as exc:
-            db.rollback()
-            log.error("actlabs_rock_upload_failed", error=str(exc))
-            return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
+            return _upload_failed(db, "actlabs_rock_upload_failed", exc)
         return UploadResponse(
             created=created, updated=updated, skipped=skipped, errors=errors,
             message=_finalize_message(f"ActLabs Rock: {created} created, {updated} updated", dry_run),
@@ -716,9 +696,7 @@ async def upload_actlabs_rock(
         created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(db, file_bytes)
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("actlabs_rock_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
+        return _upload_failed(db, "actlabs_rock_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"ActLabs Rock: {created} created, {updated} updated", dry_run),
@@ -747,10 +725,7 @@ async def upload_experiment_status(
         result = ExperimentStatusService.apply_status_changes(db, preview)
         _finalize_write(db, dry_run, had_errors=bool(result.errors))
     except Exception as exc:
-        db.rollback()
-        log.error("experiment_status_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "experiment_status_upload_failed", exc)
     return UploadResponse(
         created=0,
         updated=result.status_changes_applied,
@@ -819,11 +794,8 @@ async def upload_experiment_deletion(
             db, file_bytes, filename=file.filename, modified_by=current_user.email,
         )
     except Exception as exc:
-        db.rollback()
-        log.error("bulk_experiment_deletion_failed",
-                  user=current_user.email, error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Bulk deletion failed")
+        return _upload_failed(db, "bulk_experiment_deletion_failed", exc,
+                              message="Bulk deletion failed", user=current_user.email)
 
     errors = list(result.errors) + [
         f"{f['experiment_id']}: {f['error']}" for f in result.failed

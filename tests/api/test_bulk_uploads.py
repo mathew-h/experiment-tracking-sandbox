@@ -1544,3 +1544,22 @@ def test_new_experiments_template_has_is_background(client):
     notes = {r[0].value: r[1].value for r in inst.iter_rows(min_row=1) if r[0].value}
     assert "background" in notes["is_background"]
     assert "inherits" in notes["is_background"]
+
+
+# ── Issue #190 (D-12): the shared failed-upload response ─────────────────────
+
+def test_upload_failed_rolls_back_and_returns_the_all_zero_response():
+    from unittest.mock import MagicMock
+
+    from backend.api.routers.bulk_uploads import _upload_failed
+
+    db = MagicMock()
+    resp = _upload_failed(db, "sweep190_upload_failed", ValueError("bad sheet"))
+    db.rollback.assert_called_once_with()
+    assert (resp.created, resp.updated, resp.skipped) == (0, 0, 0)
+    assert resp.errors == ["bad sheet"]
+    assert resp.message == "Upload failed"
+
+    custom = _upload_failed(MagicMock(), "sweep190_delete_failed", RuntimeError("x"),
+                            message="Bulk deletion failed", user="someone@addisenergy.com")
+    assert custom.message == "Bulk deletion failed"
