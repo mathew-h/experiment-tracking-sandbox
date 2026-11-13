@@ -843,69 +843,6 @@ class ICPService:
         return results_to_add, updated_count, errors
     
     @staticmethod
-    def get_icp_results_for_experiment(db: Session, experiment_id: str) -> List[ICPResults]:
-        """
-        Retrieve all ICP results for an experiment.
-        
-        Args:
-            db: Database session
-            experiment_id: String experiment ID
-            
-        Returns:
-            List of ICPResults objects
-        """
-        experiment = ICPService._find_experiment(db, experiment_id)
-        if not experiment:
-            return []
-        return (db.query(ICPResults)
-                .join(ExperimentalResults)
-                .filter(ExperimentalResults.experiment_fk == experiment.id)
-                .all())
-    
-    @staticmethod
-    def update_icp_result(db: Session, result_id: int, update_data: Dict[str, Any]) -> Optional[ICPResults]:
-        """
-        Update an existing ICP result with new elemental data.
-        
-        Args:
-            db: Database session
-            result_id: ID of the ExperimentalResults entry
-            update_data: Dictionary of fields to update
-            
-        Returns:
-            Updated ICPResults object or None if not found
-        """
-        icp_result = db.query(ICPResults).filter(ICPResults.result_id == result_id).first()
-        
-        if not icp_result:
-            raise ValueError(f"ICPResult with result_id {result_id} not found.")
-        
-        # Update fixed columns
-        for element in ICP_FIXED_ELEMENT_FIELDS:
-            if element in update_data:
-                setattr(icp_result, element, update_data[element])
-        
-        # Update metadata fields
-        metadata_fields = [
-            'dilution_factor',
-            'instrument_used',
-            'detection_limits',
-            'raw_label',
-            'measurement_date',
-            'sample_date',
-        ]
-        for field in metadata_fields:
-            if field in update_data:
-                setattr(icp_result, field, update_data[field])
-        
-        # Update JSON data if provided
-        if 'all_elements' in update_data:
-            icp_result.all_elements = update_data['all_elements']
-        
-        db.flush()
-        return icp_result
-    
-    @staticmethod
     def _find_experiment(db: Session, experiment_id: str) -> Optional[Experiment]:
         """
         Find experiment by ID with normalization (case insensitive, ignore hyphens/underscores).
@@ -1004,50 +941,6 @@ class ICPService:
                 errors.append(f"{sample_id}: No elemental concentration data found")
         
         return errors
-    
-    @staticmethod
-    def diagnose_csv_structure(file_content: bytes) -> Dict[str, Any]:
-        """
-        Diagnose CSV file structure to help with parsing issues.
-        
-        Args:
-            file_content: Raw bytes content of the CSV file
-            
-        Returns:
-            Dictionary with diagnostic information about the CSV structure
-        """
-        try:
-            csv_string = file_content.decode('utf-8')
-            lines = csv_string.split('\n')
-            
-            diagnosis = {
-                'total_lines': len(lines),
-                'line_analysis': [],
-                'suggested_header_row': None
-            }
-            
-            # Analyze first 20 lines
-            for i, line in enumerate(lines[:20]):
-                if line.strip():  # Skip empty lines
-                    columns = line.split(',')
-                    line_info = {
-                        'line_number': i + 1,
-                        'column_count': len(columns),
-                        'has_icp_keywords': any(pattern in line.lower() for pattern in ['label', 'element', 'concentration', 'intensity', 'date time']),
-                        'preview': line[:100] + '...' if len(line) > 100 else line
-                    }
-                    diagnosis['line_analysis'].append(line_info)
-                    
-                    # Suggest header row
-                    if (line_info['has_icp_keywords'] and 
-                        5 <= line_info['column_count'] <= 50 and 
-                        diagnosis['suggested_header_row'] is None):
-                        diagnosis['suggested_header_row'] = i
-            
-            return diagnosis
-            
-        except Exception as e:
-            return {'error': f"Error diagnosing CSV structure: {str(e)}"}
     
     @staticmethod
     def parse_and_process_icp_file_ex(
