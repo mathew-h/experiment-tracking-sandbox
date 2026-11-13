@@ -1,8 +1,9 @@
-"""Issue #122 PR-D: the Solution Chemistry and quick-upload parsers' Description
-column is a 'result_note' (an 'observation' until 2026-11-09) signed by the
-parser (one slot per result);
-a blank cell writes nothing and leaves an earlier note in place; long-format
-has no text column and writes no note."""
+"""Issue #122 PR-D: the Solution Chemistry parser's Description column is a
+'result_note' (an 'observation' until 2026-11-09) signed by the parser (one slot
+per result); a blank cell writes nothing and leaves an earlier note in place.
+
+The quick-upload and long-format parsers this file also covered were deleted in
+issue #189 (no route; legacy Streamlit only)."""
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -10,8 +11,6 @@ from sqlalchemy.orm import Session
 
 from database import Experiment, ExperimentNotes, ExperimentalResults
 from database.models.enums import ExperimentStatus, NoteType
-from backend.services.bulk_uploads.quick_upload import quick_upload_from_excel
-from backend.services.bulk_uploads.long_format import long_format_upload_from_excel
 from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService
 
 from .excel_helpers import make_excel
@@ -75,50 +74,6 @@ def test_scalar_blank_description_writes_no_note(db_session: Session):
         db_session, make_excel(_SCALAR_HEADERS, [["PON_003", 7.0, None, 1.2]]),
     )
     assert errors == [] and created == 1
-    assert _notes(db_session, exp) == []
-
-
-_QUICK_HEADERS = ["Experiment ID*", "Time (days)*", "H2 Conc (ppm)*", "Description"]
-
-
-def test_quick_upload_description_becomes_a_result_note(db_session: Session):
-    exp = _seed(db_session, "PON_004", 9122404)
-    created, updated, skipped, errors, _fb = quick_upload_from_excel(
-        db_session, make_excel(_QUICK_HEADERS, [["PON_004", 7.0, 120.0, "Headspace sampled twice"]], sheet_name="Data"),
-        "hydrogen",
-    )
-    assert errors == [], errors
-    # quick_upload's created/updated split is a heuristic on result.updated_at
-    # (pre-existing, out of scope here); only the row count matters to this test.
-    assert created + updated == 1
-    (rid,) = _result_ids(db_session, exp)
-    assert [(n.note_type, n.result_id, n.note_text, n.created_by) for n in _notes(db_session, exp)] == [
-        (NoteType.result_note, rid, "Headspace sampled twice", "quick_upload"),
-    ]
-
-
-def test_quick_upload_blank_description_writes_no_note(db_session: Session):
-    exp = _seed(db_session, "PON_005", 9122405)
-    created, updated, _s, errors, _fb = quick_upload_from_excel(
-        db_session, make_excel(_QUICK_HEADERS, [["PON_005", 7.0, 120.0, None]], sheet_name="Data"),
-        "hydrogen",
-    )
-    assert errors == [], errors
-    # quick_upload's created/updated split is a heuristic on result.updated_at
-    # (pre-existing, out of scope here); only the row count matters to this test.
-    assert created + updated == 1
-    assert _notes(db_session, exp) == []
-
-
-def test_long_format_writes_no_note(db_session: Session):
-    """Long format has no free-text column; the 'Day N results' filler is gone."""
-    exp = _seed(db_session, "PON_006", 9122406)
-    headers = ["Experiment ID", "Time (days)", "Metric", "Value", "Unit"]
-    created, updated, skipped, errors, _fb = long_format_upload_from_excel(
-        db_session, make_excel(headers, [["PON_006", 7.0, "final_ph", 7.1, None]], sheet_name="Data"),
-    )
-    assert errors == [], errors
-    assert _result_ids(db_session, exp) != []
     assert _notes(db_session, exp) == []
 
 

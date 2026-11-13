@@ -121,7 +121,7 @@ class ScalarResultsService:
         # Issue #81: the '-t<days>' token in the experiment ID is canonical for
         # this vial's timepoint — fill a missing time from it, reject a conflict.
         # Defense in depth: the live bulk parsers also check string-level, but
-        # every upload path (scalar, master, long-format) funnels through here.
+        # every upload path (scalar, master) funnels through here.
         time_post_reaction = apply_id_timepoint(
             experiment.id_timepoint_days, result_data.get('time_post_reaction'),
         )
@@ -248,7 +248,7 @@ class ScalarResultsService:
         # column, so a blank cell there is a deliberate clear of its own slot
         # (sync_result_note deletes only the note signed `note_source`). Gated on
         # the declared set because only the Master parser declares one;
-        # scalar_results.py / quick_upload.py keep leaving the note in place --
+        # scalar_results.py keeps leaving the note in place --
         # narrower than #116, where `None` means "everything".
         clears_own_slot = bool(
             overwrite and sheet_fields is not None and 'description' in sheet_fields
