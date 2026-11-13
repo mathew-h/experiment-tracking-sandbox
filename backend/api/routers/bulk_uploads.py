@@ -842,36 +842,80 @@ _NO_TEMPLATE = {
 }
 
 
+def _write_header_sheet(
+    ws,
+    headers: list[str],
+    required: set[str],
+    example_row: list | None = None,
+    *,
+    min_width: int = 16,
+    required_key: Callable[[str], str] = lambda header: header,
+) -> None:
+    """Write a template sheet: a styled header row and an optional example row.
+
+    A header is filled gold when ``required_key(header)`` is in ``required``,
+    green otherwise. Column width is the header length plus 4, at least
+    ``min_width``.
+    """
+    from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
+
+    req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+    opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    for col, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = Font(bold=True)
+        cell.fill = req_fill if required_key(h) in required else opt_fill
+        cell.alignment = Alignment(horizontal="center")
+        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, min_width)
+    if example_row:
+        for col, val in enumerate(example_row, start=1):
+            ws.cell(row=2, column=col, value=val)
+
+
+def _write_instructions_sheet(
+    wb, instructions: list[tuple[str, str]], widths: tuple[int, int] = (30, 70),
+) -> None:
+    """Append an INSTRUCTIONS sheet of (column, note) rows; the first row is bold."""
+    from openpyxl.styles import Font  # noqa: PLC0415
+
+    ws_inst = wb.create_sheet("INSTRUCTIONS")
+    ws_inst.column_dimensions["A"].width = widths[0]
+    ws_inst.column_dimensions["B"].width = widths[1]
+    for r_idx, (col_name, note) in enumerate(instructions, start=1):
+        name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
+        note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
+        if r_idx == 1:
+            name_cell.font = Font(bold=True)
+            note_cell.font = Font(bold=True)
+
+
+def _workbook_bytes(wb) -> bytes:
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _simple_template(
     headers: list[str],
     required: set[str],
     sheet_title: str = "Template",
     example_row: list | None = None,
+    *,
+    min_width: int = 16,
+    instructions: list[tuple[str, str]] | None = None,
+    instruction_widths: tuple[int, int] = (30, 70),
 ) -> bytes:
-    """Generate a minimal Excel template with highlighted required columns."""
+    """Generate an Excel template with highlighted required columns, and an
+    INSTRUCTIONS sheet when ``instructions`` is given."""
     import openpyxl  # noqa: PLC0415
-    from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = sheet_title
-    req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-    opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-
-    for col, h in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col, value=h)
-        cell.font = Font(bold=True)
-        cell.fill = req_fill if h in required else opt_fill
-        cell.alignment = Alignment(horizontal="center")
-        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
-
-    if example_row:
-        for col, val in enumerate(example_row, start=1):
-            ws.cell(row=2, column=col, value=val)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+    _write_header_sheet(ws, headers, required, example_row, min_width=min_width)
+    if instructions is not None:
+        _write_instructions_sheet(wb, instructions, instruction_widths)
+    return _workbook_bytes(wb)
 
 
 def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
@@ -899,21 +943,15 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
 
     if upload_type == "new-experiments":
         import openpyxl  # noqa: PLC0415
-        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
-
-        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
 
         def _write_sheet(ws, headers, required, example_row=None):
-            for col, h in enumerate(headers, start=1):
-                cell = ws.cell(row=1, column=col, value=h)
-                cell.font = Font(bold=True)
-                cell.fill = req_fill if h.replace("*", "").split("(")[0].strip() in required else opt_fill
-                cell.alignment = Alignment(horizontal="center")
-                ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
-            if example_row:
-                for col, val in enumerate(example_row, start=1):
-                    ws.cell(row=2, column=col, value=val)
+            # The key strips the "*" marker, so it never matches a `required`
+            # entry that still carries one: no header on these sheets is filled
+            # gold. Kept as is (issue #190 is a no-output-change refactor).
+            _write_header_sheet(
+                ws, headers, required, example_row, min_width=18,
+                required_key=lambda h: h.replace("*", "").split("(")[0].strip(),
+            )
 
         wb = openpyxl.Workbook()
 
@@ -995,9 +1033,6 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
         # Instructions sheet
-        ws_inst = wb.create_sheet("INSTRUCTIONS")
-        ws_inst.column_dimensions["A"].width = 35
-        ws_inst.column_dimensions["B"].width = 75
         instructions = [
             ("Column / Sheet", "Notes"),
             ("--- experiments sheet ---", ""),
@@ -1049,21 +1084,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("order", "Integer addition order (optional)."),
             ("method", f"Free-text addition method description (optional, max {ADDITION_METHOD_MAX_LENGTH} characters — longer values are truncated with a warning)."),
         ]
-        for r_idx, (col_name, note) in enumerate(instructions, start=1):
-            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
-            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
-            if r_idx == 1:
-                name_cell.font = Font(bold=True)
-                note_cell.font = Font(bold=True)
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+        _write_instructions_sheet(wb, instructions, widths=(35, 75))
+        return _workbook_bytes(wb)
 
     if upload_type == "rock-inventory":
-        import openpyxl  # noqa: PLC0415
-        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
-
         headers = [
             "sample_id", "rock_classification", "state", "country",
             "locality", "latitude", "longitude", "description",
@@ -1078,24 +1102,6 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             "", "", "", "",
             "FALSE",
         ]
-        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Template"
-        for col, h in enumerate(headers, start=1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = Font(bold=True)
-            cell.fill = req_fill if h in required else opt_fill
-            cell.alignment = Alignment(horizontal="center")
-            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
-        for col, val in enumerate(example_row, start=1):
-            ws.cell(row=2, column=col, value=val)
-
-        ws_inst = wb.create_sheet("INSTRUCTIONS")
-        ws_inst.column_dimensions["A"].width = 30
-        ws_inst.column_dimensions["B"].width = 70
         instructions = [
             ("Column", "Notes"),
             ("sample_id", "REQUIRED. Unique sample identifier (e.g. S001, SROCK-042)."),
@@ -1133,16 +1139,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ),
             ("overwrite", "TRUE clears and rewrites all optional fields for existing samples (default FALSE)."),
         ]
-        for r_idx, (col_name, note) in enumerate(instructions, start=1):
-            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
-            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
-            if r_idx == 1:
-                name_cell.font = Font(bold=True)
-                note_cell.font = Font(bold=True)
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+        return _simple_template(
+            headers, required, example_row=example_row, min_width=16,
+            instructions=instructions, instruction_widths=(30, 70),
+        )
 
     if upload_type == "chemical-inventory":
         return _simple_template(
@@ -1172,30 +1172,9 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
     if upload_type == "experiment-status":
-        import openpyxl  # noqa: PLC0415
-        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
-
         headers = ["experiment_id", "status", "reactor_number", "date"]
         required = {"experiment_id", "status"}
         example_row = ["HPHT_072", "ONGOING", 3, "2026-07-15"]
-        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Template"
-        for col, h in enumerate(headers, start=1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = Font(bold=True)
-            cell.fill = req_fill if h in required else opt_fill
-            cell.alignment = Alignment(horizontal="center")
-            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
-        for col, val in enumerate(example_row, start=1):
-            ws.cell(row=2, column=col, value=val)
-
-        ws_inst = wb.create_sheet("INSTRUCTIONS")
-        ws_inst.column_dimensions["A"].width = 30
-        ws_inst.column_dimensions["B"].width = 80
         instructions = [
             ("Column", "Notes"),
             ("experiment_id", "REQUIRED. Must match an existing experiment_id."),
@@ -1218,16 +1197,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
                 "is missing), nothing is demoted and a warning is returned.",
             ),
         ]
-        for r_idx, (col_name, note) in enumerate(instructions, start=1):
-            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
-            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
-            if r_idx == 1:
-                name_cell.font = Font(bold=True)
-                note_cell.font = Font(bold=True)
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+        return _simple_template(
+            headers, required, example_row=example_row, min_width=18,
+            instructions=instructions, instruction_widths=(30, 80),
+        )
 
     raise ValueError(f"Unknown template type: {upload_type}")
 
