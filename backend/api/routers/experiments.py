@@ -1714,13 +1714,14 @@ def update_experiment(
         # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
         cond = lowest_conditions(db, exp.id)
         if cond is not None:
+            # Cascades to every linked scalar (conditions_calcs.py).
             recalculate(cond, db)
             db.flush()
-        # Also recalculate scalars directly: conditions_calcs.py cascades to scalars via ORM
-        # relationships when conditions exist, but this explicit loop ensures scalars update
-        # even when there are no conditions (total_ferrous_iron_g stays NULL in that case).
-        for scalar in scalars_for_experiment(db, exp.id):
-            recalculate(scalar, db)
+        else:
+            # No conditions row, so no cascade: recalculate the scalars directly.
+            # (With conditions this loop repeated the cascade; issue #191, E-08.)
+            for scalar in scalars_for_experiment(db, exp.id):
+                recalculate(scalar, db)
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
