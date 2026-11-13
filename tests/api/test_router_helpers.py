@@ -119,3 +119,39 @@ def test_lowest_conditions_map_keys_by_experiment_and_skips_the_missing(db_sessi
     cond_a, cond_b = _conditions(db_session, a), _conditions(db_session, b)
     assert lowest_conditions_map(db_session, [a.id, b.id, bare.id]) == {a.id: cond_a, b.id: cond_b}
     assert lowest_conditions_map(db_session, []) == {}
+
+
+# ── run helpers (D-15, D-16) ─────────────────────────────────────────────────
+
+def test_is_variant_is_true_only_for_parent_underscore_text(db_session):
+    from backend.services.experiment_lookup import is_variant
+
+    root = _exp(db_session, "LOOKUP190_020", 9190020, base="LOOKUP190_020")
+    segment = _exp(db_session, "LOOKUP190_020-2", 9190021, base="LOOKUP190_020")
+    bypass = _exp(db_session, "LOOKUP190_020-2_Bypass1", 9190022, base="LOOKUP190_020")
+    lookalike = _exp(db_session, "LOOKUP190_020-25", 9190023, base="LOOKUP190_020")
+    segment.parent, bypass.parent, lookalike.parent = root, segment, segment
+    db_session.flush()
+
+    assert is_variant(root) is False        # no parent
+    assert is_variant(segment) is False     # sequential: <parent>-2
+    assert is_variant(bypass) is True       # side sample: <parent>_Bypass1
+    assert is_variant(lookalike) is False   # shares a prefix, no underscore
+
+
+def test_root_description_prefers_the_first_root_then_the_first_described():
+    from types import SimpleNamespace as Row
+
+    from backend.services.run_service import root_description
+
+    def is_root(m):
+        return m.root
+
+    described_root = [Row(root=False, description="side"), Row(root=True, description="root text")]
+    assert root_description(described_root, is_root) == "root text"
+    blank_root = [Row(root=True, description=None), Row(root=False, description="fallback")]
+    assert root_description(blank_root, is_root) == "fallback"
+    two_roots = [Row(root=True, description="first"), Row(root=True, description="second")]
+    assert root_description(two_roots, is_root) == "first"
+    assert root_description([Row(root=False, description=None)], is_root) is None
+    assert root_description([], is_root) is None

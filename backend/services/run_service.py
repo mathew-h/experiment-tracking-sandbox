@@ -109,14 +109,31 @@ def latest_segment(segments: Sequence[RunSegment]) -> RunSegment:
     return max(segments, key=lambda s: (s.date is not None, _aware(s.date) or _EPOCH, s.id))
 
 
+M = TypeVar("M")
+
+
+def root_description(ordered: Sequence[M], is_root: Callable[[M], bool]) -> str | None:
+    """The description that stands for a whole run or lineage.
+
+    ``ordered`` is the members in the caller's display order; each has a
+    ``description``. The first root's description wins; if there is no root, or
+    it has none, the first member that has one. The run pages and the Excel
+    export share this rule (issue #190, D-16) and differ only in the order
+    they pass in.
+    """
+    roots = [m for m in ordered if is_root(m)]
+    if roots and roots[0].description:
+        return roots[0].description
+    return next((m.description for m in ordered if m.description), None)
+
+
 def run_description(segments: list[RunSegment]) -> str | None:
     """Root segment's description (non-variant, no parent, earliest date); else the
     first segment that has one."""
-    ordered = by_date(segments)
-    roots = [s for s in ordered if not s.is_variant and s.parent_experiment_id is None]
-    if roots and roots[0].description:
-        return roots[0].description
-    return next((s.description for s in ordered if s.description), None)
+    return root_description(
+        by_date(segments),
+        is_root=lambda s: not s.is_variant and s.parent_experiment_id is None,
+    )
 
 
 def ongoing_ids(segments: Iterable[RunSegment]) -> list[str]:

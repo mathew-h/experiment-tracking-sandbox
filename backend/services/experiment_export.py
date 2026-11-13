@@ -32,6 +32,7 @@ from backend.services.experiment_lookup import (
     find_experiment, is_variant, lowest_conditions_map, series_key,
 )
 from backend.services.replicate_collapse import timepoint_stem_expr
+from backend.services.run_service import root_description
 from backend.services.workdays import LAB_TZ
 from database.experiment_id_parser import split_timepoint_token
 from database.models.experiments import Experiment
@@ -607,10 +608,7 @@ def _results_columns(elements: list[str]) -> list[Column]:
 
 
 def _root_description(lineage: Lineage) -> str | None:
-    roots = [m for m in lineage.members if m.is_root and not m.is_variant]
-    if roots and roots[0].description:
-        return roots[0].description
-    return next((m.description for m in lineage.members if m.description), None)
+    return root_description(lineage.members, is_root=lambda m: m.is_root and not m.is_variant)
 
 
 def _data_tabs(db: Session, members: list[Member]
