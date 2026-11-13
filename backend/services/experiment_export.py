@@ -28,10 +28,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.results import ICP_ELEMENTS
 from backend.services.core_flood_service import is_core_flood
-from backend.services.experiment_lookup import find_experiment, series_key
+from backend.services.experiment_lookup import find_experiment, lowest_conditions_map, series_key
 from backend.services.replicate_collapse import timepoint_stem_expr
 from backend.services.workdays import LAB_TZ
-from database.models.conditions import ExperimentalConditions
 from database.experiment_id_parser import split_timepoint_token
 from database.models.experiments import Experiment
 
@@ -262,13 +261,7 @@ NOTE_COLUMNS: list[Column] = [
 
 def _load_members(db: Session, exps: list[Experiment]) -> list[Member]:
     """Members for `exps` (one conditions query). Unsorted; see _series_order."""
-    conditions = {
-        c.experiment_fk: c for c in db.execute(
-            select(ExperimentalConditions)
-            .where(ExperimentalConditions.experiment_fk.in_([e.id for e in exps]))
-            .order_by(ExperimentalConditions.id.desc())  # lowest id wins below
-        ).scalars()
-    }
+    conditions = lowest_conditions_map(db, [e.id for e in exps])
 
     members: list[Member] = []
     for e in exps:

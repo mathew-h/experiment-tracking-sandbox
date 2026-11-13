@@ -87,3 +87,35 @@ def test_series_key_is_the_base_id_else_the_own_id(db_session):
 
     assert series_key(_exp(db_session, "LOOKUP190_003-2", 9190003, base="LOOKUP190_003")) == "LOOKUP190_003"
     assert series_key(_exp(db_session, "LOOKUP190_004", 9190004)) == "LOOKUP190_004"
+
+
+# ── conditions and scalar lookups (D-02, D-05) ───────────────────────────────
+
+def _conditions(db_session, exp, **fields):
+    from database.models.conditions import ExperimentalConditions
+
+    cond = ExperimentalConditions(experiment_fk=exp.id, experiment_id=exp.experiment_id, **fields)
+    db_session.add(cond)
+    db_session.flush()
+    return cond
+
+
+def test_lowest_conditions_returns_the_row_or_none(db_session):
+    from backend.services.experiment_lookup import lowest_conditions
+
+    with_row = _exp(db_session, "LOOKUP190_010", 9190010)
+    without = _exp(db_session, "LOOKUP190_011", 9190011)
+    cond = _conditions(db_session, with_row, rock_mass_g=2.0)
+    assert lowest_conditions(db_session, with_row.id) is cond
+    assert lowest_conditions(db_session, without.id) is None
+
+
+def test_lowest_conditions_map_keys_by_experiment_and_skips_the_missing(db_session):
+    from backend.services.experiment_lookup import lowest_conditions_map
+
+    a = _exp(db_session, "LOOKUP190_012", 9190012)
+    b = _exp(db_session, "LOOKUP190_013", 9190013)
+    bare = _exp(db_session, "LOOKUP190_014", 9190014)
+    cond_a, cond_b = _conditions(db_session, a), _conditions(db_session, b)
+    assert lowest_conditions_map(db_session, [a.id, b.id, bare.id]) == {a.id: cond_a, b.id: cond_b}
+    assert lowest_conditions_map(db_session, []) == {}

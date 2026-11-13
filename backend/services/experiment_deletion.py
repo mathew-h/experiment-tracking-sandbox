@@ -83,6 +83,7 @@ from database.models.results import (
     ExperimentalResults, ICPResults, ResultFiles, ScalarResults,
 )
 from database.models.xrd import XRDPhase
+from backend.services.experiment_lookup import lowest_conditions
 from backend.services.h2_background import groups_using_background
 
 log = structlog.get_logger(__name__)
@@ -246,11 +247,7 @@ def serialize_experiment_snapshot(db: Session, exp: Experiment) -> dict[str, Any
     # made the experiment undeletable through both the single-delete endpoint
     # and the bulk uploader (issue #109). impact.conditions still counts every
     # row; only the snapshot narrows to one.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
 
     additives: list[dict[str, Any]] = []
     if conditions is not None:

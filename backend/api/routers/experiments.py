@@ -15,7 +15,7 @@ from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
 from backend.api.routers._helpers import call_or_http, get_experiment_or_404
-from backend.services.experiment_lookup import find_experiment, series_key
+from backend.services.experiment_lookup import find_experiment, lowest_conditions, series_key
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
@@ -121,11 +121,7 @@ def _build_list_item(db: Session, exp: Experiment) -> dict:
     # .first() with an explicit order, not scalar_one_or_none(): UNIQUE
     # (experiment_fk) forbids a second row going forward, but one duplicate on a
     # pre-constraint database used to 500 this entire endpoint (issue #109).
-    cond = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    cond = lowest_conditions(db, exp.id)
     item_data["experiment_type"] = cond.experiment_type if cond else None
     item_data["reactor_number"] = cond.reactor_number if cond else None
     additive_row = db.execute(
@@ -1196,11 +1192,7 @@ def list_experiment_additives(
     # string-keyed lookup could 500 on a duplicated string, return [] for a real
     # experiment, or (worse, in the PUT/DELETE variants below) touch another
     # experiment's row.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         return []
     rows = db.execute(
@@ -1228,11 +1220,7 @@ def upsert_experiment_additive(
     # Resolve via experiment_fk, not the denormalized string (issue #109):
     # a stale string could otherwise write this additive onto another
     # experiment's conditions row.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment conditions not found")
     compound = db.get(Compound, compound_id)
@@ -1287,11 +1275,7 @@ def delete_experiment_additive(
     exp = get_experiment_or_404(db, experiment_id)
     # Resolve via experiment_fk, not the denormalized string (issue #109) —
     # see the GET/PUT variants above for the failure modes a string match hits.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
     additive = db.execute(
@@ -1426,18 +1410,13 @@ def get_experiment(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentDetailResponse:
     """Get a single experiment with nested conditions, notes, and modifications."""
-    from database.models.conditions import ExperimentalConditions
     from database.models.experiments import ModificationsLog
     from backend.api.schemas.conditions import ConditionsResponse
 
     exp = get_experiment_or_404(db, experiment_id)
 
     # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
-    cond = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    cond = lowest_conditions(db, exp.id)
     notes = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.experiment_fk == exp.id)
@@ -1712,11 +1691,7 @@ def update_experiment(
         exp.sample_id = new_sample_id
         db.flush()
         # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
-        cond = db.execute(
-            select(ExperimentalConditions)
-            .where(ExperimentalConditions.experiment_fk == exp.id)
-            .order_by(ExperimentalConditions.id)
-        ).scalars().first()
+        cond = lowest_conditions(db, exp.id)
         if cond is not None:
             recalculate(cond, db)
             db.flush()

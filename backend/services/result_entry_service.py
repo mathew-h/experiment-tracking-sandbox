@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.services import notes as notes_service
 from backend.services.calculations.registry import recalculate
-from backend.services.experiment_lookup import find_experiment
+from backend.services.experiment_lookup import find_experiment, lowest_conditions
 from backend.services.result_merge_utils import (
     resolve_primary_timepoint, update_cumulative_times_for_chain,
 )
@@ -128,11 +128,7 @@ def _default_day(raw_measurement: datetime, start: datetime) -> float:
 
 def conditions_for(db: Session, exp: Experiment) -> ExperimentalConditions | None:
     """The experiment's conditions row (lowest id, should a duplicate survive)."""
-    return db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id).limit(1)
-    ).scalar_one_or_none()
+    return lowest_conditions(db, exp.id)
 
 
 def _jsonable(values: dict) -> dict:
