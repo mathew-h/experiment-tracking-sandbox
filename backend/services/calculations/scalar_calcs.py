@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
+from backend.services.physical_constants import (
+    DEFAULT_BACKGROUND_AMMONIUM_MM,
+    FE_MOLAR_MASS,
+    H2_MOLAR_MASS,
+    NH4_MOLAR_MASS,
+)
 from backend.services.calculations.registry import register
 from database.models.results import ScalarResults
-
-
-FE_MOLAR_MASS = 55.845  # g/mol
 
 
 def calculate_ferrous_iron_yield_h2(
@@ -54,7 +57,7 @@ def calculate_ferrous_iron_yield_nh3(
         or total_ferrous_iron_g <= 0
     ):
         return None
-    bg = background_ammonium_mM if background_ammonium_mM is not None else 0.2
+    bg = background_ammonium_mM if background_ammonium_mM is not None else DEFAULT_BACKGROUND_AMMONIUM_MM
     net_mM = max(0.0, gross_ammonium_mM - bg)
     total_nh3_mol = (net_mM / 1000.0) * (solution_volume_mL / 1000.0)
     fe2_consumed_g = total_nh3_mol * 4.5 * FE_MOLAR_MASS
@@ -105,9 +108,9 @@ def recalculate_scalar(instance: object, session: Session) -> None:
     gross = getattr(instance, 'gross_ammonium_concentration_mM', None)
     if gross is not None and liquid_volume_ml is not None and liquid_volume_ml > 0:
         bg = getattr(instance, 'background_ammonium_concentration_mM', None)
-        bg = bg if bg is not None else 0.2
+        bg = bg if bg is not None else DEFAULT_BACKGROUND_AMMONIUM_MM
         net_conc = max(0.0, gross - bg)
-        ammonia_mass_g = (net_conc / 1000.0) * (liquid_volume_ml / 1000.0) * 18.04
+        ammonia_mass_g = (net_conc / 1000.0) * (liquid_volume_ml / 1000.0) * NH4_MOLAR_MASS
         if rock_mass is not None and rock_mass > 0:
             instance.grams_per_ton_yield = 1_000_000.0 * (ammonia_mass_g / rock_mass)
         else:
@@ -155,7 +158,6 @@ def _calculate_hydrogen(instance: object) -> None:
 
     R = 0.082057          # L·atm/(mol·K)
     T_K = 293.15          # 20°C
-    H2_MOLAR_MASS = 2.01588  # g/mol
 
     P_atm = pressure_mpa * 9.86923
     V_L = vol_ml / 1000.0

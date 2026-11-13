@@ -5,10 +5,12 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.services.physical_constants import FE_MOLAR_MASS, FEO_MOLAR_MASS
+
 log = structlog.get_logger(__name__)
 
 # Fe atomic mass (55.845) / FeO molar mass (71.844)
-FE_IN_FEO_FRACTION: float = 55.845 / 71.844
+FE_IN_FEO_FRACTION: float = FE_MOLAR_MASS / FEO_MOLAR_MASS
 
 
 def calculate_total_ferrous_iron_g(
