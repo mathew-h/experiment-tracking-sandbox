@@ -1,13 +1,42 @@
 # backend/services/calculations/conditions_calcs.py
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 from backend.services.calculations.registry import register
 from backend.services.elemental_composition_service import (
     calculate_total_ferrous_iron_g,
     get_analyte_wt_pct,
 )
 from database.models.conditions import ExperimentalConditions
+
+
+def _preload_scalars(session: Session, experiment: object) -> None:
+    """Load the scalar row of every result of the experiment in one query.
+
+    The cascade below reads ``result.scalar_data`` for each result. Left to
+    lazy loading that is one query per result (issue #191, E-05). This changes
+    which statements run, not which rows are recalculated.
+
+    ``experiment.results`` is read first on purpose: the session only holds
+    weak references, so results loaded by a query whose return value is
+    dropped can be garbage-collected before the cascade reaches them. The
+    collection keeps them alive, and the query then fills ``scalar_data`` on
+    those same objects.
+    """
+    from database.models.experiments import Experiment
+    from database.models.results import ExperimentalResults
+
+    if not isinstance(session, Session) or not isinstance(experiment, Experiment):
+        return  # unit tests pass plain objects; nothing to preload
+    result_ids = [result.id for result in experiment.results if result.id is not None]
+    if not result_ids:
+        return
+    session.execute(
+        select(ExperimentalResults)
+        .where(ExperimentalResults.id.in_(result_ids))
+        .options(selectinload(ExperimentalResults.scalar_data))
+    ).scalars().all()
 
 
 @register(ExperimentalConditions)
@@ -51,6 +80,7 @@ def recalculate_conditions(instance: ExperimentalConditions, session: Session) -
     from backend.services.calculations.scalar_calcs import recalculate_scalar
     experiment = getattr(instance, 'experiment', None)
     if experiment is not None:
+        _preload_scalars(session, experiment)
         for result in getattr(experiment, 'results', None) or []:
             scalar = getattr(result, 'scalar_data', None)
             if scalar is not None:

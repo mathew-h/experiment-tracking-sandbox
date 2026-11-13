@@ -210,7 +210,6 @@ def _patch_conditions(client, db_session, experiment_id: str) -> int:
     return len(statements)
 
 
-@pytest.mark.xfail(strict=True, reason="E-05 lands in a later commit")
 def test_conditions_cascade_query_count_does_not_grow_with_results(client, db_session):
     compounds = _compounds(db_session, "QCCAS")
     _experiment(db_session, "QCCAS_001", 9195000, compounds, results=2)
