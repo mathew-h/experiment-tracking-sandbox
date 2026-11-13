@@ -354,3 +354,28 @@ def test_cumulative_time_is_none_without_a_time_and_survives_a_cycle(db_session)
     update_cumulative_times_for_chain(db_session, second.id)
     assert undated.cumulative_time_post_reaction_days is None
     assert all(value is not None for value in _cumulative(db_session, first))
+
+
+# ── E-10: replicate group page ───────────────────────────────────────────────
+
+GROUP_DETAIL_CEILING = 12
+
+
+def _replicate_group(db, stem: str, start: int, letters: str) -> None:
+    compounds = _compounds(db, stem)
+    for offset, letter in enumerate(letters):
+        _experiment(db, f"{stem}{letter}", start + offset, compounds, base=stem, label=letter, results=1)
+    db.commit()
+
+
+def test_group_detail_query_count_does_not_grow_with_members(client, db_session, reporting_views):
+    _replicate_group(db_session, "QCGDA_001", 9199000, "ab")
+    _replicate_group(db_session, "QCGDB_001", 9199100, "abcdefgh")
+
+    small, body_small = _count(client, "/api/experiments/groups/QCGDA_001")
+    large, body_large = _count(client, "/api/experiments/groups/QCGDB_001")
+    assert (len(body_small["members"]), len(body_large["members"])) == (2, 8)
+    assert small == large, f"query count grew with members: {small} for 2, {large} for 8"
+    assert large <= GROUP_DETAIL_CEILING, large
+    assert body_large["shared_conditions"]["rock_mass_g"] == 2.0
+    assert body_large["divergent_fields"] == []
