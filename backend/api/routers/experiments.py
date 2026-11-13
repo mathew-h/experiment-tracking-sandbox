@@ -14,6 +14,7 @@ from database.reactor_slot import derive_reactor_slot
 from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
+from backend.api.routers._helpers import call_or_http
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
@@ -970,12 +971,10 @@ def _result_entry_response(db: Session, result_id: int) -> ResultWithFlagsRespon
 
 def _run_result_entry(fn: Callable[[], T]) -> T:
     """Run a result-entry service call, mapping its errors to 404/422."""
-    try:
-        return fn()
-    except result_entry.ResultEntryNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except result_entry.ResultEntryInvalid as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    return call_or_http(fn, (
+        (result_entry.ResultEntryNotFound, 404),
+        (result_entry.ResultEntryInvalid, 422),
+    ))
 
 
 @router.post(
