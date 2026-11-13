@@ -44,6 +44,12 @@ def is_core_flood(conditions: ExperimentalConditions | None) -> bool:
     return conditions is not None and series_prefix(conditions.experiment_type) == "CF"
 
 
+# Every spelling is_core_flood accepts ("Core Flood", "CoreFlood", "CF", in any
+# case or spacing) contains one of these once lower-cased. A SQL pre-filter
+# only; is_core_flood stays the rule (run_service.load_segments).
+CORE_FLOOD_TYPE_CONTAINS = ("core", "cf")
+
+
 _VIEW = "v_core_flood_samples"
 
 
@@ -84,7 +90,8 @@ def _resolve(
     """Base ID and segments of the core flood run `requested_id` names:
     a base, segment or variant ID (issue #158). Not-found reports the
     ID the caller sent."""
-    return runs.resolve_run(db, requested_id, include=is_core_flood, not_found=CoreFloodNotFound)
+    return runs.resolve_run(db, requested_id, include=is_core_flood, not_found=CoreFloodNotFound,
+                            type_contains=CORE_FLOOD_TYPE_CONTAINS)
 
 
 def get_run(db: Session, base_id: str) -> CoreFloodRun:
@@ -121,7 +128,8 @@ def list_runs(
             latest_cumulative_h2_grams_per_ton=run.latest_cumulative_h2_grams_per_ton,
             warning_count=len(compute_warnings(run.segments, run.samples)),
         )
-        for run in runs.summarize_runs(db, include=is_core_flood, view=_VIEW, scope=scope, q=q)
+        for run in runs.summarize_runs(db, include=is_core_flood, view=_VIEW, scope=scope, q=q,
+                                       type_contains=CORE_FLOOD_TYPE_CONTAINS)
     ]
     return runs.sort_runs(items)
 

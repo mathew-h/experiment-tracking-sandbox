@@ -158,7 +158,7 @@
 - **Evidence:** the raw `string_agg` at `routers/experiments.py:89-99` matches the view in `database/event_listeners.py:222-232`, which `services/replicate_groups.py:229` already reads.
 - **Locked:** no · **Derived path:** no (read only)
 - **Action:** read the view, batched per page (pairs with E-01). **Risk:** low. **Proof:** list-endpoint JSON diff on dev.
-- [ ] Approved — **not shipped in PR #194; deferred to #191 with E-01.** The reporting views exist in the test database only inside the `reporting_views` fixture, so the list endpoint's tests would all need it, and neither the inline query nor the view orders its `string_agg`.
+- [x] Approved — **resolved in PR #195 without the view.** On the dev DB the list's text matches "ordered by compound id" for 596 of 596 captured rows, while the unordered view matches 378 of 596, so reading the view would reorder additives on about a third of rows. The list keeps its own query, now one batched query with `ORDER BY c.id` (identical text for all 2,011 dev experiments). The duplicate SQL remains until the view gets an order, which needs a migration (suggested for #175).
 
 ### D-05: The "scalars for an experiment" two-step query is written three times · Reported
 - **Evidence:** `routers/experiments.py:1302-1308`, `:1694-1699`; `services/experiment_deletion.py:171`. Each selects result ids, then `ScalarResults.result_id.in_(…)`.
@@ -269,13 +269,13 @@
 - **Evidence:** `_build_list_item` (`routers/experiments.py:76-104`) makes three queries per row: conditions (`:82`), the additive `string_agg` (`:89`) and the lazy `exp.description` (the `description_note` relationship, `database/models/experiments.py:58-64`, not eager). Grouped mode adds one bucket query per row (`:341-349`) plus three per collapsed child (`:364-365`). With `limit` up to 500, that is thousands of queries.
 - **Locked:** no · **Derived path:** no
 - **Action:** batch conditions, additive summaries (via the view, D-04), descriptions and bucket membership with a few `IN` queries. **Risk:** med (the list logic carries #87/#98/#109 subtleties). **Proof:** `tests/api/test_experiments*.py`, the rollup and replicate tests, and a page-JSON diff on dev.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-02: Results tab runs two queries per result · Reported
 - **Evidence:** `_result_with_flags` (`routers/experiments.py:842-853`) fetches the scalar row and the ICP row separately per result, called in a loop from `GET /{id}/results` (`:839`). `dashboard.py:448-456` already does this in bulk.
 - **Locked:** no · **Derived path:** read only
 - **Action:** `selectinload(ExperimentalResults.scalar_data, ExperimentalResults.icp_data)`. **Risk:** low. **Proof:** tests/api results-tab tests.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-03: `next-id` / `next-ids` load every matching ID into Python · **Verified**
 - **Evidence:** `routers/experiments.py:391-399` (one pass) and `:416-426` (four passes) select every matching `experiment_id` and take the max in Python.
@@ -287,55 +287,55 @@
 - **Evidence:** `routers/samples.py:518-522` runs a `selectinload` query whose result is thrown away. `db.commit()` and `db.refresh(ea)` (`:532-533`) then expire the object, so `_to_analysis_response` lazy-loads again.
 - **Locked:** no · **Derived path:** no
 - **Action:** drop the dead query, or reload after the commit. **Risk:** low.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-05: Conditions cascade lazy-loads every result's scalar · **Verified**
 - **Evidence:** `services/calculations/conditions_calcs.py:52-57` iterates `experiment.results` and lazily reads `result.scalar_data` per result (default `lazy="select"`). It also does `session.get(Experiment)` (`:38`) and then `instance.experiment` (`:52`), two lookups for the same row.
 - **Locked:** no · **Derived path:** **yes**
 - **Action:** callers pre-load `experiment → results → scalar_data` with `selectinload`; reuse the one experiment object. The math is unchanged. **Risk:** low. **Proof:** SQL-echo query count before and after, plus the derived-column diff.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-06: `recalculate_conditions_for_samples` runs one query per experiment, with no SAVEPOINT · Reported
 - **Evidence:** `services/elemental_composition_service.py:50-66` runs a separate conditions query per experiment, using `.first()` with **no `order_by`**, which breaks the lowest-id convention. `get_analyte_wt_pct` (`conditions_calcs.py:42`) re-runs the same FeO query for every experiment on the same sample. There is no `begin_nested()` per row, so a DBAPI error poisons the rest of the loop. That violates the SAVEPOINT-per-row rule.
 - **Locked:** no (but it is called by the locked `actlabs_titration_data.py:240, :624`) · **Derived path:** **yes** (`total_ferrous_iron_g` cascades to scalars)
 - **Action:** one ordered query for all conditions, an FeO cache per sample within the call, and `begin_nested()` per row. **Risk:** low–med. Adding `order_by` could change which row is recalculated where duplicates exist (#109). **Proof:** derived-column diff; actlabs titration tests.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-07: Background-ammonium recalc loop lazy-loads per row · Reported
 - **Evidence:** `routers/experiments.py:1302-1312`. `recalculate_scalar` lazily loads `scalar.result_entry` per row; the result ids were selected as ints, so no objects are in the identity map.
 - **Locked:** no · **Derived path:** **yes**
 - **Action:** `selectinload(ScalarResults.result_entry)`. **Risk:** low. **Proof:** derived-column diff; `test_background_ammonium.py`.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-08: `PATCH /api/experiments/{id}` sample change recalculates every scalar twice · **Verified**
 - **Evidence:** `routers/experiments.py:1688-1690` runs `recalculate(cond, db)`, which cascades to every linked scalar (`conditions_calcs.py:52-57`). Then `:1693-1701` re-selects and recalculates the same scalars. Only a `db.flush()` runs between them. `recalculate_scalar` is idempotent, so the second pass writes identical values. The in-code comment justifies the loop **only** for the no-conditions case.
 - **Locked:** no · **Derived path:** **yes**
 - **Action:** run the `:1693-1701` loop only in an `else` branch when `cond is None`. This keeps the no-conditions case intact. **Risk:** low. **Proof:** on a dev-DB copy, PATCH the sample for one experiment with conditions and one without, before and after the change, and diff every scalar derived column. Then the full derived-column diff.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-09: `update_cumulative_times_for_chain` re-walks the whole lineage on every uploaded row · Reported
 - **Evidence:** `services/result_merge_utils.py:225-302`. The query count per call is 2 + Σ(2·depth + 1) over the chain, because `get_ancestor_time_offset` (`:247-257`) re-queries every ancestor's MAX. It is called once per row from `icp_service.py:769` (inside `bulk_create_icp_results`, `:795`), `scalar_results_service.py:268` (per `create_scalar_result_ex`, used by master, long_format and quick_upload) and `result_entry_service.py:283`.
 - **Locked:** the module is not locked; the per-batch alternative would need locked caller edits (H-10). **Derived path:** **yes** (`cumulative_time_post_reaction_days`).
 - **Action (local, behaviour-preserving):** load the chain once, get MAX(time) per experiment with one GROUP BY, walk parents in memory, then update. That is about 3 queries per call. **Risk:** med. **Proof:** dry-run `recalculate_cumulative_times_014` on dev before and after (zero changes); `test_time_field_guardrails`; the core-flood view tests.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-10: `replicate_groups._compare_conditions` lazy-loads conditions per member · Reported
 - **Evidence:** `services/replicate_groups.py:190-196` reads `member.conditions` per member; `_fetch_members` (`:126-143`) loads with no options.
 - **Locked:** no · **Derived path:** no
 - **Action:** `.options(selectinload(Experiment.conditions))`. **Risk:** low. **Proof:** `tests/api/test_replicate_group_detail.py`.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-11: `delete_experiment_cascade` lets the ORM lazy-load each child · Reported
 - **Evidence:** `services/experiment_deletion.py:378`. `db.delete(exp)` cascades through `results`, then each result's `files`, `scalar_data` and `icp_data`, with no `passive_deletes`. That is about 3 SELECTs per result. Bulk delete runs it per experiment (`experiment_deletion_bulk.py:146`).
 - **Locked:** the service fix is not locked; a model-level `passive_deletes` fix would be (do not do that). **Derived path:** no
 - **Action:** `selectinload` the children before `db.delete`. **Risk:** med (delete path). **Proof:** delete and bulk-delete tests; audit-row impact counts unchanged.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-12: `run_service.load_segments(base_id=None)` loads every lineage experiment, then filters in Python · Reported
 - **Evidence:** `services/run_service.py:65-81` joins every experiment that has a base, then filters with `include()` per row. `list_runs` then fetches view rows for every run (`core_flood_service.py:122-124`, `hpht_service.py:151-153`) before `scope="active"` drops the non-ongoing ones.
 - **Locked:** no · **Derived path:** no
 - **Action:** push the series filter into SQL (via the normalized experiment-type set from `reactor_slot`) and fetch samples only for runs that pass scope. **Risk:** low–med (normalization must match `series_prefix`). **Proof:** JSON diff of both list endpoints.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-13: `evaluate_characterized` calls `db.get(PXRFReading)` per comma-separated reading · Reported
 - **Evidence:** `services/samples.py:83-88`. It is called per affected sample from the pXRF upload router (E-14).
@@ -347,7 +347,7 @@
 - **Evidence:** `routers/bulk_uploads.py:302-340`. A 4-way `LIKE` OR across every imported reading number runs first, then one `db.query(SampleInfo)` plus `evaluate_characterized` per sample. The router also parses the file a second time (openpyxl, falling back to pandas). Its "mirror" of the parser's reading-number normalization is not a true mirror (X-10).
 - **Locked:** no (router) · **Derived path:** `characterized` only
 - **Action:** fetch the samples with one `IN`. **Risk:** low. **Proof:** tests/api pXRF tests.
-- [ ] Approved
+- [x] Approved — shipped in PR #195 (issue #191)
 
 ### E-15: actlabs-rock upload resolves each sample ID about three times and discards one result · Reported
 - **Evidence:**
@@ -356,7 +356,7 @@
 - **Locked:** the router part is not locked (drop the unused auto-resolve or surface it as warnings); the service-side index is locked (L-E3).
 - **Derived path:** yes, downstream (`recalculate_conditions_for_samples`)
 - **Action:** remove the discarded `auto_log` work in the router. **Risk:** low. **Proof:** tests/api actlabs tests.
-- [ ] Approved
+- [ ] Approved — **not shipped in PR #195: the finding does not hold as written.** The router does no work for `auto_log`; it ignores a value the locked parser's `preflight_check` computes, and that same lookup decides whether an ID is a conflict. The saving needs a parser change: see L-E3, #172.
 
 ---
 

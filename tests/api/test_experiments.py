@@ -905,42 +905,88 @@ def test_patch_sample_id_calls_recalculate_on_conditions(client, db_session):
     assert ExperimentalConditions in called_types
 
 
-def test_patch_sample_id_calls_recalculate_on_scalars(client, db_session):
-    """recalculate is called with each ScalarResults instance."""
-    from unittest.mock import patch as mock_patch
+def _seed_scalars_for_sample_change(db_session, experiment_id, number, *, with_conditions, results=3):
     from database.models.conditions import ExperimentalConditions
     from database.models.results import ExperimentalResults, ScalarResults
 
-    _make_sample(db_session, "SAMPLE_SCALAR_001")
-    exp = _make_experiment(db_session, "SAMPLETEST_005", 9704)
-    cond = ExperimentalConditions(
-        experiment_fk=exp.id,
-        experiment_id=exp.experiment_id,
-    )
-    db_session.add(cond)
-    db_session.flush()
-    result = ExperimentalResults(
-        experiment_fk=exp.id,
-        time_post_reaction_days=1.0,
-        time_post_reaction_bucket_days=1.0,
-        cumulative_time_post_reaction_days=1.0,
-        is_primary_timepoint_result=True,
-    )
-    db_session.add(result)
-    db_session.flush()
-    scalar = ScalarResults(result_id=result.id)
-    db_session.add(scalar)
-    db_session.commit()
-
-    with mock_patch("backend.api.routers.experiments.recalculate") as mock_recalc:
-        resp = client.patch(
-            "/api/experiments/SAMPLETEST_005",
-            json={"sample_id": "SAMPLE_SCALAR_001"},
+    exp = _make_experiment(db_session, experiment_id, number)
+    if with_conditions:
+        db_session.add(ExperimentalConditions(
+            experiment_fk=exp.id, experiment_id=exp.experiment_id, rock_mass_g=2.0, water_volume_mL=20.0))
+        db_session.flush()
+    scalar_ids = []
+    for day in range(results):
+        result = ExperimentalResults(
+            experiment_fk=exp.id,
+            time_post_reaction_days=float(day),
+            time_post_reaction_bucket_days=float(day),
+            cumulative_time_post_reaction_days=float(day),
+            is_primary_timepoint_result=True,
         )
+        db_session.add(result)
+        db_session.flush()
+        scalar = ScalarResults(result_id=result.id, h2_concentration=100.0,
+                               gas_sampling_volume_ml=5.0, gas_sampling_pressure_MPa=0.1)
+        db_session.add(scalar)
+        db_session.flush()
+        scalar_ids.append(scalar.id)
+    db_session.commit()
+    return scalar_ids
+
+
+def _spy_on_scalar_recalculation(monkeypatch):
+    """Record every scalar recalculation, whether it arrives through the
+    conditions cascade (module attribute) or the registry (direct call)."""
+    from backend.services.calculations import registry, scalar_calcs
+    from database.models.results import ScalarResults
+
+    calls: list[int] = []
+    real = scalar_calcs.recalculate_scalar
+
+    def spy(instance, session):
+        calls.append(instance.id)
+        return real(instance, session)
+
+    monkeypatch.setattr(scalar_calcs, "recalculate_scalar", spy)
+    monkeypatch.setitem(registry._REGISTRY, ScalarResults, spy)
+    return calls
+
+
+def test_patch_sample_id_recalculates_each_scalar_exactly_once(client, db_session, monkeypatch):
+    """With a conditions row the cascade recalculates the scalars. The router
+    used to loop over them a second time (issue #191, E-08)."""
+    from database.models.results import ScalarResults
+
+    _make_sample(db_session, "SAMPLE_SCALAR_001")
+    scalar_ids = _seed_scalars_for_sample_change(db_session, "SAMPLETEST_005", 9704, with_conditions=True)
+    calls = _spy_on_scalar_recalculation(monkeypatch)
+
+    resp = client.patch("/api/experiments/SAMPLETEST_005", json={"sample_id": "SAMPLE_SCALAR_001"})
 
     assert resp.status_code == 200
-    called_types = [type(call_args[0][0]) for call_args in mock_recalc.call_args_list]
-    assert ScalarResults in called_types
+    assert sorted(calls) == sorted(scalar_ids)  # each one once, none twice
+    db_session.expire_all()
+    for scalar in db_session.query(ScalarResults).filter(ScalarResults.id.in_(scalar_ids)):
+        assert scalar.h2_micromoles is not None
+        assert scalar.h2_grams_per_ton_yield is not None  # needs rock_mass_g from conditions
+
+
+def test_patch_sample_id_without_conditions_still_recalculates_scalars(client, db_session, monkeypatch):
+    """No conditions row means no cascade, so the router recalculates directly."""
+    from database.models.results import ScalarResults
+
+    _make_sample(db_session, "SAMPLE_SCALAR_002")
+    scalar_ids = _seed_scalars_for_sample_change(db_session, "SAMPLETEST_015", 9714, with_conditions=False)
+    calls = _spy_on_scalar_recalculation(monkeypatch)
+
+    resp = client.patch("/api/experiments/SAMPLETEST_015", json={"sample_id": "SAMPLE_SCALAR_002"})
+
+    assert resp.status_code == 200
+    assert sorted(calls) == sorted(scalar_ids)
+    db_session.expire_all()
+    for scalar in db_session.query(ScalarResults).filter(ScalarResults.id.in_(scalar_ids)):
+        assert scalar.h2_micromoles is not None
+        assert scalar.h2_grams_per_ton_yield is None  # no rock mass to divide by
 
 
 def test_patch_sample_id_logs_modification(client, db_session):

@@ -72,7 +72,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import delete as sql_delete, func, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from database.models.analysis import ExternalAnalysis
 from database.models.characterization import ElementalAnalysis
@@ -362,8 +362,25 @@ def delete_experiment_cascade(
     ))
     db.flush()
 
+    # Issue #191 (E-11): load what the ORM cascade is about to delete in a few
+    # queries. Left alone, db.delete() lazy-loads each result's files, scalar
+    # row and ICP row one result at a time. This only preloads; the cascade
+    # rules in database/models/ decide what is deleted, exactly as before.
+    # `preloaded` is held until after the commit because the session keeps only
+    # weak references to loaded rows.
+    preloaded = db.execute(
+        select(ExperimentalResults)
+        .where(ExperimentalResults.experiment_fk == exp.id)
+        .options(
+            selectinload(ExperimentalResults.files),
+            selectinload(ExperimentalResults.scalar_data),
+            selectinload(ExperimentalResults.icp_data),
+        )
+    ).scalars().all()
+
     db.delete(exp)
     db.commit()
+    del preloaded
 
     log.info(
         "experiment_deleted",

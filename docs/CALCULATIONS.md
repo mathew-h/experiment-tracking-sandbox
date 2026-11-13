@@ -27,6 +27,15 @@ To add a new formula:
 3. Import the module in `backend/services/calculations/__init__.py`
 4. Update this document
 
+**The conditions cascade (issue #191).** `recalculate_conditions` ends by recalculating every
+scalar row of the experiment, so a caller that has recalculated a conditions row must not
+loop over its scalars again. `PATCH /api/experiments/{id}` did that on a sample change and
+recalculated each scalar twice; it now recalculates scalars directly only when the
+experiment has no conditions row, where there is no cascade. The cascade loads all the
+scalar rows in one query before it starts. `recalculate_conditions_for_samples` reads each
+sample's FeO value once per call and wraps each experiment in a SAVEPOINT, so one failing
+row no longer stops the rest.
+
 **Constants (issue #190, sweep D-18).** Molar masses and the default background
 ammonium live in `backend/services/physical_constants.py`: `FE_MOLAR_MASS` (55.845),
 `FEO_MOLAR_MASS` (71.844), `H2_MOLAR_MASS` (2.01588), `NH4_MOLAR_MASS` (18.04) and
@@ -375,10 +384,10 @@ mutation — and `calculate_ferrous_iron_yield_h2` returns NULL whenever this is
 taking `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` down with it. Every
 path that recalculates:
 
-- `POST /api/conditions`, `PATCH /api/conditions/{id}` — `backend/api/routers/conditions.py:115`, `:142`
-- `PATCH /api/experiments/{id}`, on a sample change — `backend/api/routers/experiments.py:1759`
-- Replicate creation — `database/lineage_utils.py:606`
-- Any elemental upload, via `recalculate_conditions_for_samples()` (`backend/services/elemental_composition_service.py:34`) — this is what covers experiments created *before* their rock's FeO data arrived
+- `POST /api/conditions`, `PATCH /api/conditions/{id}` — `create_conditions` and `update_conditions` in `backend/api/routers/conditions.py`
+- `PATCH /api/experiments/{id}`, on a sample change — `update_experiment` in `backend/api/routers/experiments.py`
+- Replicate creation — `create_replicate_experiments` in `database/lineage_utils.py`
+- Any elemental upload, via `recalculate_conditions_for_samples()` (`backend/services/elemental_composition_service.py`) — this is what covers experiments created *before* their rock's FeO data arrived
 - The New Experiments bulk upload, as of 2026-08-10 — records every conditions row it touches and recalculates them in one pass before returning
 
 **Known gap — the recalculation is not surfaced in the UI.** The bulk uploader appends

@@ -223,17 +223,20 @@ def create_experimental_result_row(
 # Cumulative time across experiment lineage chains
 # ---------------------------------------------------------------------------
 
-def get_ancestor_time_offset(db: Session, experiment: Experiment) -> float:
-    """Walk up the experiment lineage chain and sum the max ``time_post_reaction``
-    from each ancestor experiment.
+def _ancestor_time_offset(
+    experiment: Experiment,
+    experiments_by_id: dict[int, Experiment],
+    max_time_by_id: dict[int, float],
+) -> float:
+    """Sum of the max ``time_post_reaction_days`` of each ancestor, nearest first.
 
     For a base experiment (no parent) the offset is 0.
     For a derivation like ``HPHT_051-3`` whose chain is
     ``HPHT_051 → HPHT_051-2 → HPHT_051-3``, the offset equals
-    ``max_time(HPHT_051) + max_time(HPHT_051-2)``.
+    ``max_time(HPHT_051-2) + max_time(HPHT_051)``, added in that order.
 
-    Returns:
-        Cumulative offset in days (float).
+    Reads only the two mappings, so it issues no query. An ancestor missing
+    from ``experiments_by_id`` ends the walk, as a missing row always did.
     """
     offset = 0.0
     current = experiment
@@ -244,25 +247,37 @@ def get_ancestor_time_offset(db: Session, experiment: Experiment) -> float:
             break  # safety: stop on cycles
         visited.add(current.id)
 
-        parent = (
-            db.query(Experiment)
-            .filter(Experiment.id == current.parent_experiment_fk)
-            .first()
-        )
+        parent = experiments_by_id.get(current.parent_experiment_fk)
         if parent is None:
             break
 
-        max_time = (
-            db.query(sa_func.max(ExperimentalResults.time_post_reaction_days))
-            .filter(ExperimentalResults.experiment_fk == parent.id)
-            .scalar()
-        )
+        max_time = max_time_by_id.get(parent.id)
         if max_time is not None:
             offset += max_time
 
         current = parent
 
     return offset
+
+
+def _load_ancestors(db: Session, experiments_by_id: dict[int, Experiment]) -> None:
+    """Add to ``experiments_by_id`` every ancestor that is not already in it.
+
+    Ancestors normally share the chain's base ID and are already loaded, so
+    this usually runs no query. It loops only for a parent outside the chain.
+    """
+    while True:
+        missing = {
+            exp.parent_experiment_fk for exp in experiments_by_id.values()
+            if exp.parent_experiment_fk is not None and exp.parent_experiment_fk not in experiments_by_id
+        }
+        if not missing:
+            return
+        found = db.query(Experiment).filter(Experiment.id.in_(missing)).all()
+        if not found:
+            return  # dangling parent ids; the walk stops there
+        for exp in found:
+            experiments_by_id[exp.id] = exp
 
 
 def update_cumulative_times_for_chain(db: Session, experiment_fk: int) -> None:
@@ -272,6 +287,11 @@ def update_cumulative_times_for_chain(db: Session, experiment_fk: int) -> None:
     This is safe to call after any result insert / update — it will update
     the calling experiment **and** all sibling / downstream experiments that
     share the same ``base_experiment_id``.
+
+    The chain is loaded once (issue #191, E-09): its experiments, each
+    experiment's max time in one grouped query, and all its results in one
+    query. It used to re-query every ancestor and its max time for every
+    experiment of the chain, on every uploaded row.
     """
     experiment = db.query(Experiment).filter(Experiment.id == experiment_fk).first()
     if experiment is None:
@@ -285,16 +305,36 @@ def update_cumulative_times_for_chain(db: Session, experiment_fk: int) -> None:
         .filter(Experiment.base_experiment_id == base_id)
         .all()
     )
+    if not chain_experiments:
+        db.flush()
+        return
 
-    for exp in chain_experiments:
-        offset = get_ancestor_time_offset(db, exp)
+    experiments_by_id = {exp.id: exp for exp in chain_experiments}
+    _load_ancestors(db, experiments_by_id)
 
-        results = (
-            db.query(ExperimentalResults)
-            .filter(ExperimentalResults.experiment_fk == exp.id)
+    max_time_by_id: dict[int, float] = {
+        fk: max_time for fk, max_time in (
+            db.query(
+                ExperimentalResults.experiment_fk,
+                sa_func.max(ExperimentalResults.time_post_reaction_days),
+            )
+            .filter(ExperimentalResults.experiment_fk.in_(list(experiments_by_id)))
+            .group_by(ExperimentalResults.experiment_fk)
             .all()
         )
-        for result in results:
+    }
+
+    results_by_experiment: dict[int, list[ExperimentalResults]] = {}
+    for result in (
+        db.query(ExperimentalResults)
+        .filter(ExperimentalResults.experiment_fk.in_([exp.id for exp in chain_experiments]))
+        .all()
+    ):
+        results_by_experiment.setdefault(result.experiment_fk, []).append(result)
+
+    for exp in chain_experiments:
+        offset = _ancestor_time_offset(exp, experiments_by_id, max_time_by_id)
+        for result in results_by_experiment.get(exp.id, []):
             if result.time_post_reaction_days is not None:
                 result.cumulative_time_post_reaction_days = offset + result.time_post_reaction_days
             else:
