@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -153,3 +154,21 @@ def test_upload_slot_signers_match_the_parsers_tags():
     retired = {"quick_upload"}
     assert not retired & scanned, "a retired signer is back in a parser; drop it from `retired`"
     assert UPLOAD_SLOT_SIGNERS == {master_bulk_upload._NOTE_SOURCE} | scanned | retired
+
+
+@pytest.mark.parametrize("note_type,result_id,event_date,breaks", [
+    (NoteType.description, None, None, False),
+    (NoteType.description, 7, None, True),
+    (NoteType.modification, 7, None, False),
+    (NoteType.modification, None, date(2026, 11, 13), False),
+    (NoteType.modification, None, None, True),
+    (NoteType.result_note, 7, None, False),
+    (NoteType.result_note, None, date(2026, 11, 13), True),
+    (NoteType.observation, None, None, False),
+    (NoteType.observation, 7, date(2026, 11, 13), False),
+])
+def test_breaks_note_scope_mirrors_ck_note_scope(note_type, result_id, event_date, breaks):
+    """Issue #190 (D-06): the one Python mirror of the CHECK constraint."""
+    from backend.services.notes import breaks_note_scope
+
+    assert breaks_note_scope(note_type, result_id, event_date) is breaks

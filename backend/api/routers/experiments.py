@@ -740,17 +740,36 @@ def _load_notes_for_bulk(db: Session, ids: list[int]) -> list[ExperimentNotes]:
     return notes
 
 
+# 422 wording for a ck_note_scope violation, per endpoint. The rule itself is
+# notes_service.breaks_note_scope; only the phrasing differs by context.
+_ADD_SCOPE_DETAIL: dict[NoteType, str] = {
+    NoteType.description: "A 'description' note is experiment-level; do not pass result_id.",
+    NoteType.modification: "A 'modification' note must be scoped to a result or carry an event_date.",
+    NoteType.result_note: "A 'result_note' note must name the result_id it describes.",
+}
+_PATCH_SCOPE_DETAIL: dict[NoteType, str] = {
+    NoteType.description: "A result-scoped note cannot become the 'description'; it is experiment-level.",
+    NoteType.modification: "A 'modification' note must be scoped to a result or carry an event_date.",
+    NoteType.result_note: "A 'result_note' note must be scoped to a result.",
+}
+_BULK_SCOPE_DETAIL: dict[NoteType, str] = {
+    NoteType.description: "Result-scoped notes cannot become 'description'",
+    NoteType.modification: "A 'modification' note must be scoped to a result or carry an event_date",
+    NoteType.result_note: "A 'result_note' note must be scoped to a result",
+}
+
+
 def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteType) -> None:
     """Mirror ck_note_scope and uq_one_description_per_experiment for a whole
     batch so the caller gets one 422/409 naming the offenders and nothing is
     half-applied. Same rules as patch_note, applied to N rows."""
+    offending = [
+        n.id for n in notes
+        if notes_service.breaks_note_scope(target, n.result_id, n.event_date)
+    ]
+    if offending:
+        raise HTTPException(status_code=422, detail=f"{_BULK_SCOPE_DETAIL[target]}: {offending}")
     if target is NoteType.description:
-        offending = [n.id for n in notes if n.result_id is not None]
-        if offending:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Result-scoped notes cannot become 'description': {offending}",
-            )
         # Two selected notes on one experiment, or an existing description there.
         wanting = [n for n in notes if n.note_type is not NoteType.description]
         per_exp: dict[int, list[int]] = {}
@@ -770,20 +789,6 @@ def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteTy
             raise HTTPException(
                 status_code=409,
                 detail=f"These experiments would end up with more than one description: {eids}",
-            )
-    elif target is NoteType.modification:
-        offending = [n.id for n in notes if n.result_id is None and n.event_date is None]
-        if offending:
-            raise HTTPException(
-                status_code=422,
-                detail=f"A 'modification' note must be scoped to a result or carry an event_date: {offending}",
-            )
-    elif target is NoteType.result_note:
-        offending = [n.id for n in notes if n.result_id is None]
-        if offending:
-            raise HTTPException(
-                status_code=422,
-                detail=f"A 'result_note' note must be scoped to a result: {offending}",
             )
 
 
@@ -1797,21 +1802,8 @@ def add_note(
     exp = get_experiment_or_404(db, experiment_id)
 
     # Mirror of ck_note_scope, for the message.
-    if payload.note_type is NoteType.description and payload.result_id is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'description' note is experiment-level; do not pass result_id.",
-        )
-    if payload.note_type is NoteType.modification and payload.result_id is None and payload.event_date is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'modification' note must be scoped to a result or carry an event_date.",
-        )
-    if payload.note_type is NoteType.result_note and payload.result_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'result_note' note must name the result_id it describes.",
-        )
+    if notes_service.breaks_note_scope(payload.note_type, payload.result_id, payload.event_date):
+        raise HTTPException(status_code=422, detail=_ADD_SCOPE_DETAIL[payload.note_type])
     # Mirror of fk_note_result_same_experiment, for the message.
     if payload.result_id is not None:
         owner_fk = db.execute(
@@ -1878,21 +1870,8 @@ def patch_note(
 
     # Mirror of ck_note_scope on the state AFTER this patch (issue #122 PR-B):
     # a retype and a date change can each remove a 'modification's only anchor.
-    if new_type is NoteType.description and note.result_id is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="A result-scoped note cannot become the 'description'; it is experiment-level.",
-        )
-    if new_type is NoteType.modification and note.result_id is None and new_date is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'modification' note must be scoped to a result or carry an event_date.",
-        )
-    if new_type is NoteType.result_note and note.result_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'result_note' note must be scoped to a result.",
-        )
+    if notes_service.breaks_note_scope(new_type, note.result_id, new_date):
+        raise HTTPException(status_code=422, detail=_PATCH_SCOPE_DETAIL[new_type])
 
     if payload.note_text is not None and payload.note_text != note.note_text:
         old_values["note_text"], new_values["note_text"] = note.note_text, payload.note_text
