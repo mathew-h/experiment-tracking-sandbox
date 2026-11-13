@@ -271,3 +271,86 @@ def test_conditions_cascade_query_count_does_not_grow_with_results(client, db_se
     for scalar in scalars:
         ammonia_g = (max(0.0, scalar.gross_ammonium_concentration_mM - 0.2) / 1000.0) * (20.0 / 1000.0) * 18.04
         assert scalar.grams_per_ton_yield == pytest.approx(1_000_000.0 * ammonia_g / 4.0)
+
+
+# ── E-09: cumulative time across a lineage chain ─────────────────────────────
+
+CHAIN_CEILING = 6
+
+
+def _chain(db, base: str, start: int, depth: int) -> list[Experiment]:
+    """base, base-2, base-3 ... each the child of the one before, each with
+    results at days 1 and 4."""
+    chain: list[Experiment] = []
+    for level in range(depth):
+        experiment_id = base if level == 0 else f"{base}-{level + 1}"
+        exp = Experiment(experiment_id=experiment_id, experiment_number=start + level,
+                         status=ExperimentStatus.ONGOING, base_experiment_id=base,
+                         parent_experiment_fk=chain[-1].id if chain else None)
+        db.add(exp)
+        db.flush()
+        for day in (1.0, 4.0):
+            db.add(ExperimentalResults(experiment_fk=exp.id, time_post_reaction_days=day,
+                                       time_post_reaction_bucket_days=day,
+                                       is_primary_timepoint_result=True))
+        chain.append(exp)
+    db.flush()
+    return chain
+
+
+def _cumulative(db, exp: Experiment) -> list[float]:
+    return sorted(
+        r.cumulative_time_post_reaction_days
+        for r in db.query(ExperimentalResults).filter_by(experiment_fk=exp.id)
+    )
+
+
+def test_cumulative_time_query_count_does_not_grow_with_chain_depth(db_session):
+    from backend.services.result_merge_utils import update_cumulative_times_for_chain
+
+    short = _chain(db_session, "QCCHAINA_001", 9198000, 2)
+    long = _chain(db_session, "QCCHAINB_001", 9198100, 7)
+
+    counts = []
+    for chain in (short, long):
+        db_session.expire_all()
+        with count_queries() as statements:
+            update_cumulative_times_for_chain(db_session, chain[-1].id)
+        counts.append(len([s for s in statements if s.lstrip().upper().startswith("SELECT")]))
+    assert counts[0] == counts[1], f"SELECT count grew with chain depth: {counts}"
+    assert counts[1] <= CHAIN_CEILING, counts
+
+    # Each segment starts where its ancestors' last samples ended (4 days each).
+    for level, exp in enumerate(long):
+        assert _cumulative(db_session, exp) == [4.0 * level + 1.0, 4.0 * level + 4.0]
+
+
+def test_cumulative_time_follows_a_parent_outside_the_chain(db_session):
+    """A parent with a different base ID is still walked (it is loaded on demand)."""
+    from backend.services.result_merge_utils import update_cumulative_times_for_chain
+
+    (outside,) = _chain(db_session, "QCCHAINC_001", 9198200, 1)
+    (inside,) = _chain(db_session, "QCCHAIND_001", 9198300, 1)
+    inside.parent_experiment_fk = outside.id
+    db_session.flush()
+
+    update_cumulative_times_for_chain(db_session, inside.id)
+    assert _cumulative(db_session, inside) == [5.0, 8.0]   # 4 days of the outside parent, then 1 and 4
+    # The outside experiment belongs to another chain; this call leaves it alone.
+    untouched = db_session.query(ExperimentalResults).filter_by(experiment_fk=outside.id).all()
+    assert [r.cumulative_time_post_reaction_days for r in untouched] == [None, None]
+
+
+def test_cumulative_time_is_none_without_a_time_and_survives_a_cycle(db_session):
+    from backend.services.result_merge_utils import update_cumulative_times_for_chain
+
+    first, second = _chain(db_session, "QCCHAINE_001", 9198400, 2)
+    first.parent_experiment_fk = second.id  # a cycle; the walk must stop, not spin
+    undated = ExperimentalResults(experiment_fk=second.id, time_post_reaction_days=None,
+                                  is_primary_timepoint_result=False)
+    db_session.add(undated)
+    db_session.flush()
+
+    update_cumulative_times_for_chain(db_session, second.id)
+    assert undated.cumulative_time_post_reaction_days is None
+    assert all(value is not None for value in _cumulative(db_session, first))
