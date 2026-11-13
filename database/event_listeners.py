@@ -1217,8 +1217,7 @@ def set_reactor_slot(mapper, connection, target):
     because "every path that writes reactor_number must remember to also update
     the slot" is precisely the failure mode the column exists to eliminate. This
     covers every path that loads an ExperimentalConditions instance and mutates
-    its attributes: both bulk-upload parsers, the conditions router,
-    experimental_conditions_service.py, and the legacy Streamlit app.
+    its attributes: both bulk-upload parsers and the conditions router.
 
     Exception: a bulk `Query.update()` (Core UPDATE) compiles straight to SQL
     and does not invoke per-row mapper events, so it does NOT fire this
