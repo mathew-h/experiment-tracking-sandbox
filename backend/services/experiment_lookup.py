@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, contains_eager
 
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
@@ -68,10 +68,16 @@ def lowest_conditions_map(
 
 
 def scalars_for_experiment(db: Session, experiment_fk: int) -> list[ScalarResults]:
-    """Every ScalarResults row of the experiment's results, in id order (one query)."""
+    """Every ScalarResults row of the experiment's results, in id order (one query).
+
+    Each row comes with its ``result_entry`` loaded from the same join, because
+    recalculating a scalar reads it; lazy loading would cost one query per row
+    (issue #191, E-07).
+    """
     return list(db.execute(
         select(ScalarResults)
-        .join(ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id)
+        .join(ScalarResults.result_entry)
+        .options(contains_eager(ScalarResults.result_entry))
         .where(ExperimentalResults.experiment_fk == experiment_fk)
         .order_by(ScalarResults.id)
     ).scalars())

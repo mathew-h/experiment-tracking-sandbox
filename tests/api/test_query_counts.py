@@ -196,6 +196,43 @@ def test_results_tab_query_count_does_not_grow_with_results(client, db_session):
     assert all(row["has_scalar"] and row["has_icp"] for row in body_large)
 
 
+# ── E-07: background-ammonium recalculation ──────────────────────────────────
+
+BACKGROUND_CEILING = 9
+
+
+def test_background_ammonium_query_count_does_not_grow_with_results(client, db_session):
+    compounds = _compounds(db_session, "QCBKG")
+    _experiment(db_session, "QCBKG_001", 9197000, compounds, results=2)
+    _experiment(db_session, "QCBKG_002", 9197001, compounds, results=10)
+    db_session.commit()
+
+    counts = {}
+    for experiment_id in ("QCBKG_001", "QCBKG_002"):
+        db_session.expire_all()
+        with count_queries() as statements:
+            resp = client.patch(f"/api/experiments/{experiment_id}/background-ammonium", json={"value": 0.5})
+        assert resp.status_code == 200, resp.text
+        counts[experiment_id] = len(statements)
+    assert resp.json() == {"updated": 10}
+    assert counts["QCBKG_001"] == counts["QCBKG_002"], counts
+    assert counts["QCBKG_002"] <= BACKGROUND_CEILING, counts
+
+    db_session.expire_all()
+    scalars = (
+        db_session.query(ScalarResults)
+        .join(ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id)
+        .join(Experiment, Experiment.id == ExperimentalResults.experiment_fk)
+        .filter(Experiment.experiment_id == "QCBKG_002")
+        .all()
+    )
+    assert len(scalars) == 10
+    for scalar in scalars:
+        assert scalar.background_ammonium_concentration_mM == 0.5
+        ammonia_g = (max(0.0, scalar.gross_ammonium_concentration_mM - 0.5) / 1000.0) * (20.0 / 1000.0) * 18.04
+        assert scalar.grams_per_ton_yield == pytest.approx(1_000_000.0 * ammonia_g / 2.0)
+
+
 # ── E-05: conditions cascade ─────────────────────────────────────────────────
 
 CASCADE_CEILING = 10
