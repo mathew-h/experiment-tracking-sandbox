@@ -8,7 +8,6 @@ paths:
   - "backend/services/calculations/**"
   - "backend/services/bulk_uploads/master_bulk_upload.py"
   - "backend/services/bulk_uploads/scalar_results.py"
-  - "backend/services/bulk_uploads/quick_upload.py"
   - "backend/api/routers/results.py"
   - "backend/api/routers/core_floods.py"
   - "backend/api/schemas/results.py"
@@ -95,8 +94,8 @@ Stores solution chemistry measurements.
     `_sheet_fields` from the keys of its own `result_data` literal, so adding a
     sheet column cannot leave the new field unclearable. A declared column left
     blank still clears — required, or an overwrite re-upload re-asserts the
-    stale GC carryover geometry issue #114 removed. `scalar_results.py` and
-    `quick_upload.py` also reach this branch and declare nothing, so they keep
+    stale GC carryover geometry issue #114 removed. `scalar_results.py` also
+    reaches this branch and declares nothing, so it keeps
     the whole-list behavior and the same latent bug; tracked separately.
   - **Geometry requires a reading (issue #114):** a Master Results row with no
     `H2 (ppm)` in either GC block stores no `gas_sampling_volume_ml` or

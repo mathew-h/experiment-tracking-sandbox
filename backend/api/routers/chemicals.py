@@ -3,15 +3,11 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-from database.models.chemicals import Compound, ChemicalAdditive
-from database.models.conditions import ExperimentalConditions
-import backend.services.calculations  # noqa: F401 — registers @register decorators
-from backend.services.calculations.registry import recalculate
+from database.models.chemicals import Compound
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.chemicals import (
     CompoundCreate, CompoundUpdate, CompoundResponse,
-    AdditiveCreate, AdditiveResponse,
 )
 
 log = structlog.get_logger(__name__)
@@ -108,39 +104,3 @@ def update_compound(
     db.refresh(compound)
     log.info("compound_updated", compound_id=compound_id, user=current_user.email)
     return CompoundResponse.model_validate(compound)
-
-
-@router.get("/additives/{conditions_id}", response_model=list[AdditiveResponse])
-def list_additives(
-    conditions_id: int,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> list[AdditiveResponse]:
-    """List chemical additives for a conditions record, ordered by addition_order."""
-    rows = db.execute(
-        select(ChemicalAdditive)
-        .where(ChemicalAdditive.experiment_id == conditions_id)
-        .order_by(ChemicalAdditive.addition_order)
-    ).scalars().all()
-    return [AdditiveResponse.model_validate(r) for r in rows]
-
-
-@router.post("/additives/{conditions_id}", response_model=AdditiveResponse, status_code=201)
-def create_additive(
-    conditions_id: int,
-    payload: AdditiveCreate,
-    db: Session = Depends(get_db),
-    current_user: FirebaseUser = Depends(verify_firebase_token),
-) -> AdditiveResponse:
-    """Add a chemical additive to a conditions record and trigger derived field recalculation."""
-    conditions = db.get(ExperimentalConditions, conditions_id)
-    if conditions is None:
-        raise HTTPException(status_code=404, detail="Conditions record not found")
-    additive = ChemicalAdditive(experiment_id=conditions_id, **payload.model_dump())
-    db.add(additive)
-    db.flush()
-    recalculate(additive, db)
-    db.commit()
-    db.refresh(additive)
-    log.info("additive_created", conditions_id=conditions_id, compound_id=payload.compound_id)
-    return AdditiveResponse.model_validate(additive)

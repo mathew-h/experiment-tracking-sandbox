@@ -3,7 +3,6 @@ paths:
   - "database/models/conditions.py"
   - "database/models/chemicals.py"
   - "database/reactor_slot.py"
-  - "backend/services/experimental_conditions_service.py"
   - "backend/services/denormalized_ids.py"
   - "backend/services/calculations/**"
   - "backend/services/bulk_uploads/new_experiments.py"

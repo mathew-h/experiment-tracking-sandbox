@@ -9,11 +9,13 @@ in sync with the implementation after every change.
 
 ## How the Calculation Engine Works
 
-After any database write, M3 API endpoints call:
+After a write is flushed, and before the commit, API endpoints and services call:
 
 ```python
-from backend.services.calculations import registry
-registry.recalculate(instance, session)
+import backend.services.calculations  # noqa: F401  (registers the @register functions)
+from backend.services.calculations.registry import recalculate
+
+recalculate(instance, session)
 ```
 
 The registry dispatches to the correct formula function based on `type(instance)`.
@@ -365,9 +367,9 @@ mutation — and `calculate_ferrous_iron_yield_h2` returns NULL whenever this is
 taking `ferrous_iron_yield_h2_pct` and `ferrous_iron_yield_nh3_pct` down with it. Every
 path that recalculates:
 
-- `POST /api/conditions`, `PATCH /api/conditions/{id}` — `backend/api/routers/conditions.py:103`, `:125`
-- `PATCH /api/experiments/{id}` — `backend/api/routers/experiments.py:1329`
-- Replicate creation — `database/lineage_utils.py:603`
+- `POST /api/conditions`, `PATCH /api/conditions/{id}` — `backend/api/routers/conditions.py:115`, `:142`
+- `PATCH /api/experiments/{id}`, on a sample change — `backend/api/routers/experiments.py:1759`
+- Replicate creation — `database/lineage_utils.py:606`
 - Any elemental upload, via `recalculate_conditions_for_samples()` (`backend/services/elemental_composition_service.py:34`) — this is what covers experiments created *before* their rock's FeO data arrived
 - The New Experiments bulk upload, as of 2026-08-10 — records every conditions row it touches and recalculates them in one pass before returning
 

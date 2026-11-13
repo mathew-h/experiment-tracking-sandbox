@@ -55,9 +55,8 @@ def fetch_samples(
     return runs.fetch_samples(db, _VIEW, base_ids=base_ids, result_id=result_id)
 
 
-# Shared with the HPHT run page; module names kept for existing importers.
+# Shared with the HPHT run page; the router calls it as svc.attach_notes.
 attach_notes = runs.attach_notes
-run_description = runs.run_description
 
 
 def _load_segments(db: Session, base_id: str | None = None) -> dict[str, list[CoreFloodSegment]]:
@@ -127,7 +126,7 @@ def list_runs(
     needle = runs.normalize_query(q)
     items: list[CoreFloodRunListItem] = []
     for base_id, segments in by_base.items():
-        description = run_description(segments)
+        description = runs.run_description(segments)
         if not runs.matches(needle, base_id, segments, description):
             continue
         samples = samples_by_base.get(base_id, [])
@@ -152,9 +151,6 @@ def list_runs(
     return runs.sort_runs(items)
 
 
-# Writable Core Flood columns; kept as module names for existing importers.
-RESULT_FIELDS = CF_PROFILE.result_fields
-SCALAR_FIELDS = CF_PROFILE.scalar_fields
 _NOT_CF = "{experiment_id} is not a Core Flood experiment"
 
 

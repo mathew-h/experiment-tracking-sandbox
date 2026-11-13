@@ -16,7 +16,6 @@ from backend.services.bulk_uploads._id_match import (
     AmbiguousExperimentIdError,
     find_experiment_matches,
     find_sample_matches,
-    fuzzy_find_experiment,
     fuzzy_find_sample,
     normalize_id,
 )
@@ -40,19 +39,13 @@ def test_the_fixture_really_collides():
 
 def test_exact_match_wins_over_ambiguity(two_colliding_experiments: Session):
     """A byte-exact ID is never ambiguous, even when its normalized key is."""
-    exp = fuzzy_find_experiment(two_colliding_experiments, "GUARD_AMB_001")
-    assert exp is not None
-    assert exp.experiment_id == "GUARD_AMB_001"
+    matches = find_experiment_matches(two_colliding_experiments, "GUARD_AMB_001")
+    assert [m.experiment_id for m in matches] == ["GUARD_AMB_001"]
 
 
 def test_find_experiment_matches_returns_both(two_colliding_experiments: Session):
     matches = find_experiment_matches(two_colliding_experiments, "guard-amb-01")
     assert {m.experiment_id for m in matches} == {"GUARD_AMB_1", "GUARD_AMB_001"}
-
-
-def test_fuzzy_find_experiment_refuses_to_guess(two_colliding_experiments: Session):
-    """The whole point: no arbitrary .first() on an ambiguous key."""
-    assert fuzzy_find_experiment(two_colliding_experiments, "guard-amb-01") is None
 
 
 def test_unambiguous_lookup_still_resolves(db_session: Session):
@@ -61,12 +54,12 @@ def test_unambiguous_lookup_still_resolves(db_session: Session):
         status=ExperimentStatus.ONGOING,
     ))
     db_session.flush()
-    exp = fuzzy_find_experiment(db_session, "guard-solo-7")
-    assert exp is not None and exp.experiment_id == "GUARD_SOLO_007"
+    matches = find_experiment_matches(db_session, "guard-solo-7")
+    assert [m.experiment_id for m in matches] == ["GUARD_SOLO_007"]
 
 
-def test_missing_experiment_still_returns_none(db_session: Session):
-    assert fuzzy_find_experiment(db_session, "GUARD_NOPE_999") is None
+def test_missing_experiment_matches_nothing(db_session: Session):
+    assert find_experiment_matches(db_session, "GUARD_NOPE_999") == []
 
 
 def test_ambiguous_error_carries_the_candidates():

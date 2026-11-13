@@ -140,15 +140,3 @@ class PXRFUploadService:
             return 0, 0, 0, clean_errors, []
         inserted, updated, skipped, upsert_errors = cls._upsert_dataframe(db, df, update_existing)
         return inserted, updated, skipped, upsert_errors, warnings
-
-    @classmethod
-    def ingest_from_source(
-        cls, db: Session, file_source: str, update_existing: bool = False
-    ) -> Tuple[int, int, int, List[str], List[str]]:
-        from utils.storage import get_file  # noqa: PLC0415
-
-        try:
-            file_bytes = get_file(file_source)
-        except Exception as e:
-            return 0, 0, 0, [f"Error fetching file '{file_source}': {e}"], []
-        return cls.ingest_from_bytes(db, file_bytes, update_existing)

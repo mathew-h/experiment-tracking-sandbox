@@ -148,4 +148,8 @@ def test_upload_slot_signers_match_the_parsers_tags():
     literal = re.compile(r"""\[\s*['"]_note_source['"]\s*\]\s*=\s*['"]([^'"]+)['"]""")
     scanned = {m for path in root.glob("*.py") for m in literal.findall(path.read_text(encoding="utf-8"))}
     assert scanned, "the regex found no _note_source assignments; update it"
-    assert UPLOAD_SLOT_SIGNERS == {master_bulk_upload._NOTE_SOURCE} | scanned
+    # Signers whose parser is gone but whose notes may still exist. quick_upload.py
+    # was deleted in issue #189; a note it signed must still release on edit.
+    retired = {"quick_upload"}
+    assert not retired & scanned, "a retired signer is back in a parser; drop it from `retired`"
+    assert UPLOAD_SLOT_SIGNERS == {master_bulk_upload._NOTE_SOURCE} | scanned | retired

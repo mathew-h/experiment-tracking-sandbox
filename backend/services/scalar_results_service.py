@@ -121,7 +121,7 @@ class ScalarResultsService:
         # Issue #81: the '-t<days>' token in the experiment ID is canonical for
         # this vial's timepoint — fill a missing time from it, reject a conflict.
         # Defense in depth: the live bulk parsers also check string-level, but
-        # every upload path (scalar, master, long-format) funnels through here.
+        # every upload path (scalar, master) funnels through here.
         time_post_reaction = apply_id_timepoint(
             experiment.id_timepoint_days, result_data.get('time_post_reaction'),
         )
@@ -248,7 +248,7 @@ class ScalarResultsService:
         # column, so a blank cell there is a deliberate clear of its own slot
         # (sync_result_note deletes only the note signed `note_source`). Gated on
         # the declared set because only the Master parser declares one;
-        # scalar_results.py / quick_upload.py keep leaving the note in place --
+        # scalar_results.py keeps leaving the note in place --
         # narrower than #116, where `None` means "everything".
         clears_own_slot = bool(
             overwrite and sheet_fields is not None and 'description' in sheet_fields
@@ -466,53 +466,3 @@ class ScalarResultsService:
             .filter(ExperimentalResults.experiment_fk == experiment.id)
             .all()
         )
-    
-    @staticmethod
-    def update_scalar_result(db: Session, result_id: int, update_data: Dict[str, Any]) -> Optional[ScalarResults]:
-        """
-        Update an existing scalar result and recalculate derived values.
-        
-        Args:
-            db: Database session
-            result_id: ID of the ExperimentalResults entry
-            update_data: Dictionary of fields to update
-            
-        Returns:
-            Updated ScalarResults object or None if not found
-        """
-        scalar_result = db.query(ScalarResults).filter(ScalarResults.result_id == result_id).first()
-        
-        if not scalar_result:
-            raise ValueError(f"ScalarResult with result_id {result_id} not found.")
-        
-        # Update fields from update_data
-        for field, value in update_data.items():
-            if hasattr(scalar_result, field):
-                setattr(scalar_result, field, value)
-        
-        # Recalculate derived values
-        from backend.services.calculations.registry import recalculate  # noqa: PLC0415
-        recalculate(scalar_result, db)
-        
-        db.flush()
-        return scalar_result
-    
-    @staticmethod
-    def validate_required_fields(data: Dict[str, Any], required_fields: set) -> List[str]:
-        """
-        Validate that required fields are present in data.
-        
-        Args:
-            data: Dictionary to validate
-            required_fields: Set of required field names
-            
-        Returns:
-            List of error messages for missing fields
-        """
-        errors = []
-        missing_fields = required_fields - set(data.keys())
-        
-        if missing_fields:
-            errors.append(f"Missing required fields: {', '.join(missing_fields)}")
-        
-        return errors

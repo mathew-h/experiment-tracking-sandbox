@@ -51,6 +51,8 @@ from database.models.results import ExperimentalResults
 # sync_result_note. A result-scoped note signed with one of these sits in that
 # parser's slot. Timepoint Modifications signs with the uploader's email and
 # new_experiments writes experiment-level descriptions, so neither is here.
+# 'quick_upload' is a retired signer: its parser was deleted in issue #189, but
+# notes it wrote keep the tag, so they must still leave the slot when edited.
 UPLOAD_SLOT_SIGNERS: frozenset[str] = frozenset({"master_bulk_upload", "scalar_results", "quick_upload"})
 
 

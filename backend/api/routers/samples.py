@@ -1,6 +1,5 @@
 # backend/api/routers/samples.py
 from __future__ import annotations
-import os
 import uuid
 import structlog
 from pathlib import Path
@@ -8,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, File, Fo
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, selectinload
 from database.models.samples import SampleInfo, SamplePhotos
-from database.models.analysis import ExternalAnalysis
+from database.models.analysis import ExternalAnalysis, PXRFReading
 from database.models.experiments import Experiment
 from backend.api.dependencies.db import get_db
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
@@ -161,10 +160,7 @@ def get_sample(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> SampleDetail:
-    from database.models.conditions import ExperimentalConditions
     from database.models.characterization import ElementalAnalysis
-    from database.models.analysis import PXRFReading
-    from database.models.xrd import XRDAnalysis
 
     sample = db.execute(
         select(SampleInfo)
@@ -245,7 +241,6 @@ def _build_pxrf_map(
     db: Session,
 ) -> "dict[str, PXRFReading]":
     """Return a {reading_no: PXRFReading} map for all pXRF analyses in the list."""
-    from database.models.analysis import PXRFReading
     reading_nos: set[str] = set()
     for a in analyses:
         if a.analysis_type == "pXRF" and a.pxrf_reading_no:
@@ -486,8 +481,6 @@ def create_analysis(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExternalAnalysisWithWarnings:
-    from database.models.analysis import ExternalAnalysis as EA, PXRFReading
-    from sqlalchemy.orm import selectinload as sl
 
     if db.get(SampleInfo, sample_id) is None:
         raise HTTPException(status_code=404, detail="Sample not found")
@@ -510,15 +503,15 @@ def create_analysis(
     if normalized_readings:
         ea_data["pxrf_reading_no"] = ",".join(normalized_readings)
 
-    ea = EA(sample_id=sample_id, **ea_data)
+    ea = ExternalAnalysis(sample_id=sample_id, **ea_data)
     db.add(ea)
     db.flush()
 
     # Reload with files relationship to satisfy _to_analysis_response
     db.execute(
-        select(EA)
-        .where(EA.id == ea.id)
-        .options(sl(EA.analysis_files))
+        select(ExternalAnalysis)
+        .where(ExternalAnalysis.id == ea.id)
+        .options(selectinload(ExternalAnalysis.analysis_files))
     ).scalar_one()
 
     sample = db.get(SampleInfo, sample_id)
@@ -544,14 +537,12 @@ def list_analyses(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ExternalAnalysisResponse]:
-    from database.models.analysis import ExternalAnalysis as EA
-    from sqlalchemy.orm import selectinload as sl
 
     rows = db.execute(
-        select(EA)
-        .where(EA.sample_id == sample_id)
-        .options(sl(EA.analysis_files), sl(EA.xrd_analysis))
-        .order_by(EA.analysis_date)
+        select(ExternalAnalysis)
+        .where(ExternalAnalysis.sample_id == sample_id)
+        .options(selectinload(ExternalAnalysis.analysis_files), selectinload(ExternalAnalysis.xrd_analysis))
+        .order_by(ExternalAnalysis.analysis_date)
     ).scalars().all()
     pxrf_map = _build_pxrf_map(list(rows), db)
     return [_to_analysis_response(r, pxrf_map) for r in rows]
@@ -565,16 +556,14 @@ def delete_analysis(
     db: Session = Depends(get_db),
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ):
-    from database.models.analysis import ExternalAnalysis as EA
-    from sqlalchemy.orm import selectinload as sl
 
     ea = db.execute(
-        select(EA)
+        select(ExternalAnalysis)
         .where(
-            EA.id == analysis_id,
-            EA.sample_id == sample_id,
+            ExternalAnalysis.id == analysis_id,
+            ExternalAnalysis.sample_id == sample_id,
         )
-        .options(sl(EA.analysis_files))
+        .options(selectinload(ExternalAnalysis.analysis_files))
     ).scalar_one_or_none()
     if ea is None:
         raise HTTPException(status_code=404, detail="Analysis not found")

@@ -37,28 +37,28 @@
 - **Inbound refs:** none (LIVE 0 / TEST 0 / LEGACY 0).
 - **Last change:** 2026-03-16 · **Locked:** no · **Derived path:** no
 - **Action:** delete. **Risk:** low. **Proof:** `python -c "import backend.api.main"`; `git grep "api.routes"` is empty.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-02: `backend/services/database/` package holds only an empty `__init__.py` · **Verified**
 - **Evidence:** `backend/services/database/__init__.py`, 0 bytes; the directory has no other file.
 - **Inbound refs:** none for `services.database` / `services/database` anywhere, docs included.
 - **Last change:** 2026-03-16 · **Locked:** no · **Derived path:** no
 - **Action:** delete the package. **Risk:** low. **Proof:** `python -c "import backend.services"`, plus the six-dir pytest.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-03: `backend/api/schemas/__init__.py` re-exports nothing anyone imports · Reported
 - **Evidence:** `backend/api/schemas/__init__.py:1-13` re-exports schema classes (including `ReactorStatusResponse`, S-05). No `from backend.api.schemas import …` or `import backend.api.schemas` exists in `backend`, `database`, `scripts`, `tests`, `alembic` or `app.py`. Its only effect is to import every schema module whenever any one is imported.
 - **Inbound refs:** none.
 - **Last change:** 2026-03-16 · **Locked:** no · **Derived path:** no
 - **Action:** empty the file (keep it as a package marker). **Risk:** low. **Proof:** the app and the test collection import cleanly.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-04: `ExperimentalConditionsService` is broken and only legacy calls it · **Verified**
 - **Evidence:** `backend/services/experimental_conditions_service.py:46,96` call `conditions.calculate_derived_conditions()`, `:102` calls `additive.calculate_derived_values()` and `:109` calls `scalar_data.calculate_yields()`. None of these methods exists anywhere (`git grep "def calculate_yields\|def calculate_derived"` is empty), so create and update raise `AttributeError`. `calculate_water_to_rock_ratio` (`:56`) has no callers and returns `0.0` where the engine returns `None`.
 - **Inbound refs:** LEGACY `legacy/streamlit_frontend/edit_experiment.py:11,249,261`, `legacy/streamlit_frontend/new_experiment.py:8,382`; a docstring mention in `database/event_listeners.py:1221`; prose in `database/data_migrations/README.md`.
 - **Last change:** 2026-03-16 · **Locked:** no · **Derived path:** nominally yes, but the code cannot run.
 - **Action:** delete the module and drop the docstring mention. **Risk:** none for the app; this breaks a legacy Streamlit import that is already broken at runtime. **Proof:** `git grep ExperimentalConditionsService` shows only `legacy/` and docs.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-05: `GET /api/dashboard/reactor-status` and `ReactorStatusResponse` · **Verified**
 - **Evidence:** `backend/api/routers/dashboard.py:373-425`; schema `backend/api/schemas/dashboard.py:8-9` ("Legacy response — kept for backwards-compat"). The comment at `dashboard.py:393` cites `/api/dashboard/reactor-cards`, which does not exist.
@@ -69,7 +69,7 @@
   - Power BI: **not checkable from the repo.** Mat to confirm.
 - **Last change:** block 2026-07-30; file 2026-11-10 · **Locked:** no · **Derived path:** no
 - **Action:** remove the endpoint, schema, re-export (S-03) and both tests. The wrapper and the `ReactorStatus` TS interface go in the frontend sweep. **Risk:** low. **Proof:** assert absence via the FastAPI route registry, not HTTP 404 (the SPA catch-all serves 200).
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-06: `GET /api/dashboard/timeline/{experiment_id}` and its two schemas · **Verified** (no live caller)
 - **Evidence:** `backend/api/routers/dashboard.py:428-474`; `ExperimentTimelineResponse`, `TimelinePoint` (`backend/api/schemas/dashboard.py:19, :28`).
@@ -80,7 +80,7 @@
   - No `scripts/` caller.
 - **Last change:** block 2026-03-16; file 2026-11-10 · **Locked:** no · **Derived path:** no
 - **Action:** remove the endpoint and schemas (wrapper goes in the frontend sweep). **Risk:** low. **Proof:** route-registry assertion; Power BI check.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-07: `GET`/`POST /api/chemicals/additives/{conditions_id}` · **Verified** (no live caller)
 - **Evidence:** `backend/api/routers/chemicals.py:113-146`. The POST calls `recalculate(additive)` but, unlike every other additive write path, writes **no `ModificationsLog` row**. It is a third copy of additive-write logic (D-07).
@@ -90,27 +90,27 @@
   - No `scripts/` caller.
 - **Last change:** file 2026-03-24 · **Locked:** no · **Derived path:** **yes** (POST writes the additive calc fields).
 - **Action:** remove both endpoints (wrappers go in the frontend sweep). **Risk:** low–med (endpoint removal; Power BI and external scripts must be ruled out). **Proof:** route-registry assertion; grep `chemicals/additives` in `scripts/`, `frontend/src`, `tests/`.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-08: `ScalarResultsService.update_scalar_result` and `validate_required_fields` · Reported
 - **Evidence:** `backend/services/scalar_results_service.py:471` (`update_scalar_result`, contains a registry call at `:495`) and `:501` (`validate_required_fields`).
 - **Inbound refs:** none for either. Related TEST-only methods in the same class are listed for visibility and **not proposed** for removal: `bulk_create_scalar_results` (`:273`, `tests/test_icp_handling.py`) and `get_scalar_results_for_experiment` (`:435`, `tests/…/test_scalar_results_ambiguity.py:60`).
 - **Last change:** block 2026-03-19; file 2026-11-09 · **Locked:** no · **Derived path:** dead code only.
 - **Action:** delete the two zero-caller methods. **Risk:** low. **Proof:** `git grep` for both names is empty outside the definition.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-09: `experiment_validation.format_validation_warning` and the unused re-exports · Reported
 - **Evidence:** `backend/services/experiment_validation.py:264` (`format_validation_warning`). The `__all__` entries `EXPERIMENT_TYPE_ABBREVIATIONS`, `ParsedExperimentID` and `get_experiment_type_from_id` (`:33-35`, imported at `:24-30` only to re-export) are never imported from this module; live callers import them from `database.experiment_id_parser`. `validate_experiment_id` is LIVE (the locked `new_experiments.py:32,485`) and stays.
 - **Inbound refs:** LEGACY `legacy/streamlit_frontend/new_experiment.py:12,129` for `format_validation_warning`; none for the re-exports from this module.
 - **Last change:** file 2026-07-24 · **Locked:** no (but keep `new_experiments.py`'s imports intact) · **Derived path:** no
 - **Action:** delete the function, trim `__all__` and the re-export imports. **Risk:** low. **Proof:** grep each name outside `legacy/`.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-10: Unused and redundant imports in `routers/samples.py` · Reported
 - **Evidence:** `backend/api/routers/samples.py:3` `import os` is unused. Module-level symbols are re-imported inside functions: `ExternalAnalysis as EA` / `selectinload as sl` at `:489-490, :547-548, :568-569`, and `PXRFReading` at `:166, :248`.
 - **Inbound refs:** n/a · **Last change:** file 2026-04-24 · **Locked:** no · **Derived path:** no
 - **Action:** remove. **Risk:** low. **Proof:** `.venv` flake8 is clean; tests/api samples tests pass.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ### S-11: Stale comments and docstrings (no behaviour change) · Reported
 - **Evidence:**
@@ -121,7 +121,7 @@
   - The trigger-list line refs in `docs/CALCULATIONS.md` are stale (conditions.py 103/125 → 115/142; experiments.py 1329 → 1689; lineage_utils.py 603 → 606). The same stale refs appear in a comment in the locked `new_experiments.py:185-187`, which is listed under L-misc rather than changed here.
 - **Last change:** various · **Locked:** no (except the comment noted) · **Derived path:** no
 - **Action:** correct the text. **Risk:** nil.
-- [ ] Approved
+- [x] Approved — shipped in PR #193 (issue #189)
 
 ---
 
@@ -368,15 +368,15 @@ Every item here touches `backend/services/bulk_uploads/` or `backend/services/ic
 
 | ID | Item | Evidence | Inbound refs | Last change (block / file) | Proposed action · risk | Approve |
 |---|---|---|---|---|---|---|
-| L-S1 | `ExperimentAdditivesService` has no route (**seed**) | `bulk_uploads/experiment_additives.py:17`; own comment `:125-133` | LEGACY `legacy/streamlit_frontend/bulk_uploads.py:8,982`; TEST `tests/services/bulk_uploads/test_experiment_additives.py` | file 2026-07-29 | Delete with its test once legacy is retired (H-01). Low. Live additive path is the `new_experiments` additives sheet. | [ ] |
-| L-S2 | `quick_upload`, `long_format`, `metric_groups` have no route | `quick_upload_from_excel`, `long_format_upload_from_excel`, `METRIC_GROUPS` | LEGACY `bulk_uploads.py:21-29,1015,1103,1129`; TEST `test_parser_result_notes.py:13-14`, `test_typed_notes_dual_write.py:387` | quick/long file 2026-10-14 (**< 60 days**), metric_groups 2026-03-16 | **Fails the 60-day rule** for two files, so also a human call. Footnote 6 names `_note_source='quick_upload'`. Check prod notes with `created_by='quick_upload'` first. Low–med. | [ ] |
-| L-S3 | `ScalarResultsUploadService.bulk_upsert_from_excel` (non-`_ex` wrapper) | `bulk_uploads/scalar_results.py:46-62` | none (router and legacy call `_ex`) · **Verified** | block 2026-03-16 / file 2026-10-14 | Delete. Low. | [ ] |
-| L-S4 | `AnalyteService` | `bulk_uploads/actlabs_titration_data.py:80-118` | none · **Verified** | file 2026-06-17 | Delete. Low. | [ ] |
-| L-S5 | `ICPService.get_icp_results_for_experiment`, `update_icp_result` | `icp_service.py:846, :866` | none · **Verified** | block 2026-03-16 / file 2026-10-14 | Delete both. Low. | [ ] |
-| L-S6 | Legacy-only diagnostics | `ICPService.diagnose_csv_structure` (`icp_service.py:1009`); `ActlabsRockTitrationService.diagnose` (`actlabs_titration_data.py:357`), which makes `_read_table_with_mode` (`:250`) dead too | LEGACY `bulk_uploads.py:1525, :693` | — | Delete with legacy. **Not** `parse_and_process_icp_file` / `process_icp_dataframe`: footnote 3(d) keeps their 2-tuple arity for `legacy/…:1558,1599`. | [ ] |
-| L-S7 | `PXRFUploadService.ingest_from_source` and the `update_existing=True` branch | `pxrf_data.py:145`, `:110-117` | TEST `tests/api/test_bulk_uploads.py:1477-1494` (asserts only that an import stays lazy) · **Verified**; LEGACY `:554` passes `update_existing` | file 2026-05-05 | Delete `ingest_from_source` and adjust that test. The `update_existing` branch is H-08. Low. | [ ] |
-| L-S8 | rock_inventory image-attach branch | `rock_inventory.py:349-401`; the router passes `image_files=[]` (`routers/bulk_uploads.py:567`) | LEGACY `bulk_uploads.py:647` | file 2026-04-24 | Delete with legacy. Low. | [ ] |
-| L-S9 | `_id_match.fuzzy_find_experiment` | `_id_match.py:133` | TEST `test_id_match_ambiguity.py:19,43,55,64,69` · **Verified** | file 2026-08-05 | Delete, or keep as a tested API. Low. | [ ] |
+| L-S1 | `ExperimentAdditivesService` has no route (**seed**) | `bulk_uploads/experiment_additives.py:17`; own comment `:125-133` | LEGACY `legacy/streamlit_frontend/bulk_uploads.py:8,982`; TEST `tests/services/bulk_uploads/test_experiment_additives.py` | file 2026-07-29 | Delete with its test once legacy is retired (H-01). Low. Live additive path is the `new_experiments` additives sheet. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S2 | `quick_upload`, `long_format`, `metric_groups` have no route | `quick_upload_from_excel`, `long_format_upload_from_excel`, `METRIC_GROUPS` | LEGACY `bulk_uploads.py:21-29,1015,1103,1129`; TEST `test_parser_result_notes.py:13-14`, `test_typed_notes_dual_write.py:387` | quick/long file 2026-10-14 (**< 60 days**), metric_groups 2026-03-16 | **Fails the 60-day rule** for two files, so also a human call. Footnote 6 names `_note_source='quick_upload'`. Check prod notes with `created_by='quick_upload'` first. Low–med. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S3 | `ScalarResultsUploadService.bulk_upsert_from_excel` (non-`_ex` wrapper) | `bulk_uploads/scalar_results.py:46-62` | none (router and legacy call `_ex`) · **Verified** | block 2026-03-16 / file 2026-10-14 | Delete. Low. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S4 | `AnalyteService` | `bulk_uploads/actlabs_titration_data.py:80-118` | none · **Verified** | file 2026-06-17 | Delete. Low. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S5 | `ICPService.get_icp_results_for_experiment`, `update_icp_result` | `icp_service.py:846, :866` | none · **Verified** | block 2026-03-16 / file 2026-10-14 | Delete both. Low. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S6 | Legacy-only diagnostics | `ICPService.diagnose_csv_structure` (`icp_service.py:1009`); `ActlabsRockTitrationService.diagnose` (`actlabs_titration_data.py:357`), which makes `_read_table_with_mode` (`:250`) dead too | LEGACY `bulk_uploads.py:1525, :693` | — | Delete with legacy. **Not** `parse_and_process_icp_file` / `process_icp_dataframe`: footnote 3(d) keeps their 2-tuple arity for `legacy/…:1558,1599`. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S7 | `PXRFUploadService.ingest_from_source` and the `update_existing=True` branch | `pxrf_data.py:145`, `:110-117` | TEST `tests/api/test_bulk_uploads.py:1477-1494` (asserts only that an import stays lazy) · **Verified**; LEGACY `:554` passes `update_existing` | file 2026-05-05 | Delete `ingest_from_source` and adjust that test. The `update_existing` branch is H-08. Low. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S8 | rock_inventory image-attach branch | `rock_inventory.py:349-401`; the router passes `image_files=[]` (`routers/bulk_uploads.py:567`) | LEGACY `bulk_uploads.py:647` | file 2026-04-24 | Delete with legacy. Low. | [x] PR #193, signed off by Mat 2026-11-13 |
+| L-S9 | `_id_match.fuzzy_find_experiment` | `_id_match.py:133` | TEST `test_id_match_ambiguity.py:19,43,55,64,69` · **Verified** | file 2026-08-05 | Delete, or keep as a tested API. Low. | [x] PR #193, signed off by Mat 2026-11-13 |
 
 ### Locked: duplicated
 
@@ -408,7 +408,7 @@ Every item here touches `backend/services/bulk_uploads/` or `backend/services/ic
 
 These items fail one staleness condition, may be reached dynamically, or need a product decision before any cleanup.
 
-- **H-01: Retire `legacy/streamlit_frontend/`?** It is the sole remaining caller of S-04, S-09, L-S1, L-S2, L-S6 and L-S8, and its `bulk_uploads.py:1558,1599` calls are why footnote 3(d) pins ICP's 2-tuple arity. Retiring it first (scripts/docs sweep) turns most locked-stale items into simple deletions.
+- **H-01: Retire `legacy/streamlit_frontend/`?** It is the sole remaining caller of S-04, S-09, L-S1, L-S2, L-S6 and L-S8, and its `bulk_uploads.py:1558,1599` calls are why footnote 3(d) pins ICP's 2-tuple arity. Retiring it first (scripts/docs sweep) turns most locked-stale items into simple deletions. **Decided 2026-11-13: yes. Deleted in PR #193; root `app.py` and the `streamlit` pin go to #174.**
 - **H-02: Endpoints with no live UI caller that tooling or tests may still use.** No `scripts/` file calls any of them; the only endpoint-calling script, `scripts/delete_experiments_via_api.ps1`, uses `GET /api/experiments/{id}`, `/delete-impact` and `DELETE`. **Power BI usage can't be checked from the repo.**
 
   | Endpoint | Wrapper (live callers) | Tests | Derived write |
@@ -436,7 +436,7 @@ These items fail one staleness condition, may be reached dynamically, or need a 
 - **H-08: `overwrite` / `update_existing` flags the API never passes.** These are `ElementalCompositionService.bulk_upsert_wide_from_excel(overwrite=)`, `ActlabsRockTitrationService.import_excel(overwrite=)` and pXRF `update_existing` (L-S7). Through the API, "updated" is always 0 for these. Expose the flags or delete the branches?
 - **H-09: Replace the `frontend.config.variable_config` stub with a real backend constants module.** That needs locked edits to `scalar_results.py:12`, `pxrf_data.py:11` and `icp_service.py:11` (see D-14, X-13).
 - **H-10: Per-batch cumulative-time update** (beyond E-09's local fix) needs locked caller edits.
-- **H-11: `core_flood_service.RESULT_FIELDS` / `SCALAR_FIELDS` (`:156-157`) and the `run_description` alias (`:60`).** They have no importers, but the lines were last changed 2026-11-07, so they **fail the 60-day rule**. They became orphans in b62b96d (#146). Delete them in Phase 2 anyway?
+- **H-11: `core_flood_service.RESULT_FIELDS` / `SCALAR_FIELDS` (`:156-157`) and the `run_description` alias (`:60`).** They have no importers, but the lines were last changed 2026-11-07, so they **fail the 60-day rule**. They became orphans in b62b96d (#146). Delete them in Phase 2 anyway? **Decided 2026-11-13: delete despite the 60-day rule. Shipped in PR #193.**
 - **H-12: Two DB engines in one process.** `backend/api/dependencies/db.py:7-9` uses `Settings.database_url`; `database/database.py:13-25` builds a second engine from `os.getenv("DATABASE_URL")` with a different default, imported via `main.py:25` (`reset_postgres_sequences`). Merging touches `database/database.py`, which locked code and scripts import.
 - **H-13: `update_cumulative_times_for_chain` filters on `base_experiment_id == base_id`** (`result_merge_utils.py:279-285`). A row with NULL `base_experiment_id` never updates itself. Roots get base = self from `parse_lineage_fields`, so this should affect only legacy or empty IDs. One dev-DB SQL count would settle it.
 

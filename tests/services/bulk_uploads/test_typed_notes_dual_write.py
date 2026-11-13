@@ -383,20 +383,6 @@ def test_scalar_overwrite_blank_description_leaves_the_note(db_session: Session)
     assert [(n.note_text, n.created_by) for n in _notes(db_session, exp)] == [("first text", "scalar_results")]
 
 
-def test_quick_upload_overwrite_blank_description_leaves_the_note(db_session: Session):
-    from backend.services.bulk_uploads.quick_upload import quick_upload_from_excel
-    exp = _seed_experiment(db_session, "TNO_010", 9118510)
-    headers = ["Experiment ID*", "Time (days)*", "H2 Conc (ppm)*", "Description"]
-    quick_upload_from_excel(
-        db_session, make_excel(headers, [["TNO_010", 7.0, 120.0, "first text"]], sheet_name="Data"), "hydrogen",
-    )
-    quick_upload_from_excel(
-        db_session, make_excel(headers, [["TNO_010", 7.0, 130.0, None]], sheet_name="Data"),
-        "hydrogen", overwrite_all=True,
-    )
-    assert [(n.note_text, n.created_by) for n in _notes(db_session, exp)] == [("first text", "quick_upload")]
-
-
 # ---------------------------------------------------------------------------
 # Timepoint modifications
 # ---------------------------------------------------------------------------

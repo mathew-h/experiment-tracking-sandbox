@@ -22,21 +22,15 @@ from typing import Optional, Tuple, List
 import re
 
 from database.experiment_id_parser import (
-    EXPERIMENT_TYPE_ABBREVIATIONS,
     ParsedExperimentID,
     classify_base_id,
-    get_experiment_type_from_id,
     split_timepoint_token,
 )
 
 __all__ = [
-    "EXPERIMENT_TYPE_ABBREVIATIONS",
-    "ParsedExperimentID",
-    "get_experiment_type_from_id",
     "extract_lineage_info",
     "parse_experiment_id",
     "validate_experiment_id",
-    "format_validation_warning",
 ]
 
 
@@ -259,23 +253,3 @@ def validate_experiment_id(experiment_id: str) -> Tuple[bool, List[str]]:
     """
     parsed = parse_experiment_id(experiment_id)
     return parsed.is_valid, parsed.warnings
-
-
-def format_validation_warning(warnings: List[str]) -> str:
-    """
-    Format validation warnings into a user-friendly message.
-    
-    Args:
-        warnings: List of warning messages
-        
-    Returns:
-        Formatted warning string
-    """
-    if not warnings:
-        return ""
-    
-    if len(warnings) == 1:
-        return f"⚠️ {warnings[0]}"
-    
-    return "⚠️ Validation warnings:\n" + "\n".join(f"  • {w}" for w in warnings)
-

@@ -17,7 +17,7 @@
 ## Legacy (superseded, reference only)
 | Layer | Technology | Location |
 |---|---|---|
-| Frontend | Streamlit | `legacy/streamlit_frontend/` |
+| Frontend | Streamlit | deleted in issue #189 (2026-11-13); see git history |
 | Database | SQLite file (`experiments.db`) | superseded by PostgreSQL |
 
 The Streamlit → React/FastAPI/PostgreSQL migration completed at Milestone 8 (`docs/milestones/MILESTONE_INDEX.md`). Do not build new features against the legacy Streamlit code.

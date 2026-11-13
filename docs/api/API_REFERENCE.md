@@ -779,8 +779,6 @@ Response (pXRF with missing reading):
 | GET | `/api/chemicals/compounds` | List all compounds |
 | GET | `/api/chemicals/compounds/{id}` | Get compound |
 | POST | `/api/chemicals/compounds` | Create compound |
-| GET | `/api/chemicals/additives/{conditions_id}` | List additives for a conditions record |
-| POST | `/api/chemicals/additives/{conditions_id}` | Add additive (triggers full additive calc) |
 
 ## Analysis
 
@@ -795,8 +793,6 @@ Response (pXRF with missing reading):
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/dashboard/` | **M7** Full dashboard payload: summary stats, reactor cards, Gantt timeline, recent activity. Single call. |
-| GET | `/api/dashboard/reactor-status` | Legacy — reactors with current ONGOING experiment |
-| GET | `/api/dashboard/timeline/{experiment_id}` | All timepoints with scalar/ICP presence flags |
 
 ### GET /api/dashboard/
 
@@ -939,7 +935,7 @@ POST /api/bulk-uploads/new-experiments   file=<same xlsx>  plan_hash=a1b2…
   → 200 { "created": 0, "errors": ["Plan changed since preview: …"] }   # file or DB changed
 ```
 
-Note: the legacy Streamlit uploader (`legacy/streamlit_frontend/bulk_uploads.py`) calls the service directly via `bulk_upsert_from_excel` and is not covered by either gate.
+Note: the legacy Streamlit uploader, which called the service directly and bypassed both gates, was deleted in issue #189 (2026-11-13).
 
 ### Bulk experiment deletion (issue #109, Phase 1)
 
