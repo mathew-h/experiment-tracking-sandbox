@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend.api.schemas.results import IcpRow
+from backend.api.schemas.results import IcpRow, SampleEntryFields, reject_explicit_null
 from backend.api.schemas.runs import RunSampleNote, RunSegment
 
 WarningCode = Literal[
@@ -80,18 +80,10 @@ class CoreFloodRunListItem(BaseModel):
     warning_count: int
 
 
-class _CoreFloodSampleFields(BaseModel):
-    """Optional sample fields shared by create and edit (one definition of each constraint)."""
-    model_config = ConfigDict(extra="forbid")
+class _CoreFloodSampleFields(SampleEntryFields):
+    """Optional sample fields shared by create and edit: the common measured
+    fields (SampleEntryFields) plus the Core Flood rig readings."""
 
-    gc_run_date: Optional[datetime] = None
-    sample_tube_number: Optional[int] = Field(None, gt=0)
-    sampling_volume_mL: Optional[float] = Field(None, ge=0)
-    h2_concentration: Optional[float] = Field(None, ge=0)
-    gas_sampling_volume_ml: Optional[float] = Field(None, ge=0)
-    gas_sampling_pressure_MPa: Optional[float] = Field(None, ge=0)
-    final_ph: Optional[float] = None
-    final_conductivity_mS_cm: Optional[float] = None
     nitrogen_flow_rate_mL_min: Optional[float] = None
     inlet_pressure_psi: Optional[float] = None
     outlet_pressure_psi: Optional[float] = None
@@ -115,11 +107,8 @@ class CoreFloodSampleUpdate(_CoreFloodSampleFields):
     @field_validator("measurement_date", "flow_rate_mL_min")
     @classmethod
     def _omittable_not_nullable(cls, v):
-        # Omitting either field leaves it alone (validators skip unset defaults);
-        # an explicit null is rejected. A hold is flow 0, not null.
-        if v is None:
-            raise ValueError("may be omitted but not null")
-        return v
+        # A hold is flow 0, not null.
+        return reject_explicit_null(v)
 
 
 # Shared with GET /api/experiments/{experiment_id}/icp (issue #143).

@@ -12,7 +12,7 @@ Auth: All endpoints require `Authorization: Bearer <firebase-id-token>` header.
 | GET | `/api/experiments/{experiment_id}/exists` | Check if experiment ID string is already in use |
 | GET | `/api/experiments/{experiment_id}/export` | **Export all** (issue #141): one `.xlsx` for the experiment's whole lineage. See below. |
 | POST | `/api/experiments/export` | **Data Export** (issue #142): one `.xlsx` for a picked list of experiments. See below. |
-| GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications |
+| GET | `/api/experiments/{experiment_id}` | Get single experiment with conditions, notes, and modifications. `notes` are `NoteResponse` rows (each carries `experiment_id` since issue #190); `modifications` are `ModificationResponse` rows |
 | GET | `/api/experiments/{experiment_id}/results` | List result timepoints with scalar/ICP existence flags, `has_modification_note` (EXISTS over the result's `modification` notes) and `notes` (every typed note scoped to the result). `has_brine_modification` was removed in #118 PR3. Rows include `sample_tube_number` (read-only, issue #146). |
 | POST | `/api/experiments/{experiment_id}/results` | **Hand entry** (issue #146): add one sample (result + scalar rows, notes) atomically to a non-Core-Flood experiment. 201. See below. |
 | PATCH | `/api/experiments/{experiment_id}/results/{result_id}` | **Hand edit** (issue #146): audited partial edit of one primary sample. See below. |
@@ -726,7 +726,7 @@ for `-t<days>` IDs — see `docs/user_guide/REPLICATES.md` for the full limitati
 | GET | `/api/samples/{sample_id}/analyses` | List external analyses for the sample |
 | POST | `/api/samples/{sample_id}/analyses` | Create external analysis. pXRF: normalizes `pxrf_reading_no`, returns warnings for unmatched reading numbers. Auto-evaluates `characterized`. |
 | DELETE | `/api/samples/{sample_id}/analyses/{analysis_id}` | Delete analysis. Auto-evaluates `characterized`. Returns 204. |
-| GET | `/api/samples/{sample_id}/activity` | Last 100 modification log entries for the sample |
+| GET | `/api/samples/{sample_id}/activity` | Last 100 modification log entries for the sample, as `ModificationResponse` rows (`id`, `modified_by`, `modification_type`, `modified_table`, `old_values`, `new_values`, `created_at`) |
 
 ### GET /api/samples
 
@@ -988,7 +988,7 @@ POST /api/bulk-uploads/experiment-deletion   file=<xlsx with experiment_id colum
 | POST | `/api/bulk-uploads/pxrf` | Import pXRF readings from instrument export. |
 | POST | `/api/bulk-uploads/experiment-deletion` | **Hard-deletes** every experiment in the file's `experiment_id` column. **403 for anyone but `mhearl@addisenergy.com`** (see below). |
 | GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`, `experiment-deletion`. Returns 404 for types with no template. |
-| GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. Requires auth. |
+| GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N, "Autoclave": N}` — next experiment number per type, from the same prefix table as `/next-id` (`HPHT`, `SERUM`, `CF`, `AUTOCLAVE`). Used by New Experiments card. Requires auth. |
 
 ## Core floods
 

@@ -235,3 +235,71 @@ def test_chemical_additive_upsert_method_over_max_length_rejected():
             amount=1.0, unit=AmountUnit.GRAM,
             addition_method="x" * (ADDITION_METHOD_MAX_LENGTH + 1),
         )
+
+
+# ── Issue #190 (D-09): the shared sample-entry base ──────────────────────────
+
+def _entry_schemas():
+    from backend.api.schemas.core_floods import CoreFloodSampleCreate, CoreFloodSampleUpdate
+    from backend.api.schemas.results import ResultEntryCreate, ResultEntryUpdate
+
+    return [
+        (ResultEntryCreate, {"measurement_date": "2026-11-13T10:00:00"}),
+        (ResultEntryUpdate, {}),
+        (CoreFloodSampleCreate, {"measurement_date": "2026-11-13T10:00:00", "flow_rate_mL_min": 0.1}),
+        (CoreFloodSampleUpdate, {}),
+    ]
+
+
+def test_every_entry_schema_extends_the_shared_base_and_forbids_unknown_fields():
+    import pytest
+    from pydantic import ValidationError
+
+    from backend.api.schemas.results import SampleEntryFields
+
+    for schema, minimal in _entry_schemas():
+        assert issubclass(schema, SampleEntryFields), schema.__name__
+        assert schema.model_config.get("extra") == "forbid", schema.__name__
+        schema(**minimal)
+        with pytest.raises(ValidationError):
+            schema(**minimal, not_a_real_field=1)
+
+
+def test_shared_constraints_apply_to_both_series():
+    import pytest
+    from pydantic import ValidationError
+
+    for schema, minimal in _entry_schemas():
+        for bad in ({"sample_tube_number": 0}, {"h2_concentration": -1}, {"gas_sampling_pressure_MPa": -0.1}):
+            with pytest.raises(ValidationError):
+                schema(**minimal, **bad)
+
+
+def test_update_schemas_reject_an_explicit_null_but_allow_omission():
+    import pytest
+    from pydantic import ValidationError
+
+    from backend.api.schemas.core_floods import CoreFloodSampleUpdate
+    from backend.api.schemas.results import ResultEntryUpdate
+
+    assert ResultEntryUpdate().measurement_date is None
+    with pytest.raises(ValidationError, match="may be omitted but not null"):
+        ResultEntryUpdate(measurement_date=None)
+    with pytest.raises(ValidationError, match="may be omitted but not null"):
+        CoreFloodSampleUpdate(flow_rate_mL_min=None)
+
+
+def test_entry_schema_field_order_is_unchanged():
+    """Field order is part of the published schema; the shared base must not move anything."""
+    from backend.api.schemas.core_floods import CoreFloodSampleCreate
+    from backend.api.schemas.results import ResultEntryCreate
+
+    common = ["gc_run_date", "sample_tube_number", "sampling_volume_mL", "h2_concentration",
+              "gas_sampling_volume_ml", "gas_sampling_pressure_MPa", "final_ph", "final_conductivity_mS_cm"]
+    assert list(ResultEntryCreate.model_fields) == common + [
+        "gross_ammonium_concentration_mM", "result_note", "modification_note",
+        "measurement_date", "time_post_reaction_days"]
+    assert list(CoreFloodSampleCreate.model_fields) == common + [
+        "nitrogen_flow_rate_mL_min", "inlet_pressure_psi", "outlet_pressure_psi",
+        "permeability_flow_rate_mL_min", "result_note",
+        "measurement_date", "time_post_reaction_days", "flow_rate_mL_min"]

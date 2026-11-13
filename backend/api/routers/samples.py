@@ -10,6 +10,7 @@ from database.models.samples import SampleInfo, SamplePhotos
 from database.models.analysis import ExternalAnalysis, PXRFReading
 from database.models.experiments import Experiment
 from backend.api.dependencies.db import get_db
+from backend.api.schemas.experiments import ModificationResponse
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.samples import (
     SampleCreate, SampleUpdate, SampleResponse,
@@ -588,7 +589,7 @@ def delete_analysis(
 
 
 # ── GET /api/samples/{sample_id}/activity ─────────────────────────────────
-@router.get("/{sample_id}/activity")
+@router.get("/{sample_id}/activity", response_model=list[ModificationResponse])
 def get_sample_activity(
     sample_id: str,
     db: Session = Depends(get_db),
@@ -602,15 +603,4 @@ def get_sample_activity(
         .order_by(ModificationsLog.created_at.desc())
         .limit(100)
     ).scalars().all()
-    return [
-        {
-            "id": r.id,
-            "modified_by": r.modified_by,
-            "modification_type": r.modification_type,
-            "modified_table": r.modified_table,
-            "old_values": r.old_values,
-            "new_values": r.new_values,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    return [ModificationResponse.model_validate(r) for r in rows]

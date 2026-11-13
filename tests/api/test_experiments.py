@@ -223,6 +223,52 @@ def test_next_ids_includes_autoclave(client):
     assert data['Autoclave'] >= 1
 
 
+def _seed_ids(db_session, *experiment_ids: str) -> None:
+    from database.models.enums import ExperimentStatus
+    from database.models.experiments import Experiment
+
+    for offset, experiment_id in enumerate(experiment_ids):
+        db_session.add(Experiment(experiment_id=experiment_id, experiment_number=9190300 + offset,
+                                  status=ExperimentStatus.ONGOING))
+    db_session.commit()
+
+
+def test_next_id_and_next_ids_agree_on_autoclave(client, db_session):
+    """Issue #190 (D-03, sweep defect X-09): both endpoints use the AUTOCLAVE
+    prefix. next-ids used to search 'Autoclave_%', which matched nothing."""
+    _seed_ids(db_session, "AUTOCLAVE_004", "AUTOCLAVE_011")
+    assert client.get("/api/experiments/next-id?type=Autoclave").json()["next_id"] == "AUTOCLAVE_012"
+    assert client.get("/api/experiments/next-ids").json()["Autoclave"] == 12
+
+
+def test_next_ids_matches_next_id_for_every_type(client, db_session):
+    _seed_ids(db_session, "HPHT_041", "SERUM_007", "CF_019", "AUTOCLAVE_002")
+    numbers = client.get("/api/experiments/next-ids").json()
+    assert numbers == {"HPHT": 42, "Serum": 8, "CF": 20, "Autoclave": 3}
+    for label, experiment_type in (("HPHT", "HPHT"), ("Serum", "Serum"),
+                                   ("CF", "Core Flood"), ("Autoclave", "Autoclave")):
+        next_id = client.get(f"/api/experiments/next-id?type={experiment_type}").json()["next_id"]
+        assert int(next_id.rsplit("_", 1)[1]) == numbers[label]
+
+
+def test_next_id_counts_only_all_digit_suffixes(client, db_session):
+    """Segments, replicates, vials and side samples do not advance the number;
+    zero padding and long numbers do."""
+    _seed_ids(db_session, "HPHT_007", "HPHT_0012", "HPHT_099-2", "HPHT_150a",
+              "HPHT_200-t3", "HPHT_300_Desorption", "HPHT_JW_400")
+    assert client.get("/api/experiments/next-id?type=HPHT").json()["next_id"] == "HPHT_013"
+
+
+def test_next_id_pads_to_three_digits_and_grows_past_them(client, db_session):
+    _seed_ids(db_session, "SERUM_999")
+    assert client.get("/api/experiments/next-id?type=Serum").json()["next_id"] == "SERUM_1000"
+
+
+def test_next_id_unknown_type_uses_its_upper_cased_name(client, db_session):
+    _seed_ids(db_session, "OTHER_THING_004")
+    assert client.get("/api/experiments/next-id?type=Other Thing").json()["next_id"] == "OTHER_THING_005"
+
+
 # ============================================================
 # Additive endpoints (Issue #7)
 # ============================================================

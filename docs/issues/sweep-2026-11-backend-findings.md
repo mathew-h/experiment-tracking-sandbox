@@ -136,7 +136,7 @@
 - **Exceptions to preserve:** `list_experiment_additives` (`experiments.py:1141`) returns `[]` instead of a 404; `upsert_experiment_additive` uses the detail text "Experiment conditions not found".
 - **Locked:** no · **Derived path:** it sits in front of derived writes without changing them.
 - **Action:** `get_experiment_or_404(db, id)` in a router helper module, and `series_key(exp)` in services. **Risk:** low. **Proof:** tests/api experiments, additives, notes, dashboard, results.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-02: "Conditions for an experiment, lowest id wins" is done several ways · Reported
 - **Evidence:**
@@ -145,32 +145,32 @@
   - `elemental_composition_service.py:50-64` uses `.first()` **without** `order_by` (see E-06).
 - **Locked:** no · **Derived path:** **yes**. `experiments.py:1683` feeds `recalculate(cond)`.
 - **Action:** one `lowest_conditions(db, exp_fk)` helper (keep `.first()` semantics per #109). **Risk:** low. **Proof:** tests/api plus a derived-column diff, because `:1683` is a write path. Contract entry in `decisions.md`.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-03: `next-id` and `next-ids` duplicate the suffix parse and disagree on the Autoclave prefix · **Verified**
 - **Evidence:** `routers/experiments.py:386-400` and `:404-428` use the same max-suffix loop. `_TYPE_PREFIX` (`:58-63`) maps `"Autoclave"` to `"AUTOCLAVE"`; `next-ids` (`:414`) uses `"Autoclave"`. `LIKE` is case-sensitive on Postgres, so the two endpoints can disagree. The finding is also a correctness issue (X-09).
 - **Inbound refs:** LIVE (`experimentsApi.nextId`, `bulkUploadsApi.getNextIds`).
 - **Last change:** file 2026-11-08 · **Locked:** no · **Derived path:** no
 - **Action:** one helper, after Mat decides the canonical prefix (H-04). **Risk:** med. **Proof:** dev-DB counts of `LIKE 'AUTOCLAVE\_%'` vs `LIKE 'Autoclave\_%'`.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-04: The experiments list re-implements `v_experiment_additives_summary` · Reported
 - **Evidence:** the raw `string_agg` at `routers/experiments.py:89-99` matches the view in `database/event_listeners.py:222-232`, which `services/replicate_groups.py:229` already reads.
 - **Locked:** no · **Derived path:** no (read only)
 - **Action:** read the view, batched per page (pairs with E-01). **Risk:** low. **Proof:** list-endpoint JSON diff on dev.
-- [ ] Approved
+- [ ] Approved — **not shipped in PR #194; deferred to #191 with E-01.** The reporting views exist in the test database only inside the `reporting_views` fixture, so the list endpoint's tests would all need it, and neither the inline query nor the view orders its `string_agg`.
 
 ### D-05: The "scalars for an experiment" two-step query is written three times · Reported
 - **Evidence:** `routers/experiments.py:1302-1308`, `:1694-1699`; `services/experiment_deletion.py:171`. Each selects result ids, then `ScalarResults.result_id.in_(…)`.
 - **Locked:** no · **Derived path:** **yes**. Both router copies drive `recalculate(scalar)` loops.
 - **Action:** one helper (a join saves a round trip). **Risk:** low. **Proof:** derived-column diff.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-06: Note-scope rules (mirrors of `ck_note_scope`) are written three times · Reported
 - **Evidence:** `add_note` (`routers/experiments.py:1807-1821`), `patch_note` (`:1892-1906`) and `_check_bulk_retype` (`:671-711`). The 422 messages differ slightly between them.
 - **Locked:** no · **Derived path:** no
 - **Action:** one validator in `services/notes.py`. **Risk:** med (tests may pin exact 422 text). **Proof:** tests/api notes tests.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-07: Additive write/delete logic exists three times, and `modified_by` is inconsistent · Reported
 - **Evidence:**
@@ -179,7 +179,7 @@
   - `experiments.py` writes `modified_by=current_user.uid` (`:1221, :1273`, and `update_experiment` `:1535-1706`); `additives.py` writes `.email` (`:82, :125`).
 - **Locked:** no · **Derived path:** **yes** (additive calc fields).
 - **Action:** one additive service. The `uid` vs `email` choice is H-05. **Risk:** med. **Proof:** derived-column diff; tests/api additives.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-08: Hand-built serialization of `ModificationsLog` rows and notes, and three JSON-safe helpers · Reported
 - **Evidence:**
@@ -188,68 +188,68 @@
   - The JSON-safe value helpers for `ModificationsLog` differ: `_primitive` (`experiment_deletion.py:206-214`: enum, date and datetime, else str), `_jsonable` (`result_entry_service.py:137`: datetime only) and `_serialize` (`scalar_results_service.py:226`: anything with isoformat).
 - **Locked:** no · **Derived path:** no
 - **Action:** a typed `ModificationResponse`, reuse `NoteResponse`, and one `audit_jsonable()` helper. **Risk:** low–med (`NoteResponse` adds `experiment_id` to the payload). **Proof:** tests/api detail tests; frontend type-check.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-09: `_ResultEntryFields` and `_CoreFloodSampleFields` share eight fields and a validator · Reported
 - **Evidence:** `schemas/results.py:155-172` and `schemas/core_floods.py:83-100` share the same eight fields (`gc_run_date` … `final_conductivity_mS_cm`) plus `result_note`. The `_omittable_not_nullable` validators are duplicated (`results.py:187-194`, `core_floods.py:115-122`).
 - **Locked:** no · **Derived path:** indirectly (these fields feed the scalar H2 and yield calcs).
 - **Action:** a common base class; `extra="forbid"` must carry over. **Risk:** low–med. **Proof:** tests/api results and core_floods; OpenAPI schema diff.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-10: Three near-identical exception-to-HTTP helpers · Reported
 - **Evidence:** `_run_result_entry` (`routers/experiments.py:903-910`), `_translate` (`routers/core_floods.py:20-26`), `_translate` (`routers/hpht.py:23-28`).
 - **Locked:** no · **Derived path:** no
 - **Action:** optional. **Risk:** low. Low value; listed for completeness.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-11: Experiment-type `.value` normalization is copied within `dashboard.py` · Reported
 - **Evidence:** `routers/dashboard.py:142-147` and `:314-319`. Related: X-08 (the Serum literal in the same file).
 - **Locked:** no · **Derived path:** no
 - **Action:** one helper (consider `normalize_experiment_type`). **Risk:** low.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-12: Bulk-upload router: 14 copies of the failure-response block · Reported
 - **Evidence:** `except Exception: db.rollback(); log.error(…); return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")` at `backend/api/routers/bulk_uploads.py:160, 198, 345, 376, 409, 477, 513, 543, 571, 599, 632, 677, 719, 750`, plus a variant at `:822`.
 - **Preserve:** the plan-gate, experiment-status validation-failed and ICP parse-failed early returns keep their extra fields. Footnote 3(e) requires ICP to pass `warnings=`.
 - **Locked:** no (the router is not a parser) · **Derived path:** no
 - **Action:** a `_failed(db, event, exc)` helper. **Risk:** low. **Proof:** `tests/api/test_bulk_uploads*.py`.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-13: Bulk-upload router template building · Reported
 - **Evidence:** `_simple_template` (`bulk_uploads.py:466`) exists, but its fill/font/width loop is re-coded in the new-experiments (`:924-937`), rock-inventory (`:1101-1114`) and experiment-status (`:1201-1215`) branches. The INSTRUCTIONS-sheet writer is repeated at `:1021-1078, :1119-1162, :1219-1247`. (Locked parser-side copies: L-D9.)
 - **Locked:** no (router only) · **Derived path:** no
 - **Action:** extend `_simple_template` with `instructions=` and `extra_sheets=`. **Risk:** low. **Proof:** template tests plus a cell-level diff of the generated workbooks (headers, fills, instruction rows).
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-14: Bulk-upload router installs the `frontend.config.variable_config` stub three times · Reported
 - **Evidence:** `bulk_uploads.py:120-151` (scalar, with a 20-key header literal), `:237-246` (pXRF) and `:436-454` (ICP). It exists because the locked `scalar_results.py:12`, `pxrf_data.py:11` and `icp_service.py:11` import a module that no longer exists. The scalar template headers (`:907-916`) are a second hand-kept copy of the stub's strings.
 - **Locked:** no for the router helper; replacing the stub with a real backend module is H-09 (locked edits).
 - **Action:** one `_ensure_variable_config()` helper. **Risk:** low. **Proof:** tests/api bulk uploads.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-15: The `is_variant` rule is written twice in Python · Reported
 - **Evidence:** `services/run_service.py:89-90` and `services/experiment_export.py:274-275` (`parent and id.startswith(parent.id + "_")`). The SQL copies (`icp_series.py:21-25` `_IS_VARIANT`, `v_core_flood_samples`, `v_hpht_samples`) are documented and stay.
 - **Locked:** no · **Derived path:** no
 - **Action:** one `is_variant(exp)` helper. **Risk:** low. **Proof:** tests/api export, core_floods, hpht.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-16: Run-member loading and root description, `run_service` vs `experiment_export` · Reported
 - **Evidence:** member building in `run_service.load_segments` (`:58-97`) and `experiment_export._load_members` (`:255-282`); root description in `run_service.run_description` (`:111-118`) and `experiment_export._root_description` (`:591-595`). The rule is the same, but the ordering tie-break differs (`_series_order`'s `-t` text key vs `by_date`'s plain id), so the result can differ only for runs with `-t` vials.
 - **Locked:** no · **Derived path:** no
 - **Action:** a shared loader plus helper. **Risk:** low–med (the export workbook "Description" cell could change on ties). **Proof:** compare both functions across every dev-DB lineage before switching.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-17: Core Flood and HPHT `list_runs` / `_resolve` are about 85% identical · Reported
 - **Evidence:** `core_flood_service.py:119-152` vs `hpht_service.py:150-181`, and `core_flood_service.py:88-98` vs `hpht_service.py:121-129`. Both re-implement `run_service.latest_sample_by_base` (`:196-210`) as `real[-1]`.
 - **Locked:** no · **Derived path:** no (reads `cumulative_h2_grams_per_ton` from views)
 - **Action:** a generic `list_run_items` / `resolve_run` in `run_service` with per-series callbacks. Leave the dashboard's deliberate date choice (`dashboard.py:222-229`) alone. **Risk:** med. **Proof:** byte-compare both list endpoints' JSON on dev (as #149 did).
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-18: Fe molar mass and other engine literals · Reported
 - **Evidence:** `55.845` appears in `services/calculations/scalar_calcs.py:8` and `services/elemental_composition_service.py:11` (inside `FE_IN_FEO_FRACTION`). Inline literals sit in `scalar_calcs.py`: background default `0.2` (`:57, :108`; also the model default), NH₄⁺ MW `18.04` (`:110`) and a function-local `H2_MOLAR_MASS = 2.01588` (`:158`). The SQL view copies are documented and test-guarded; leave them.
 - **Locked:** no · **Derived path:** **yes** (formula inputs).
 - **Action:** import one constant and hoist the literals to module constants. Byte-identical floats preserve values. **Risk:** low. **Proof:** derived-column diff (it must be zero).
-- [ ] Approved
+- [x] Approved — shipped in PR #194 (issue #190)
 
 ### D-19: Two different "characterized" rules (service vs mapper listener) · **Verified**
 - **Evidence:**
@@ -281,7 +281,7 @@
 - **Evidence:** `routers/experiments.py:391-399` (one pass) and `:416-426` (four passes) select every matching `experiment_id` and take the max in Python.
 - **Locked:** no · **Derived path:** no
 - **Action:** compute the max in SQL (regex plus cast), or accept the cost at about 1k rows. Fold into D-03. **Risk:** low.
-- [ ] Approved
+- [x] Approved — shipped in PR #194 with D-03 (issue #190)
 
 ### E-04: `create_analysis` runs a discarded query · Reported
 - **Evidence:** `routers/samples.py:518-522` runs a `selectinload` query whose result is thrown away. `db.commit()` and `db.refresh(ea)` (`:532-533`) then expire the object, so `_to_analysis_response` lazy-loads again.

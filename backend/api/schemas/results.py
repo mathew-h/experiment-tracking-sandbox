@@ -152,9 +152,25 @@ class ResultWithFlagsResponse(BaseModel):
     xrd_run_date: Optional[datetime] = None
 
 
-class _ResultEntryFields(BaseModel):
-    """Optional fields shared by hand-entry create and edit (STANDARD_PROFILE in
-    backend/services/result_entry_service.py; one definition of each constraint)."""
+def reject_explicit_null(value):
+    """Validator body for a field that may be omitted but not sent as null.
+
+    Omitting the field leaves the stored value alone (validators skip unset
+    defaults); an explicit null is rejected.
+    """
+    if value is None:
+        raise ValueError("may be omitted but not null")
+    return value
+
+
+class SampleEntryFields(BaseModel):
+    """The measured fields every hand-entered sample shares, whatever the
+    series (issue #190, D-09): one definition of each constraint. The standard
+    and Core Flood entry schemas both extend this. Unknown fields are rejected.
+
+    ``result_note`` is declared by each subclass rather than here only to keep
+    each schema's published field order unchanged.
+    """
     model_config = ConfigDict(extra="forbid")
 
     gc_run_date: Optional[datetime] = None
@@ -165,6 +181,12 @@ class _ResultEntryFields(BaseModel):
     gas_sampling_pressure_MPa: Optional[float] = Field(None, ge=0)
     final_ph: Optional[float] = None
     final_conductivity_mS_cm: Optional[float] = None
+
+
+class _ResultEntryFields(SampleEntryFields):
+    """Optional fields shared by hand-entry create and edit (STANDARD_PROFILE in
+    backend/services/result_entry_service.py; one definition of each constraint)."""
+
     gross_ammonium_concentration_mM: Optional[float] = Field(None, ge=0)
     # The sample's first result_note; blank on edit deletes it.
     result_note: Optional[str] = Field(None, max_length=2000)
@@ -187,11 +209,7 @@ class ResultEntryUpdate(_ResultEntryFields):
     @field_validator("measurement_date")
     @classmethod
     def _omittable_not_nullable(cls, v):
-        # Omitting it leaves the date alone (validators skip unset defaults);
-        # an explicit null is rejected.
-        if v is None:
-            raise ValueError("may be omitted but not null")
-        return v
+        return reject_explicit_null(v)
 
 
 class BackgroundAmmoniumUpdate(BaseModel):

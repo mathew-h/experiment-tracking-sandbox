@@ -4,6 +4,7 @@ import structlog
 from sqlalchemy.orm import Session
 from database import Experiment, ExperimentalResults, ScalarResults, ModificationsLog
 from database.models.enums import NoteType
+from backend.services.audit import audit_values
 from backend.services.notes import _clean, sync_result_note
 from backend.services.result_merge_utils import (
     apply_id_timepoint,
@@ -222,19 +223,13 @@ class ScalarResultsService:
 
         # Audit trail: log changes via ModificationsLog
         if upsert.fields_updated:
-            # Serialize values to JSON-safe types (datetimes -> isoformat strings)
-            def _serialize(val: Any) -> Any:
-                if hasattr(val, 'isoformat'):
-                    return val.isoformat()
-                return val
-
             log_entry = ModificationsLog(
                 experiment_id=experiment.experiment_id,
                 experiment_fk=experiment.id,
                 modification_type=upsert.action,
                 modified_table="scalar_results",
-                old_values={k: _serialize(v) for k, v in upsert.old_values.items()} or None,
-                new_values={k: _serialize(v) for k, v in upsert.new_values.items()} or None,
+                old_values=audit_values(upsert.old_values) or None,
+                new_values=audit_values(upsert.new_values) or None,
             )
             db.add(log_entry)
 

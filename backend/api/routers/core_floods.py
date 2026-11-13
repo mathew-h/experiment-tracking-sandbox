@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies.db import get_db
+from backend.api.routers._helpers import call_or_http
 from backend.api.schemas.core_floods import (
     CoreFloodIcpRow, CoreFloodRun, CoreFloodRunListItem, CoreFloodSample, CoreFloodSampleCreate,
     CoreFloodSampleUpdate,
@@ -19,11 +20,10 @@ T = TypeVar("T")
 
 def _translate(fn: Callable[[], T]) -> T:
     """Run fn, mapping the CoreFloodError hierarchy to HTTP statuses."""
-    try:
-        return fn()
-    except svc.CoreFloodError as exc:
-        code = 404 if isinstance(exc, svc.CoreFloodNotFound) else 422
-        raise HTTPException(status_code=code, detail=str(exc))
+    return call_or_http(fn, (
+        (svc.CoreFloodNotFound, 404),
+        (svc.CoreFloodError, 422),
+    ))
 
 
 @router.get("", response_model=list[CoreFloodRunListItem])

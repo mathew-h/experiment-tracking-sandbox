@@ -876,3 +876,30 @@ Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
 - Not covered: the backend-built `additives_summary` string (Experiments, Data Export, Replicate Group), sample latitude/longitude (identifiers, kept raw), Recharts axis ticks, and free text.
 
 **Related:** `frontend/src/utils/numberFormat.ts`, `frontend/src/components/ui/Num.tsx`; `docs/CODE_STANDARDS.md`.
+
+## 2026-11-13 — Shared backend helpers that new code must use (issue #190, sweep PR 2)
+
+**Decision:** The #167 sweep found the same rules written out at many call sites. Issue #190 gave each rule one definition. New code must call these helpers; do not write the query or rule inline again.
+
+**Contracts:**
+
+- **Find an experiment by its exact ID** — `backend/services/experiment_lookup.py::find_experiment(db, experiment_id)` returns the row or `None`. In a router, use `backend/api/routers/_helpers.py::get_experiment_or_404(db, experiment_id, detail="Experiment not found")`. Both match the ID exactly. Lenient matching of IDs typed into upload sheets stays in `bulk_uploads/_id_match.py`.
+- **The series an experiment belongs to** — `experiment_lookup.series_key(exp)` is `base_experiment_id`, else the experiment's own ID. It is the Python twin of `COALESCE(base_experiment_id, experiment_id)` in the views. `h2_background.group_key` is the same function under its older name.
+- **The conditions row of an experiment** — `experiment_lookup.lowest_conditions(db, experiment_fk)`, or `lowest_conditions_map(db, experiment_fks)` for many experiments in one query. The lowest id wins and the query uses `.first()`, never `scalar_one_or_none()`: a database that predates `uq_conditions_experiment_fk` can hold a duplicate row, and that must not raise (issue #109).
+- **The scalar rows of an experiment** — `experiment_lookup.scalars_for_experiment(db, experiment_fk)`, one join, in id order.
+- **Is this a side sample** — `experiment_lookup.is_variant(exp)`: the ID is `<parent ID>_<Text>`. The SQL copies in `v_core_flood_samples`, `v_hpht_samples` and `icp_series._IS_VARIANT` stay; change all of them together.
+- **Writing a chemical additive from the API** — `backend/services/additive_service.py` (`upsert_additive`, `patch_additive`, `delete_additive`). It flushes, then calls `recalculate(additive, db)` explicitly, then writes the audit row; the caller commits. **The explicit recalculate must stay**: the mapper listener in `database/event_listeners.py` runs before the additive's relationships are loaded, so it cannot be relied on to produce the stored derived fields (sweep H-06; its removal is tracked in #175).
+- **`ModificationsLog.modified_by` is the user's email on every path** (sweep H-05). The experiments router wrote the Firebase uid before this change. Existing rows were not backfilled, so a reader of old rows can still meet a uid.
+- **Values written to `ModificationsLog.old_values` / `new_values`** — `backend/services/audit.py::audit_jsonable(value)` and `audit_values(mapping)`. The date check runs before the Enum check on purpose: a pandas `Timestamp` has a `.value` attribute (integer nanoseconds) and must be stored as its ISO string.
+- **A ModificationsLog row in an API response** — `backend/api/schemas/experiments.py::ModificationResponse`. Notes use `NoteResponse`. Do not hand-build these dicts.
+- **The `ck_note_scope` rule in Python** — `backend/services/notes.py::breaks_note_scope(note_type, result_id, event_date)`. Each endpoint keeps its own 422 wording; only the rule is shared.
+- **Mapping service exceptions to HTTP errors** — `_helpers.call_or_http(fn, errors, detail=str)`. List a subclass before its base class.
+- **Molar masses and the default background ammonium** — `backend/services/physical_constants.py`. Do not write `55.845`, `2.01588`, `18.04` or `0.2` inline. The module sits outside the `calculations` package because that package imports `conditions_calcs`, which imports `elemental_composition_service`; a constants module inside the package would be a circular import.
+- **Run list pages** — `run_service.summarize_runs` and `resolve_run` hold the logic the Core Flood and HPHT services share. A new run series builds its list from `RunSummary` and supplies its own list item, warnings and sort order.
+- **Experiment ID prefixes** — `_TYPE_PREFIX` in `routers/experiments.py` is the one table for `/next-id` and `/next-ids`. The canonical Autoclave prefix is `AUTOCLAVE` (sweep H-04); existing IDs are never renamed.
+
+**Why:** Dead code and repeated logic made every feature issue slower to scope, and one copy had already drifted: `/next-ids` searched for `Autoclave_%` while every Autoclave ID is `AUTOCLAVE_…`, so it always answered 1 (sweep defect X-09).
+
+**Scope and proof:** No stored value changed. The derived-column diff (`recalculate_all_registry_012.py` on a copy of the dev database, `develop` vs the branch) was identical across 11,369 rows of `experimental_conditions`, `chemical_additives`, `scalar_results` and `experimental_results`. Not done here: D-04 (read the additives summary from its view in the experiments list) moved to #191 with E-01; the locked parsers' own copies of these rules are #172.
+
+**Related:** `docs/issues/sweep-2026-11-backend-findings.md` (D-01 to D-18); epic #192.

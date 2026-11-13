@@ -27,6 +27,14 @@ To add a new formula:
 3. Import the module in `backend/services/calculations/__init__.py`
 4. Update this document
 
+**Constants (issue #190, sweep D-18).** Molar masses and the default background
+ammonium live in `backend/services/physical_constants.py`: `FE_MOLAR_MASS` (55.845),
+`FEO_MOLAR_MASS` (71.844), `H2_MOLAR_MASS` (2.01588), `NH4_MOLAR_MASS` (18.04) and
+`DEFAULT_BACKGROUND_AMMONIUM_MM` (0.2). Formula modules and services import them from
+there; do not write these numbers inline. The module sits outside the `calculations`
+package to avoid a circular import with `elemental_composition_service`. The SQL
+views keep their own copies of the H2 and Fe values, guarded by tests.
+
 **Cumulative time on hand-entered rows (issue #146).** `cumulative_time_post_reaction_days` is not a registry formula; `update_cumulative_times_for_chain` (`backend/services/result_merge_utils.py`) sets it. Since #146, hand-entered samples from the UI (`POST /api/experiments/{experiment_id}/results` and the Core Flood sample routes, both through `backend/services/result_entry_service.py`) always call it, so they get a cumulative time. Rows created with the older `POST /api/results` still get none. No formula changed.
 
 ---

@@ -83,6 +83,8 @@ from database.models.results import (
     ExperimentalResults, ICPResults, ResultFiles, ScalarResults,
 )
 from database.models.xrd import XRDPhase
+from backend.services.audit import audit_jsonable
+from backend.services.experiment_lookup import lowest_conditions
 from backend.services.h2_background import groups_using_background
 
 log = structlog.get_logger(__name__)
@@ -203,20 +205,9 @@ def collect_delete_impact(db: Session, exp: Experiment) -> DeleteImpact:
     return impact
 
 
-def _primitive(value: Any) -> Any:
-    """Coerce a column value to something json/JSONB can hold."""
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if hasattr(value, "value"):  # enum member (e.g. ExperimentStatus)
-        return value.value
-    if hasattr(value, "isoformat"):  # date / datetime
-        return value.isoformat()
-    return str(value)
-
-
 def _row_to_dict(instance: Any) -> dict[str, Any]:
     return {
-        col.name: _primitive(getattr(instance, col.name))
+        col.name: audit_jsonable(getattr(instance, col.name))
         for col in instance.__table__.columns
     }
 
@@ -246,11 +237,7 @@ def serialize_experiment_snapshot(db: Session, exp: Experiment) -> dict[str, Any
     # made the experiment undeletable through both the single-delete endpoint
     # and the bulk uploader (issue #109). impact.conditions still counts every
     # row; only the snapshot narrows to one.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
 
     additives: list[dict[str, Any]] = []
     if conditions is not None:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import json
-from typing import Optional, Union
+import sys
+from types import ModuleType
+from typing import Callable, Optional, Union
 
 import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
@@ -110,6 +112,76 @@ def _plan_gate_errors(plan: UploadPlanSchema, expected_plan_hash: Optional[str])
 # Existing endpoints (preserved exactly)
 # ---------------------------------------------------------------------------
 
+# The locked parsers scalar_results.py, pxrf_data.py and icp_service.py import
+# constants from `frontend.config.variable_config`, a module of the retired
+# Streamlit app that no longer exists. Each upload endpoint installs a stub
+# module carrying the constant its parser needs before importing the parser.
+# Replacing the stub with a real backend module needs locked-file edits and is
+# tracked in issue #172 (sweep H-09); the import-order hazard is issue #188.
+_VARIABLE_CONFIG = "frontend.config.variable_config"
+
+_SCALAR_RESULTS_TEMPLATE_HEADERS: dict[str, str] = {
+    "measurement_date": "Date",
+    "experiment_id": "Experiment ID",
+    "replicate": "Replicate",
+    "time_post_reaction": "Time (days)",
+    "description": "Description",
+    "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
+    "sampling_volume_mL": "Sampling Vol (mL)",
+    "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
+    "background_experiment_id": "Bkg Exp ID",
+    "h2_concentration": "H2 Conc (ppm)",
+    "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
+    "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
+    "final_ph": "Final pH",
+    "ferrous_iron_yield": "Fe2+ Yield (%)",
+    "final_nitrate_concentration_mM": "Final Nitrate (mM)",
+    "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
+    "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
+    "final_conductivity_mS_cm": "Conductivity (mS/cm)",
+    "final_alkalinity_mg_L": "Alkalinity (mg/L)",
+    "overwrite": "Overwrite",
+}
+
+_PXRF_REQUIRED_COLUMNS: frozenset[str] = frozenset(
+    {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"})
+
+
+def _icp_fixed_element_fields() -> list[str]:
+    from backend.api.schemas.results import ICP_ELEMENTS  # noqa: PLC0415
+    return list(ICP_ELEMENTS)
+
+
+def _ensure_variable_config(name: str, default: Callable[[], object]) -> None:
+    """Make sure the stub module exists and has the attribute ``name``.
+
+    An attribute that is already there is left alone, so a module or value put
+    in place by something else (a test, or an earlier request) wins.
+    """
+    if _VARIABLE_CONFIG not in sys.modules:
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules[_VARIABLE_CONFIG] = ModuleType(_VARIABLE_CONFIG)
+    module = sys.modules[_VARIABLE_CONFIG]
+    if not hasattr(module, name):
+        setattr(module, name, default())
+
+
+def _upload_failed(
+    db: Session, event: str, exc: Exception, *, message: str = "Upload failed", **log_fields: object,
+) -> UploadResponse:
+    """Roll back, log ``event``, and build the all-zero response for a failed upload.
+
+    Every upload endpoint answers an unexpected exception this way (issue #190,
+    D-12). Early returns that carry extra fields (the plan gate, the
+    experiment-status validation failure, the ICP parse failure with its
+    ``warnings``) build their own response and do not use this.
+    """
+    db.rollback()
+    log.error(event, error=str(exc), **log_fields)
+    return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message=message)
+
+
 @router.post("/scalar-results", response_model=UploadResponse)
 async def upload_scalar_results(
     file: UploadFile = File(...),
@@ -118,37 +190,7 @@ async def upload_scalar_results(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a Solution Chemistry Excel file and upsert scalar results."""
-    import sys  # noqa: PLC0415
-    from types import ModuleType  # noqa: PLC0415
-    if "frontend.config.variable_config" not in sys.modules:
-        _stub = ModuleType("frontend.config.variable_config")
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
-    _vc = sys.modules["frontend.config.variable_config"]
-    if not hasattr(_vc, "SCALAR_RESULTS_TEMPLATE_HEADERS"):
-        _vc.SCALAR_RESULTS_TEMPLATE_HEADERS = {
-            "measurement_date": "Date",
-            "experiment_id": "Experiment ID",
-            "replicate": "Replicate",
-            "time_post_reaction": "Time (days)",
-            "description": "Description",
-            "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
-            "sampling_volume_mL": "Sampling Vol (mL)",
-            "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
-            "background_experiment_id": "Bkg Exp ID",
-            "h2_concentration": "H2 Conc (ppm)",
-            "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
-            "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
-            "final_ph": "Final pH",
-            "ferrous_iron_yield": "Fe2+ Yield (%)",
-            "final_nitrate_concentration_mM": "Final Nitrate (mM)",
-            "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
-            "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
-            "final_conductivity_mS_cm": "Conductivity (mS/cm)",
-            "final_alkalinity_mg_L": "Alkalinity (mg/L)",
-            "overwrite": "Overwrite",
-        }
+    _ensure_variable_config("SCALAR_RESULTS_TEMPLATE_HEADERS", lambda: dict(_SCALAR_RESULTS_TEMPLATE_HEADERS))
     from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
@@ -157,10 +199,7 @@ async def upload_scalar_results(
         )
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("scalar_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "scalar_upload_failed", exc)
     log.info("scalar_upload", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
@@ -195,10 +234,7 @@ async def upload_new_experiments(
         gate_errors = _plan_gate_errors(plan, plan_hash)
         _finalize_write(db, dry_run, had_errors=bool(gate_errors))
     except Exception as exc:
-        db.rollback()
-        log.error("new_experiments_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "new_experiments_upload_failed", exc)
 
     if gate_errors:
         # Nothing was persisted, so the parser's own counts would be a lie — report
@@ -235,16 +271,7 @@ async def upload_pxrf(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a pXRF CSV/Excel file and re-evaluate characterized status for affected samples."""
-    import sys  # noqa: PLC0415
-    from types import ModuleType  # noqa: PLC0415
-    if "frontend.config.variable_config" not in sys.modules:
-        _stub = ModuleType("frontend.config.variable_config")
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
-    _vc = sys.modules["frontend.config.variable_config"]
-    if not hasattr(_vc, "PXRF_REQUIRED_COLUMNS"):
-        _vc.PXRF_REQUIRED_COLUMNS = {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
+    _ensure_variable_config("PXRF_REQUIRED_COLUMNS", lambda: set(_PXRF_REQUIRED_COLUMNS))
     from backend.services.bulk_uploads.pxrf_data import PXRFUploadService  # noqa: PLC0415
     file_bytes = await file.read()
 
@@ -342,10 +369,7 @@ async def upload_pxrf(
 
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("pxrf_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "pxrf_upload_failed", exc)
 
     base_msg = f"pXRF: {created} created, {updated} updated"
     message = (
@@ -373,10 +397,7 @@ async def upload_aeris_xrd(
         created, updated, skipped, errors = AerisXRDUploadService.bulk_upsert_from_excel(db, file_bytes)
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("aeris_xrd_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "aeris_xrd_upload_failed", exc)
     return UploadResponse(created=created, updated=updated, skipped=skipped, errors=errors,
                           message=_finalize_message(f"XRD: {created} created, {updated} updated", dry_run),
                           dry_run=dry_run)
@@ -406,10 +427,7 @@ async def upload_master_results(
         created, updated, skipped = outcome.created, outcome.updated, outcome.skipped
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("master_results_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "master_results_upload_failed", exc)
     log.info("master_results", created=created, updated=updated, user=current_user.email, dry_run=dry_run)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped,
@@ -434,23 +452,13 @@ async def upload_icp_oes(
     When overwrite=True, existing ICPResults for each matching (experiment, timepoint)
     are deleted before new data is inserted rather than merged.
     """
-    import sys  # noqa: PLC0415
-    from types import ModuleType  # noqa: PLC0415
-    if "frontend.config.variable_config" not in sys.modules:
-        _stub = ModuleType("frontend.config.variable_config")
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
-    _vc = sys.modules["frontend.config.variable_config"]
-    if not hasattr(_vc, "ICP_FIXED_ELEMENT_FIELDS"):
-        # Mirror the canonical fixed-column list rather than a literal. This
-        # stub is what production actually runs (frontend.config no longer
-        # exists), and its previous 27-element literal predated the ag/ce/k/
-        # la/na/pb/sc/th/v (2026-05) and s (2026-06) columns -- so every one
-        # of those readings landed in all_elements only and the fixed columns
-        # stayed NULL in production. Migration 5840d41bf18d backfills them.
-        from backend.api.schemas.results import ICP_ELEMENTS  # noqa: PLC0415
-        _vc.ICP_FIXED_ELEMENT_FIELDS = list(ICP_ELEMENTS)
+    # Mirror the canonical fixed-column list rather than a literal. This stub is
+    # what production actually runs (frontend.config no longer exists), and its
+    # previous 27-element literal predated the ag/ce/k/la/na/pb/sc/th/v
+    # (2026-05) and s (2026-06) columns -- so every one of those readings
+    # landed in all_elements only and the fixed columns stayed NULL in
+    # production. Migration 5840d41bf18d backfills them.
+    _ensure_variable_config("ICP_FIXED_ELEMENT_FIELDS", _icp_fixed_element_fields)
     from backend.services.icp_service import ICPService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
@@ -474,10 +482,7 @@ async def upload_icp_oes(
         touched = _touched(created_rows)
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("icp_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "icp_upload_failed", exc)
     new_count = len(created_rows) - updated_count
     log.info("icp_upload", created=new_count, updated=updated_count, user=current_user.email,
              dry_run=dry_run, touched=len(touched))
@@ -510,10 +515,7 @@ async def upload_xrd_mineralogy(
         )
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("xrd_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "xrd_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"XRD: {created} created, {updated} updated", dry_run),
@@ -540,10 +542,7 @@ async def upload_timepoint_modifications(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("timepoint_mod_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "timepoint_mod_upload_failed", exc)
     return UploadResponse(
         created=0, updated=updated, skipped=skipped, errors=errors,
         feedbacks=feedbacks,
@@ -568,10 +567,7 @@ async def upload_rock_inventory(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("rock_inventory_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "rock_inventory_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         warnings=warnings,
@@ -596,10 +592,7 @@ async def upload_chemical_inventory(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("chemical_inventory_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "chemical_inventory_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"Chemical Inventory: {created} created, {updated} updated", dry_run),
@@ -629,10 +622,7 @@ async def upload_elemental_composition(
         )
         _finalize_write(db, dry_run, had_errors=bool(errors))
     except Exception as exc:
-        db.rollback()
-        log.error("elemental_composition_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "elemental_composition_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"Elemental Composition: {created} created, {updated} updated", dry_run),
@@ -674,9 +664,7 @@ async def upload_actlabs_rock(
             )
             _finalize_write(db, dry_run)
         except Exception as exc:
-            db.rollback()
-            log.error("actlabs_rock_upload_failed", error=str(exc))
-            return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
+            return _upload_failed(db, "actlabs_rock_upload_failed", exc)
         return UploadResponse(
             created=created, updated=updated, skipped=skipped, errors=errors,
             message=_finalize_message(f"ActLabs Rock: {created} created, {updated} updated", dry_run),
@@ -716,9 +704,7 @@ async def upload_actlabs_rock(
         created, updated, skipped, errors = ActlabsRockTitrationService.import_excel(db, file_bytes)
         _finalize_write(db, dry_run)
     except Exception as exc:
-        db.rollback()
-        log.error("actlabs_rock_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)], message="Upload failed")
+        return _upload_failed(db, "actlabs_rock_upload_failed", exc)
     return UploadResponse(
         created=created, updated=updated, skipped=skipped, errors=errors,
         message=_finalize_message(f"ActLabs Rock: {created} created, {updated} updated", dry_run),
@@ -747,10 +733,7 @@ async def upload_experiment_status(
         result = ExperimentStatusService.apply_status_changes(db, preview)
         _finalize_write(db, dry_run, had_errors=bool(result.errors))
     except Exception as exc:
-        db.rollback()
-        log.error("experiment_status_upload_failed", error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Upload failed")
+        return _upload_failed(db, "experiment_status_upload_failed", exc)
     return UploadResponse(
         created=0,
         updated=result.status_changes_applied,
@@ -819,11 +802,8 @@ async def upload_experiment_deletion(
             db, file_bytes, filename=file.filename, modified_by=current_user.email,
         )
     except Exception as exc:
-        db.rollback()
-        log.error("bulk_experiment_deletion_failed",
-                  user=current_user.email, error=str(exc))
-        return UploadResponse(created=0, updated=0, skipped=0, errors=[str(exc)],
-                              message="Bulk deletion failed")
+        return _upload_failed(db, "bulk_experiment_deletion_failed", exc,
+                              message="Bulk deletion failed", user=current_user.email)
 
     errors = list(result.errors) + [
         f"{f['experiment_id']}: {f['error']}" for f in result.failed
@@ -862,36 +842,80 @@ _NO_TEMPLATE = {
 }
 
 
+def _write_header_sheet(
+    ws,
+    headers: list[str],
+    required: set[str],
+    example_row: list | None = None,
+    *,
+    min_width: int = 16,
+    required_key: Callable[[str], str] = lambda header: header,
+) -> None:
+    """Write a template sheet: a styled header row and an optional example row.
+
+    A header is filled gold when ``required_key(header)`` is in ``required``,
+    green otherwise. Column width is the header length plus 4, at least
+    ``min_width``.
+    """
+    from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
+
+    req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+    opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    for col, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = Font(bold=True)
+        cell.fill = req_fill if required_key(h) in required else opt_fill
+        cell.alignment = Alignment(horizontal="center")
+        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, min_width)
+    if example_row:
+        for col, val in enumerate(example_row, start=1):
+            ws.cell(row=2, column=col, value=val)
+
+
+def _write_instructions_sheet(
+    wb, instructions: list[tuple[str, str]], widths: tuple[int, int] = (30, 70),
+) -> None:
+    """Append an INSTRUCTIONS sheet of (column, note) rows; the first row is bold."""
+    from openpyxl.styles import Font  # noqa: PLC0415
+
+    ws_inst = wb.create_sheet("INSTRUCTIONS")
+    ws_inst.column_dimensions["A"].width = widths[0]
+    ws_inst.column_dimensions["B"].width = widths[1]
+    for r_idx, (col_name, note) in enumerate(instructions, start=1):
+        name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
+        note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
+        if r_idx == 1:
+            name_cell.font = Font(bold=True)
+            note_cell.font = Font(bold=True)
+
+
+def _workbook_bytes(wb) -> bytes:
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _simple_template(
     headers: list[str],
     required: set[str],
     sheet_title: str = "Template",
     example_row: list | None = None,
+    *,
+    min_width: int = 16,
+    instructions: list[tuple[str, str]] | None = None,
+    instruction_widths: tuple[int, int] = (30, 70),
 ) -> bytes:
-    """Generate a minimal Excel template with highlighted required columns."""
+    """Generate an Excel template with highlighted required columns, and an
+    INSTRUCTIONS sheet when ``instructions`` is given."""
     import openpyxl  # noqa: PLC0415
-    from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = sheet_title
-    req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-    opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-
-    for col, h in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col, value=h)
-        cell.font = Font(bold=True)
-        cell.fill = req_fill if h in required else opt_fill
-        cell.alignment = Alignment(horizontal="center")
-        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
-
-    if example_row:
-        for col, val in enumerate(example_row, start=1):
-            ws.cell(row=2, column=col, value=val)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+    _write_header_sheet(ws, headers, required, example_row, min_width=min_width)
+    if instructions is not None:
+        _write_instructions_sheet(wb, instructions, instruction_widths)
+    return _workbook_bytes(wb)
 
 
 def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
@@ -919,21 +943,15 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
 
     if upload_type == "new-experiments":
         import openpyxl  # noqa: PLC0415
-        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
-
-        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
 
         def _write_sheet(ws, headers, required, example_row=None):
-            for col, h in enumerate(headers, start=1):
-                cell = ws.cell(row=1, column=col, value=h)
-                cell.font = Font(bold=True)
-                cell.fill = req_fill if h.replace("*", "").split("(")[0].strip() in required else opt_fill
-                cell.alignment = Alignment(horizontal="center")
-                ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
-            if example_row:
-                for col, val in enumerate(example_row, start=1):
-                    ws.cell(row=2, column=col, value=val)
+            # The key strips the "*" marker, so it never matches a `required`
+            # entry that still carries one: no header on these sheets is filled
+            # gold. Kept as is (issue #190 is a no-output-change refactor).
+            _write_header_sheet(
+                ws, headers, required, example_row, min_width=18,
+                required_key=lambda h: h.replace("*", "").split("(")[0].strip(),
+            )
 
         wb = openpyxl.Workbook()
 
@@ -1015,9 +1033,6 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
         # Instructions sheet
-        ws_inst = wb.create_sheet("INSTRUCTIONS")
-        ws_inst.column_dimensions["A"].width = 35
-        ws_inst.column_dimensions["B"].width = 75
         instructions = [
             ("Column / Sheet", "Notes"),
             ("--- experiments sheet ---", ""),
@@ -1069,21 +1084,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ("order", "Integer addition order (optional)."),
             ("method", f"Free-text addition method description (optional, max {ADDITION_METHOD_MAX_LENGTH} characters — longer values are truncated with a warning)."),
         ]
-        for r_idx, (col_name, note) in enumerate(instructions, start=1):
-            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
-            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
-            if r_idx == 1:
-                name_cell.font = Font(bold=True)
-                note_cell.font = Font(bold=True)
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+        _write_instructions_sheet(wb, instructions, widths=(35, 75))
+        return _workbook_bytes(wb)
 
     if upload_type == "rock-inventory":
-        import openpyxl  # noqa: PLC0415
-        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
-
         headers = [
             "sample_id", "rock_classification", "state", "country",
             "locality", "latitude", "longitude", "description",
@@ -1098,24 +1102,6 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             "", "", "", "",
             "FALSE",
         ]
-        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Template"
-        for col, h in enumerate(headers, start=1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = Font(bold=True)
-            cell.fill = req_fill if h in required else opt_fill
-            cell.alignment = Alignment(horizontal="center")
-            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
-        for col, val in enumerate(example_row, start=1):
-            ws.cell(row=2, column=col, value=val)
-
-        ws_inst = wb.create_sheet("INSTRUCTIONS")
-        ws_inst.column_dimensions["A"].width = 30
-        ws_inst.column_dimensions["B"].width = 70
         instructions = [
             ("Column", "Notes"),
             ("sample_id", "REQUIRED. Unique sample identifier (e.g. S001, SROCK-042)."),
@@ -1153,16 +1139,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
             ),
             ("overwrite", "TRUE clears and rewrites all optional fields for existing samples (default FALSE)."),
         ]
-        for r_idx, (col_name, note) in enumerate(instructions, start=1):
-            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
-            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
-            if r_idx == 1:
-                name_cell.font = Font(bold=True)
-                note_cell.font = Font(bold=True)
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+        return _simple_template(
+            headers, required, example_row=example_row, min_width=16,
+            instructions=instructions, instruction_widths=(30, 70),
+        )
 
     if upload_type == "chemical-inventory":
         return _simple_template(
@@ -1192,30 +1172,9 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
         )
 
     if upload_type == "experiment-status":
-        import openpyxl  # noqa: PLC0415
-        from openpyxl.styles import PatternFill, Font, Alignment  # noqa: PLC0415
-
         headers = ["experiment_id", "status", "reactor_number", "date"]
         required = {"experiment_id", "status"}
         example_row = ["HPHT_072", "ONGOING", 3, "2026-07-15"]
-        req_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        opt_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Template"
-        for col, h in enumerate(headers, start=1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = Font(bold=True)
-            cell.fill = req_fill if h in required else opt_fill
-            cell.alignment = Alignment(horizontal="center")
-            ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 18)
-        for col, val in enumerate(example_row, start=1):
-            ws.cell(row=2, column=col, value=val)
-
-        ws_inst = wb.create_sheet("INSTRUCTIONS")
-        ws_inst.column_dimensions["A"].width = 30
-        ws_inst.column_dimensions["B"].width = 80
         instructions = [
             ("Column", "Notes"),
             ("experiment_id", "REQUIRED. Must match an existing experiment_id."),
@@ -1238,16 +1197,10 @@ def _get_template_bytes(upload_type: str, mode: Optional[str] = None) -> bytes:
                 "is missing), nothing is demoted and a warning is returned.",
             ),
         ]
-        for r_idx, (col_name, note) in enumerate(instructions, start=1):
-            name_cell = ws_inst.cell(row=r_idx, column=1, value=col_name)
-            note_cell = ws_inst.cell(row=r_idx, column=2, value=note)
-            if r_idx == 1:
-                name_cell.font = Font(bold=True)
-                note_cell.font = Font(bold=True)
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+        return _simple_template(
+            headers, required, example_row=example_row, min_width=18,
+            instructions=instructions, instruction_widths=(30, 80),
+        )
 
     raise ValueError(f"Unknown template type: {upload_type}")
 

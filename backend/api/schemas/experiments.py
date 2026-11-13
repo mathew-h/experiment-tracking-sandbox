@@ -123,11 +123,18 @@ class ExperimentResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-class ExperimentDetailResponse(ExperimentResponse):
-    """Full detail including nested conditions, notes, modifications."""
-    conditions: Optional[dict] = None
-    notes: list[dict] = []
-    modifications: list[dict] = []
+class ModificationResponse(BaseModel):
+    """One ModificationsLog row as the API returns it (issue #190, D-08): the
+    experiment detail page and the sample activity feed share this shape."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    modified_by: Optional[str] = None
+    modification_type: Optional[str] = None
+    modified_table: Optional[str] = None
+    old_values: Optional[Any] = None
+    new_values: Optional[Any] = None
+    created_at: Optional[datetime] = None
 
 
 class NoteCreate(BaseModel):
@@ -185,6 +192,13 @@ class NoteResponse(BaseModel):
     needs_review: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class ExperimentDetailResponse(ExperimentResponse):
+    """Full detail including nested conditions, notes, modifications."""
+    conditions: Optional[dict] = None
+    notes: list[NoteResponse] = []
+    modifications: list[ModificationResponse] = []
 
 
 class ReviewNoteItem(NoteResponse):

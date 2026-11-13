@@ -5,7 +5,7 @@ from typing import Callable, Literal, TypeVar
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import ColumnElement, Date, cast, select, func, text, case, or_, exists
+from sqlalchemy import ColumnElement, Date, Numeric, cast, select, func, text, case, or_, exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database.models.experiments import Experiment, ExperimentNotes, ModificationsLog
@@ -14,10 +14,15 @@ from database.reactor_slot import derive_reactor_slot
 from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
+from backend.api.routers._helpers import call_or_http, get_experiment_or_404
+from backend.services.experiment_lookup import (
+    find_experiment, lowest_conditions, scalars_for_experiment, series_key,
+)
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
+    ModificationResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse, DistinctText,
     NotesBulkPatch, NotesBulkDelete, NotesBulkResponse,
     ReplicateGroupMember, ReplicateGroupResponse,
@@ -43,6 +48,7 @@ from database.models.conditions import ExperimentalConditions
 from database.models.samples import SampleInfo
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
+from backend.services import additive_service
 from backend.services import notes as notes_service
 from backend.services import experiment_export
 from backend.services.experiment_deletion import (
@@ -56,13 +62,40 @@ router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
 T = TypeVar("T")
 
-# Prefix mapping for next-id endpoint
+# Experiment type -> ID prefix, for /next-id and /next-ids. One table for both
+# (issue #190, D-03): they used to disagree on Autoclave, and LIKE is
+# case-sensitive on PostgreSQL. AUTOCLAVE is the canonical prefix (Mat, 2026-11-13).
 _TYPE_PREFIX: dict[str, str] = {
     "HPHT": "HPHT",
     "Serum": "SERUM",
     "Autoclave": "AUTOCLAVE",
     "Core Flood": "CF",
 }
+
+# /next-ids response key -> experiment type. The keys are part of the response
+# contract the bulk-upload page reads, so "CF" stays "CF".
+_NEXT_IDS_LABELS: dict[str, str] = {
+    "HPHT": "HPHT",
+    "Serum": "Serum",
+    "CF": "Core Flood",
+    "Autoclave": "Autoclave",
+}
+
+
+def _max_id_number(db: Session, prefix: str) -> int:
+    """Highest all-digit suffix among IDs shaped ``<prefix>_<digits>``; 0 if none.
+
+    Computed in SQL (one aggregate) rather than by loading every matching ID.
+    The LIKE pattern is deliberately the one the Python loop used, unescaped
+    underscore included; the regex then keeps only all-digit suffixes.
+    """
+    suffix = func.substr(Experiment.experiment_id, len(prefix) + 2)
+    highest = db.execute(
+        select(func.max(cast(suffix, Numeric)))
+        .where(Experiment.experiment_id.like(f"{prefix}_%"))
+        .where(suffix.op("~")("^[0-9]+$"))
+    ).scalar_one_or_none()
+    return int(highest) if highest is not None else 0
 
 
 def _is_group_parent_spelling(derivation, treatment, replicate_label) -> bool:
@@ -119,11 +152,7 @@ def _build_list_item(db: Session, exp: Experiment) -> dict:
     # .first() with an explicit order, not scalar_one_or_none(): UNIQUE
     # (experiment_fk) forbids a second row going forward, but one duplicate on a
     # pre-constraint database used to 500 this entire endpoint (issue #109).
-    cond = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    cond = lowest_conditions(db, exp.id)
     item_data["experiment_type"] = cond.experiment_type if cond else None
     item_data["reactor_number"] = cond.reactor_number if cond else None
     additive_row = db.execute(
@@ -382,7 +411,7 @@ def list_experiments(
             # query filters) and identified by id, never by replicate_label
             # (a '-t<days>' vial shares its letter with its parent vial).
             if exp.replicate_label is not None:
-                bucket_key = exp.base_experiment_id or exp.experiment_id
+                bucket_key = series_key(exp)
             elif exp.base_experiment_id and exp.experiment_id in (
                 f"{exp.base_experiment_id}-0", f"{exp.base_experiment_id}-1",
             ):
@@ -455,16 +484,7 @@ def get_next_experiment_id(
 ) -> NextIdResponse:
     """Return the next auto-incremented experiment ID for the given type."""
     prefix = _TYPE_PREFIX.get(type, type.upper().replace(" ", "_"))
-    pattern = f"{prefix}_%"
-    rows = db.execute(
-        select(Experiment.experiment_id).where(Experiment.experiment_id.like(pattern))
-    ).scalars().all()
-    max_num = 0
-    for eid in rows:
-        suffix = eid[len(prefix) + 1:]
-        if suffix.isdigit():
-            max_num = max(max_num, int(suffix))
-    next_num = str(max_num + 1).zfill(3)
+    next_num = str(_max_id_number(db, prefix) + 1).zfill(3)
     return NextIdResponse(next_id=f"{prefix}_{next_num}")
 
 
@@ -474,25 +494,15 @@ def get_next_experiment_ids(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> dict:
     """
-    Return the next sequence number for each experiment type, derived by
-    parsing the numeric suffix from experiment_id (same logic as /next-id).
+    Return the next sequence number for each experiment type, from the same
+    prefix table and suffix rule as /next-id.
 
     Response: ``{"HPHT": 107, "Serum": 165, "CF": 15, "Autoclave": 8}``
     """
-    label_prefix = {"HPHT": "HPHT", "Serum": "SERUM", "CF": "CF", "Autoclave": "Autoclave"}
-    result: dict[str, int] = {}
-    for label, prefix in label_prefix.items():
-        rows = db.execute(
-            select(Experiment.experiment_id)
-            .where(Experiment.experiment_id.like(f"{prefix}_%"))
-        ).scalars().all()
-        max_num = 0
-        for eid in rows:
-            suffix = eid[len(prefix) + 1:]
-            if suffix.isdigit():
-                max_num = max(max_num, int(suffix))
-        result[label] = max_num + 1
-    return result
+    return {
+        label: _max_id_number(db, _TYPE_PREFIX[experiment_type]) + 1
+        for label, experiment_type in _NEXT_IDS_LABELS.items()
+    }
 
 
 def _group_member_to_detail(member) -> ReplicateGroupMemberDetail:
@@ -732,17 +742,36 @@ def _load_notes_for_bulk(db: Session, ids: list[int]) -> list[ExperimentNotes]:
     return notes
 
 
+# 422 wording for a ck_note_scope violation, per endpoint. The rule itself is
+# notes_service.breaks_note_scope; only the phrasing differs by context.
+_ADD_SCOPE_DETAIL: dict[NoteType, str] = {
+    NoteType.description: "A 'description' note is experiment-level; do not pass result_id.",
+    NoteType.modification: "A 'modification' note must be scoped to a result or carry an event_date.",
+    NoteType.result_note: "A 'result_note' note must name the result_id it describes.",
+}
+_PATCH_SCOPE_DETAIL: dict[NoteType, str] = {
+    NoteType.description: "A result-scoped note cannot become the 'description'; it is experiment-level.",
+    NoteType.modification: "A 'modification' note must be scoped to a result or carry an event_date.",
+    NoteType.result_note: "A 'result_note' note must be scoped to a result.",
+}
+_BULK_SCOPE_DETAIL: dict[NoteType, str] = {
+    NoteType.description: "Result-scoped notes cannot become 'description'",
+    NoteType.modification: "A 'modification' note must be scoped to a result or carry an event_date",
+    NoteType.result_note: "A 'result_note' note must be scoped to a result",
+}
+
+
 def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteType) -> None:
     """Mirror ck_note_scope and uq_one_description_per_experiment for a whole
     batch so the caller gets one 422/409 naming the offenders and nothing is
     half-applied. Same rules as patch_note, applied to N rows."""
+    offending = [
+        n.id for n in notes
+        if notes_service.breaks_note_scope(target, n.result_id, n.event_date)
+    ]
+    if offending:
+        raise HTTPException(status_code=422, detail=f"{_BULK_SCOPE_DETAIL[target]}: {offending}")
     if target is NoteType.description:
-        offending = [n.id for n in notes if n.result_id is not None]
-        if offending:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Result-scoped notes cannot become 'description': {offending}",
-            )
         # Two selected notes on one experiment, or an existing description there.
         wanting = [n for n in notes if n.note_type is not NoteType.description]
         per_exp: dict[int, list[int]] = {}
@@ -762,20 +791,6 @@ def _check_bulk_retype(db: Session, notes: list[ExperimentNotes], target: NoteTy
             raise HTTPException(
                 status_code=409,
                 detail=f"These experiments would end up with more than one description: {eids}",
-            )
-    elif target is NoteType.modification:
-        offending = [n.id for n in notes if n.result_id is None and n.event_date is None]
-        if offending:
-            raise HTTPException(
-                status_code=422,
-                detail=f"A 'modification' note must be scoped to a result or carry an event_date: {offending}",
-            )
-    elif target is NoteType.result_note:
-        offending = [n.id for n in notes if n.result_id is None]
-        if offending:
-            raise HTTPException(
-                status_code=422,
-                detail=f"A 'result_note' note must be scoped to a result: {offending}",
             )
 
 
@@ -881,11 +896,7 @@ def get_experiment_results(
 ) -> list[ResultWithFlagsResponse]:
     """Return all result timepoints for an experiment, with scalar and ICP existence flags."""
 
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     results = db.execute(
         select(ExperimentalResults)
@@ -970,12 +981,10 @@ def _result_entry_response(db: Session, result_id: int) -> ResultWithFlagsRespon
 
 def _run_result_entry(fn: Callable[[], T]) -> T:
     """Run a result-entry service call, mapping its errors to 404/422."""
-    try:
-        return fn()
-    except result_entry.ResultEntryNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except result_entry.ResultEntryInvalid as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    return call_or_http(fn, (
+        (result_entry.ResultEntryNotFound, 404),
+        (result_entry.ResultEntryInvalid, 422),
+    ))
 
 
 @router.post(
@@ -1050,12 +1059,8 @@ def get_experiment_rollup(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[RollupTimepointResponse]:
     """Cross-replicate mean/median/std per timepoint from v_results_scalar_rollup."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-    base = exp.base_experiment_id or exp.experiment_id
+    exp = get_experiment_or_404(db, experiment_id)
+    base = series_key(exp)
     rows = resolve_rollup_rows(db, base)
     return [RollupTimepointResponse(**dict(r)) for r in rows]
 
@@ -1079,12 +1084,8 @@ def get_replicate_group(
     tests/api/test_experiment_rollup.py::TestReplicateGroupWrapperShapes for
     the locked-in regression coverage.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-    base = exp.base_experiment_id or exp.experiment_id
+    exp = get_experiment_or_404(db, experiment_id)
+    base = series_key(exp)
     parent = exp if exp.replicate_label is None else exp.parent
     if parent is not None:
         members = db.execute(
@@ -1147,11 +1148,7 @@ def update_experiment_status(
     the caller can complete it and retry. A confirm-and-supersede dialog is a
     deferred follow-up; the backend contract is the same with or without it.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     if payload.status == ExperimentStatus.ONGOING:
         conditions = exp.conditions
@@ -1203,9 +1200,7 @@ def list_experiment_additives(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[AdditiveResponse]:
     """List chemical additives for an experiment by its string ID. Returns [] if no conditions exist."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    exp = find_experiment(db, experiment_id)
     if exp is None:
         return []
     # Resolve via experiment_fk, not the denormalized string (issue #109): both
@@ -1214,11 +1209,7 @@ def list_experiment_additives(
     # string-keyed lookup could 500 on a duplicated string, return [] for a real
     # experiment, or (worse, in the PUT/DELETE variants below) touch another
     # experiment's row.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         return []
     rows = db.execute(
@@ -1242,56 +1233,21 @@ def upsert_experiment_additive(
     Accepts experiment string ID and resolves conditions row internally.
     ChemicalAdditive.experiment_id is a FK to experimental_conditions.id (not experiments.id).
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment conditions not found")
+    exp = get_experiment_or_404(db, experiment_id, detail="Experiment conditions not found")
     # Resolve via experiment_fk, not the denormalized string (issue #109):
     # a stale string could otherwise write this additive onto another
     # experiment's conditions row.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment conditions not found")
     compound = db.get(Compound, compound_id)
     if compound is None:
         raise HTTPException(status_code=404, detail="Compound not found")
-    existing = db.execute(
-        select(ChemicalAdditive)
-        .where(ChemicalAdditive.experiment_id == conditions.id)
-        .where(ChemicalAdditive.compound_id == compound_id)
-    ).scalar_one_or_none()
-    if existing:
-        old_vals = {"amount": existing.amount, "unit": existing.unit.value if existing.unit else None}
-        mod_type = "update"
-        for k, v in payload.model_dump(exclude_unset=True).items():
-            setattr(existing, k, v)
-        additive = existing
-    else:
-        old_vals = None
-        mod_type = "create"
-        additive = ChemicalAdditive(
-            experiment_id=conditions.id,
-            compound_id=compound_id,
-            **payload.model_dump(),
-        )
-        db.add(additive)
-    db.flush()
-    recalculate(additive, db)
-    new_vals = {"amount": additive.amount, "unit": additive.unit.value if additive.unit else None}
-    db.add(ModificationsLog(
-        experiment_id=experiment_id,
-        experiment_fk=exp.id,
-        modified_by=current_user.uid,
-        modification_type=mod_type,
-        modified_table="chemical_additives",
-        old_values=old_vals,
-        new_values=new_vals,
-    ))
+    additive = additive_service.upsert_additive(
+        db, exp, conditions, compound_id,
+        fields=payload.model_dump(), fields_set=payload.model_dump(exclude_unset=True),
+        user_email=current_user.email,
+    )
     db.commit()
     db.refresh(additive)
     log.info("additive_upserted", experiment_id=experiment_id, compound_id=compound_id)
@@ -1306,44 +1262,16 @@ def delete_experiment_additive(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> Response:
     """Remove a chemical additive from an experiment."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     # Resolve via experiment_fk, not the denormalized string (issue #109) —
     # see the GET/PUT variants above for the failure modes a string match hits.
-    conditions = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    additive = db.execute(
-        select(ChemicalAdditive)
-        .where(ChemicalAdditive.experiment_id == conditions.id)
-        .where(ChemicalAdditive.compound_id == compound_id)
-    ).scalar_one_or_none()
+    additive = additive_service.find_additive(db, conditions.id, compound_id)
     if additive is None:
         raise HTTPException(status_code=404, detail="Additive not found")
-    compound = db.get(Compound, compound_id)
-    old_vals = {
-        "compound_id": compound_id,
-        "compound_name": compound.name if compound else None,
-        "amount": additive.amount,
-        "unit": additive.unit.value if additive.unit else None,
-    }
-    db.delete(additive)
-    db.add(ModificationsLog(
-        experiment_id=experiment_id,
-        experiment_fk=exp.id,
-        modified_by=current_user.uid,
-        modification_type="delete",
-        modified_table="chemical_additives",
-        old_values=old_vals,
-        new_values=None,
-    ))
+    additive_service.delete_additive(db, additive, exp, current_user.email)
     db.commit()
     log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
     return Response(status_code=204)
@@ -1361,19 +1289,9 @@ def set_experiment_background_ammonium(
     Updates background_ammonium_concentration_mM on all ScalarResults rows for the
     experiment and triggers recalculation of derived yield fields on each row.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
-    result_ids = db.execute(
-        select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
-    ).scalars().all()
-
-    scalars = db.execute(
-        select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
-    ).scalars().all()
+    scalars = scalars_for_experiment(db, exp.id)
 
     for scalar in scalars:
         scalar.background_ammonium_concentration_mM = payload.value
@@ -1456,22 +1374,13 @@ def get_experiment(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> ExperimentDetailResponse:
     """Get a single experiment with nested conditions, notes, and modifications."""
-    from database.models.conditions import ExperimentalConditions
     from database.models.experiments import ModificationsLog
     from backend.api.schemas.conditions import ConditionsResponse
 
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
-    cond = db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id)
-    ).scalars().first()
+    cond = lowest_conditions(db, exp.id)
     notes = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.experiment_fk == exp.id)
@@ -1484,34 +1393,13 @@ def get_experiment(
     ).scalars().all()
 
     cond_dict = ConditionsResponse.model_validate(cond).model_dump() if cond else None
-    notes_list = [
-        {
-            "id": n.id,
-            "note_text": n.note_text,
-            "note_type": n.note_type.value,
-            "result_id": n.result_id,
-            "event_date": n.event_date.isoformat() if n.event_date else None,
-            "created_by": n.created_by,
-            "needs_review": n.needs_review,
-            "created_at": n.created_at.isoformat(),
-            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
-        }
-        for n in notes
-    ]
-    mods_list = [
-        {
-            "id": m.id,
-            "modified_by": m.modified_by,
-            "modification_type": m.modification_type,
-            "modified_table": m.modified_table,
-            "old_values": m.old_values,
-            "new_values": m.new_values,
-            "created_at": m.created_at.isoformat(),
-        }
-        for m in mods
-    ]
     base = ExperimentResponse.model_validate(exp)
-    return ExperimentDetailResponse(**base.model_dump(), conditions=cond_dict, notes=notes_list, modifications=mods_list)
+    return ExperimentDetailResponse(
+        **base.model_dump(),
+        conditions=cond_dict,
+        notes=[NoteResponse.model_validate(n) for n in notes],
+        modifications=[ModificationResponse.model_validate(m) for m in mods],
+    )
 
 
 @router.post("", response_model=ExperimentResponse, status_code=201)
@@ -1582,11 +1470,7 @@ def update_experiment(
     """Update mutable fields on an experiment. If experiment_id is provided and differs
     from the path param, treats it as a rename: checks uniqueness, updates
     ExperimentalConditions.experiment_id, and writes a ModificationsLog entry."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     data = payload.model_dump(exclude_unset=True)
     new_id = data.pop("experiment_id", None)
@@ -1602,7 +1486,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"date": old_date.isoformat() if old_date else None},
@@ -1614,7 +1498,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"is_outlier": old_is_outlier},
@@ -1627,7 +1511,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"is_background": old_is_background},
@@ -1734,7 +1618,7 @@ def update_experiment(
             db.add(ModificationsLog(
                 experiment_id=new_id,
                 experiment_fk=exp.id,
-                modified_by=current_user.uid,
+                modified_by=current_user.email,
                 modification_type="update",
                 modified_table="experiments",
                 old_values={"experiment_id": experiment_id},
@@ -1750,29 +1634,19 @@ def update_experiment(
         exp.sample_id = new_sample_id
         db.flush()
         # .first(), not scalar_one_or_none(): tolerate a duplicate row (issue #109).
-        cond = db.execute(
-            select(ExperimentalConditions)
-            .where(ExperimentalConditions.experiment_fk == exp.id)
-            .order_by(ExperimentalConditions.id)
-        ).scalars().first()
+        cond = lowest_conditions(db, exp.id)
         if cond is not None:
             recalculate(cond, db)
             db.flush()
         # Also recalculate scalars directly: conditions_calcs.py cascades to scalars via ORM
         # relationships when conditions exist, but this explicit loop ensures scalars update
         # even when there are no conditions (total_ferrous_iron_g stays NULL in that case).
-        result_ids = db.execute(
-            select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
-        ).scalars().all()
-        scalars = db.execute(
-            select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
-        ).scalars().all()
-        for scalar in scalars:
+        for scalar in scalars_for_experiment(db, exp.id):
             recalculate(scalar, db)
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"sample_id": old_sample_id},
@@ -1815,11 +1689,7 @@ def get_experiment_delete_impact(
     Read-only; powers the confirmation dialog so it can show consequences
     instead of a generic warning. 404 if the experiment does not exist.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     return _impact_to_response(collect_delete_impact(db, exp))
 
 
@@ -1838,11 +1708,7 @@ def delete_experiment(
     backend/services/experiment_deletion.py for why a bare db.delete() is not
     sufficient.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     impact = delete_experiment_cascade(db, exp, modified_by=current_user.email)
     return ExperimentDeletedResponse(
@@ -1867,28 +1733,11 @@ def add_note(
     result ownership; the checks here only translate those into 422/409 with a
     readable message instead of a 500.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
 
     # Mirror of ck_note_scope, for the message.
-    if payload.note_type is NoteType.description and payload.result_id is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'description' note is experiment-level; do not pass result_id.",
-        )
-    if payload.note_type is NoteType.modification and payload.result_id is None and payload.event_date is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'modification' note must be scoped to a result or carry an event_date.",
-        )
-    if payload.note_type is NoteType.result_note and payload.result_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'result_note' note must name the result_id it describes.",
-        )
+    if notes_service.breaks_note_scope(payload.note_type, payload.result_id, payload.event_date):
+        raise HTTPException(status_code=422, detail=_ADD_SCOPE_DETAIL[payload.note_type])
     # Mirror of fk_note_result_same_experiment, for the message.
     if payload.result_id is not None:
         owner_fk = db.execute(
@@ -1938,11 +1787,7 @@ def patch_note(
     that changed. Retyping obeys the DB scope rules (mirrored here as 422) and
     the one-description index (409).
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     note = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.id == note_id)
@@ -1959,21 +1804,8 @@ def patch_note(
 
     # Mirror of ck_note_scope on the state AFTER this patch (issue #122 PR-B):
     # a retype and a date change can each remove a 'modification's only anchor.
-    if new_type is NoteType.description and note.result_id is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="A result-scoped note cannot become the 'description'; it is experiment-level.",
-        )
-    if new_type is NoteType.modification and note.result_id is None and new_date is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'modification' note must be scoped to a result or carry an event_date.",
-        )
-    if new_type is NoteType.result_note and note.result_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="A 'result_note' note must be scoped to a result.",
-        )
+    if notes_service.breaks_note_scope(new_type, note.result_id, new_date):
+        raise HTTPException(status_code=422, detail=_PATCH_SCOPE_DETAIL[new_type])
 
     if payload.note_text is not None and payload.note_text != note.note_text:
         old_values["note_text"], new_values["note_text"] = note.note_text, payload.note_text
@@ -2030,11 +1862,7 @@ def delete_note(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> Response:
     """Delete a note. Writes a ModificationsLog entry then removes the row."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     note = db.execute(
         select(ExperimentNotes)
         .where(ExperimentNotes.id == note_id)

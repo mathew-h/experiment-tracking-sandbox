@@ -9,6 +9,8 @@ export type { NoteType } from './noteTypes'
 
 export interface ExperimentNote {
   id: number
+  /** The owning experiment's ID. Present on every note payload since issue #190. */
+  experiment_id?: string
   note_text: string
   note_type: NoteType
   /** Set when the note is about one timepoint (experimental_results.id). */

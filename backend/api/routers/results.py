@@ -8,6 +8,7 @@ from backend.services.calculations.registry import recalculate
 from database.models.experiments import Experiment
 from database.models.results import ExperimentalResults, ScalarResults, ICPResults
 from backend.api.dependencies.db import get_db
+from backend.api.routers._helpers import get_experiment_or_404
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.results import (
     ResultCreate, ResultResponse, ScalarCreate, ScalarUpdate,
@@ -61,11 +62,7 @@ def list_results(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> list[ResultResponse]:
     """List all result timepoints for an experiment, ordered by time_post_reaction_days. 404 if experiment not found."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
-    if exp is None:
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    exp = get_experiment_or_404(db, experiment_id)
     rows = db.execute(
         select(ExperimentalResults)
         .where(ExperimentalResults.experiment_fk == exp.id)

@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session
 
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.services import notes as notes_service
+from backend.services.audit import audit_values
 from backend.services.calculations.registry import recalculate
+from backend.services.experiment_lookup import find_experiment, lowest_conditions
 from backend.services.result_merge_utils import (
     resolve_primary_timepoint, update_cumulative_times_for_chain,
 )
@@ -127,16 +129,7 @@ def _default_day(raw_measurement: datetime, start: datetime) -> float:
 
 def conditions_for(db: Session, exp: Experiment) -> ExperimentalConditions | None:
     """The experiment's conditions row (lowest id, should a duplicate survive)."""
-    return db.execute(
-        select(ExperimentalConditions)
-        .where(ExperimentalConditions.experiment_fk == exp.id)
-        .order_by(ExperimentalConditions.id).limit(1)
-    ).scalar_one_or_none()
-
-
-def _jsonable(values: dict) -> dict:
-    """Audit-log payload: datetimes become ISO strings."""
-    return {k: v.isoformat() if isinstance(v, datetime) else v for k, v in values.items()}
+    return lowest_conditions(db, exp.id)
 
 
 def _audit(
@@ -150,8 +143,8 @@ def _audit(
         modified_by=user_email,
         modification_type=mod_type,
         modified_table=table,
-        old_values=_jsonable(old) if old is not None else None,
-        new_values=_jsonable(new) if new is not None else None,
+        old_values=audit_values(old) if old is not None else None,
+        new_values=audit_values(new) if new is not None else None,
     ))
 
 
@@ -237,9 +230,7 @@ def create_result(
     use `{experiment_id}`. All validation runs before resolve_primary_timepoint,
     which demotes the existing primary row eagerly.
     """
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    exp = find_experiment(db, experiment_id)
     if exp is None:
         raise ResultEntryNotFound(f"Experiment {experiment_id} not found")
     _check_allowed(conditions_for(db, exp), exp, allow, rejection)

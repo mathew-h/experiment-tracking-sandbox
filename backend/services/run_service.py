@@ -9,6 +9,7 @@ Run values are read from the series' samples view, never recomputed here.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Protocol, Sequence, TypeVar
 
@@ -16,6 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.runs import RunSegment
+from backend.services.experiment_lookup import is_variant
 from backend.services.icp_series import ICP_SELECT, icp_rows
 from backend.api.schemas.results import IcpRow
 from backend.services.result_entry_service import _aware
@@ -87,8 +89,7 @@ def load_segments(
             status=exp.status.value if exp.status is not None else None,
             date=exp.date,
             parent_experiment_id=parent.experiment_id if parent is not None else None,
-            is_variant=parent is not None
-            and exp.experiment_id.startswith(parent.experiment_id + "_"),
+            is_variant=is_variant(exp),
             description=exp.description,
             conditions_id=cond.id,
             pore_volume_mL=cond.pore_volume_mL,
@@ -109,14 +110,31 @@ def latest_segment(segments: Sequence[RunSegment]) -> RunSegment:
     return max(segments, key=lambda s: (s.date is not None, _aware(s.date) or _EPOCH, s.id))
 
 
+M = TypeVar("M")
+
+
+def root_description(ordered: Sequence[M], is_root: Callable[[M], bool]) -> str | None:
+    """The description that stands for a whole run or lineage.
+
+    ``ordered`` is the members in the caller's display order; each has a
+    ``description``. The first root's description wins; if there is no root, or
+    it has none, the first member that has one. The run pages and the Excel
+    export share this rule (issue #190, D-16) and differ only in the order
+    they pass in.
+    """
+    roots = [m for m in ordered if is_root(m)]
+    if roots and roots[0].description:
+        return roots[0].description
+    return next((m.description for m in ordered if m.description), None)
+
+
 def run_description(segments: list[RunSegment]) -> str | None:
     """Root segment's description (non-variant, no parent, earliest date); else the
     first segment that has one."""
-    ordered = by_date(segments)
-    roots = [s for s in ordered if not s.is_variant and s.parent_experiment_id is None]
-    if roots and roots[0].description:
-        return roots[0].description
-    return next((s.description for s in ordered if s.description), None)
+    return root_description(
+        by_date(segments),
+        is_root=lambda s: not s.is_variant and s.parent_experiment_id is None,
+    )
 
 
 def ongoing_ids(segments: Iterable[RunSegment]) -> list[str]:
@@ -169,6 +187,85 @@ def sort_runs(items: list[T]) -> list[T]:
         i.base_id,
     ))
     return items
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """What every run list row is built from, whatever the series."""
+
+    base_id: str
+    segments: list[RunSegment]
+    description: str | None
+    ongoing_experiment_ids: list[str]
+    samples: list[dict]        # every view row of the run, side samples included
+    real_samples: list[dict]   # the same without side samples (is_variant)
+    first_sample_date: datetime | None
+    last_sample_date: datetime | None
+    latest_cumulative_h2_grams_per_ton: float | None
+
+
+def resolve_run(
+    db: Session, requested_id: str, *,
+    include: Callable[[ExperimentalConditions], bool],
+    not_found: Callable[[str], Exception],
+) -> tuple[str, list[RunSegment]]:
+    """Base ID and segments (unsorted) of the run ``requested_id`` names: a
+    base, segment or variant ID (issue #158).
+
+    Raises ``not_found(requested_id)`` when no segment passes ``include``, so
+    the error names the ID the caller sent.
+    """
+    base_id = resolve_base_id(db, requested_id)
+    segments = load_segments(db, include=include, base_id=base_id).get(base_id)
+    if not segments:
+        raise not_found(requested_id)
+    return base_id, segments
+
+
+def summarize_runs(
+    db: Session, *,
+    include: Callable[[ExperimentalConditions], bool],
+    view: str,
+    scope: str = "active",
+    q: str | None = None,
+) -> list[RunSummary]:
+    """One summary per run of a series, for its list page (issue #190, D-17).
+
+    ``scope="active"`` keeps runs with an ONGOING segment; ``q`` filters on the
+    base ID, any segment ID or the description. Unsorted: each series sorts its
+    own list. Two queries, whatever the number of runs.
+    """
+    by_base = load_segments(db, include=include)
+    samples_by_base: dict[str, list[dict]] = defaultdict(list)
+    for row in fetch_samples(db, view, base_ids=list(by_base)):
+        samples_by_base[row["run_base_id"]].append(row)
+
+    needle = normalize_query(q)
+    summaries: list[RunSummary] = []
+    for base_id, segments in by_base.items():
+        description = run_description(segments)
+        if not matches(needle, base_id, segments, description):
+            continue
+        ongoing = ongoing_ids(segments)
+        if scope == "active" and not ongoing:
+            continue
+        samples = samples_by_base.get(base_id, [])
+        real = [r for r in samples if not r["is_variant"]]
+        dates = [_aware(r["sample_date"]) for r in real if r["sample_date"] is not None]
+        summaries.append(RunSummary(
+            base_id=base_id,
+            segments=segments,
+            description=description,
+            ongoing_experiment_ids=ongoing,
+            samples=samples,
+            real_samples=real,
+            first_sample_date=min(dates) if dates else None,
+            last_sample_date=max(dates) if dates else None,
+            # Rows arrive in view order, so the last one is the latest sample.
+            latest_cumulative_h2_grams_per_ton=(
+                real[-1]["cumulative_h2_grams_per_ton"] if real else None),
+        ))
+    return summaries
 
 
 def fetch_samples(

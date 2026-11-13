@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from typing import Callable, Literal, Optional, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies.db import get_db
+from backend.api.routers._helpers import call_or_http
 from backend.api.schemas.hpht import HphtRun, HphtRunListItem
 from backend.api.schemas.results import IcpRow
 from backend.auth.firebase_auth import FirebaseUser, verify_firebase_token
@@ -22,10 +23,10 @@ T = TypeVar("T")
 
 def _translate(fn: Callable[[], T]) -> T:
     """Run fn, mapping HphtRunNotFound to 404."""
-    try:
-        return fn()
-    except svc.HphtRunNotFound as exc:
-        raise HTTPException(status_code=404, detail=f"No HPHT run with base ID {exc}")
+    return call_or_http(
+        fn, ((svc.HphtRunNotFound, 404),),
+        detail=lambda exc: f"No HPHT run with base ID {exc}",
+    )
 
 
 @router.get("", response_model=list[HphtRunListItem])

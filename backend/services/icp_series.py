@@ -7,13 +7,13 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.api.schemas.results import (
     ICP_ELEMENTS, ExperimentIcpResponse, IcpRow, IcpSegmentStart,
 )
-from database.models.experiments import Experiment
+from backend.services.experiment_lookup import find_experiment, series_key
 
 # Element columns of icp_results aliased as icp_<el>; join alias must be `i`.
 ICP_SELECT = ", ".join(f'i."{e}" AS "icp_{e}"' for e in ICP_ELEMENTS)
@@ -64,12 +64,10 @@ def series_icp(db: Session, experiment_id: str) -> ExperimentIcpResponse:
     (the experiment alone when it has none), ordered by cumulative day, plus
     the start day of each chained segment. Serum vials (-tN) have no parent,
     so a vial set plots as one curve without markers."""
-    exp = db.execute(
-        select(Experiment).where(Experiment.experiment_id == experiment_id)
-    ).scalar_one_or_none()
+    exp = find_experiment(db, experiment_id)
     if exp is None:
         raise ExperimentNotFound(experiment_id)
-    params = {"base": exp.base_experiment_id or exp.experiment_id}
+    params = {"base": series_key(exp)}
     rows = icp_rows(db.execute(text(
         "SELECT er.id AS result_id, e.experiment_id, " + _IS_VARIANT + " AS is_variant,"
         " er.cumulative_time_post_reaction_days, sr.measurement_date AS sample_date, "
