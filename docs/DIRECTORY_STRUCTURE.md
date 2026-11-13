@@ -64,8 +64,6 @@ experiment_tracking_sandbox/
 │   ├── project_context/               ← auto-synced mirror for the wider team, do not edit directly
 │   └── sample_data/
 │
-├── legacy/streamlit_frontend/         ← old Streamlit UI, reference only
-│
 ├── scripts/                           ← manage_users.py, migrate-sqlite-to-postgres.py
 │
 ├── setup.ps1 / update.ps1 / backup.ps1   ← lab PC install & nightly update, see docs/deployment/STARTUP_GUIDE.md

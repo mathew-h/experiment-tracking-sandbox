@@ -58,12 +58,29 @@ These parsers handle real instrument output formats with edge cases accumulated 
 | `rock_inventory.py` | Geological sample bulk upsert |
 | `chemical_inventory.py` | Chemical compound database updates |
 | `experiment_status.py` | Batch status and reactor assignment updates |
-| `experiment_additives.py` | Chemical additive bulk updates |
-| `quick_upload.py` | Metric-specific mini-templates |
-| `long_format.py` | Long-format LIMS-compatible data |
-| `metric_groups.py` | Grouped metric upload templates |
+| ~~`experiment_additives.py`~~ | **Retired 2026-11-13 (issue #189), file deleted.** Chemical additive bulk updates |⁷
+| ~~`quick_upload.py`~~ | **Retired 2026-11-13 (issue #189), file deleted.** Metric-specific mini-templates |⁷
+| ~~`long_format.py`~~ | **Retired 2026-11-13 (issue #189), file deleted.** Long-format LIMS-compatible data |⁷
+| ~~`metric_groups.py`~~ | **Retired 2026-11-13 (issue #189), file deleted.** Grouped metric upload templates |⁷
 | `timepoint_modifications.py` | Timepoint-level modification notes |⁶
 | `master_bulk_upload.py` | Master Results Dashboard sheet parser |² ⁵ ⁶
+
+⁷ **Retired parsers (issue #189, 2026-11-13, with Mat Hearl's per-item sign-off;
+sweep findings L-S1 and L-S2).** These four modules had no FastAPI route. Their only
+callers were the Streamlit app in `legacy/streamlit_frontend/` (deleted in the same PR)
+and their own tests. Additive uploads go through the `new_experiments.py` additives
+sheet; scalar uploads go through `scalar_results.py` and `master_bulk_upload.py`. The
+footnotes below still name `quick_upload.py` and `long_format.py` where they record
+past decisions; read those mentions as history. One thing outlives the parser: notes
+already signed `quick_upload` keep that `created_by`, so the tag stays in
+`backend/services/notes.py::UPLOAD_SLOT_SIGNERS` (as a retired signer) and in
+`reclassify_upload_notes_024.py`. The same PR deleted dead code inside parsers that
+remain locked (L-S3 to L-S9): the non-`_ex` `ScalarResultsUploadService.bulk_upsert_from_excel`,
+`AnalyteService`, `ActlabsRockTitrationService.diagnose` and `_read_table_with_mode`,
+`ICPService.get_icp_results_for_experiment`, `update_icp_result` and
+`diagnose_csv_structure`, `PXRFUploadService.ingest_from_source`, the image-attach
+branch of `RockInventoryService.bulk_upsert_samples` (its `image_files` parameter and
+6-tuple return are unchanged), and `_id_match.fuzzy_find_experiment`.
 
 ¹ **Rename-path ordering contract (issue #86, changed with explicit sign-off).** The experiments-sheet loop now (a) flushes a rename's new `experiment_id` **before** recomputing lineage, so the group-parent lookup resolves against the new ID rather than the row's stale old ID (which could otherwise self-match and raise `CircularDependencyError` under the production `autoflush=False` session), and (b) wraps each row in a `db.begin_nested()` SAVEPOINT so a single failed row rolls back only itself instead of poisoning the whole batch with cascading `PendingRollbackError`. Preserve both properties when touching this loop. See the self-parent guard note in `.claude/rules/MODELS-lineage.md` and `tests/services/bulk_uploads/test_new_experiments_rename_lineage.py`.
 
@@ -103,7 +120,9 @@ the token is split, so `-t<days>` is at end-of-string when that anchored regex r
 `create_icp_result` splats it into `result_data` and stores every unrecognized key
 in the `all_elements` JSONB as a fake element; (d) `process_icp_dataframe` and
 `parse_and_process_icp_file` must keep their 2-tuple arity — `legacy/streamlit_frontend/bulk_uploads.py:1558,1599`
-still calls the latter; (e) the router's early "ICP parse failed" return must pass
+still calls the latter (**note 2026-11-13, issue #189:** that legacy caller is retired
+and deleted; the 2-tuple arity is nevertheless unchanged, because tests still unpack
+two values, and relaxing it is tracked in #172); (e) the router's early "ICP parse failed" return must pass
 `warnings=`, since the all-labels-skipped case is exactly where that warning is the
 only explanation available; (f) the disagreement warning's wording must stay a claim
 about the **label**, never about persisted data. That tally runs at parse time,
