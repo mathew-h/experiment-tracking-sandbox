@@ -379,3 +379,41 @@ def test_group_detail_query_count_does_not_grow_with_members(client, db_session,
     assert large <= GROUP_DETAIL_CEILING, large
     assert body_large["shared_conditions"]["rock_mass_g"] == 2.0
     assert body_large["divergent_fields"] == []
+
+
+# ── E-11: experiment delete ──────────────────────────────────────────────────
+
+DELETE_SELECT_CEILING = 30
+
+
+def _select_count(statements: list[str]) -> int:
+    return sum(1 for s in statements if s.lstrip().upper().startswith("SELECT"))
+
+
+def test_delete_select_count_does_not_grow_with_results(client, db_session):
+    compounds = _compounds(db_session, "QCDEL")
+    _experiment(db_session, "QCDEL_001", 9199200, compounds, results=2, with_icp=True)
+    _experiment(db_session, "QCDEL_002", 9199201, compounds, results=10, with_icp=True)
+    db_session.commit()
+
+    counts, impacts = [], []
+    for experiment_id in ("QCDEL_001", "QCDEL_002"):
+        db_session.expire_all()
+        with count_queries() as statements:
+            resp = client.delete(f"/api/experiments/{experiment_id}")
+        assert resp.status_code == 200, resp.text
+        counts.append(_select_count(statements))
+        impacts.append(resp.json())
+    assert counts[0] == counts[1], f"SELECT count grew with results: {counts}"
+    assert counts[1] <= DELETE_SELECT_CEILING, counts
+
+    # What gets deleted is unchanged: the impact counts still describe it.
+    for body, expected in zip(impacts, (2, 10)):
+        impact = body["impact"]
+        assert (impact["results"], impact["scalar_results"], impact["icp_results"]) == (expected,) * 3
+    db_session.expire_all()
+    assert db_session.query(Experiment).filter(Experiment.experiment_id.like("QCDEL_%")).count() == 0
+    assert db_session.query(ScalarResults).join(
+        ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id
+    ).join(Experiment, Experiment.id == ExperimentalResults.experiment_fk).filter(
+        Experiment.experiment_id.like("QCDEL_%")).count() == 0
