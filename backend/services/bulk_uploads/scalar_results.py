@@ -44,24 +44,6 @@ class ScalarResultsUploadService:
         return parsed.to_pydatetime()
 
     @staticmethod
-    def bulk_upsert_from_excel(
-        db: Session,
-        file_bytes: bytes,
-        overwrite_all: bool = False,
-    ) -> Tuple[int, int, int, List[str]]:
-        """
-        Parse the Solution Chemistry Excel and delegate creation/upsert to ScalarResultsService.
-
-        Returns ``(created, updated, skipped, errors)``.
-        """
-        created, updated, skipped, errors, _feedbacks = (
-            ScalarResultsUploadService.bulk_upsert_from_excel_ex(
-                db, file_bytes, overwrite_all=overwrite_all, dry_run=False,
-            )
-        )
-        return created, updated, skipped, errors
-
-    @staticmethod
     def bulk_upsert_from_excel_ex(
         db: Session,
         file_bytes: bytes,
