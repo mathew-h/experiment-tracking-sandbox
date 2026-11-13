@@ -22,6 +22,7 @@ from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
     ExperimentResponse, ExperimentDetailResponse, ExperimentStatusUpdate, NextIdResponse,
+    ModificationResponse,
     NoteCreate, NoteResponse, NoteUpdate, ReviewNoteItem, ReviewQueueResponse, DistinctText,
     NotesBulkPatch, NotesBulkDelete, NotesBulkResponse,
     ReplicateGroupMember, ReplicateGroupResponse,
@@ -1438,34 +1439,13 @@ def get_experiment(
     ).scalars().all()
 
     cond_dict = ConditionsResponse.model_validate(cond).model_dump() if cond else None
-    notes_list = [
-        {
-            "id": n.id,
-            "note_text": n.note_text,
-            "note_type": n.note_type.value,
-            "result_id": n.result_id,
-            "event_date": n.event_date.isoformat() if n.event_date else None,
-            "created_by": n.created_by,
-            "needs_review": n.needs_review,
-            "created_at": n.created_at.isoformat(),
-            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
-        }
-        for n in notes
-    ]
-    mods_list = [
-        {
-            "id": m.id,
-            "modified_by": m.modified_by,
-            "modification_type": m.modification_type,
-            "modified_table": m.modified_table,
-            "old_values": m.old_values,
-            "new_values": m.new_values,
-            "created_at": m.created_at.isoformat(),
-        }
-        for m in mods
-    ]
     base = ExperimentResponse.model_validate(exp)
-    return ExperimentDetailResponse(**base.model_dump(), conditions=cond_dict, notes=notes_list, modifications=mods_list)
+    return ExperimentDetailResponse(
+        **base.model_dump(),
+        conditions=cond_dict,
+        notes=[NoteResponse.model_validate(n) for n in notes],
+        modifications=[ModificationResponse.model_validate(m) for m in mods],
+    )
 
 
 @router.post("", response_model=ExperimentResponse, status_code=201)

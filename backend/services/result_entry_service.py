@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 import backend.services.calculations  # noqa: F401 — registers @register decorators
 from backend.services import notes as notes_service
+from backend.services.audit import audit_values
 from backend.services.calculations.registry import recalculate
 from backend.services.experiment_lookup import find_experiment, lowest_conditions
 from backend.services.result_merge_utils import (
@@ -131,11 +132,6 @@ def conditions_for(db: Session, exp: Experiment) -> ExperimentalConditions | Non
     return lowest_conditions(db, exp.id)
 
 
-def _jsonable(values: dict) -> dict:
-    """Audit-log payload: datetimes become ISO strings."""
-    return {k: v.isoformat() if isinstance(v, datetime) else v for k, v in values.items()}
-
-
 def _audit(
     db: Session, exp: Experiment, table: str,
     mod_type: Literal["create", "update", "delete"],
@@ -147,8 +143,8 @@ def _audit(
         modified_by=user_email,
         modification_type=mod_type,
         modified_table=table,
-        old_values=_jsonable(old) if old is not None else None,
-        new_values=_jsonable(new) if new is not None else None,
+        old_values=audit_values(old) if old is not None else None,
+        new_values=audit_values(new) if new is not None else None,
     ))
 
 
