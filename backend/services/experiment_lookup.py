@@ -75,3 +75,16 @@ def scalars_for_experiment(db: Session, experiment_fk: int) -> list[ScalarResult
         .where(ExperimentalResults.experiment_fk == experiment_fk)
         .order_by(ScalarResults.id)
     ).scalars())
+
+
+def is_variant(exp: Experiment) -> bool:
+    """True for a side sample: an experiment whose ID is ``<parent ID>_<Text>``.
+
+    Blanks and bypass samples (CF_027-2_Bypass1 under CF_027-2) are variants;
+    a sequential segment (CF_027-2 under CF_027) is not. Python twin of the
+    ``is_variant`` column in v_core_flood_samples and v_hpht_samples, and of
+    ``_IS_VARIANT`` in icp_series.py. Reads ``exp.parent``, so load it eagerly
+    when calling this in a loop.
+    """
+    parent = exp.parent
+    return parent is not None and exp.experiment_id.startswith(parent.experiment_id + "_")

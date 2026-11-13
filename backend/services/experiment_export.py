@@ -28,7 +28,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.results import ICP_ELEMENTS
 from backend.services.core_flood_service import is_core_flood
-from backend.services.experiment_lookup import find_experiment, lowest_conditions_map, series_key
+from backend.services.experiment_lookup import (
+    find_experiment, is_variant, lowest_conditions_map, series_key,
+)
 from backend.services.replicate_collapse import timepoint_stem_expr
 from backend.services.workdays import LAB_TZ
 from database.experiment_id_parser import split_timepoint_token
@@ -272,8 +274,7 @@ def _load_members(db: Session, exps: list[Experiment]) -> list[Member]:
             experiment_id=e.experiment_id,
             base_id=series_key(e),
             experiment_type=cond.experiment_type if cond is not None else None,
-            is_variant=parent is not None
-            and e.experiment_id.startswith(parent.experiment_id + "_"),
+            is_variant=is_variant(e),
             status=e.status.value if e.status is not None else None,
             date=e.date,
             description=e.description,

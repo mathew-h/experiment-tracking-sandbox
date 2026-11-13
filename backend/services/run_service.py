@@ -16,6 +16,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.runs import RunSegment
+from backend.services.experiment_lookup import is_variant
 from backend.services.icp_series import ICP_SELECT, icp_rows
 from backend.api.schemas.results import IcpRow
 from backend.services.result_entry_service import _aware
@@ -87,8 +88,7 @@ def load_segments(
             status=exp.status.value if exp.status is not None else None,
             date=exp.date,
             parent_experiment_id=parent.experiment_id if parent is not None else None,
-            is_variant=parent is not None
-            and exp.experiment_id.startswith(parent.experiment_id + "_"),
+            is_variant=is_variant(exp),
             description=exp.description,
             conditions_id=cond.id,
             pore_volume_mL=cond.pore_volume_mL,
