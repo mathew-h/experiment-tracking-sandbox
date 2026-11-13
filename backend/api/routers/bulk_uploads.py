@@ -345,8 +345,15 @@ async def upload_pxrf(
                 _or(*_like_conds),
             ).all()
 
-            for _sid in {ea.sample_id for ea in affected_eas if ea.sample_id}:
-                _sample = db.query(_SI).filter(_SI.sample_id == _sid).first()
+            # Issue #191 (E-14): the affected samples in one query, not one each.
+            # Sorted so the audit rows are written in a stable order.
+            _affected_ids = sorted({ea.sample_id for ea in affected_eas if ea.sample_id})
+            _samples = {
+                s.sample_id: s
+                for s in db.query(_SI).filter(_SI.sample_id.in_(_affected_ids)).all()
+            } if _affected_ids else {}
+            for _sid in _affected_ids:
+                _sample = _samples.get(_sid)
                 if _sample is None:
                     continue
                 _old = _sample.characterized
