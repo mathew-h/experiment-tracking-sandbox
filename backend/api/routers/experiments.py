@@ -15,7 +15,9 @@ from database.experiment_id_parser import split_timepoint_token
 from backend.services.replicate_collapse import collapse_by_stem, timepoint_stem_expr
 from backend.api.dependencies.db import get_db
 from backend.api.routers._helpers import call_or_http, get_experiment_or_404
-from backend.services.experiment_lookup import find_experiment, lowest_conditions, series_key
+from backend.services.experiment_lookup import (
+    find_experiment, lowest_conditions, scalars_for_experiment, series_key,
+)
 from backend.auth.firebase_auth import verify_firebase_token, FirebaseUser
 from backend.api.schemas.experiments import (
     ExperimentCreate, ExperimentUpdate, ExperimentListItem, ExperimentListResponse,
@@ -1321,13 +1323,7 @@ def set_experiment_background_ammonium(
     """
     exp = get_experiment_or_404(db, experiment_id)
 
-    result_ids = db.execute(
-        select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
-    ).scalars().all()
-
-    scalars = db.execute(
-        select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
-    ).scalars().all()
+    scalars = scalars_for_experiment(db, exp.id)
 
     for scalar in scalars:
         scalar.background_ammonium_concentration_mM = payload.value
@@ -1698,13 +1694,7 @@ def update_experiment(
         # Also recalculate scalars directly: conditions_calcs.py cascades to scalars via ORM
         # relationships when conditions exist, but this explicit loop ensures scalars update
         # even when there are no conditions (total_ferrous_iron_g stays NULL in that case).
-        result_ids = db.execute(
-            select(ExperimentalResults.id).where(ExperimentalResults.experiment_fk == exp.id)
-        ).scalars().all()
-        scalars = db.execute(
-            select(ScalarResults).where(ScalarResults.result_id.in_(result_ids))
-        ).scalars().all()
-        for scalar in scalars:
+        for scalar in scalars_for_experiment(db, exp.id):
             recalculate(scalar, db)
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,

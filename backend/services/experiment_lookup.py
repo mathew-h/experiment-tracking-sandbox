@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from database.models.conditions import ExperimentalConditions
 from database.models.experiments import Experiment
+from database.models.results import ExperimentalResults, ScalarResults
 
 
 def find_experiment(db: Session, experiment_id: str) -> Experiment | None:
@@ -64,3 +65,13 @@ def lowest_conditions_map(
     for cond in rows:
         found.setdefault(cond.experiment_fk, cond)  # first seen is the lowest id
     return found
+
+
+def scalars_for_experiment(db: Session, experiment_fk: int) -> list[ScalarResults]:
+    """Every ScalarResults row of the experiment's results, in id order (one query)."""
+    return list(db.execute(
+        select(ScalarResults)
+        .join(ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id)
+        .where(ExperimentalResults.experiment_fk == experiment_fk)
+        .order_by(ScalarResults.id)
+    ).scalars())
