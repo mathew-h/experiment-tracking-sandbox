@@ -363,3 +363,103 @@ def test_delete_additive_resolves_via_fk_despite_stale_string(client, db_session
     assert resp.status_code == 204
     gone = db_session.get(ChemicalAdditive, additive.id)
     assert gone is None
+
+
+# ── Issue #190 (D-07): one additive service, audit rows signed with the email ──
+
+_EMAIL = "test@addisenergy.com"  # conftest _FAKE_USER.email; its uid is "test-uid"
+
+
+def _additive_logs(db, exp, modification_type):
+    return db.execute(
+        select(ModificationsLog).where(
+            ModificationsLog.experiment_fk == exp.id,
+            ModificationsLog.modified_table == "chemical_additives",
+            ModificationsLog.modification_type == modification_type,
+        ).order_by(ModificationsLog.id)
+    ).scalars().all()
+
+
+def test_put_additive_create_recalculates_and_signs_with_the_email(client, db_session):
+    exp, _cond, _compound, _existing = _setup_experiment_with_additive(db_session, "ADDSVC_001", 6101)
+    other = Compound(name="ADDSVC Nickel Chloride", molecular_weight_g_mol=129.6)
+    db_session.add(other)
+    db_session.commit()
+
+    resp = client.put(f"/api/experiments/ADDSVC_001/additives/{other.id}", json={"amount": 5.0, "unit": "mM"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # 5 mM in 500 mL = 2.5 mmol; x 129.6 g/mol = 0.324 g. Stored, not NULL: the
+    # explicit post-flush recalculate is what fills these for concentration units.
+    assert body["moles_added"] == pytest.approx(0.0025)
+    assert body["mass_in_grams"] == pytest.approx(0.324)
+
+    (entry,) = _additive_logs(db_session, exp, "create")
+    assert entry.modified_by == _EMAIL
+    assert entry.experiment_id == "ADDSVC_001"
+    assert entry.old_values is None
+    assert entry.new_values == {"amount": 5.0, "unit": "mM"}
+
+
+def test_put_additive_update_logs_amount_and_unit_before_and_after(client, db_session):
+    exp, _cond, compound, additive = _setup_experiment_with_additive(db_session, "ADDSVC_002", 6102,
+                                                                     compound_name="ADDSVC Iron Oxide")
+    resp = client.put(f"/api/experiments/ADDSVC_002/additives/{compound.id}", json={"amount": 9.0, "unit": "g"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["id"] == additive.id  # updated in place, not duplicated
+    assert resp.json()["mass_in_grams"] == pytest.approx(9.0)
+
+    (entry,) = _additive_logs(db_session, exp, "update")
+    assert entry.modified_by == _EMAIL
+    assert entry.old_values == {"amount": 5.0, "unit": "g"}
+    assert entry.new_values == {"amount": 9.0, "unit": "g"}
+
+
+def test_delete_experiment_additive_logs_the_snapshot_with_the_email(client, db_session):
+    exp, _cond, compound, additive = _setup_experiment_with_additive(db_session, "ADDSVC_003", 6103,
+                                                                     compound_name="ADDSVC Magnetite")
+    additive_id = additive.id
+    assert client.delete(f"/api/experiments/ADDSVC_003/additives/{compound.id}").status_code == 204
+    db_session.expire_all()
+    assert db_session.get(ChemicalAdditive, additive_id) is None
+
+    (entry,) = _additive_logs(db_session, exp, "delete")
+    assert entry.modified_by == _EMAIL
+    assert entry.old_values == {
+        "compound_id": compound.id, "compound_name": "ADDSVC Magnetite", "amount": 5.0, "unit": "g",
+    }
+    assert entry.new_values is None
+
+
+def test_both_delete_routes_write_the_same_audit_payload(client, db_session):
+    exp_a, _c, compound_a, _a = _setup_experiment_with_additive(db_session, "ADDSVC_004", 6104,
+                                                                 compound_name="ADDSVC Hematite A")
+    exp_b, _c, _compound_b, additive_b = _setup_experiment_with_additive(db_session, "ADDSVC_005", 6105,
+                                                                         compound_name="ADDSVC Hematite B")
+    assert client.delete(f"/api/experiments/ADDSVC_004/additives/{compound_a.id}").status_code == 204
+    assert client.delete(f"/api/additives/{additive_b.id}").status_code == 204
+
+    (by_compound,) = _additive_logs(db_session, exp_a, "delete")
+    (by_pk,) = _additive_logs(db_session, exp_b, "delete")
+    assert by_compound.modified_by == by_pk.modified_by == _EMAIL
+    assert set(by_compound.old_values) == set(by_pk.old_values) == {"compound_id", "compound_name", "amount", "unit"}
+
+
+def test_patch_additive_logs_a_unit_change_as_plain_text(client, db_session):
+    exp, _cond, _compound, additive = _setup_experiment_with_additive(db_session, "ADDSVC_006", 6106,
+                                                                      compound_name="ADDSVC Siderite")
+    assert client.patch(f"/api/additives/{additive.id}", json={"unit": "mg"}).status_code == 200
+    (entry,) = _additive_logs(db_session, exp, "update")
+    assert entry.modified_by == _EMAIL
+    assert entry.old_values == {"unit": "g"}
+    assert entry.new_values == {"unit": "mg"}
+
+
+def test_experiment_patch_audit_rows_are_signed_with_the_email(client, db_session):
+    """Decision H-05: update_experiment used to sign with the Firebase uid."""
+    exp, *_ = _setup_experiment_with_additive(db_session, "ADDSVC_007", 6107, compound_name="ADDSVC Pyrite")
+    assert client.patch("/api/experiments/ADDSVC_007", json={"is_outlier": True}).status_code == 200
+    rows = db_session.execute(
+        select(ModificationsLog).where(ModificationsLog.experiment_fk == exp.id)
+    ).scalars().all()
+    assert rows and {r.modified_by for r in rows} == {_EMAIL}

@@ -48,6 +48,7 @@ from database.models.conditions import ExperimentalConditions
 from database.models.samples import SampleInfo
 from backend.api.schemas.chemicals import AdditiveResponse, ChemicalAdditiveUpsert
 from backend.services.calculations.registry import recalculate
+from backend.services import additive_service
 from backend.services import notes as notes_service
 from backend.services import experiment_export
 from backend.services.experiment_deletion import (
@@ -1242,38 +1243,11 @@ def upsert_experiment_additive(
     compound = db.get(Compound, compound_id)
     if compound is None:
         raise HTTPException(status_code=404, detail="Compound not found")
-    existing = db.execute(
-        select(ChemicalAdditive)
-        .where(ChemicalAdditive.experiment_id == conditions.id)
-        .where(ChemicalAdditive.compound_id == compound_id)
-    ).scalar_one_or_none()
-    if existing:
-        old_vals = {"amount": existing.amount, "unit": existing.unit.value if existing.unit else None}
-        mod_type = "update"
-        for k, v in payload.model_dump(exclude_unset=True).items():
-            setattr(existing, k, v)
-        additive = existing
-    else:
-        old_vals = None
-        mod_type = "create"
-        additive = ChemicalAdditive(
-            experiment_id=conditions.id,
-            compound_id=compound_id,
-            **payload.model_dump(),
-        )
-        db.add(additive)
-    db.flush()
-    recalculate(additive, db)
-    new_vals = {"amount": additive.amount, "unit": additive.unit.value if additive.unit else None}
-    db.add(ModificationsLog(
-        experiment_id=experiment_id,
-        experiment_fk=exp.id,
-        modified_by=current_user.uid,
-        modification_type=mod_type,
-        modified_table="chemical_additives",
-        old_values=old_vals,
-        new_values=new_vals,
-    ))
+    additive = additive_service.upsert_additive(
+        db, exp, conditions, compound_id,
+        fields=payload.model_dump(), fields_set=payload.model_dump(exclude_unset=True),
+        user_email=current_user.email,
+    )
     db.commit()
     db.refresh(additive)
     log.info("additive_upserted", experiment_id=experiment_id, compound_id=compound_id)
@@ -1294,30 +1268,10 @@ def delete_experiment_additive(
     conditions = lowest_conditions(db, exp.id)
     if conditions is None:
         raise HTTPException(status_code=404, detail="Experiment not found")
-    additive = db.execute(
-        select(ChemicalAdditive)
-        .where(ChemicalAdditive.experiment_id == conditions.id)
-        .where(ChemicalAdditive.compound_id == compound_id)
-    ).scalar_one_or_none()
+    additive = additive_service.find_additive(db, conditions.id, compound_id)
     if additive is None:
         raise HTTPException(status_code=404, detail="Additive not found")
-    compound = db.get(Compound, compound_id)
-    old_vals = {
-        "compound_id": compound_id,
-        "compound_name": compound.name if compound else None,
-        "amount": additive.amount,
-        "unit": additive.unit.value if additive.unit else None,
-    }
-    db.delete(additive)
-    db.add(ModificationsLog(
-        experiment_id=experiment_id,
-        experiment_fk=exp.id,
-        modified_by=current_user.uid,
-        modification_type="delete",
-        modified_table="chemical_additives",
-        old_values=old_vals,
-        new_values=None,
-    ))
+    additive_service.delete_additive(db, additive, exp, current_user.email)
     db.commit()
     log.info("additive_deleted", experiment_id=experiment_id, compound_id=compound_id)
     return Response(status_code=204)
@@ -1532,7 +1486,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"date": old_date.isoformat() if old_date else None},
@@ -1544,7 +1498,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"is_outlier": old_is_outlier},
@@ -1557,7 +1511,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"is_background": old_is_background},
@@ -1664,7 +1618,7 @@ def update_experiment(
             db.add(ModificationsLog(
                 experiment_id=new_id,
                 experiment_fk=exp.id,
-                modified_by=current_user.uid,
+                modified_by=current_user.email,
                 modification_type="update",
                 modified_table="experiments",
                 old_values={"experiment_id": experiment_id},
@@ -1692,7 +1646,7 @@ def update_experiment(
         db.add(ModificationsLog(
             experiment_id=exp.experiment_id,
             experiment_fk=exp.id,
-            modified_by=current_user.uid,
+            modified_by=current_user.email,
             modification_type="update",
             modified_table="experiments",
             old_values={"sample_id": old_sample_id},
