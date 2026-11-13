@@ -992,7 +992,7 @@ POST /api/bulk-uploads/experiment-deletion   file=<xlsx with experiment_id colum
 | POST | `/api/bulk-uploads/pxrf` | Import pXRF readings from instrument export. |
 | POST | `/api/bulk-uploads/experiment-deletion` | **Hard-deletes** every experiment in the file's `experiment_id` column. **403 for anyone but `mhearl@addisenergy.com`** (see below). |
 | GET | `/api/bulk-uploads/templates/{upload_type}` | Download Excel template. `upload_type`: `scalar-results`, `new-experiments`, `xrd-mineralogy`, `timepoint-modifications`, `rock-inventory`, `chemical-inventory`, `elemental-composition`, `experiment-status`, `experiment-deletion`. Returns 404 for types with no template. |
-| GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. |
+| GET | `/api/experiments/next-ids` | Returns `{"HPHT": N, "Serum": N, "CF": N}` — next experiment number per type. Used by New Experiments card. Requires auth. |
 
 ## Core floods
 
@@ -1140,6 +1140,8 @@ Same as `GET /api/core-floods/{base_id}/icp`, joined on `v_hpht_samples`: `IcpRo
 `/hpht` and `/hpht/:baseId` in the frontend read these three endpoints (`frontend/src/api/hpht.ts`, query keys `['hpht-runs', scope, q]`, `['hpht-run', baseId]`, `['hpht-icp', baseId]`). The page writes nothing through `/api/hpht`: sample add/edit goes through `POST` / `PATCH /api/experiments/{experiment_id}/results` (the #148 `ResultEntryModal`, pointed at one segment), and segment rename/status/description through the experiment endpoints. After a write it invalidates `['hpht-runs']`, `['hpht-run', baseId]`, `['hpht-icp', baseId]`, `['experiment', segmentId]`, `['experiment-results', segmentId]` and `['dashboard']`. The charts plot `cumulative_h2_grams_per_ton`, `h2_grams_per_ton_per_day` and `cumulative_ferrous_iron_yield_h2_pct` against `cumulative_time_post_reaction_days` for non-variant rows only; a NULL value is drawn as a gap, never as 0.
 
 ## Interactive Docs
+
+Off by default. The backend serves these three URLs only when `ENABLE_API_DOCS=true` is set in `.env`; set it in dev and never in production. When it is off, the SPA catch-all answers these paths with `index.html`.
 
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`

@@ -20,6 +20,17 @@ from backend.api.routers import (
 settings = get_settings()
 
 
+def api_docs_kwargs(s) -> dict:
+    """FastAPI docs/schema URLs: published only when ENABLE_API_DOCS is true."""
+    if s.enable_api_docs:
+        return {
+            "docs_url": "/docs",
+            "redoc_url": "/redoc",
+            "openapi_url": "/openapi.json",
+        }
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from database.database import reset_postgres_sequences
@@ -32,6 +43,7 @@ app = FastAPI(
     title="Experiment Tracking System API",
     description="Backend API for laboratory experiment tracking",
     version="1.0.0",
+    **api_docs_kwargs(settings),
     openapi_tags=[
         {"name": "experiments", "description": "Experiment CRUD and notes"},
         {"name": "conditions", "description": "Experimental conditions and calculation engine"},

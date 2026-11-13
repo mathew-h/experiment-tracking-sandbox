@@ -53,4 +53,4 @@ do not attempt to restart the process.
 
 ## API Reference
 Full endpoint reference: `docs/api/API_REFERENCE.md`
-Interactive docs when server is running: `http://localhost:8000/docs`
+Interactive docs when server is running: `http://localhost:8000/docs` (only with `ENABLE_API_DOCS=true` in `.env`; off by default)

@@ -3149,3 +3149,9 @@ pinned `/{experiment_id}/replicate-group` wrapper are all untouched.
 - **Deploy:** frontend only, no migration, no package change.
 - **Follow-up candidate:** format `additives_summary` amounts in the backend.
 - **Tests added:** yes — vitest `numberFormat` unit tests; `RunSamplesTable` flow-rate / day-label precision and hover title; 8 existing test files updated to the new precision. **Docs updated:** yes. **Decision logged:** yes.
+
+## 2026-11-13 | inline — Hide public API endpoints before cloud move (`fix/hide-public-endpoints`)
+- **Files changed:** `backend/api/routers/experiments.py` (`GET /api/experiments/next-ids` now depends on `verify_firebase_token`), `backend/config/settings.py` (`enable_api_docs`, default False), `backend/api/main.py` (`api_docs_kwargs`; `/docs`, `/redoc`, `/openapi.json` registered only when `ENABLE_API_DOCS=true`), `.env.example`, `docs/api/API_REFERENCE.md`, `docs/specs/new_experiments_upload.md`, `backend/CLAUDE.md`
+- **Tests added:** yes — `test_next_ids_requires_auth` (replaces `test_next_ids_no_auth_required`, expects 401), `test_api_docs_disabled_by_default`, `test_api_docs_enabled_by_setting`, `test_app_registers_docs_routes_only_when_enabled` (route registry, not HTTP status, because the SPA catch-all answers `/docs`); `test_openapi_schema_has_all_tags` now calls `app.openapi()` directly
+- **Decision logged:** no. Docs are off unless opted in, so a cloud deploy can't publish them by accident. Devs who want Swagger locally add `ENABLE_API_DOCS=true` to their own `.env`. The frontend already sends the bearer token on every request, so NextIdChips is unaffected.
+- **Lab PC:** after `update.ps1`, `/docs` serves the React app instead of Swagger; no `.env` change is needed there.
