@@ -61,6 +61,11 @@ def is_hpht(conditions: ExperimentalConditions | None) -> bool:
     return conditions is not None and series_prefix(conditions.experiment_type) == "R"
 
 
+# Every spelling is_hpht accepts contains this once lower-cased. A SQL
+# pre-filter only; is_hpht stays the rule (run_service.load_segments).
+HPHT_TYPE_CONTAINS = ("hpht",)
+
+
 def _base_mismatch(base_id: str, experiment_id: str) -> bool:
     """True unless the ID is the base itself or `<base>-...` / `<base>_...`.
 
@@ -113,7 +118,8 @@ def _resolve(db: Session, requested_id: str) -> tuple[str, list[RunSegment]]:
     base, segment or variant ID (issue #158). Not-found reports the ID
     the caller sent."""
     base_id, segments = runs.resolve_run(
-        db, requested_id, include=is_hpht, not_found=HphtRunNotFound)
+        db, requested_id, include=is_hpht, not_found=HphtRunNotFound,
+        type_contains=HPHT_TYPE_CONTAINS)
     return base_id, runs.by_date(segments)
 
 
@@ -150,6 +156,7 @@ def list_runs(
             latest_cumulative_h2_grams_per_ton=run.latest_cumulative_h2_grams_per_ton,
             warning_count=len(compute_warnings(run.base_id, run.segments)),
         )
-        for run in runs.summarize_runs(db, include=is_hpht, view=_VIEW, scope=scope, q=q)
+        for run in runs.summarize_runs(db, include=is_hpht, view=_VIEW, scope=scope, q=q,
+                                       type_contains=HPHT_TYPE_CONTAINS)
     ]
     return _sort_by_reactor(items)

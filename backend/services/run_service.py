@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Protocol, Sequence, TypeVar
 
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from backend.api.schemas.runs import RunSegment
@@ -62,8 +62,17 @@ def load_segments(
     *,
     include: Callable[[ExperimentalConditions], bool],
     base_id: str | None = None,
+    type_contains: Sequence[str] | None = None,
 ) -> dict[str, list[RunSegment]]:
-    """Segments whose conditions pass `include`, grouped by base_experiment_id (one query)."""
+    """Segments whose conditions pass `include`, grouped by base_experiment_id (one query).
+
+    `include` is the rule. `type_contains` only narrows what the database
+    sends back (issue #191, E-12): rows whose lower-cased experiment_type
+    contains none of these substrings are skipped in SQL instead of being
+    loaded and then rejected by `include`. It must be a superset of what
+    `include` accepts; a series passes the substrings every accepted spelling
+    of its type contains (see HPHT_TYPE_CONTAINS, CORE_FLOOD_TYPE_CONTAINS).
+    """
     stmt = (
         select(Experiment, ExperimentalConditions)
         .join(ExperimentalConditions, ExperimentalConditions.experiment_fk == Experiment.id)
@@ -75,6 +84,9 @@ def load_segments(
     )
     if base_id is not None:
         stmt = stmt.where(Experiment.base_experiment_id == base_id)
+    if type_contains:
+        lowered = func.lower(ExperimentalConditions.experiment_type)
+        stmt = stmt.where(or_(*[lowered.contains(part, autoescape=True) for part in type_contains]))
     grouped: dict[str, list[RunSegment]] = defaultdict(list)
     seen: set[int] = set()
     for exp, cond in db.execute(stmt).all():
@@ -208,6 +220,7 @@ def resolve_run(
     db: Session, requested_id: str, *,
     include: Callable[[ExperimentalConditions], bool],
     not_found: Callable[[str], Exception],
+    type_contains: Sequence[str] | None = None,
 ) -> tuple[str, list[RunSegment]]:
     """Base ID and segments (unsorted) of the run ``requested_id`` names: a
     base, segment or variant ID (issue #158).
@@ -216,7 +229,8 @@ def resolve_run(
     the error names the ID the caller sent.
     """
     base_id = resolve_base_id(db, requested_id)
-    segments = load_segments(db, include=include, base_id=base_id).get(base_id)
+    segments = load_segments(
+        db, include=include, base_id=base_id, type_contains=type_contains).get(base_id)
     if not segments:
         raise not_found(requested_id)
     return base_id, segments
@@ -228,20 +242,21 @@ def summarize_runs(
     view: str,
     scope: str = "active",
     q: str | None = None,
+    type_contains: Sequence[str] | None = None,
 ) -> list[RunSummary]:
     """One summary per run of a series, for its list page (issue #190, D-17).
 
     ``scope="active"`` keeps runs with an ONGOING segment; ``q`` filters on the
     base ID, any segment ID or the description. Unsorted: each series sorts its
     own list. Two queries, whatever the number of runs.
-    """
-    by_base = load_segments(db, include=include)
-    samples_by_base: dict[str, list[dict]] = defaultdict(list)
-    for row in fetch_samples(db, view, base_ids=list(by_base)):
-        samples_by_base[row["run_base_id"]].append(row)
 
+    The scope and ``q`` filters need only the segments, so they run first and
+    samples are fetched just for the runs that remain (issue #191, E-12): the
+    default "active" list no longer reads every finished run's samples.
+    """
+    by_base = load_segments(db, include=include, type_contains=type_contains)
     needle = normalize_query(q)
-    summaries: list[RunSummary] = []
+    kept: list[tuple[str, list[RunSegment], str | None, list[str]]] = []
     for base_id, segments in by_base.items():
         description = run_description(segments)
         if not matches(needle, base_id, segments, description):
@@ -249,6 +264,14 @@ def summarize_runs(
         ongoing = ongoing_ids(segments)
         if scope == "active" and not ongoing:
             continue
+        kept.append((base_id, segments, description, ongoing))
+
+    samples_by_base: dict[str, list[dict]] = defaultdict(list)
+    for row in fetch_samples(db, view, base_ids=[base_id for base_id, *_ in kept]):
+        samples_by_base[row["run_base_id"]].append(row)
+
+    summaries: list[RunSummary] = []
+    for base_id, segments, description, ongoing in kept:
         samples = samples_by_base.get(base_id, [])
         real = [r for r in samples if not r["is_variant"]]
         dates = [_aware(r["sample_date"]) for r in real if r["sample_date"] is not None]

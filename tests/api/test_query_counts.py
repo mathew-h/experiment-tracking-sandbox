@@ -417,3 +417,79 @@ def test_delete_select_count_does_not_grow_with_results(client, db_session):
         ExperimentalResults, ExperimentalResults.id == ScalarResults.result_id
     ).join(Experiment, Experiment.id == ExperimentalResults.experiment_fk).filter(
         Experiment.experiment_id.like("QCDEL_%")).count() == 0
+
+
+# ── E-12: run lists filter by series in SQL and skip inactive runs' samples ──
+
+def test_type_prefilters_never_exclude_a_spelling_the_python_rule_accepts():
+    """type_contains only narrows the SQL; it must be a superset of the rule.
+    Every spelling the Python rule accepts has to contain one of the substrings
+    once lower-cased, or a run would silently vanish from its list."""
+    from backend.services.core_flood_service import CORE_FLOOD_TYPE_CONTAINS
+    from backend.services.hpht_service import HPHT_TYPE_CONTAINS
+    from database.reactor_slot import _SERIES_BY_TYPE, series_prefix
+
+    for prefix, parts in (("R", HPHT_TYPE_CONTAINS), ("CF", CORE_FLOOD_TYPE_CONTAINS)):
+        canonical = [name for name, series in _SERIES_BY_TYPE.items() if series == prefix]
+        assert canonical, prefix
+        spellings = []
+        for name in canonical:
+            spellings += [name, name.upper(), name.title(), f"  {name}  ", name.replace(" ", "   "),
+                          name.replace(" ", "\t")]
+        for spelling in spellings:
+            assert series_prefix(spelling) == prefix, spelling
+            assert any(part in spelling.lower() for part in parts), (spelling, parts)
+
+
+def _run(db, base: str, number: int, experiment_type: str, status: ExperimentStatus) -> None:
+    exp = Experiment(experiment_id=base, experiment_number=number, status=status, base_experiment_id=base,
+                     date=datetime(2026, 6, 1, 12, tzinfo=timezone.utc))
+    db.add(exp)
+    db.flush()
+    db.add(ExperimentalConditions(experiment_fk=exp.id, experiment_id=base, experiment_type=experiment_type))
+    db.flush()
+
+
+@pytest.mark.parametrize("spelling", ["HPHT", "hpht", " Hpht  "])
+def test_hpht_list_finds_every_spelling_and_no_other_series(client, db_session, reporting_views, spelling):
+    _run(db_session, "QCRUNH_001", 9199300, spelling, ExperimentStatus.ONGOING)
+    _run(db_session, "QCRUNS_001", 9199301, "Serum", ExperimentStatus.ONGOING)
+    _run(db_session, "QCRUNC_001", 9199302, "Core Flood", ExperimentStatus.ONGOING)
+    db_session.commit()
+    bases = {row["base_id"] for row in client.get("/api/hpht?scope=all&q=QCRUN").json()}
+    assert bases == {"QCRUNH_001"}
+
+
+@pytest.mark.parametrize("spelling", ["Core Flood", "core  flood", "CoreFlood", "CF", " cf "])
+def test_core_flood_list_finds_every_spelling_and_no_other_series(client, db_session, reporting_views, spelling):
+    _run(db_session, "QCRUNC_002", 9199310, spelling, ExperimentStatus.ONGOING)
+    _run(db_session, "QCRUNH_002", 9199311, "HPHT", ExperimentStatus.ONGOING)
+    db_session.commit()
+    bases = {row["base_id"] for row in client.get("/api/core-floods?scope=all&q=QCRUN").json()}
+    assert bases == {"QCRUNC_002"}
+
+
+def test_active_run_list_reads_samples_only_for_active_runs(client, db_session, reporting_views):
+    from backend.services import run_service
+
+    _run(db_session, "QCRUNH_010", 9199320, "HPHT", ExperimentStatus.ONGOING)
+    _run(db_session, "QCRUNH_011", 9199321, "HPHT", ExperimentStatus.COMPLETED)
+    db_session.commit()
+
+    asked: list[list[str]] = []
+    real = run_service.fetch_samples
+
+    def spy(db, view, *, base_ids=None, result_id=None):
+        asked.append(sorted(b for b in (base_ids or []) if b.startswith("QCRUNH_01")))
+        return real(db, view, base_ids=base_ids, result_id=result_id)
+
+    run_service.fetch_samples = spy
+    try:
+        active = client.get("/api/hpht?scope=active&q=QCRUNH_01").json()
+        everything = client.get("/api/hpht?scope=all&q=QCRUNH_01").json()
+    finally:
+        run_service.fetch_samples = real
+
+    assert [row["base_id"] for row in active] == ["QCRUNH_010"]
+    assert {row["base_id"] for row in everything} == {"QCRUNH_010", "QCRUNH_011"}
+    assert asked == [["QCRUNH_010"], ["QCRUNH_010", "QCRUNH_011"]]
