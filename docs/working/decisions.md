@@ -903,3 +903,22 @@ Alembic `b8c4e2d7f9a1`; the 2026-09-08 entry above (dual-write).
 **Scope and proof:** No stored value changed. The derived-column diff (`recalculate_all_registry_012.py` on a copy of the dev database, `develop` vs the branch) was identical across 11,369 rows of `experimental_conditions`, `chemical_additives`, `scalar_results` and `experimental_results`. Not done here: D-04 (read the additives summary from its view in the experiments list) moved to #191 with E-01; the locked parsers' own copies of these rules are #172.
 
 **Related:** `docs/issues/sweep-2026-11-backend-findings.md` (D-01 to D-18); epic #192.
+
+## 2026-11-13 — No per-row queries in list and recalculation paths (issue #191, sweep PR 3)
+
+**Decision:** Endpoints that return or recalculate many rows fetch what those rows need once, before the loop. Each is guarded by a query-count test (`tests/api/test_query_counts.py`) that runs the same request on a small and a larger data set and requires the same number of statements.
+
+**Contracts:**
+
+- **Experiments list** (`routers/experiments.py`): `_build_list_item(exp, lookups)` issues no query. Anything a list row needs is added to `_ListLookups` (one query for the page) or loaded with the row (`selectinload(Experiment.description_note)`). Grouped mode resolves every bucket and every last result date before the item loop.
+- **Additives summary text** is ordered by compound id (`_additive_summaries`). That is the order the list has always shown on the dev database. `v_experiment_additives_summary` builds the same text with no `ORDER BY` and disagrees for about a third of experiments, so the list does not read the view (sweep D-04). Giving the view an order needs a migration; until then the two can show the same additives in a different order.
+- **Conditions cascade**: `recalculate_conditions` recalculates the experiment's scalars. Do not recalculate them again after it (see `docs/CALCULATIONS.md`).
+- **Weak references**: the SQLAlchemy session holds loaded rows weakly. A preload whose return value is dropped can be garbage-collected before the code that needs it runs. Keep a reference (`_preload_scalars` reads the collection first; `delete_experiment_cascade` holds `preloaded` until after the commit).
+- **Run lists**: `run_service.load_segments(type_contains=...)` narrows the SQL only. The Python rule (`is_hpht`, `is_core_flood`) decides, and the substrings must match every spelling that rule accepts (`HPHT_TYPE_CONTAINS`, `CORE_FLOOD_TYPE_CONTAINS`; guarded by `test_type_prefilters_never_exclude_a_spelling_the_python_rule_accepts`). A new accepted spelling in `database/reactor_slot.py::_SERIES_BY_TYPE` must keep that test passing.
+- **Cumulative times**: `update_cumulative_times_for_chain` loads a chain once. Per-upload-row calls from the locked parsers remain (#172).
+
+**Why:** the experiments list issued 3 queries per row and about 16 per replicate group; a sample change recalculated every scalar twice; the cumulative-time update re-walked the whole lineage for every experiment of a chain on every uploaded row.
+
+**Scope and proof:** no stored value changed. On a copy of the dev database, the recalculation migration, the elemental recalculation, 60 background-ammonium edits, 72 sample changes, a cumulative-time update of all 2,011 experiments and migration 014 were run with `develop` and with the branch: 11,369 rows of the four derived-value tables were byte-identical. Not done: E-15 (the work is inside the locked ActLabs parser, #172) and E-13 (waits on #171).
+
+**Related:** `docs/issues/sweep-2026-11-backend-findings.md` (E-01 to E-15, D-04); epic #192.
