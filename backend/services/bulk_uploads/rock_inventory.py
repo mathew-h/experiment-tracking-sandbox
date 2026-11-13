@@ -2,17 +2,15 @@ from __future__ import annotations
 
 import datetime
 import io
-from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 import pandas as pd
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database import SampleInfo, SamplePhotos, ExternalAnalysis
+from database import SampleInfo, ExternalAnalysis
 from database.models.analysis import PXRFReading
 from backend.services.samples import normalize_pxrf_reading_no
-from backend.config.settings import get_settings
 
 
 class RockInventoryService:
@@ -64,12 +62,14 @@ class RockInventoryService:
         overwrite_all: bool = False,
     ) -> Tuple[int, int, int, int, List[str], List[str]]:
         """
-        Upsert rock samples (SampleInfo) and attach photos.
+        Upsert rock samples (SampleInfo).
 
         Args:
             db: SQLAlchemy session
             file_bytes: Excel file bytes containing sample rows
-            image_files: list of tuples (file_name, file_bytes, mime_type)
+            image_files: ignored. Kept so the signature the upload route calls
+                (db, file_bytes, []) is unchanged; the image-attach branch was
+                deleted in issue #189. images_attached is always 0.
             overwrite_all: If True, overwrite all fields for existing samples. 
                           Per-row 'overwrite' column in Excel takes precedence.
 
@@ -345,62 +345,6 @@ class RockInventoryService:
                     updated += 1
             except Exception as e:
                 errors.append(f"Row {idx+2}: {e}")
-
-        # Attach images: file name (without extension) should match a sample_id
-        # Save to storage under sample_photos/{sample_id}
-        if image_files:
-            # Build existing photos lookup per (sample_id, file_name)
-            for (file_name, data, mime_type) in image_files:
-                try:
-                    base_name = file_name.rsplit('/', 1)[-1]
-                    simple_name = base_name.rsplit('\\', 1)[-1]
-                    name_no_ext = simple_name.rsplit('.', 1)[0]
-                    target_sample_id_raw = name_no_ext.strip()
-                    if not target_sample_id_raw:
-                        continue
-
-                    # Use normalized matching to find sample (handles formatting differences)
-                    target_normalized = ''.join(ch for ch in target_sample_id_raw.lower() 
-                                               if ch not in ['-', '_', ' '])
-                    sample = db.query(SampleInfo).filter(
-                        func.lower(
-                            func.replace(
-                                func.replace(
-                                    func.replace(SampleInfo.sample_id, '-', ''),
-                                    '_', ''
-                                ),
-                                ' ', ''
-                            )
-                        ) == target_normalized
-                    ).first()
-                    
-                    if not sample:
-                        # Skip silently; sample might not be in this batch
-                        continue
-
-                    # Use actual database sample_id (canonical format) for storage
-                    dest_dir = Path(get_settings().sample_photos_dir) / sample.sample_id
-                    dest_dir.mkdir(parents=True, exist_ok=True)
-                    saved_path = str(dest_dir / simple_name)
-                    Path(saved_path).write_bytes(data)
-                    existing_photo = (
-                        db.query(SamplePhotos)
-                        .filter(SamplePhotos.sample_id == sample.sample_id, SamplePhotos.file_name == simple_name)
-                        .first()
-                    )
-                    if existing_photo:
-                        existing_photo.file_path = saved_path
-                        existing_photo.file_type = mime_type
-                    else:
-                        db.add(SamplePhotos(
-                            sample_id=sample.sample_id,
-                            file_path=saved_path,
-                            file_name=simple_name,
-                            file_type=mime_type,
-                        ))
-                    images_attached += 1
-                except Exception as e:
-                    errors.append(f"Image '{file_name}': {e}")
 
         return created, updated, images_attached, skipped, errors, warnings
 
