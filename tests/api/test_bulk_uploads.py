@@ -1563,3 +1563,41 @@ def test_upload_failed_rolls_back_and_returns_the_all_zero_response():
     custom = _upload_failed(MagicMock(), "sweep190_delete_failed", RuntimeError("x"),
                             message="Bulk deletion failed", user="someone@addisenergy.com")
     assert custom.message == "Bulk deletion failed"
+
+
+# ── Issue #190 (D-14): one installer for the variable_config stub ────────────
+
+def test_ensure_variable_config_installs_the_stub_and_keeps_existing_values():
+    from backend.api.routers.bulk_uploads import _VARIABLE_CONFIG, _ensure_variable_config
+
+    names = ("frontend", "frontend.config", _VARIABLE_CONFIG)
+    saved = {k: sys.modules.pop(k) for k in names if k in sys.modules}
+    try:
+        _ensure_variable_config("SWEEP190_A", lambda: {"x": 1})
+        module = sys.modules[_VARIABLE_CONFIG]
+        assert module.SWEEP190_A == {"x": 1}
+        assert "frontend" in sys.modules and "frontend.config" in sys.modules
+
+        # An attribute that is already set wins; the default is not even built.
+        def _must_not_run():
+            raise AssertionError("default built although the attribute exists")
+        _ensure_variable_config("SWEEP190_A", _must_not_run)
+        assert module.SWEEP190_A == {"x": 1}
+
+        # A second attribute lands on the same module object.
+        _ensure_variable_config("SWEEP190_B", lambda: [1, 2])
+        assert sys.modules[_VARIABLE_CONFIG] is module and module.SWEEP190_B == [1, 2]
+    finally:
+        for k in names:
+            sys.modules.pop(k, None)
+        sys.modules.update(saved)
+
+
+def test_variable_config_defaults_match_what_the_parsers_expect():
+    from backend.api.routers import bulk_uploads as router
+    from backend.api.schemas.results import ICP_ELEMENTS
+
+    assert router._icp_fixed_element_fields() == list(ICP_ELEMENTS)
+    assert router._SCALAR_RESULTS_TEMPLATE_HEADERS["experiment_id"] == "Experiment ID"
+    assert len(router._SCALAR_RESULTS_TEMPLATE_HEADERS) == 20
+    assert "Reading No" in router._PXRF_REQUIRED_COLUMNS and len(router._PXRF_REQUIRED_COLUMNS) == 12

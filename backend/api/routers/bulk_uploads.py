@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import json
-from typing import Optional, Union
+import sys
+from types import ModuleType
+from typing import Callable, Optional, Union
 
 import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
@@ -110,6 +112,61 @@ def _plan_gate_errors(plan: UploadPlanSchema, expected_plan_hash: Optional[str])
 # Existing endpoints (preserved exactly)
 # ---------------------------------------------------------------------------
 
+# The locked parsers scalar_results.py, pxrf_data.py and icp_service.py import
+# constants from `frontend.config.variable_config`, a module of the retired
+# Streamlit app that no longer exists. Each upload endpoint installs a stub
+# module carrying the constant its parser needs before importing the parser.
+# Replacing the stub with a real backend module needs locked-file edits and is
+# tracked in issue #172 (sweep H-09); the import-order hazard is issue #188.
+_VARIABLE_CONFIG = "frontend.config.variable_config"
+
+_SCALAR_RESULTS_TEMPLATE_HEADERS: dict[str, str] = {
+    "measurement_date": "Date",
+    "experiment_id": "Experiment ID",
+    "replicate": "Replicate",
+    "time_post_reaction": "Time (days)",
+    "description": "Description",
+    "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
+    "sampling_volume_mL": "Sampling Vol (mL)",
+    "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
+    "background_experiment_id": "Bkg Exp ID",
+    "h2_concentration": "H2 Conc (ppm)",
+    "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
+    "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
+    "final_ph": "Final pH",
+    "ferrous_iron_yield": "Fe2+ Yield (%)",
+    "final_nitrate_concentration_mM": "Final Nitrate (mM)",
+    "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
+    "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
+    "final_conductivity_mS_cm": "Conductivity (mS/cm)",
+    "final_alkalinity_mg_L": "Alkalinity (mg/L)",
+    "overwrite": "Overwrite",
+}
+
+_PXRF_REQUIRED_COLUMNS: frozenset[str] = frozenset(
+    {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"})
+
+
+def _icp_fixed_element_fields() -> list[str]:
+    from backend.api.schemas.results import ICP_ELEMENTS  # noqa: PLC0415
+    return list(ICP_ELEMENTS)
+
+
+def _ensure_variable_config(name: str, default: Callable[[], object]) -> None:
+    """Make sure the stub module exists and has the attribute ``name``.
+
+    An attribute that is already there is left alone, so a module or value put
+    in place by something else (a test, or an earlier request) wins.
+    """
+    if _VARIABLE_CONFIG not in sys.modules:
+        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
+        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
+        sys.modules[_VARIABLE_CONFIG] = ModuleType(_VARIABLE_CONFIG)
+    module = sys.modules[_VARIABLE_CONFIG]
+    if not hasattr(module, name):
+        setattr(module, name, default())
+
+
 def _upload_failed(
     db: Session, event: str, exc: Exception, *, message: str = "Upload failed", **log_fields: object,
 ) -> UploadResponse:
@@ -133,37 +190,7 @@ async def upload_scalar_results(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a Solution Chemistry Excel file and upsert scalar results."""
-    import sys  # noqa: PLC0415
-    from types import ModuleType  # noqa: PLC0415
-    if "frontend.config.variable_config" not in sys.modules:
-        _stub = ModuleType("frontend.config.variable_config")
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
-    _vc = sys.modules["frontend.config.variable_config"]
-    if not hasattr(_vc, "SCALAR_RESULTS_TEMPLATE_HEADERS"):
-        _vc.SCALAR_RESULTS_TEMPLATE_HEADERS = {
-            "measurement_date": "Date",
-            "experiment_id": "Experiment ID",
-            "replicate": "Replicate",
-            "time_post_reaction": "Time (days)",
-            "description": "Description",
-            "gross_ammonium_concentration_mM": "Gross Ammonium (mM)",
-            "sampling_volume_mL": "Sampling Vol (mL)",
-            "background_ammonium_concentration_mM": "Bkg Ammonium (mM)",
-            "background_experiment_id": "Bkg Exp ID",
-            "h2_concentration": "H2 Conc (ppm)",
-            "gas_sampling_volume_ml": "Gas Sample Vol (mL)",
-            "gas_sampling_pressure_MPa": "Gas Pressure (MPa)",
-            "final_ph": "Final pH",
-            "ferrous_iron_yield": "Fe2+ Yield (%)",
-            "final_nitrate_concentration_mM": "Final Nitrate (mM)",
-            "final_dissolved_oxygen_mg_L": "Final DO (mg/L)",
-            "co2_partial_pressure_MPa": "CO2 Pressure (MPa)",
-            "final_conductivity_mS_cm": "Conductivity (mS/cm)",
-            "final_alkalinity_mg_L": "Alkalinity (mg/L)",
-            "overwrite": "Overwrite",
-        }
+    _ensure_variable_config("SCALAR_RESULTS_TEMPLATE_HEADERS", lambda: dict(_SCALAR_RESULTS_TEMPLATE_HEADERS))
     from backend.services.bulk_uploads.scalar_results import ScalarResultsUploadService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
@@ -244,16 +271,7 @@ async def upload_pxrf(
     current_user: FirebaseUser = Depends(verify_firebase_token),
 ) -> UploadResponse:
     """Upload a pXRF CSV/Excel file and re-evaluate characterized status for affected samples."""
-    import sys  # noqa: PLC0415
-    from types import ModuleType  # noqa: PLC0415
-    if "frontend.config.variable_config" not in sys.modules:
-        _stub = ModuleType("frontend.config.variable_config")
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
-    _vc = sys.modules["frontend.config.variable_config"]
-    if not hasattr(_vc, "PXRF_REQUIRED_COLUMNS"):
-        _vc.PXRF_REQUIRED_COLUMNS = {"Reading No", "Fe", "Mg", "Si", "Ni", "Cu", "Mo", "Co", "Al", "Ca", "K", "Au"}
+    _ensure_variable_config("PXRF_REQUIRED_COLUMNS", lambda: set(_PXRF_REQUIRED_COLUMNS))
     from backend.services.bulk_uploads.pxrf_data import PXRFUploadService  # noqa: PLC0415
     file_bytes = await file.read()
 
@@ -434,23 +452,13 @@ async def upload_icp_oes(
     When overwrite=True, existing ICPResults for each matching (experiment, timepoint)
     are deleted before new data is inserted rather than merged.
     """
-    import sys  # noqa: PLC0415
-    from types import ModuleType  # noqa: PLC0415
-    if "frontend.config.variable_config" not in sys.modules:
-        _stub = ModuleType("frontend.config.variable_config")
-        sys.modules["frontend"] = sys.modules.get("frontend", ModuleType("frontend"))
-        sys.modules["frontend.config"] = sys.modules.get("frontend.config", ModuleType("frontend.config"))
-        sys.modules["frontend.config.variable_config"] = _stub
-    _vc = sys.modules["frontend.config.variable_config"]
-    if not hasattr(_vc, "ICP_FIXED_ELEMENT_FIELDS"):
-        # Mirror the canonical fixed-column list rather than a literal. This
-        # stub is what production actually runs (frontend.config no longer
-        # exists), and its previous 27-element literal predated the ag/ce/k/
-        # la/na/pb/sc/th/v (2026-05) and s (2026-06) columns -- so every one
-        # of those readings landed in all_elements only and the fixed columns
-        # stayed NULL in production. Migration 5840d41bf18d backfills them.
-        from backend.api.schemas.results import ICP_ELEMENTS  # noqa: PLC0415
-        _vc.ICP_FIXED_ELEMENT_FIELDS = list(ICP_ELEMENTS)
+    # Mirror the canonical fixed-column list rather than a literal. This stub is
+    # what production actually runs (frontend.config no longer exists), and its
+    # previous 27-element literal predated the ag/ce/k/la/na/pb/sc/th/v
+    # (2026-05) and s (2026-06) columns -- so every one of those readings
+    # landed in all_elements only and the fixed columns stayed NULL in
+    # production. Migration 5840d41bf18d backfills them.
+    _ensure_variable_config("ICP_FIXED_ELEMENT_FIELDS", _icp_fixed_element_fields)
     from backend.services.icp_service import ICPService  # noqa: PLC0415
     file_bytes = await file.read()
     try:
