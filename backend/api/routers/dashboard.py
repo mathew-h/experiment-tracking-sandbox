@@ -21,6 +21,13 @@ from backend.services.result_entry_service import _aware
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
+def _type_text(experiment_type: object) -> str | None:
+    """A stored experiment_type as plain text: an enum's value, else str(), else None."""
+    if hasattr(experiment_type, "value"):
+        return experiment_type.value
+    return str(experiment_type) if experiment_type else None
+
+
 # Static reactor hardware specs, keyed by slot label (issue #147). The single
 # source of truth: the dashboard payload carries this table (`reactor_specs`),
 # so the frontend no longer keeps a copy. Core Flood labels have no entry.
@@ -138,12 +145,7 @@ def get_dashboard(
     reactor_cards: list[ReactorCardData] = []
     for row in reactor_rows:
         rn = row.reactor_number
-        exp_type = (
-            row.experiment_type.value
-            if hasattr(row.experiment_type, "value")
-            else str(row.experiment_type)
-            if row.experiment_type else None
-        )
+        exp_type = _type_text(row.experiment_type)
         # Stored, not re-derived (issue #97).
         label = row.reactor_slot
         if label in seen_labels:
@@ -310,12 +312,7 @@ def get_dashboard(
     timeline: list[GanttEntry] = []
     for row in gantt_rows:
         status = row.status
-        exp_type = (
-            row.experiment_type.value
-            if hasattr(row.experiment_type, "value")
-            else str(row.experiment_type)
-            if row.experiment_type else None
-        )
+        exp_type = _type_text(row.experiment_type)
         ended_at = row.updated_at if status != ExperimentStatus.ONGOING else None
         start = row.date or row.created_at
         days = None
