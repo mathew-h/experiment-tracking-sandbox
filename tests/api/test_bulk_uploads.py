@@ -1473,8 +1473,8 @@ def test_pxrf_upload_no_change_when_no_matching_readings(client, db_session):
 def test_pxrf_data_importable_without_utils_storage():
     """pxrf_data must not require utils.storage at import time.
 
-    The API uses ingest_from_bytes; utils.storage is only needed by
-    ingest_from_source (legacy file-path loader). A top-level import
+    The API uses ingest_from_bytes. The only user of utils.storage was
+    ingest_from_source, deleted in issue #189. A top-level import of it
     causes ModuleNotFoundError in production → HTTP 500 on first upload.
     """
     import importlib
@@ -1491,7 +1491,7 @@ def test_pxrf_data_importable_without_utils_storage():
     except ModuleNotFoundError as exc:
         raise AssertionError(
             f"pxrf_data raised ModuleNotFoundError on import: {exc}\n"
-            "Move 'from utils.storage import get_file' inside ingest_from_source."
+            "pxrf_data must not import utils.storage (ingest_from_source is gone)."
         ) from exc
     finally:
         # Restore saved stubs first
