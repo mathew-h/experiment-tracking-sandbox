@@ -32,7 +32,7 @@ zero padding, which is the leniency the finders exist for. Two documented
 equivalences are deliberately lost -- "HPHT_0014B" no longer matches
 "HPHT_001_4B" -- because they were guesses.
 
-Both ``fuzzy_find_sample`` and ``fuzzy_find_experiment`` try an exact DB match
+``find_sample_matches`` and ``find_experiment_matches`` try an exact DB match
 first (single indexed query), then fall back to loading all rows and comparing
 normalized IDs in Python. The exact-match fast path means the fallback scan is
 only needed when the file's ID format differs from the stored one. Neither ever
@@ -126,26 +126,6 @@ def fuzzy_find_sample(db: Session, raw_id: str) -> Optional[SampleInfo]:
             raw_id=raw_id,
             normalized=normalize_id(raw_id),
             candidates=sorted(s.sample_id for s in matches),
-        )
-    return None
-
-
-def fuzzy_find_experiment(db: Session, raw_id: str) -> Optional[Experiment]:
-    """The Experiment matching ``raw_id``, or None if none or several match.
-
-    Returns None rather than raising so existing callers keep working. Callers
-    that must distinguish ambiguity from absence should use
-    ``find_experiment_matches`` and raise ``AmbiguousExperimentIdError``.
-    """
-    matches = find_experiment_matches(db, raw_id)
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        log.warning(
-            "ambiguous_experiment_id",
-            raw_id=raw_id,
-            normalized=normalize_id(raw_id),
-            candidates=sorted(e.experiment_id for e in matches),
         )
     return None
 
